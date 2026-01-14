@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 import time
 from io import StringIO
-from src.selenium_client import SeleniumDriverFactory
+from io import StringIO
 from src.database import insert_player_stats
 
 class BartTorvikClient:
@@ -124,7 +124,16 @@ class BartTorvikClient:
         url = f"https://barttorvik.com/playerstat.php?link=y&minGP=1&year={year}&start={start_date}&end={end_date}"
         print(f"  [TORVIK] Fetching player stats from {url}...")
         
-        driver = SeleniumDriverFactory.create_driver(headless=True)
+        url = f"https://barttorvik.com/playerstat.php?link=y&minGP=1&year={year}&start={start_date}&end={end_date}"
+        print(f"  [TORVIK] Fetching player stats from {url}...")
+        
+        try:
+            from src.selenium_client import SeleniumDriverFactory
+            driver = SeleniumDriverFactory.create_driver(headless=True)
+        except ImportError:
+             print("  [TORVIK] Selenium not available.")
+             return []
+
         if not driver: return []
         
         import json
