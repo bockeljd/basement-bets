@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# 0. Load Environment Variables
+if [ -f .env ]; then
+    echo "Loading .env file..."
+    export $(cat .env | grep -v '^#' | xargs)
+fi
+
 # 1. Start Backend
 echo "Starting FastAPI Backend..."
 # Run in background

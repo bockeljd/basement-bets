@@ -5,7 +5,7 @@ import os
 # Add src to path so imports work
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-from database import init_db, insert_bet
+from database import init_db, insert_bet, init_player_stats_db
 from parsers.draftkings import DraftKingsParser
 from analytics import AnalyticsEngine
 
@@ -22,6 +22,16 @@ def import_file(filepath):
         # print("Detected: FanDuel")
         from src.parsers.fanduel import FanDuelParser
         parser = FanDuelParser()
+        bets = parser.parse(content)
+    elif content.strip().startswith("Bet #") or content.strip().startswith("1\t"):
+        # print("Detected: Manual TSV")
+        from src.parsers.manual_tsv import ManualTSVParser
+        parser = ManualTSVParser()
+        bets = parser.parse(content)
+    elif "Picks" in content and "Wager: $" in content:
+        # Detected: DraftKings Text Dump (Copy-Paste)
+        from src.parsers.draftkings_text import DraftKingsTextParser
+        parser = DraftKingsTextParser()
         bets = parser.parse(content)
     else:
         # print("Detected: DraftKings")
@@ -56,13 +66,14 @@ def main():
     # Report Command
     subparsers.add_parser("report", help="Show performance report")
     
-    # Predict Command
-    subparsers.add_parser("predict", help="Show recommendations")
+    # Enrich Command
+    subparsers.add_parser("enrich", help="Fetch closing odds for pending bets")
     
     args = parser.parse_args()
     
     if args.command == "init":
         init_db()
+        init_player_stats_db()
         
     elif args.command == "import":
         import_file(args.file)
@@ -73,16 +84,30 @@ def main():
             print(f"Directory {imports_dir} does not exist.")
             return
             
-        files = [f for f in os.listdir(imports_dir) if f.endswith('.txt')]
+        files = [f for f in os.listdir(imports_dir) if f.endswith('.txt') or f.endswith('.csv') or f.endswith('.html')]
         print(f"Found {len(files)} files to ingest...")
         
         total_bets = 0
         for filename in sorted(files):
              filepath = os.path.join(imports_dir, filename)
+             # Skip manual financial files which are handled by their own scripts for now, 
+             # OR ensure import_file handles them safely (it returns 0 if not matched).
+             # The existing import_file seems robust enough.
              total_bets += import_file(filepath)
              
         print(f"=== Total Ingested: {total_bets} bets ===")
+        
+        # Auto-Enrich
+        print("\n=== Fetching Closing Odds ===")
+        from src.services.clv import ClosingOddsFetcher
+        fetcher = ClosingOddsFetcher()
+        fetcher.run()
             
+    elif args.command == "enrich":
+        from src.services.clv import ClosingOddsFetcher
+        fetcher = ClosingOddsFetcher()
+        fetcher.run()
+
     elif args.command == "report":
         engine = AnalyticsEngine()
         summary = engine.get_summary()

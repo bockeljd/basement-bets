@@ -1,0 +1,1397 @@
+INFO:     Will watch for changes in these directories: ['/Users/jordanbockelman/Basement Bets/bet_tracker']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [67978] using WatchFiles
+INFO:     Started server process [67980]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 5328s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (70s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 5328s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/ncaab?date=20260113...
+  [FALLBACK SUCCESS] Retrieved 10 events from Action Network.
+  [CACHE SAVED] Response stored.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE HIT] Using cached data (2998s old)
+  [MODEL] Analyzing 20 games...
+INFO:     127.0.0.1:51203 - "GET /api/research HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'src/selenium_client.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [67980]
+INFO:     Started server process [69590]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/models/odds_client.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [69590]
+INFO:     Started server process [69672]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/services/grading_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [69672]
+INFO:     Started server process [69715]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/services/grading_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [69715]
+INFO:     Started server process [69721]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:51429 - "GET /api/financials HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [69721]
+INFO:     Started server process [70234]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 5814s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/nfl?date=20260113...
+  [FALLBACK SUCCESS] Retrieved 4 events from Action Network.
+  [CACHE SAVED] Response stored.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 5815s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/ncaab?date=20260113...
+  [FALLBACK SUCCESS] Retrieved 10 events from Action Network.
+  [CACHE SAVED] Response stored.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE HIT] Using cached data (3483s old)
+  [MODEL] Analyzing 20 games...
+INFO:     127.0.0.1:51472 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51473 - "GET /api/research/history HTTP/1.1" 200 OK
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:51562 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51563 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51564 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51565 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51566 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51567 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51569 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51572 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51573 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51575 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51577 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51579 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51581 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51584 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51585 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51587 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51589 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51591 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51594 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51595 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51597 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51599 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51601 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51603 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 5921s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (105s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51605 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 5921s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (105s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51608 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 5926s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (110s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 5926s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (109s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE HIT] Using cached data (3592s old)
+  [MODEL] Analyzing 20 games...
+INFO:     127.0.0.1:51612 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51613 - "GET /api/research/history HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 5928s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (112s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 5927s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (110s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE HIT] Using cached data (3594s old)
+  [MODEL] Analyzing 20 games...
+INFO:     127.0.0.1:51612 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51613 - "GET /api/research/history HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 5932s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (116s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51628 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 5932s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (116s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51631 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:51647 - "GET /api/balances HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6001s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (185s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51671 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51672 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51673 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51674 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51675 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51676 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51680 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51681 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51684 - "GET /api/financials HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6001s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (185s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51685 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51691 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51692 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51693 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51694 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51726 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51727 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51728 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51729 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51730 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51731 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51733 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51735 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51737 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51739 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51742 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51743 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51745 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51748 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51749 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51751 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51753 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51755 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51757 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51759 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51761 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51763 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51765 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51767 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6021s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (205s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51769 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6021s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (205s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51772 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6067s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (251s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51798 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:51800 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51801 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51802 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51803 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51804 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51808 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51809 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51812 - "GET /api/financials HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6067s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (251s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51813 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51819 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51820 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51821 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51822 - "GET /api/stats/period HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'src/analytics.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [70234]
+INFO:     Started server process [71997]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/parsers/draftkings_text.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [71997]
+INFO:     Started server process [72051]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'verify_normalization.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [72051]
+INFO:     Started server process [72095]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'verify_normalization.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [72095]
+INFO:     Started server process [72206]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:51921 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51922 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51923 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51924 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51925 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51926 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51931 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51932 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51933 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51934 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51937 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51938 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51940 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51942 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51945 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51948 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51949 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51950 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51953 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51954 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51956 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51958 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51960 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51962 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6326s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (510s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51964 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6326s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (511s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:51967 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'src/analytics.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [72206]
+INFO:     Started server process [72743]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/parsers/draftkings_text.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [72743]
+INFO:     Started server process [72788]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/analytics.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [72788]
+INFO:     Started server process [72984]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/parsers/draftkings_text.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [72984]
+INFO:     Started server process [73028]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'verify_normalization.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [73028]
+INFO:     Started server process [73071]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'verify_normalization.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [73071]
+INFO:     Started server process [73146]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:52108 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52109 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52110 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52111 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52112 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52113 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52115 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52117 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52119 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52121 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52124 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52125 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52127 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52130 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52131 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52133 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52135 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52137 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52140 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52141 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52143 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52145 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52147 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52149 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6977s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1161s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52151 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 6977s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1161s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52154 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7010s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1194s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7010s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1192s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4676s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52165 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52166 - "GET /api/research/history HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7013s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1197s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7013s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1196s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4680s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52165 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52166 - "GET /api/research/history HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7023s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1207s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52239 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7023s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1208s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52243 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'ingest_dk_text.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [73146]
+INFO:     Started server process [75306]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:52265 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52266 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52267 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52268 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52269 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52270 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52272 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52274 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52279 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52280 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52281 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52282 - "GET /api/stats/period HTTP/1.1" 200 OK
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:52318 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52319 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52320 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52321 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52322 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52323 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52325 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52328 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52329 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52331 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52334 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52335 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52337 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52340 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52341 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52343 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52345 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52347 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52350 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52351 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52353 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52355 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52357 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52359 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7246s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1430s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52361 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7246s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1431s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52364 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7253s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1437s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52367 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7253s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1437s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52370 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7278s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1463s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7278s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1461s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4945s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52402 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52403 - "GET /api/research/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52430 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52431 - "GET /api/bets HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7282s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1466s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7282s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1465s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4949s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52402 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52403 - "GET /api/research/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52432 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52433 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52434 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7285s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1469s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7285s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1468s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4952s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52402 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52403 - "GET /api/research/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52435 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52451 - "GET /api/balances HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7288s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1472s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7288s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1471s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4955s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52402 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52403 - "GET /api/research/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52486 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52557 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52558 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52559 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52560 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52568 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52569 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52570 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52571 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52572 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52573 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52575 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52577 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52582 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52583 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52584 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52585 - "GET /api/stats/period HTTP/1.1" 200 OK
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:52599 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52602 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52603 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52604 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52605 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52606 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52608 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52611 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52612 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52614 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52617 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52618 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52620 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52623 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52624 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52626 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52628 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52630 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52633 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52634 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52636 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52638 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52640 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52642 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7312s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1497s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52644 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 7313s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1497s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:52647 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7325s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1510s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7325s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1508s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4992s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52656 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52657 - "GET /api/research/history HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 7329s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (1513s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 7329s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (1512s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 4996s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:52656 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52657 - "GET /api/research/history HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'debug_epl.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [75306]
+INFO:     Started server process [76987]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [76987]
+INFO:     Started server process [77538]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77538]
+INFO:     Started server process [77546]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/models/nfl_model.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77546]
+INFO:     Started server process [77665]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/models/epl_model.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77665]
+INFO:     Started server process [77726]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/models/ncaam_model.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77726]
+INFO:     Started server process [77806]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:53051 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53052 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53053 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53054 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53055 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53056 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53060 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53061 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53062 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53064 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53067 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53068 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53070 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53072 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53076 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53077 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53079 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53082 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53085 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53086 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53088 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53090 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53092 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53094 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 8217s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (2401s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:53096 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 8217s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (2401s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:53099 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 8254s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (2438s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 8254s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (2436s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 5920s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:53107 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53108 - "GET /api/research/history HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 8257s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (2441s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 8257s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (2440s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 5924s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:53107 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53141 - "GET /api/research/history HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [77806]
+INFO:     Started server process [82773]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 9266s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (3450s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 9266s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (3449s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 6933s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:53659 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53660 - "GET /api/research/history HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 9270s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (3454s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 9270s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (3453s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 6937s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:53659 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53698 - "GET /api/research/history HTTP/1.1" 200 OK
+[API] Refreshing Analytics Engine...
+INFO:     127.0.0.1:53949 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53950 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53951 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53952 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53953 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53954 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53956 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53959 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53960 - "GET /api/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53962 - "GET /api/bets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53965 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53966 - "GET /api/breakdown/player HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53968 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53971 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53972 - "GET /api/balances HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53975 - "GET /api/financials HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53976 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53978 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53981 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53982 - "GET /api/stats/period HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53985 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53986 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53988 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53990 - "GET /api/stats/period HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 9358s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (3542s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:53992 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+  [CACHE STALE] Data is 9358s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (3543s old)
+  [CACHE HIT] Using cached Selenium data.
+INFO:     127.0.0.1:53995 - "GET /api/odds/NFL HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 9365s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (3550s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 9366s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (3548s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 7032s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:54001 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54002 - "GET /api/research/history HTTP/1.1" 200 OK
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:48: FutureWarning: Passing literal html to 'read_html' is deprecated and will be removed in a future version. To read from a literal string, wrap it in a 'StringIO' object.
+  dfs = pd.read_html(resp.text)
+/Users/jordanbockelman/Basement Bets/bet_tracker/src/models/ncaam_model.py:69: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  df[c] = pd.to_numeric(df[c], errors='coerce')
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'www.football-data.co.uk'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...
+  [MODEL] Processing 44576 plays...
+  [MODEL] Fetching Market Odds...
+  [CACHE STALE] Data is 9370s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for americanfootball_nfl...
+  [CACHE HIT] Using cached data (3554s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 4 games...
+  [MODEL] Scraped Advanced Stats from https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html...
+  [STATS] League Averages: Pace=69.8, ORtg=109.9
+  [MODEL] Loaded stats for 365 schools.
+  [MODEL] Fetching Market Odds (Totals)...
+  [CACHE STALE] Data is 9370s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds?regions=us&markets=totals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for basketball_ncaab...
+  [CACHE HIT] Using cached data (3553s old)
+  [CACHE HIT] Using cached Selenium data.
+  [MODEL] Analyzing 10 games...
+  [MODEL] Fetching stats from https://www.football-data.co.uk/mmz4281/2425/E0.csv...
+  [STATS] League Avg Goals: 1.47
+  [MODEL] Loaded stats for 20 teams.
+  [MODEL] Fetching Market Odds (H2H)...
+  [CACHE STALE] Data is 7037s old (Limit: 3600s)
+  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/soccer_epl/odds...
+  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/soccer_epl/odds?regions=us&markets=h2h&oddsFormat=decimal&apiKey=bca3b754df7c1390a364dc2b616927e0
+  [FALLBACK] Odds API failed. Engaging Selenium Scraper for soccer_epl...
+[Selenium] Fetching https://api.actionnetwork.com/web/v1/scoreboard/soccer_epl?date=20260113...
+  [MODEL] No odds data found.
+INFO:     127.0.0.1:54001 - "GET /api/research HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54002 - "GET /api/research/history HTTP/1.1" 200 OK
