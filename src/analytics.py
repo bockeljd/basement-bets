@@ -345,7 +345,9 @@ class AnalyticsEngine:
         total_withdrawals = 0.0
         
         with get_db_connection() as conn:
-            rows = conn.execute(query).fetchall()
+            cur = conn.cursor()
+            cur.execute(query)
+            rows = cur.fetchall()
             for r in rows:
                 amt = r['amount']
                 typ = r['type']
@@ -384,7 +386,9 @@ class AnalyticsEngine:
         provider_stats = defaultdict(lambda: {'deposited': 0.0, 'withdrawn': 0.0})
         query_all = "SELECT provider, type, amount, description FROM transactions"
         with get_db_connection() as conn:
-            rows = conn.execute(query_all).fetchall()
+            cur = conn.cursor()
+            cur.execute(query_all)
+            rows = cur.fetchall()
             for r in rows:
                 p = r['provider']
                 amt = r['amount']
@@ -456,7 +460,9 @@ class AnalyticsEngine:
             ORDER BY date DESC
         """
         with get_db_connection() as conn:
-            rows = conn.execute(query).fetchall()
+            cur = conn.cursor()
+            cur.execute(query)
+            rows = cur.fetchall()
             for r in rows:
                 t = dict(r)
                 # Exclusion Logic (same as financial summary)

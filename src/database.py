@@ -290,7 +290,6 @@ def fetch_latest_ledger_info():
     SELECT provider, balance, date 
     FROM transactions 
     WHERE date = (SELECT MAX(date) FROM transactions t2 WHERE t2.provider = transactions.provider)
-    GROUP BY provider
     """
     # Note: This subquery is standard SQL, should work on both.
     with get_db_connection() as conn:
