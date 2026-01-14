@@ -85,13 +85,13 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def read_root():
-    return {
-        "status": "API Active",
-        "frontend": "Not Served (Static Routing Failed)",
-        "tip": "Check Vercel Output Directory settings if you see this."
-    }
+# @app.get("/")
+# def read_root():
+#    return {
+#        "status": "API Active",
+#        "frontend": "Not Served (Static Routing Failed)",
+#        "tip": "Check Vercel Output Directory settings if you see this."
+#    }
 
 @app.get("/api/stats")
 async def get_stats():
