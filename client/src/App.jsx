@@ -117,7 +117,19 @@ function App() {
             <p className="text-sm text-gray-500 mb-6">
                 Most common cause: Database not initialized.<br />
             </p>
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4 justify-center">
+                <button
+                    onClick={() => {
+                        const pass = prompt("Enter Basement Password:");
+                        if (pass) {
+                            localStorage.setItem('basement_password', pass);
+                            window.location.reload();
+                        }
+                    }}
+                    className="px-6 py-2 bg-slate-100 hover:bg-white text-slate-950 rounded-lg font-bold transition"
+                >
+                    Update Password
+                </button>
                 <button
                     onClick={() => {
                         api.get('/api/admin/init-db')
