@@ -22,7 +22,13 @@ def get_db_connection():
         # PRODUCTION: Use Vercel Postgres
         # Vercel injects POSTGRES_URL
         db_url = os.environ.get("POSTGRES_URL")
-        # Ensure we have a URL, otherwise fail fast or fallback? Fail fast is checking environment constraints.
+        
+        if not db_url:
+            # Fatal Error: No DB String
+            print("[CRITICAL] POSTGRES_URL is missing in Vercel Environment.")
+            print("[CRITICAL] Ensure you have pulled 'env' or added the Store in Vercel Dashboard.")
+            raise RuntimeError("CRITICAL: POSTGRES_URL environment variable is not set. Cannot connect to database.")
+
         conn = psycopg2.connect(db_url, cursor_factory=psycopg2.extras.DictCursor)
         try:
             yield conn
