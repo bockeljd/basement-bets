@@ -116,14 +116,25 @@ function App() {
             <p className="text-gray-400 mb-6">{error}</p>
             <p className="text-sm text-gray-500 mb-6">
                 Most common cause: Database not initialized.<br />
-                Please visit <a href="/api/admin/init-db" className="text-blue-400 hover:underline">/api/admin/init-db</a>
             </p>
-            <button
-                onClick={() => window.location.reload()}
-                className="px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
-            >
-                Retry
-            </button>
+            <div className="flex gap-4">
+                <button
+                    onClick={() => {
+                        api.get('/api/admin/init-db')
+                            .then(() => alert("Database Initialized!"))
+                            .catch(e => alert("Error: " + (e.response?.data?.message || e.message)));
+                    }}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-bold transition"
+                >
+                    Initialize Database
+                </button>
+                <button
+                    onClick={() => window.location.reload()}
+                    className="px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+                >
+                    Retry
+                </button>
+            </div>
         </div>
     );
 
