@@ -3,8 +3,9 @@ import requests
 import json
 import time
 import datetime
-import sqlite3
 from typing import Dict, Any, Optional
+
+from src.database import get_db_connection, _exec  # Use shared DB logic
 
 # Load env
 from dotenv import load_dotenv
@@ -17,28 +18,35 @@ class OddsAPIClient:
     """
     BASE_URL = "https://api.the-odds-api.com/v4/sports"
     CACHE_DURATION = 3600  # 1 hour in seconds
-    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'bets.db')
-
+    
     def __init__(self):
         self.api_key = os.getenv("ODDS_API_KEY")
+        # In Vercel, we might not want to raise error immediately if key missing?
+        # But user wants authentication.
         if not self.api_key:
-            raise ValueError("ODDS_API_KEY not found in environment variables.")
+             print("[WARN] ODDS_API_KEY not found.")
+        
+        # We generally don't want to run DDL at runtime in Serverless if possible, 
+        # but for now we try to init cache table safely.
         self._init_cache()
-
-    def _get_db(self):
-        return sqlite3.connect(self.DB_PATH)
 
     def _init_cache(self):
         """Initialize the cache table if not exists."""
-        with self._get_db() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS api_cache (
-                    key TEXT PRIMARY KEY,
-                    response TEXT,
-                    timestamp REAL
-                )
-            """)
-            conn.commit()
+        # Use generic connection (SQLite or PG)
+        # TEXT/REAL types are compatible.
+        query = """
+            CREATE TABLE IF NOT EXISTS api_cache (
+                key TEXT PRIMARY KEY,
+                response TEXT,
+                timestamp REAL
+            )
+        """
+        try:
+            with get_db_connection() as conn:
+                _exec(conn, query)
+                conn.commit()
+        except Exception as e:
+            print(f"[OddsAPI] Cache Init Failed (Non-Fatal): {e}")
 
     def _get_cache_key(self, endpoint: str, params: Dict) -> str:
         """Generate a unique key for the request."""
@@ -48,28 +56,58 @@ class OddsAPIClient:
 
     def _get_from_cache(self, key: str) -> Optional[Dict]:
         """Retrieve from cache if valid."""
-        with self._get_db() as conn:
-            cursor = conn.execute("SELECT response, timestamp FROM api_cache WHERE key = ?", (key,))
-            row = cursor.fetchone()
-            
-            if row:
-                response_json, timestamp = row
-                age = time.time() - timestamp
-                if age < self.CACHE_DURATION:
-                    print(f"  [CACHE HIT] Using cached data ({int(age)}s old)")
-                    return json.loads(response_json)
-                else:
-                    print(f"  [CACHE STALE] Data is {int(age)}s old (Limit: {self.CACHE_DURATION}s)")
-            return None
+        query = "SELECT response, timestamp FROM api_cache WHERE key = ?"
+        try:
+            with get_db_connection() as conn:
+                cursor = _exec(conn, query, (key,))
+                row = cursor.fetchone()
+                
+                if row:
+                    # DictCursor vs Tuple access
+                    # SQLite Row vs PG DictRow. Both support key access?
+                    # Row supports integer index. DictRow supports key.
+                    # Let's verify what _exec returns.
+                    # It returns cursor.
+                    # SQLite row works like tuple too? Yes.
+                    # Postgres DictCursor works like list/tuple? Yes.
+                    
+                    response_json = row[0]
+                    timestamp = row[1]
+                    
+                    age = time.time() - timestamp
+                    if age < self.CACHE_DURATION:
+                        print(f"  [CACHE HIT] Using cached data ({int(age)}s old)")
+                        return json.loads(response_json)
+                    else:
+                        print(f"  [CACHE STALE] Data is {int(age)}s old")
+        except Exception as e:
+             print(f"[OddsAPI] Cache Read Error: {e}")
+        return None
 
     def _save_to_cache(self, key: str, data: Any):
         """Save response to cache."""
-        with self._get_db() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO api_cache (key, response, timestamp) VALUES (?, ?, ?)",
-                (key, json.dumps(data), time.time())
-            )
-            print("  [CACHE SAVED] Response stored.")
+        # SQLite: INSERT OR REPLACE
+        # Postgres: INSERT ... ON CONFLICT
+        # _exec handles "INSERT OR IGNORE". 
+        # But here we want REPLACE/UPDATE.
+        # "INSERT OR REPLACE" is valid in SQLite.
+        # Postgres uses "INSERT ... ON CONFLICT (key) DO UPDATE SET ..."
+        
+        # Simpler approach: DELETE then INSERT (Atomic enough for cache)
+        # OR handle DB specific syntax here.
+        # Let's rely on DELETE + INSERT for simplicity across both.
+        
+        del_query = "DELETE FROM api_cache WHERE key = ?"
+        ins_query = "INSERT INTO api_cache (key, response, timestamp) VALUES (?, ?, ?)"
+        
+        try:
+            with get_db_connection() as conn:
+                _exec(conn, del_query, (key,))
+                _exec(conn, ins_query, (key, json.dumps(data), time.time()))
+                conn.commit()
+                print("  [CACHE SAVED] Response stored.")
+        except Exception as e:
+            print(f"[OddsAPI] Cache Write Error: {e}")
 
     def _request(self, endpoint: str, params: Dict = {}) -> Any:
         """Internal request method with caching."""
