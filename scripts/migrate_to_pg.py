@@ -11,8 +11,9 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 from src.database import init_db, init_model_history, init_transactions_tab, init_player_stats_db
 
 def migrate():
-    # Load environment variables
-    load_dotenv()
+    # Load environment variables (try .env.development.local first for Vercel pulled vars)
+    load_dotenv('.env.development.local')
+    load_dotenv('.env') # Fallback
     
     pg_url = os.getenv('DATABASE_URL')
     if not pg_url:
@@ -54,7 +55,7 @@ def migrate():
             bets_data.append((
                 b['provider'], b['date'], b['sport'], b['bet_type'], b['wager'], b['profit'], 
                 b['status'], b['description'], b['selection'], b['odds'], b['closing_odds'], 
-                b['is_live'], b['is_bonus'], b['raw_text'], b['created_at']
+                bool(b['is_live']), bool(b['is_bonus']), b['raw_text'], b['created_at']
             ))
             
         if bets_data:
@@ -101,7 +102,7 @@ def migrate():
             for p in preds:
                 pred_data.append((
                     p['game_id'], p['sport'], p['date'], p['matchup'], p['bet_on'], p['market'],
-                    p['market_line'], p['fair_line'], p['edge'], p['is_actionable'], p['result'], p['created_at']
+                    p['market_line'], p['fair_line'], p['edge'], bool(p['is_actionable']), p['result'], p['created_at']
                 ))
                 
             with pg_conn.cursor() as cur:

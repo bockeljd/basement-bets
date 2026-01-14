@@ -19,15 +19,14 @@ def get_db_type():
 @contextmanager
 def get_db_connection():
     if IS_VERCEL:
-        # PRODUCTION: Use Vercel Postgres
-        # Vercel injects POSTGRES_URL
-        db_url = os.environ.get("POSTGRES_URL")
+        # PRODUCTION: Use Vercel Postgres (POSTGRES_URL) or Neon (DATABASE_URL)
+        db_url = os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL")
         
         if not db_url:
             # Fatal Error: No DB String
-            print("[CRITICAL] POSTGRES_URL is missing in Vercel Environment.")
-            print("[CRITICAL] Ensure you have pulled 'env' or added the Store in Vercel Dashboard.")
-            raise RuntimeError("CRITICAL: POSTGRES_URL environment variable is not set. Cannot connect to database.")
+            print("[CRITICAL] POSTGRES_URL and DATABASE_URL are missing in Vercel Environment.")
+            print("[CRITICAL] Ensure you have added the Neon/Postgres Integration.")
+            raise RuntimeError("CRITICAL: Database connection string not found.")
 
         conn = psycopg2.connect(db_url, cursor_factory=psycopg2.extras.DictCursor)
         try:

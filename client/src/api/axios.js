@@ -3,7 +3,7 @@ import axios from 'axios';
 const password = localStorage.getItem('basement_password');
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || '/api',
+    baseURL: import.meta.env.VITE_API_URL || '',
     headers: {
         'X-BASEMENT-KEY': password
     }

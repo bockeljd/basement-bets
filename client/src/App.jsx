@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from './api/axios';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
-import { LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign } from 'lucide-react';
+import { LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign, AlertCircle } from 'lucide-react';
 import BetTypeAnalysis from './components/BetTypeAnalysis';
 import Research from './pages/Research';
 
@@ -47,8 +47,9 @@ function App() {
     const [monthlyBreakdown, setMonthlyBreakdown] = useState([]);
     const [betTypeBreakdown, setBetTypeBreakdown] = useState([]);
     const [balances, setBalances] = useState({});
-    const [periodStats, setPeriodStats] = useState({});
     const [financials, setFinancials] = useState(null);
+    const [periodStats, setPeriodStats] = useState({});
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         // Fetch Data
@@ -67,6 +68,13 @@ function App() {
                     api.get('/api/balances'),
                     api.get('/api/financials')
                 ]);
+
+                // Check for 403 or 500 in results to alert user
+                const failed = results.find(r => r.status === 'rejected');
+                if (failed) {
+                    // Since we catch globally in axios for 403, this is likely 500 or Network
+                    throw failed.reason;
+                }
 
                 // Fetch Period Stats in parallel
                 const currentYear = new Date().getFullYear();
@@ -95,12 +103,31 @@ function App() {
 
             } catch (err) {
                 console.error("API Error", err);
+                setError(err.message || "Failed to load dashboard data.");
             }
         };
         fetchData();
     }, []);
 
-    if (!stats) return <div className="p-10 text-center text-white">Loading Dashboard...</div>;
+    if (error) return (
+        <div className="flex flex-col items-center justify-center min-h-screen text-red-500 bg-slate-950 p-6 text-center">
+            <AlertCircle size={48} className="mb-4" />
+            <h2 className="text-2xl font-bold mb-2">Connection Error</h2>
+            <p className="text-gray-400 mb-6">{error}</p>
+            <p className="text-sm text-gray-500 mb-6">
+                Most common cause: Database not initialized.<br />
+                Please visit <a href="/api/admin/init-db" className="text-blue-400 hover:underline">/api/admin/init-db</a>
+            </p>
+            <button
+                onClick={() => window.location.reload()}
+                className="px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+            >
+                Retry
+            </button>
+        </div>
+    );
+
+    if (!stats) return <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white font-mono animate-pulse">Loading Basement Bets...</div>;
 
     return (
         <ErrorBoundary>
