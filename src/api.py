@@ -42,6 +42,16 @@ def run_init():
     init_db() 
     return {"message": "Database Initialized on Vercel Postgres"}
 
+@app.get("/api/health")
+def health_check():
+    return {
+        "status": "Healthy",
+        "database_url_present": bool(os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL")),
+        "basement_password_present": bool(os.environ.get("BASEMENT_PASSWORD")),
+        "vercel_env": os.environ.get("VERCEL") == "1"
+    }
+
+
 # Global Exception Handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
