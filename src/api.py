@@ -85,9 +85,9 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def read_root():
-    return {"message": "Betting Analytics API is running"}
+# @app.get("/")
+# def read_root():
+#     return {"message": "Betting Analytics API is running"}
 
 @app.get("/api/stats")
 async def get_stats():
