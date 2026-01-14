@@ -436,15 +436,15 @@ const Research = () => {
             <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                     <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
-                    <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges >1.5pts.</p>
+                    <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges &gt;1.5pts.</p>
                 </div>
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                     <h3 className="font-bold text-orange-400 mb-2">NCAAM Model</h3>
-                    <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals >4pt edge.</p>
+                    <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals &gt;4pt edge.</p>
                 </div>
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                     <h3 className="font-bold text-purple-400 mb-2">EPL Model</h3>
-                    <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with >5% Expected Value.</p>
+                    <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with &gt;5% Expected Value.</p>
                 </div>
             </div>
         </div>
