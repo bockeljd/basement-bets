@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from './api/axios';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
 import { LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign } from 'lucide-react';
 import BetTypeAnalysis from './components/BetTypeAnalysis';
@@ -58,23 +58,23 @@ function App() {
                 const getVal = (res, defaultVal) => res.status === 'fulfilled' ? res.value.data : defaultVal;
 
                 const results = await Promise.allSettled([
-                    axios.get('/api/stats'),
-                    axios.get('/api/bets'),
-                    axios.get('/api/breakdown/sport'),
-                    axios.get('/api/breakdown/player'),
-                    axios.get('/api/breakdown/monthly'),
-                    axios.get('/api/breakdown/bet_type'),
-                    axios.get('/api/balances'),
-                    axios.get('/api/financials')
+                    api.get('/api/stats'),
+                    api.get('/api/bets'),
+                    api.get('/api/breakdown/sport'),
+                    api.get('/api/breakdown/player'),
+                    api.get('/api/breakdown/monthly'),
+                    api.get('/api/breakdown/bet_type'),
+                    api.get('/api/balances'),
+                    api.get('/api/financials')
                 ]);
 
                 // Fetch Period Stats in parallel
                 const currentYear = new Date().getFullYear();
                 const periodResults = await Promise.allSettled([
-                    axios.get('/api/stats/period?days=7'),
-                    axios.get('/api/stats/period?days=30'),
-                    axios.get(`/api/stats/period?year=${currentYear}`),
-                    axios.get('/api/stats/period')
+                    api.get('/api/stats/period?days=7'),
+                    api.get('/api/stats/period?days=30'),
+                    api.get(`/api/stats/period?year=${currentYear}`),
+                    api.get('/api/stats/period')
                 ]);
 
                 setStats(getVal(results[0], { total_bets: 0, total_profit: 0, win_rate: 0, roi: 0 }));
@@ -386,7 +386,7 @@ function OddsTicker() {
     const [odds, setOdds] = useState([]);
 
     useEffect(() => {
-        axios.get('/api/odds/NFL')
+        api.get('/api/odds/NFL')
             .then(res => {
                 if (Array.isArray(res.data)) {
                     setOdds(res.data);

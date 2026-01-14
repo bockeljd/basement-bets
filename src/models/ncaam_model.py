@@ -18,89 +18,99 @@ class NCAAMModel(BaseModel):
     Source: Sports-Reference (Scraping Advanced Stats).
     """
     
-    STATS_URL = "https://www.sports-reference.com/cbb/seasons/men/2026-advanced-school-stats.html"
-    
-    # Team Mapping Helper (Odds API names are messy for colleges)
-    # We will try a fuzzy match or manual map map for major teams later.
-    # For now, we assume simple matching (e.g. "Duke" == "Duke").
-    
+    STATS_URL = "https://barttorvik.com/2026_team_results.json"
+    CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'ncaam_torvik_cache.json')
+    MAPPING_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'team_mapping.json')
+
     def __init__(self):
         super().__init__(sport_key="basketball_ncaab")
         self.odds_client = OddsAPIClient()
         self.team_stats = {}
         self.league_avg = {}
+        self.team_mapping = self._load_mapping()
+
+    def _load_mapping(self):
+        import json
+        if os.path.exists(self.MAPPING_FILE):
+             with open(self.MAPPING_FILE, 'r') as f:
+                 return json.load(f)
+        return {}
 
     def fetch_data(self):
         """
-        Scrape Advanced Stats from Sports-Reference.
+        Fetch Efficiency Ratings from BartTorvik (JSON).
         """
-        print(f"  [MODEL] Scraped Advanced Stats from {self.STATS_URL}...")
+        import json
+        import time
+        from src.services.barttorvik import BartTorvikClient
+        
+        # Check Cache
+        if os.path.exists(self.CACHE_FILE):
+            mtime = os.path.getmtime(self.CACHE_FILE)
+            if time.time() - mtime < 43200: # 12 Hours TTL
+                print("  [MODEL] Loading cached Torvik stats...")
+                with open(self.CACHE_FILE, 'r') as f:
+                    data = json.load(f)
+                    self.team_stats = data.get('stats', {})
+                    self.league_avg = data.get('league_avg', {})
+                    return self.team_stats
+        
+        print(f"  [MODEL] Fetching Torvik data...")
         
         try:
-            # Add headers to avoid bot detection
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36"
-            }
-            resp = requests.get(self.STATS_URL, headers=headers)
-            resp.raise_for_status()
+            client = BartTorvikClient()
+            ratings = client.get_efficiency_ratings(year=2026) # 2026 Season
             
-            # Parse Tables
-            dfs = pd.read_html(resp.text)
-            if not dfs:
-                print("  [ERROR] No tables found in HTML.")
+            if not ratings:
+                print("  [ERROR] No ratings returned from Torvik.")
                 return {}
+
+            # Convert to internal format (ORtg, DRtg, Pace)
+            self.team_stats = {}
+            
+            # Track aggregates for league average
+            total_pace = 0; total_ortg = 0; total_drtg = 0; count = 0
+            
+            for team, data in ratings.items():
+                stats = {
+                    'Pace': data['tempo'],
+                    'ORtg': data['off_rating'],
+                    'DRtg': data['def_rating'],
+                    '3PAr': 0.4, # Default/Fallback if not in generic JSON
+                    'ORB%': 30.0 # Default
+                }
                 
-            df = dfs[0]
-            
-            # Clean Data
-            # Handle MultiIndex: We specifically want 'Pace', 'ORtg', and 'Opp.' (Points Allowed)
-            # The Debug script showed flattened cols include these.
-            if isinstance(df.columns, pd.MultiIndex):
-                # Flatten
-                df.columns = df.columns.map(lambda x: x[1] if "Unnamed" not in x[1] else x[0])
-            
-            # Remove divider rows
-            df = df[df['School'] != 'School']
-            
-            # Convert to numeric
-            cols_to_convert = ['Pace', 'ORtg', 'Opp.', '3PAr', 'ORB%']
-            for c in cols_to_convert:
-                if c in df.columns:
-                    df[c] = pd.to_numeric(df[c], errors='coerce')
-            
-            # Drop NaN
-            df = df.dropna(subset=['Pace', 'ORtg', 'Opp.'])
-            
-            # Calculate DRtg if missing
-            # DRtg = (Opp Points / Pace) * 100
-            if 'DRtg' not in df.columns and 'Opp.' in df.columns and 'Pace' in df.columns:
-                df['DRtg'] = (df['Opp.'] / df['Pace']) * 100
-            
-            # Recalculate League Avg
-            self.league_avg = {
-                'Pace': df['Pace'].mean(),
-                'ORtg': df['ORtg'].mean(),
-                'DRtg': df['DRtg'].mean(),
-                '3PAr': df['3PAr'].mean(),
-                'ORB%': df['ORB%'].mean()
-            }
+                # Check for NaNs
+                if stats['Pace'] == 0: continue
+                
+                self.team_stats[team] = stats
+                
+                total_pace += stats['Pace']
+                total_ortg += stats['ORtg']
+                total_drtg += stats['DRtg']
+                count += 1
+                
+            if count > 0:
+                self.league_avg = {
+                    'Pace': total_pace / count,
+                    'ORtg': total_ortg / count,
+                    'DRtg': total_drtg / count
+                }
+            else:
+                self.league_avg = {'Pace': 68.0, 'ORtg': 105.0, 'DRtg': 105.0}
+
             print(f"  [STATS] League Averages: Pace={self.league_avg['Pace']:.1f}, ORtg={self.league_avg['ORtg']:.1f}")
 
-            # Store in Dict
-            self.team_stats = {}
-            for _, row in df.iterrows():
-                # Clean Team Name (remove "NCAA" suffix if present)
-                team_name = row['School'].replace(" NCAA", "").strip()
-                self.team_stats[team_name] = {
-                    'Pace': row['Pace'],
-                    'ORtg': row['ORtg'],
-                    'DRtg': row['DRtg'],
-                    '3PAr': row['3PAr'],
-                    'ORB%': row['ORB%']
-                }
+            # Save to Cache
+            with open(self.CACHE_FILE, 'w') as f:
+                json.dump({'stats': self.team_stats, 'league_avg': self.league_avg}, f)
             
-            print(f"  [MODEL] Loaded stats for {len(self.team_stats)} schools.")
+            print(f"  [MODEL] Loaded stats for {len(self.team_stats)} schools (Torvik).")
             return self.team_stats
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to fetch Torvik data: {e}")
+            return {}
 
         except Exception as e:
             print(f"  [ERROR] Failed to fetch data: {e}")
@@ -232,12 +242,16 @@ class NCAAMModel(BaseModel):
 
     def _map_name(self, name):
         """
-        Map Odds API name (e.g. "Buffalo Bulls") to SR name (e.g. "Buffalo").
-        Logic: Find longest SR key that is a substring of the input name.
+        Map Odds API name to SR name using mapping file then heuristic.
         """
+        # 1. Direct Map
+        if name in self.team_mapping:
+            return self.team_mapping[name]
+            
         if not self.team_stats:
             return name
             
+        # 2. Heuristic: Substring Match
         # Sort keys by length desc to prevent "Iowa" matching "Iowa State" first
         sorted_keys = sorted(self.team_stats.keys(), key=len, reverse=True)
         
@@ -245,7 +259,8 @@ class NCAAMModel(BaseModel):
             if key in name:
                 return key
                 
-        # Fallback or specific overrides
+        # 3. Log Failure
+        # print(f"  [WARN] Could not map team: {name}")
         return name
 
     def _get_market_total(self, game):

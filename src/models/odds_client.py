@@ -122,18 +122,18 @@ class OddsAPIClient:
         if data is not None:
              return data
              
-        # 2. Fallback: Action Network (Selenium)
-        print(f"  [FALLBACK] Odds API failed. Engaging Selenium Scraper for {sport_key}...")
+        # 2. Fallback: Action Network (API)
+        print(f"  [FALLBACK] Odds API failed. Engaging Action Network (API) for {sport_key}...")
         try:
-            cache_key = f"selenium:odds:{sport_key}:{datetime.date.today()}"
+            cache_key = f"action:odds:{sport_key}:{datetime.date.today()}"
             cached_data = self._get_from_cache(cache_key)
             if cached_data:
-                 print(f"  [CACHE HIT] Using cached Selenium data.")
+                 print(f"  [CACHE HIT] Using cached Action Network data.")
                  return cached_data
 
-            from src.selenium_client import ActionNetworkSeleniumClient
-            scraper = ActionNetworkSeleniumClient()
-            fallback_data = scraper.get_odds(sport_key)
+            from src.action_network import ActionNetworkClient
+            scraper = ActionNetworkClient()
+            fallback_data = scraper.fetch_odds(sport_key)
             
             if fallback_data:
                 print(f"  [FALLBACK SUCCESS] Retrieved {len(fallback_data)} events from Action Network.")
@@ -158,17 +158,18 @@ class OddsAPIClient:
         if data is not None:
             return data
             
-        # 2. Fallback: Action Network (Selenium)
-        print(f"  [FALLBACK] Odds API failed. Engaging Selenium Scraper for scores ({sport_key})...")
+        # 2. Fallback: Action Network (API)
+        print(f"  [FALLBACK] Odds API failed. Engaging Action Network (API) for scores ({sport_key})...")
         try:
-            cache_key = f"selenium:scores:{sport_key}:{datetime.date.today()}"
+            cache_key = f"action:scores:{sport_key}:{datetime.date.today()}"
             cached_data = self._get_from_cache(cache_key)
             if cached_data:
                 return cached_data
 
-            from src.selenium_client import ActionNetworkSeleniumClient
-            scraper = ActionNetworkSeleniumClient()
-            fallback_data = scraper.get_odds(sport_key) # Selenium returns combined odds/scores object
+            from src.action_network import ActionNetworkClient
+            scraper = ActionNetworkClient()
+            # fetch_odds returns full event objects which include scores/status
+            fallback_data = scraper.fetch_odds(sport_key) 
             
             if fallback_data:
                 self._save_to_cache(cache_key, fallback_data)

@@ -130,10 +130,13 @@ class ActionNetworkClient:
         sport_map = {
             "americanfootball_nfl": "nfl",
             "basketball_nba": "nba",
+            "basketball_ncaab": "ncaab",
             "baseball_mlb": "mlb",
             "icehockey_nhl": "nhl",
             "ncaab": "ncaab",
-            "ncaaf": "ncaaf"
+            "ncaaf": "ncaaf",
+            "soccer_epl": "soccer", # Map to generic soccer (Action Network usually handles sub-leagues or just 'soccer')
+            "soccer": "soccer"
         }
         
         an_sport = sport_map.get(sport_key, sport_key)

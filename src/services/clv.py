@@ -3,18 +3,19 @@ import os
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from database import get_db_connection, update_closing_odds
-from action_network import ActionNetworkClient
+from action_network import ActionNetworkClient, get_todays_games
 from datetime import datetime
 import time
 
 class ClosingOddsFetcher:
     def __init__(self):
-        self.client = ActionNetworkClient()
         self.sport_map = {
             "NFL": "nfl",
             "NBA": "nba",
             "NCAAF": "ncaaf",
             "NCAAB": "ncaab",
+            "NCAA Basketball": "ncaab",
+            "NCAA (Generic)": "ncaab",  # Guessing basketball based on season
             "MLB": "mlb",
             "NHL": "nhl"
         }
@@ -52,7 +53,7 @@ class ClosingOddsFetcher:
         
         for (date_str, sport), batch in grouped.items():
             print(f"Fetching {sport} for {date_str} ({len(batch)} bets)...")
-            games = self.client.get_todays_games(self.sport_map.get(sport, sport), [date_str])
+            games = get_todays_games(self.sport_map.get(sport, sport), [date_str])
             
             for bet in batch:
                 closing_line = self._find_closing_line(bet, games)

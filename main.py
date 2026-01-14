@@ -69,6 +69,9 @@ def main():
     # Enrich Command
     subparsers.add_parser("enrich", help="Fetch closing odds for pending bets")
     
+    # Scout Command
+    subparsers.add_parser("scout", help="Run Predictive Models to find future edges")
+
     args = parser.parse_args()
     
     if args.command == "init":
@@ -146,6 +149,37 @@ def main():
         else:
             print(" - None yet. You're doing great!")
             
+    elif args.command == "scout":
+        print("\n=== SCOUTING REPORT ===")
+        
+        # 1. NFL
+        from src.models.nfl_model import NFLModel
+        print("\n[NFL] Running Monte Carlo Model...")
+        try:
+            nfl = NFLModel()
+            edges = nfl.find_edges()
+            if not edges:
+                print("  No edges found (or no odds data).")
+            for e in edges:
+                 if e['is_actionable']:
+                     print(f"  ★ DETECTED: {e['bet_on']} ({e['market_spread']}) vs Fair ({e['fair_spread']}) | Edge: {e['edge']}")
+        except Exception as e:
+            print(f"  Error running NFL model: {e}")
+
+        # 2. NCAAM
+        from src.models.ncaam_model import NCAAMModel
+        print("\n[NCAAM] Running Efficiency Model...")
+        try:
+            cbb = NCAAMModel()
+            edges = cbb.find_edges()
+            if not edges:
+                print("  No edges found.")
+            for e in edges:
+                 if e['is_actionable']:
+                     print(f"  ★ DETECTED: {e['game']} {e['bet_on']} {e['market_line']} (Fair: {e['fair_line']}) | Edge: {e['edge']}")
+        except Exception as e:
+             print(f"  Error running NCAAM model: {e}")
+
     else:
         parser.print_help()
 

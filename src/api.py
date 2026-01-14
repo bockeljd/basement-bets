@@ -1,11 +1,46 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security.api_key import APIKeyHeader
+import os
+
 from src.models.odds_client import OddsAPIClient
-from src.database import fetch_all_bets, insert_model_prediction, fetch_model_history
+from src.database import fetch_all_bets, insert_model_prediction, fetch_model_history, init_db
 from typing import Optional
 
 app = FastAPI()
+
+# --- Security Configuration ---
+API_KEY_NAME = "X-BASEMENT-KEY"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+@app.middleware("http")
+async def check_access_key(request: Request, call_next):
+    # Allow public access to root, favicon, or OPTIONS (CORS preflight)
+    if request.method == "OPTIONS":
+         return await call_next(request)
+         
+    if request.url.path.startswith("/api"):
+        # Get Key from Header
+        client_key = request.headers.get(API_KEY_NAME)
+        server_key = os.environ.get("BASEMENT_PASSWORD")
+        
+        # If Password is set on Server, enforce it
+        # Note: If server_key is NOT set (e.g. dev), we might skip check or enforce empty?
+        # User prompt implies: "If Password is set on Server, enforce it".
+        if server_key and client_key != server_key:
+             return JSONResponse(status_code=403, content={"message": "Wrong Password"})
+             
+    response = await call_next(request)
+    return response
+
+# --- Admin Routes ---
+@app.get("/api/admin/init-db")
+def run_init():
+    # WARNING: Secure this or remove after use
+    # It is protected by the middleware above if /api prefix is hit.
+    init_db() 
+    return {"message": "Database Initialized on Vercel Postgres"}
 
 # Global Exception Handler
 @app.exception_handler(Exception)
@@ -150,7 +185,7 @@ async def get_research_edges():
         for e in nfl_edges:
             e['sport'] = 'NFL'
             e['market'] = 'Spread'
-            e['logic'] = 'EPA/Play Model'
+            e['logic'] = 'Monte Carlo (Gaussian)'
             # Sanitize
             e['is_actionable'] = bool(sanitize(e.get('is_actionable', False)))
             e['edge'] = sanitize(e.get('edge'))
@@ -165,7 +200,7 @@ async def get_research_edges():
         for e in ncaam_edges:
             e['sport'] = 'NCAAM'
             e['market'] = 'Total'
-            e['logic'] = 'Monte Carlo (Efficiency)'
+            e['logic'] = 'KenPom Efficiency + Tempo'
              # Sanitize
             e['is_actionable'] = bool(sanitize(e.get('is_actionable', False)))
             e['edge'] = sanitize(e.get('edge'))
@@ -180,7 +215,7 @@ async def get_research_edges():
         for e in epl_edges:
             e['sport'] = 'EPL'
             e['market'] = 'Moneyline'
-            e['logic'] = 'Poisson (xG)'
+            e['logic'] = 'Poisson Distribution (xG)'
             # Normalize keys for frontend
             e['market_line'] = sanitize(e.get('market_odds'))
             e['fair_line'] = sanitize(e.get('fair_odds'))

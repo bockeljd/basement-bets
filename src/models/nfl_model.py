@@ -22,12 +22,14 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.
 
 from src.models.base_model import BaseModel
 from src.models.odds_client import OddsAPIClient
+from src.models.monte_carlo import MonteCarloEngine
 from typing import Dict, Any, List
 
 class NFLModel(BaseModel):
     """
     NFL Predictive Model - Real Data Version.
     Source: nfl_data_py (Play-by-Play EPA).
+    Uses Monte Carlo Simulation for "Chaos Engine" logic.
     """
     
     # Mapping: nfl_data_py (Abbr) -> Odds API (Full Name)
@@ -45,22 +47,25 @@ class NFLModel(BaseModel):
     # Reverse Map for lookups
     REVERSE_MAP = {v: k for k, v in TEAM_MAP.items()}
 
-    SCALE_FACTOR = 15.0 
-    HFA = 2.0 
-
     def __init__(self):
         super().__init__(sport_key="americanfootball_nfl")
         self.odds_client = OddsAPIClient()
+        self.mc_engine = MonteCarloEngine(simulations=5000)
         self.team_stats = {}
 
     def fetch_data(self):
         """
-        Fetch real-world play-by-play data and calculate Team EPA.
+        Fetch real-world play-by-play data and calculate Team EPA and Volatility.
         """
         print("  [MODEL] Loading NFL Play-by-Play Data (2025 Local)...")
         # Load local parquet (Manual Download)
         try:
-            pbp = pd.read_parquet(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'play_by_play_2025.parquet'))
+            # Try 2024 if 2025 fails, or just assume the file exists as per setup
+            pbp_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'play_by_play_2025.parquet')
+            if not os.path.exists(pbp_path):
+                 pbp_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'play_by_play_2024.parquet')
+            
+            pbp = pd.read_parquet(pbp_path)
         except Exception as e:
             print(f"  [ERROR] Failed to load local data: {e}")
             return {}
@@ -71,53 +76,59 @@ class NFLModel(BaseModel):
         
         print(f"  [MODEL] Processing {len(df)} plays...")
         
-        # Aggregate EPA by Team (Mean EPA/Play)
-        # We can also filter for garbage time later, but keep it simple for now.
-        team_epa = df.groupby('posteam')['epa'].mean()
+        # Aggregate EPA by Team (Mean & Std Dev for Volatility)
+        stats = df.groupby('posteam')['epa'].agg(['mean', 'std'])
         
         # Store in self.team_stats with Odds API Names
         self.team_stats = {}
-        for abbr, epa in team_epa.items():
+        for abbr, row in stats.iterrows():
             full_name = self.TEAM_MAP.get(abbr)
             if full_name:
-                self.team_stats[full_name] = round(epa, 3)
-            else:
-                print(f"  [WARN] Unknown team abbreviation: {abbr}")
+                self.team_stats[full_name] = {
+                    'epa': round(row['mean'], 3),
+                    # Heuristic Volatility: Scale EPA std (~0.7) to Match std (~10.5)
+                    'volatility': round(row['std'] * 15.0, 2)
+                }
                 
         # Debug Output
-        # top_5 = sorted(self.team_stats.items(), key=lambda x: x[1], reverse=True)[:5]
-        # print(f"  [STATS] Top 5 Offenses (EPA/Play): {top_5}")
+        top_5 = sorted(self.team_stats.items(), key=lambda x: x[1]['epa'], reverse=True)[:5]
+        print(f"  [STATS] Top 5 Offenses (EPA/Play): {[(k, v['epa']) for k,v in top_5]}")
         
         return self.team_stats
 
     def predict(self, game_id: str, home_team: str, away_team: str) -> Dict[str, Any]:
         """
-        Predict Fair Spread using Real EPA.
+        Predict Fair Spread using Monte Carlo Interaction.
         """
-        home_epa = self.team_stats.get(home_team)
-        away_epa = self.team_stats.get(away_team)
+        h_stats = self.team_stats.get(home_team)
+        a_stats = self.team_stats.get(away_team)
         
-        if home_epa is None or away_epa is None:
-            # print(f"  [SKIP] Missing data for {home_team} or {away_team}")
+        if not h_stats or not a_stats:
             return None
 
-        # Logic: (Away - Home) * Scale - HFA?
-        # Standard: Spread is Points needed to equalize.
-        # If Home is Better (Higher EPA), Spread should be Negative.
-        # Diff = Away - Home. (-0.1 - 0.1 = -0.2).
-        # Fair = -0.2 * 15 = -3.0.
-        # -3.0 - 2.0(HFA) = -5.0.
+        # CALCULATE PROJECTED SCORE (INTERACTION)
+        # Using a base NFL score of 21.5
+        # Simplified EPA-to-Points projection for Monte Carlo
+        h_proj = 21.5 + ((h_stats['epa'] - a_stats['epa']) * 30)
+        a_proj = 21.5 + ((a_stats['epa'] - h_stats['epa']) * 30)
         
-        raw_diff = away_epa - home_epa
-        fair_spread = (raw_diff * self.SCALE_FACTOR) - self.HFA
-
+        # DELEGATE TO CHAOS ENGINE
+        sim_result = self.mc_engine.simulate_game(
+            home_proj=h_proj, home_vol=h_stats['volatility'],
+            away_proj=a_proj, away_vol=a_stats['volatility']
+        )
+        
         return {
             "game_id": game_id,
             "home_team": home_team,
             "away_team": away_team,
-            "fair_spread": round(fair_spread, 1),
-            "home_epa": home_epa,
-            "away_epa": away_epa
+            "fair_spread": sim_result.fair_spread,
+            "fair_total": sim_result.fair_total,
+            "win_prob": sim_result.home_win_pct,
+            "edge_detected": sim_result.edge_detected,
+            "volatility_edge": sim_result.volatility_edge,
+            "home_stats": h_stats,
+            "away_stats": a_stats
         }
     
     def find_edges(self):
@@ -158,15 +169,15 @@ class NFLModel(BaseModel):
             bet_on = "Pass"
             edge_val = diff
             
-            if diff > 1.5:
+            # Edge Threshold: > 3.0 points (Volatility safe)
+            if diff > 3.0:
                 is_actionable = True
-                bet_on = home
-            elif diff < -1.5:
+                bet_on = home # Market (-3) > Fair (-7). Edge Home. Or Market (+7) > Fair (+3).
+            elif diff < -3.0:
                 is_actionable = True
                 bet_on = away
                 edge_val = abs(diff)
             else:
-                # Lean
                 bet_on = home if diff > 0 else away
                 edge_val = abs(diff)
 
@@ -175,8 +186,9 @@ class NFLModel(BaseModel):
                 "bet_on": bet_on,
                 "market_spread": market_spread,
                 "fair_spread": fair_spread,
+                "win_prob": prediction['win_prob'],
                 "edge": round(edge_val, 1),
-                "is_actionable": is_actionable,
+                "is_actionable": is_actionable or prediction['edge_detected'],
                 "start_time": game.get('commence_time')
             })
                 
@@ -200,4 +212,5 @@ if __name__ == "__main__":
     edges = model.find_edges()
     print(f"\nFound {len(edges)} edges:")
     for e in edges:
-        print(f"Bet {e['bet_on']} ({e['market_spread']}) vs Fair ({e['fair_spread']}) | Edge: {e['edge']} pts")
+        action = " [BET]" if e['is_actionable'] else ""
+        print(f"Bet {e['bet_on']} ({e['market_spread']}) vs Fair ({e['fair_spread']}) | Edge: {e['edge']} pts{action}")

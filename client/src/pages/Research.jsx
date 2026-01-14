@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import api from '../api/axios';
 import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 const Research = () => {
@@ -20,21 +21,14 @@ const Research = () => {
     const fetchEdges = async () => {
         try {
             setLoading(true);
-            const apiUrl = import.meta.env.VITE_VITE_API_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
             const [edgesRes, historyRes] = await Promise.all([
-                fetch(`${apiUrl}/api/research`),
-                fetch(`${apiUrl}/api/research/history`)
+                api.get('/api/research'),
+                api.get('/api/research/history')
             ]);
 
-            if (!edgesRes.ok) throw new Error('Failed to fetch research data');
-            const data = await edgesRes.json();
-            setEdges(data);
-
-            if (historyRes.ok) {
-                const historyData = await historyRes.json();
-                setHistory(historyData);
-            }
+            setEdges(edgesRes.data || []);
+            setHistory(historyRes.data || []);
 
         } catch (err) {
             console.error(err);
@@ -47,15 +41,13 @@ const Research = () => {
     const gradeResults = async () => {
         try {
             setLoading(true);
-            const apiUrl = import.meta.env.VITE_VITE_API_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
-            const res = await fetch(`${apiUrl}/api/research/grade`, { method: 'POST' });
-            if (!res.ok) throw new Error('Grading failed');
-            const result = await res.json();
+            const res = await api.post('/api/research/grade');
+            const result = res.data;
             alert(`Grading Complete! ${result.graded || 0} bets updated.`);
             await fetchEdges();
         } catch (err) {
             console.error(err);
-            alert('Grading failed: ' + err.message);
+            alert('Grading failed: ' + (err.response?.data?.message || err.message));
         } finally {
             setLoading(false);
         }
@@ -330,7 +322,7 @@ const Research = () => {
                                                             {/* Tooltip */}
                                                             <div className="absolute right-full mr-2 w-48 p-3 bg-slate-900 border border-slate-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-[10px]">
                                                                 <div className={`font-bold uppercase tracking-wider mb-1 ${edge.audit_class === 'high' ? 'text-green-400' :
-                                                                        edge.audit_class === 'medium' ? 'text-yellow-400' : 'text-red-400'
+                                                                    edge.audit_class === 'medium' ? 'text-yellow-400' : 'text-red-400'
                                                                     }`}>
                                                                     {edge.audit_class === 'high' ? 'High Confidence' :
                                                                         edge.audit_class === 'medium' ? 'Medium Confidence' : 'Low Confidence'}
@@ -444,15 +436,15 @@ const Research = () => {
             <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                     <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
-                    <p className="text-sm text-slate-400">Uses EPA/Play (Ridge Regression) to calculate fair spreads. Looks for >1.5pt discrepancies vs market.</p>
+                    <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges >1.5pts.</p>
                 </div>
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                     <h3 className="font-bold text-orange-400 mb-2">NCAAM Model</h3>
-                    <p className="text-sm text-slate-400">Monte Carlo simulation (10k runs) based on Adjusted Tempo & Efficiency stats. Targets >4pt edge on Totals.</p>
+                    <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals >4pt edge.</p>
                 </div>
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                     <h3 className="font-bold text-purple-400 mb-2">EPL Model</h3>
-                    <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with >10% Expected Value.</p>
+                    <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with >5% Expected Value.</p>
                 </div>
             </div>
         </div>
