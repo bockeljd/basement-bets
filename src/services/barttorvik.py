@@ -24,10 +24,14 @@ class BartTorvikClient:
         url = f"{self.BASE_URL}?date={date_str}&conlimit="
         print(f"  [TORVIK] Fetching daily stats from {url} via Selenium...")
         
-        driver = SeleniumDriverFactory.create_driver(headless=True)
-        if not driver:
-            print("  [TORVIK] Failed to init Selenium driver.")
+        try:
+            from src.selenium_client import SeleniumDriverFactory
+            driver = SeleniumDriverFactory.create_driver(headless=True)
+        except ImportError:
+            print("  [TORVIK] Selenium not available.")
             return {}
+
+        if not driver:
 
         try:
             driver.get(url)
