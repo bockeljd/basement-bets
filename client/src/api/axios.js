@@ -1,9 +1,10 @@
 import axios from 'axios';
+import { config } from '../config';
 
 const password = localStorage.getItem('basement_password');
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || '',
+    baseURL: config.API_URL,
     headers: {
         'X-BASEMENT-KEY': password
     }

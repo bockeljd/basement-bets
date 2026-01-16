@@ -32,6 +32,7 @@ class BartTorvikClient:
             return {}
 
         if not driver:
+            return {}
 
         try:
             driver.get(url)

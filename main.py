@@ -14,6 +14,7 @@ def import_file(filepath):
     try:
         with open(filepath, 'r') as f:
             content = f.read()
+            # Trigger Reload
     except FileNotFoundError:
         print(f"Error: File {filepath} not found.")
         return 0

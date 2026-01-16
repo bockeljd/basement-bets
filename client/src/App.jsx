@@ -1,9 +1,46 @@
 import React, { useState, useEffect } from 'react';
 import api from './api/axios';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
-import { LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign, AlertCircle } from 'lucide-react';
+import {
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell
+} from 'recharts';
+import {
+    LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, Activity,
+    DollarSign, Calendar, Filter, Download, Plus, AlertCircle, RefreshCw, Trash, PlusCircle
+} from 'lucide-react';
+import axios from 'axios';
 import BetTypeAnalysis from './components/BetTypeAnalysis';
 import Research from './pages/Research';
+import { PasteSlipContainer } from './components/PasteSlipContainer';
+import { StagingBanner } from './components/StagingBanner';
+
+// --- Login Modal Component ---
+const LoginModal = ({ onSubmit }) => {
+    const [pass, setPass] = useState('');
+    return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999]">
+            <div className="bg-slate-900 border border-slate-700 p-8 rounded-xl max-w-md w-full shadow-2xl">
+                <h2 className="text-2xl font-bold text-white mb-4">Authentication</h2>
+                <p className="text-slate-400 mb-6">Enter the Basement Password to access this server.</p>
+                <form onSubmit={(e) => { e.preventDefault(); onSubmit(pass); }}>
+                    <input
+                        type="password"
+                        value={pass}
+                        onChange={(e) => setPass(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-600 text-white rounded p-3 mb-4 focus:ring-2 focus:ring-blue-500 outline-none"
+                        placeholder="Password..."
+                        autoFocus
+                    />
+                    <button
+                        type="submit"
+                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded transition-colors"
+                    >
+                        Login
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 // Helpers
 const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).filter ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val) : (typeof val === 'number' ? `$${val.toFixed(2)}` : val);
@@ -47,9 +84,29 @@ function App() {
     const [monthlyBreakdown, setMonthlyBreakdown] = useState([]);
     const [betTypeBreakdown, setBetTypeBreakdown] = useState([]);
     const [balances, setBalances] = useState({});
-    const [financials, setFinancials] = useState(null);
-    const [periodStats, setPeriodStats] = useState({});
     const [error, setError] = useState(null);
+    const [timeSeries, setTimeSeries] = useState([]);
+    const [drawdown, setDrawdown] = useState(null);
+    const [financials, setFinancials] = useState({ total_in_play: 0, total_deposited: 0, total_withdrawn: 0, realized_profit: 0 });
+    const [periodStats, setPeriodStats] = useState({ '7d': null, '30d': null, 'ytd': null, 'all': null });
+    const [showAddBet, setShowAddBet] = useState(false);
+
+    // Auth State
+    const [showLogin, setShowLogin] = useState(() => {
+        return !localStorage.getItem('basement_password');
+    });
+
+    const handleLogin = (pass) => {
+        localStorage.setItem('basement_password', pass);
+        // Force reload to apply key via axios interceptor or just state? 
+        // Axios reads from localStorage on create. We might need to reload or update api instance.
+        // Reload is safest for now to reset all state.
+        window.location.reload();
+    };
+
+    if (showLogin) {
+        return <LoginModal onSubmit={handleLogin} />;
+    }
 
     useEffect(() => {
         // Fetch Data
@@ -58,6 +115,7 @@ function App() {
                 // Helper to get data or default
                 const getVal = (res, defaultVal) => res.status === 'fulfilled' ? res.value.data : defaultVal;
 
+                // Parallelize API calls
                 const results = await Promise.allSettled([
                     api.get('/api/stats'),
                     api.get('/api/bets'),
@@ -66,14 +124,19 @@ function App() {
                     api.get('/api/breakdown/monthly'),
                     api.get('/api/breakdown/bet_type'),
                     api.get('/api/balances'),
-                    api.get('/api/financials')
+                    api.get('/api/financials'),
+                    api.get('/api/analytics/series'),
+                    api.get('/api/analytics/drawdown')
                 ]);
 
                 // Check for 403 or 500 in results to alert user
                 const failed = results.find(r => r.status === 'rejected');
                 if (failed) {
+                    if (failed.status === 403 || (failed.response && failed.response.status === 403) || (failed.message && failed.message.includes("403"))) {
+                        setShowLogin(true);
+                    }
                     // Since we catch globally in axios for 403, this is likely 500 or Network
-                    throw failed.reason;
+                    // throw failed.reason;
                 }
 
                 // Fetch Period Stats in parallel
@@ -93,6 +156,8 @@ function App() {
                 setBetTypeBreakdown(getVal(results[5], []));
                 setBalances(getVal(results[6], {}));
                 setFinancials(getVal(results[7], { total_in_play: 0, total_deposited: 0, total_withdrawn: 0, realized_profit: 0 }));
+                setTimeSeries(getVal(results[8], []));
+                setDrawdown(getVal(results[9], { max_drawdown: 0.0, current_drawdown: 0.0, peak_profit: 0.0 }));
 
                 setPeriodStats({
                     '7d': getVal(periodResults[0], { net_profit: 0, roi: 0, wins: 0, losses: 0, total_bets: 0, actual_win_rate: 0, implied_win_rate: 0 }),
@@ -154,6 +219,7 @@ function App() {
 
     return (
         <ErrorBoundary>
+            <StagingBanner />
             <div className="min-h-screen bg-slate-950 text-white p-8 font-sans selection:bg-green-500 selection:text-black">
                 <div className="max-w-7xl mx-auto">
                     {/* Header */}
@@ -184,10 +250,37 @@ function App() {
                             >
                                 <TrendingUp size={18} /> Research
                             </button>
+                            <button
+                                onClick={() => setView('performance')}
+                                className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all ${view === 'performance' ? 'bg-blue-500 text-white font-bold shadow-[0_0_15px_rgba(59,130,246,0.4)]' : 'bg-slate-800 hover:bg-slate-700'}`}
+                            >
+                                <TrendingUp size={18} /> Performance
+                            </button>
+                            <button
+                                onClick={() => setShowAddBet(true)}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg flex items-center gap-2 font-bold transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                            >
+                                <PlusCircle size={18} /> Add Bet
+                            </button>
                         </div>
                     </header>
 
                     {/* Content */}
+                    {showAddBet && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="w-full max-w-2xl relative">
+                                <PasteSlipContainer
+                                    onSaveSuccess={() => {
+                                        setShowAddBet(false);
+                                        // Refresh data
+                                        window.location.reload(); // Simple refresh for now
+                                    }}
+                                    onClose={() => setShowAddBet(false)}
+                                />
+                            </div>
+                        </div>
+                    )}
+
                     {view === 'summary' ? (
                         <SummaryView
                             stats={stats}
@@ -201,12 +294,98 @@ function App() {
                         />
                     ) : view === 'transactions' ? (
                         <TransactionView bets={bets} financials={financials} />
+                    ) : view === 'performance' ? (
+                        <PerformanceView timeSeries={timeSeries} drawdown={drawdown} financials={financials} />
                     ) : (
                         <Research />
                     )}
                 </div>
             </div>
         </ErrorBoundary>
+    );
+}
+
+function PerformanceView({ timeSeries, drawdown, financials }) {
+    if (!timeSeries || timeSeries.length === 0) {
+        return (
+            <div className="bg-slate-900 border border-slate-800 p-10 rounded-xl text-center">
+                <p className="text-gray-400">No performance data available yet. Settle some bets to see your equity curve!</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Financial Overview */}
+            <div className="flex flex-wrap gap-4 items-stretch">
+                <FinancialHeader financials={financials} mode="performance" />
+            </div>
+
+            {/* Drawdown & Peak Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
+                    <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Max Drawdown</div>
+                    <div className="text-2xl font-bold text-red-400">{formatCurrency(drawdown?.max_drawdown || 0)}</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
+                    <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Current Drawdown</div>
+                    <div className="text-2xl font-bold text-orange-400">{formatCurrency(drawdown?.current_drawdown || 0)}</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
+                    <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Peak Profit</div>
+                    <div className="text-2xl font-bold text-green-400">{formatCurrency(drawdown?.peak_profit || 0)}</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
+                    <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Recovery</div>
+                    <div className="text-2xl font-bold text-blue-400">{drawdown?.recovery_pct || 0}%</div>
+                </div>
+            </div>
+
+            {/* Equity Curve Chart */}
+            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
+                <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                    <TrendingUp className="text-green-400" /> Bankroll Curve
+                </h3>
+                <div className="h-[400px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={timeSeries}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                            <XAxis
+                                dataKey="date"
+                                stroke="#64748b"
+                                fontSize={10}
+                                tickLine={false}
+                                axisLine={false}
+                            />
+                            <YAxis
+                                stroke="#64748b"
+                                fontSize={10}
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={(val) => `$${val}`}
+                            />
+                            <Tooltip
+                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }}
+                                itemStyle={{ color: '#22c55e', fontWeight: 'bold' }}
+                                formatter={(val) => [formatCurrency(val), "Net Balance"]}
+                            />
+                            <Line
+                                type="monotone"
+                                dataKey="cumulative"
+                                stroke="#22c55e"
+                                strokeWidth={3}
+                                dot={timeSeries.length < 50 ? { fill: '#22c55e', strokeWidth: 2, r: 4, stroke: '#0f172a' } : false}
+                                activeDot={{ r: 6, strokeWidth: 0 }}
+                                animationDuration={1500}
+                            />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+                <div className="mt-4 text-center text-xs text-gray-500">
+                    Cumulative net balance over time including all bets and transactions.
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -239,7 +418,7 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
         <div className="space-y-8">
             {/* Bankroll Section */}
             <div className="flex flex-wrap gap-4 items-stretch">
-                <FinancialHeader financials={financials} mode="summary" />
+                {/* Clean Summary: No FinancialHeader here */}
                 {Object.entries(balances)
                     .filter(([provider]) => provider && provider !== 'Barstool' && provider !== 'Other' && provider !== 'Total Net Profit')
                     .map(([provider, data]) => (
@@ -497,8 +676,38 @@ function TransactionView({ bets, financials }) {
     // Extract unique options for dropdowns
     const sports = ["All", ...new Set(bets.map(b => b.sport).filter(Boolean))].sort();
     const types = ["All", ...new Set(bets.map(b => b.bet_type).filter(Boolean))].sort();
-    const statuses = ["All", ...new Set(bets.map(b => b.status).filter(Boolean))].sort();
+    const [error, setError] = useState(null);
+    const [isUpdating, setIsUpdating] = useState(false);
 
+    const handleSettle = async (betId, status) => {
+        setIsUpdating(true);
+        try {
+            await api.patch(`/api/bets/${betId}/settle`, { status });
+            // For now, reload to get fresh stats
+            window.location.reload();
+        } catch (err) {
+            console.error("Settle Error:", err);
+            alert("Failed to settle bet.");
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const handleDelete = async (betId) => {
+        if (!confirm("Are you sure you want to delete this bet?")) return;
+        setIsUpdating(true);
+        try {
+            await api.delete(`/api/bets/${betId}`);
+            window.location.reload();
+        } catch (err) {
+            console.error("Delete Error:", err);
+            alert("Failed to delete bet.");
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const statuses = ['All', 'PENDING', 'WON', 'LOST', 'PUSH'];
     const filtered = bets.filter(b => {
         const matchDate = b.date.includes(filters.date);
         const matchSport = filters.sport === "All" || b.sport === filters.sport;
@@ -579,6 +788,7 @@ function TransactionView({ bets, financials }) {
                                 <th className="px-6 py-3 border-b border-gray-700 text-right">Wager</th>
                                 <th className="px-6 py-3 border-b border-gray-700 text-center">Status</th>
                                 <th className="px-6 py-3 border-b border-gray-700 text-right">Profit</th>
+                                <th className="px-6 py-3 border-b border-gray-700 text-right">Actions</th>
                             </tr>
                             {/* Filter Row */}
                             <tr className="bg-gray-850">
@@ -618,8 +828,8 @@ function TransactionView({ bets, financials }) {
                                         onChange={e => setFilters({ ...filters, selection: e.target.value })}
                                     />
                                 </th>
-                                <th className="px-2 py-2"></th> {/* Odds no filter */}
-                                <th className="px-2 py-2"></th> {/* Wager no filter */}
+                                <th className="px-2 py-2"></th> {/* Odds */}
+                                <th className="px-2 py-2"></th> {/* Wager */}
                                 <th className="px-2 py-2">
                                     <select
                                         className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-blue-500 outline-none"
@@ -629,7 +839,8 @@ function TransactionView({ bets, financials }) {
                                         {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
                                 </th>
-                                <th className="px-2 py-2"></th> {/* Profit no filter */}
+                                <th className="px-2 py-2"></th> {/* Profit */}
+                                <th className="px-2 py-2"></th> {/* Actions */}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-800">
@@ -681,7 +892,41 @@ function TransactionView({ bets, financials }) {
                                             </span>
                                         </td>
                                         <td className={`px-6 py-3 text-right font-bold text-xs ${bet.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                            {!isTxn ? (bet.profit >= 0 ? '+' : '') + formatCurrency(bet.profit) : '-'}
+                                            {(bet.profit !== undefined && bet.profit !== null) ? (bet.profit >= 0 ? '+' : '') + formatCurrency(bet.profit) : '-'}
+                                        </td>
+                                        <td className="px-6 py-3 text-right space-x-2">
+                                            {!isTxn && (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleSettle(bet.id, 'WON')}
+                                                        className="p-1 text-green-500 hover:bg-green-500/10 rounded border border-green-500/20 title='Settle as Win'"
+                                                        disabled={isUpdating}
+                                                    >
+                                                        W
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleSettle(bet.id, 'LOST')}
+                                                        className="p-1 text-red-500 hover:bg-red-500/10 rounded border border-red-500/20 title='Settle as Loss'"
+                                                        disabled={isUpdating}
+                                                    >
+                                                        L
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleSettle(bet.id, 'PUSH')}
+                                                        className="p-1 text-yellow-500 hover:bg-yellow-500/10 rounded border border-yellow-500/20 title='Settle as Push'"
+                                                        disabled={isUpdating}
+                                                    >
+                                                        P
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(bet.id)}
+                                                        className="p-1 text-gray-500 hover:text-red-400 title='Delete'"
+                                                        disabled={isUpdating}
+                                                    >
+                                                        <Trash size={12} />
+                                                    </button>
+                                                </>
+                                            )}
                                         </td>
                                     </tr>
                                 );
@@ -738,16 +983,16 @@ const FinancialHeader = ({ financials, mode = 'all' }) => {
                 borderColor="border-green-500/30"
                 colorClass="bg-green-900/20 text-green-400"
             />
-            {mode === 'all' && (
+            {mode === 'performance' && (
                 <>
                     <FinancialCard
-                        label="Total Deposited"
+                        label="Net Deposits"
                         value={financials.total_deposited}
                         icon={ArrowUpRight}
                         colorClass="bg-blue-900/20 text-blue-400"
                     />
                     <FinancialCard
-                        label="Total Withdrawn"
+                        label="Net Withdrawals"
                         value={financials.total_withdrawn}
                         icon={ArrowDownRight}
                         colorClass="bg-orange-900/20 text-orange-400"

@@ -13,6 +13,8 @@ const Research = () => {
     // Sorting & Filtering State
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
     const [sportFilter, setSportFilter] = useState('All');
+    const [edgeThreshold, setEdgeThreshold] = useState(2.0); // Default to 2.0 pts or 5% EV
+    const [confidenceThreshold, setConfidenceThreshold] = useState(50); // Default 50%
 
     useEffect(() => {
         fetchEdges();
@@ -81,27 +83,47 @@ const Research = () => {
     };
 
     const getProcessedEdges = () => {
-        let filtered = edges.filter(e => showAll || e.is_actionable);
-        if (sportFilter !== 'All') {
-            filtered = filtered.filter(e => e.sport === sportFilter);
-        }
+        let filtered = edges.filter(e => {
+            if (!showAll && !e.is_actionable) return false;
+
+            const edgeVal = e.edge || 0;
+            const confVal = e.audit_score || 50;
+
+            // Adjust edge threshold based on sport
+            const meetEdge = e.sport === 'EPL' ? edgeVal >= (edgeThreshold * 2.5) : edgeVal >= edgeThreshold;
+            const meetConf = confVal >= confidenceThreshold;
+
+            if (sportFilter !== 'All' && e.sport !== sportFilter) return false;
+
+            return meetEdge && meetConf;
+        });
 
         return [...filtered].sort((a, b) => {
             let aVal = a[sortConfig.key];
             let bVal = b[sortConfig.key];
-
-            // Handle nesting or special keys if needed
             if (aVal === undefined) aVal = '';
             if (bVal === undefined) bVal = '';
-
             if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
             if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
             return 0;
         });
     };
 
+    const getFilteredHistory = () => {
+        return history.filter(h => {
+            const edgeVal = h.edge || 0;
+            // Missing audit_score in DB history. Default to High if Edge is high?
+            // If historical item exists, it WAS actionable.
+            const confVal = h.audit_score || (h.is_actionable ? 85 : 50);
+
+            const meetEdge = h.sport === 'EPL' ? edgeVal >= (edgeThreshold * 2.5) : edgeVal >= edgeThreshold;
+            const meetConf = confVal >= confidenceThreshold;
+            return meetEdge && meetConf;
+        });
+    };
+
     const getSortedHistory = () => {
-        return [...history].sort((a, b) => {
+        return [...getFilteredHistory()].sort((a, b) => {
             let aVal = a[sortConfig.key] || '';
             let bVal = b[sortConfig.key] || '';
             if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -143,6 +165,62 @@ const Research = () => {
                 >
                     History
                 </button>
+            </div>
+            {/* Filters Section (Applied to both tabs) */}
+            <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700 mb-8 flex flex-wrap gap-10 items-end shadow-inner">
+                <div className="flex-1 min-w-[250px]">
+                    <div className="flex justify-between items-center mb-3">
+                        <div className="flex items-center text-xs font-black text-slate-400 uppercase tracking-widest">
+                            <ArrowUpDown size={12} className="mr-2 text-blue-400" />
+                            Edge Threshold
+                        </div>
+                        <span className="text-sm font-black text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded shadow-sm border border-blue-400/20">
+                            {edgeThreshold} pts / {(edgeThreshold * 2.5).toFixed(0)}% EV
+                        </span>
+                    </div>
+                    <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        step="0.5"
+                        value={edgeThreshold}
+                        onChange={(e) => setEdgeThreshold(parseFloat(e.target.value))}
+                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
+                    />
+                    <div className="flex justify-between mt-2 text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
+                        <span>High Volume</span>
+                        <span>High Value</span>
+                    </div>
+                </div>
+
+                <div className="flex-1 min-w-[250px]">
+                    <div className="flex justify-between items-center mb-3">
+                        <div className="flex items-center text-xs font-black text-slate-400 uppercase tracking-widest">
+                            <Shield size={12} className="mr-2 text-purple-400" />
+                            Model Confidence
+                        </div>
+                        <span className="text-sm font-black text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded shadow-sm border border-purple-400/20">
+                            {confidenceThreshold}%+
+                        </span>
+                    </div>
+                    <input
+                        type="range"
+                        min="50"
+                        max="95"
+                        step="5"
+                        value={confidenceThreshold}
+                        onChange={(e) => setConfidenceThreshold(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500 hover:accent-purple-400 transition-all"
+                    />
+                    <div className="flex justify-between mt-2 text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
+                        <span>Aggressive</span>
+                        <span>Conservative</span>
+                    </div>
+                </div>
+
+                <div className="text-[11px] text-slate-500 max-w-[220px] leading-relaxed font-medium bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 italic">
+                    "Use these sliders to backtest. Increasing thresholds improves win rates but narrows the betting pool."
+                </div>
             </div>
 
             {activeTab === 'live' && (
@@ -260,6 +338,9 @@ const Research = () => {
                                             <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
                                                 <div className="flex items-center">Edge <SortIcon column="edge" /></div>
                                             </th>
+                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider">
+                                                <div className="flex items-center">Size / Risk</div>
+                                            </th>
                                             <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('audit_score')}>
                                                 <div className="flex items-center">Conf <SortIcon column="audit_score" /></div>
                                             </th>
@@ -305,8 +386,21 @@ const Research = () => {
                                                             <span className="text-lg font-bold">
                                                                 {edge.sport === 'EPL' ? `${edge.edge}%` : `${edge.edge} pts`}
                                                             </span>
-                                                            {edge.sport === 'EPL' && <span className="text-[10px] uppercase tracking-tighter opacity-70 font-black">Exp. Value</span>}
-                                                            {(edge.sport === 'NFL' || edge.sport === 'NCAAM') && <span className="text-[10px] uppercase tracking-tighter opacity-70 font-black">Line Value</span>}
+                                                            <span className="text-[10px] uppercase tracking-tighter opacity-70 font-black">
+                                                                {edge.sport === 'EPL' ? 'Exp. Value' : 'Line Value'}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-4 px-6">
+                                                        <div className="flex flex-col">
+                                                            {edge.suggested_stake ? (
+                                                                <>
+                                                                    <div className="text-green-400 font-bold">${edge.suggested_stake}</div>
+                                                                    <div className="text-[10px] text-slate-500">{edge.bankroll_pct}% Bankroll</div>
+                                                                </>
+                                                            ) : (
+                                                                <span className="text-slate-600">No Edge</span>
+                                                            )}
                                                         </div>
                                                     </td>
                                                     <td className="py-4 px-6">
@@ -356,6 +450,54 @@ const Research = () => {
                         </button>
                     </div>
 
+                    {/* Model Performance Summary */}
+                    <div className="px-6 py-6 bg-slate-800/30 border-b border-slate-700 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        {[
+                            {
+                                label: 'Graded Bets',
+                                value: getFilteredHistory().filter(h => h.result && h.result !== 'Pending').length,
+                                icon: <CheckCircle size={14} className="text-blue-400" />
+                            },
+                            {
+                                label: 'Record',
+                                value: (() => {
+                                    const h = getFilteredHistory();
+                                    const w = h.filter(x => x.result === 'Win').length;
+                                    const l = h.filter(x => x.result === 'Loss').length;
+                                    const p = h.filter(x => x.result === 'Push').length;
+                                    return `${w}-${l}${p > 0 ? `-${p}` : ''}`;
+                                })(),
+                                icon: <ArrowUpDown size={14} className="text-green-400" />
+                            },
+                            {
+                                label: 'Win Rate',
+                                value: (() => {
+                                    const h = getFilteredHistory().filter(x => x.result && x.result !== 'Pending');
+                                    const w = h.filter(x => x.result === 'Win').length;
+                                    return h.length > 0 ? `${((w / h.length) * 100).toFixed(1)}%` : '0.0%';
+                                })(),
+                                icon: <CheckCircle size={14} className="text-purple-400" />
+                            },
+                            {
+                                label: 'Est. Return ($10/bet)',
+                                value: `$${getFilteredHistory().reduce((acc, h) => {
+                                    if (h.result === 'Win') return acc + 9.09;
+                                    if (h.result === 'Loss') return acc - 10.0;
+                                    return acc;
+                                }, 0).toFixed(2)}`,
+                                icon: <RefreshCw size={14} className="text-emerald-400" />
+                            }
+                        ].map((stat, i) => (
+                            <div key={i} className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 shadow-sm relative overflow-hidden group">
+                                <div className="absolute top-0 right-0 p-2 opacity-20 group-hover:opacity-100 transition-opacity">
+                                    {stat.icon}
+                                </div>
+                                <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{stat.label}</div>
+                                <div className="text-xl font-bold text-white">{stat.value}</div>
+                            </div>
+                        ))}
+                    </div>
+
                     {!loading && history.length === 0 && (
                         <div className="text-center py-10 text-slate-500">
                             No history yet. Run models to auto-track.
@@ -386,13 +528,19 @@ const Research = () => {
                                         <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
                                             <div className="flex items-center">Result <SortIcon column="result" /></div>
                                         </th>
+                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider">Score</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {getSortedHistory().map((item, idx) => (
                                         <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                                             <td className="py-4 px-6 text-slate-400 text-xs whitespace-nowrap">
-                                                {new Date(item.created_at).toLocaleDateString()}
+                                                <div className="font-bold text-slate-300">
+                                                    {new Date(item.date || item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
+                                                </div>
+                                                <div className="opacity-70">
+                                                    {new Date(item.date || item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                </div>
                                             </td>
                                             <td className="py-4 px-6">
                                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
@@ -423,6 +571,14 @@ const Research = () => {
                                                                 'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
                                                     {item.result || 'Pending'}
                                                 </span>
+                                            </td>
+                                            <td className="py-4 px-6 text-slate-300 font-mono text-xs">
+                                                {item.home_score !== null && item.away_score !== null ? (
+                                                    <div className="flex flex-col">
+                                                        <span className="text-white font-bold">{item.home_score}-{item.away_score}</span>
+                                                        <span className="text-[10px] text-slate-500">T: {item.home_score + item.away_score}</span>
+                                                    </div>
+                                                ) : '-'}
                                             </td>
                                         </tr>
                                     ))}

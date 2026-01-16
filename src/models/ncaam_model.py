@@ -1,286 +1,248 @@
-import sys
-import os
 import pandas as pd
-import requests
 import numpy as np
-import time
-
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-
-from src.models.base_model import BaseModel
-from src.models.odds_client import OddsAPIClient
 from typing import Dict, Any, List
+from src.models.base_model import BaseModel
 
 class NCAAMModel(BaseModel):
-    """
-    NCAAM Predictive Model - Totals (Monte Carlo).
-    Source: Sports-Reference (Scraping Advanced Stats).
-    """
-    
-    STATS_URL = "https://barttorvik.com/2026_team_results.json"
-    CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'ncaam_torvik_cache.json')
-    MAPPING_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', 'team_mapping.json')
-
     def __init__(self):
         super().__init__(sport_key="basketball_ncaab")
-        self.odds_client = OddsAPIClient()
-        self.team_stats = {}
-        self.league_avg = {}
-        self.team_mapping = self._load_mapping()
-
-    def _load_mapping(self):
-        import json
-        if os.path.exists(self.MAPPING_FILE):
-             with open(self.MAPPING_FILE, 'r') as f:
-                 return json.load(f)
-        return {}
+        self.team_stats = {} # Map of team -> {adj_eff, tempo}
+        self.league_avg_eff = 105.0
+        self.league_avg_tempo = 68.5
 
     def fetch_data(self):
         """
-        Fetch Efficiency Ratings from BartTorvik (JSON).
+        Fetch dynamic efficiency ratings from BartTorvik.
         """
-        import json
-        import time
         from src.services.barttorvik import BartTorvikClient
+        client = BartTorvikClient()
+        ratings = client.get_efficiency_ratings(year=2026)
         
-        # Check Cache
-        if os.path.exists(self.CACHE_FILE):
-            mtime = os.path.getmtime(self.CACHE_FILE)
-            if time.time() - mtime < 43200: # 12 Hours TTL
-                print("  [MODEL] Loading cached Torvik stats...")
-                with open(self.CACHE_FILE, 'r') as f:
-                    data = json.load(f)
-                    self.team_stats = data.get('stats', {})
-                    self.league_avg = data.get('league_avg', {})
-                    return self.team_stats
-        
-        print(f"  [MODEL] Fetching Torvik data...")
-        
-        try:
-            client = BartTorvikClient()
-            ratings = client.get_efficiency_ratings(year=2026) # 2026 Season
-            
-            if not ratings:
-                print("  [ERROR] No ratings returned from Torvik.")
-                return {}
-
-            # Convert to internal format (ORtg, DRtg, Pace)
-            self.team_stats = {}
-            
-            # Track aggregates for league average
-            total_pace = 0; total_ortg = 0; total_drtg = 0; count = 0
-            
-            for team, data in ratings.items():
-                stats = {
-                    'Pace': data['tempo'],
-                    'ORtg': data['off_rating'],
-                    'DRtg': data['def_rating'],
-                    '3PAr': 0.4, # Default/Fallback if not in generic JSON
-                    'ORB%': 30.0 # Default
+        # Normalize keys to match Model expectation (eff_off, eff_def)
+        self.team_stats = {}
+        if ratings:
+            for team, stats in ratings.items():
+                self.team_stats[team] = {
+                    "eff_off": stats.get('off_rating'),
+                    "eff_def": stats.get('def_rating'),
+                    "tempo": stats.get('tempo')
                 }
-                
-                # Check for NaNs
-                if stats['Pace'] == 0: continue
-                
-                self.team_stats[team] = stats
-                
-                total_pace += stats['Pace']
-                total_ortg += stats['ORtg']
-                total_drtg += stats['DRtg']
-                count += 1
-                
-            if count > 0:
-                self.league_avg = {
-                    'Pace': total_pace / count,
-                    'ORtg': total_ortg / count,
-                    'DRtg': total_drtg / count
-                }
-            else:
-                self.league_avg = {'Pace': 68.0, 'ORtg': 105.0, 'DRtg': 105.0}
+        
+        # Fallback if empty (shouldn't happen with live internet)
+        if not self.team_stats:
+            print("[NCAAM] Warning: Using fallback MVP stats.")
+            self.team_stats = {
+             "Houston": {"eff_off": 118.5, "eff_def": 87.0, "tempo": 63.5},
+             # Add a few just in case
+            }
 
-            print(f"  [STATS] League Averages: Pace={self.league_avg['Pace']:.1f}, ORtg={self.league_avg['ORtg']:.1f}")
-
-            # Save to Cache
-            with open(self.CACHE_FILE, 'w') as f:
-                json.dump({'stats': self.team_stats, 'league_avg': self.league_avg}, f)
-            
-            print(f"  [MODEL] Loaded stats for {len(self.team_stats)} schools (Torvik).")
-            return self.team_stats
-
-        except Exception as e:
-            print(f"  [ERROR] Failed to fetch Torvik data: {e}")
-            return {}
-
-        except Exception as e:
-            print(f"  [ERROR] Failed to fetch data: {e}")
-            return {}
-
-    def predict(self, game_id: str, home_team: str, away_team: str) -> Dict[str, Any]:
+    def get_team_stats(self, team_name: str) -> Dict[str, float]:
         """
-        Predict Total Points using KenPom-style logic.
+        Retrieve stats with fuzzy matching for team names.
         """
-        # Fuzzy Match / Name Checks needed here usually.
-        # For prototype, we expect exact match or we skip.
-        home_stats = self.team_stats.get(home_team)
-        away_stats = self.team_stats.get(away_team)
-        
-        # Try simplified names (e.g. remove "State" -> "St")?
-        # For now, just skip if not found.
-        if not home_stats:
-            # print(f"  [SKIP] Missing stats for {home_team}")
-            return None
-        if not away_stats:
-            # print(f"  [SKIP] Missing stats for {away_team}")
-            return None
-
-        # Logic:
-        # Projected Pace = (Pace_H - Avg) + (Pace_A - Avg) + Avg
-        pace_proj = (home_stats['Pace'] - self.league_avg['Pace']) + \
-                    (away_stats['Pace'] - self.league_avg['Pace']) + \
-                    self.league_avg['Pace']
-        
-        # Projected Efficiency
-        # Home Off Eff = (Home_ORtg - Avg) + (Away_DRtg - Avg) + Avg
-        home_eff = (home_stats['ORtg'] - self.league_avg['ORtg']) + \
-                   (away_stats['DRtg'] - self.league_avg['DRtg']) + \
-                   self.league_avg['ORtg']
-                   
-        away_eff = (away_stats['ORtg'] - self.league_avg['ORtg']) + \
-                   (home_stats['DRtg'] - self.league_avg['DRtg']) + \
-                   self.league_avg['ORtg']
-                   
-        # Projected Points
-        # Points = (Eff / 100) * Pace
-        home_pts = (home_eff / 100) * pace_proj
-        away_pts = (away_eff / 100) * pace_proj
-        
-        total_proj = home_pts + away_pts
-        
-        return {
-            "game_id": game_id,
-            "home_team": home_team,
-            "away_team": away_team,
-            "fair_total": round(total_proj, 1),
-            "pace": round(pace_proj, 1),
-            "home_pts": round(home_pts, 1),
-            "away_pts": round(away_pts, 1),
-            "home_stats": home_stats, # Pass full stats for auditor
-            "away_stats": away_stats
-        }
-    
-    def find_edges(self):
         if not self.team_stats:
             self.fetch_data()
             
-        print("  [MODEL] Fetching Market Odds (Totals)...")
-        # Ensure we ask for 'totals' market
-        odds_data = self.odds_client.get_odds(self.sport_key, markets='totals')
-        if not odds_data:
-            print("  [MODEL] No odds data found.")
-            return []
-
-        edges = []
-        print(f"  [MODEL] Analyzing {len(odds_data)} games...")
+        # 1. Exact Match
+        if team_name in self.team_stats:
+            return self.team_stats[team_name]
+            
+        # 2. Fuzzy / Common variations
+        # Torvik uses full names "Connecticut", OddsAPI might use "UConn"
+        # OddsAPI: "North Carolina", Torvik: "North Carolina"
+        # OddsAPI: "Miami (FL)", Torvik: "Miami FL"
         
-        for game in odds_data:
-            home = game['home_team']
-            away = game['away_team']
+        normalized_input = team_name.lower().replace('.', '').replace(' st', ' state').replace(' (fl)', '').replace(' u', '')
+        
+        best_match = None
+        best_score = 0
+        
+        for k, v in self.team_stats.items():
+            norm_k = k.lower().replace('.', '').replace(' st', ' state')
             
-            # Try to map Odds API names to SR names
-            # Simple heuristic: "North Carolina" -> "North Carolina"
-            # "State" vs "St" is common mismatch.
-            pred = self.predict(game['id'], self._map_name(home), self._map_name(away))
-            if not pred: continue
+            # Substring match
+            if normalized_input in norm_k or norm_k in normalized_input:
+                 return v
+                 
+            # Specific Overrides
+            if "uconn" in normalized_input and "connecticut" in norm_k: return v
+            if "mississippi" in normalized_input and "ole miss" in norm_k: return v
             
-            fair = pred['fair_total']
-            
-            # Get Market Total
-            market_total, bet_type = self._get_market_total(game) # Helper to get line + over/under? 
-            # Usually Total is a single number (e.g. 145.5). We compare Fair vs Market.
-            
-            if market_total is None: continue
-            
-            diff = fair - market_total
-            
-            # Logic:
-            # If Fair (150) > Market (140) -> Edge on OVER. (Diff = +10)
-            # If Fair (130) < Market (140) -> Edge on UNDER. (Diff = -10)
-            
-            # Determine Actionability & Side
-            is_actionable = False
-            bet_on = "Pass"
-            edge_val = diff
-            
-            if diff > 3.0:
-                is_actionable = True
-                bet_on = "OVER"
-            elif diff < -3.0:
-                is_actionable = True
-                bet_on = "UNDER"
-                edge_val = abs(diff)
-            else:
-                # Lean
-                bet_on = "OVER" if diff > 0 else "UNDER"
-                edge_val = abs(diff)
+        # Default Logic
+        return {"eff_off": self.league_avg_eff, "eff_def": self.league_avg_eff, "tempo": self.league_avg_tempo}
 
-            edges.append({
-                "game": f"{away} @ {home}",
-                "bet_on": bet_on,
-                "market_line": market_total,
-                "fair_line": fair,
-                "edge": round(edge_val, 1),
-                "is_actionable": is_actionable,
-                "start_time": game.get('commence_time'),
-                "home_team": home, # Needed for auditor lookups
-                "away_team": away,
-                "home_stats": pred['home_stats'],
-                "away_stats": pred['away_stats']
-            })
+    def predict(self, game_id: str, home_team: str, away_team: str, market_total: float = 0) -> Dict[str, Any]:
+        """
+        KenPom Style Total Prediction:
+        Possessions = (Home Tempo * Away Tempo) / League Avg Tempo
+        Home Points = (Home Off Eff * Away Def Eff / League Avg Eff) * (Possessions / 100)
+        Away Points = (Away Off Eff * Home Def Eff / League Avg Eff) * (Possessions / 100)
+        """
+        if not self.team_stats:
+            self.fetch_data()
+
+        h = self.get_team_stats(home_team)
+        a = self.get_team_stats(away_team)
+        
+        poss = (h['tempo'] * a['tempo']) / self.league_avg_tempo
+        
+        h_pts = (h['eff_off'] * a['eff_def'] / self.league_avg_eff) * (poss / 100)
+        a_pts = (a['eff_off'] * h['eff_def'] / self.league_avg_eff) * (poss / 100)
+        
+        fair_total = h_pts + a_pts
+        
+        # Prob(Total > Market)
+        # NCAA Totals have std dev ~11.5
+        from scipy.stats import norm
+        std_dev = 11.5
+        win_prob_over = 1 - norm.cdf(market_total, loc=fair_total, scale=std_dev)
+        
+        return {
+            "game_id": game_id,
+            "fair_total": round(fair_total * 2) / 2,
+            "win_prob": win_prob_over,
+            "edge": win_prob_over - 0.524, # -110 break even
+            "model_version": "2024-01-14-ncaam-v1"
+        }
+
+    def find_edges(self):
+        """
+        Fetch live odds and compare with model predictions to find edges.
+        """
+        from src.models.odds_client import OddsAPIClient
+        client = OddsAPIClient()
+
+        # Load Conference Filter
+        import json
+        import os
+        try:
+            # Construct absolute path to ensure loading works
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            config_path = os.path.join(base_dir, 'data', 'ncaam_conferences.json')
+            
+            with open(config_path, 'r') as f:
+                conf_data = json.load(f)
+                target_teams = set()
+                for conf, teams in conf_data.items():
+                    target_teams.update([t.lower() for t in teams])
+            print(f"[DEBUG] Loaded {len(target_teams)} target teams from {config_path}")
+        except Exception as e:
+            print(f"[NCAAM] Error loading conference filter: {e}")
+            target_teams = None
+            
+        # Helper for fuzzy matching against whitelist
+        def is_target_team(team_name):
+            if not target_teams: return True # Fail open if no config
+            t_norm = team_name.lower()
+            if t_norm in target_teams: return True
+            # Partial match check
+            for target in target_teams: 
+                # STRICTER MATCHING:
+                if target in t_norm:
+                     return True
+            return False
+        
+        # Get live odds for NCAAB
+        odds = client.get_odds("basketball_ncaab", regions="us", markets="totals")
+        
+        edges = []
+        for game in odds:
+            game_id = game.get('id')
+            home_team = game.get('home_team')
+            away_team = game.get('away_team')
+            
+            if target_teams:
+                if not (is_target_team(home_team) or is_target_team(away_team)):
+                    # print(f"[NCAAM] Skipping non-target matchup: {away} @ {home}") 
+                    continue
+                else:
+                    # print(f"[NCAAM] Processing target matchup: {away} @ {home}")
+                    pass
+            
+            game_id = game.get('id')
+            
+            # Find Totals Market
+            # OddsAPI structure: bookmakers -> markets -> outcomes
+            # We want consensus or specific book? Let's take 'DraftKings' or first available.
+            
+            best_market = None
+            bookmakers = game.get('bookmakers', [])
+            
+            # Target Books precedence
+            target_books = ['draftkings', 'fanduel', 'betmgm']
+            
+            for book in bookmakers:
+                if book['key'] in target_books:
+                    for m in book['markets']:
+                        if m['key'] == 'totals':
+                            best_market = m
+                            break
+                if best_market: break
                 
+            if not best_market:
+                # Fallback to any book
+                if bookmakers and bookmakers[0].get('markets'):
+                     for m in bookmakers[0]['markets']:
+                        if m['key'] == 'totals':
+                            best_market = m
+                            break
+                            
+            if not best_market or not best_market.get('outcomes'):
+                continue
+                
+            # Parse Market Line
+            # Outcomes: name=Over, point=140.5, price=-110
+            over = next((o for o in best_market['outcomes'] if o['name'] == 'Over'), None)
+            if not over: continue
+            
+            market_total = over.get('point')
+            if not market_total: continue
+            
+            # Run Prediction
+            pred = self.predict(game_id, home_team, away_team, market_total)
+            
+            # Line Difference (Point Edge)
+            line_diff = pred['fair_total'] - market_total
+            
+            # Probabilities for risk management (EV/Kelly)
+            prob_val = round(pred['win_prob'], 3)
+            
+            # Threshold for actionability (e.g. 2 points)
+            if line_diff >= 1.0: 
+                edges.append({
+                    "game_id": game_id,
+                    "sport": "NCAAM",
+                    "start_time": game.get('commence_time'), 
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "market": "Total",
+                    "bet_on": "OVER",
+                    "market_line": market_total,
+                    "fair_line": pred['fair_total'],
+                    "win_prob": prob_val,
+                    "edge": round(line_diff, 1), # Point Edge
+                    "odds": over.get('price'),
+                    "book": bookmakers[0]['title'] 
+                })
+            elif line_diff <= -1.0: 
+                prob_under = 1 - pred['win_prob']
+                edges.append({
+                    "game_id": game_id,
+                    "sport": "NCAAM",
+                    "start_time": game.get('commence_time'),
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "market": "Total",
+                    "bet_on": "UNDER",
+                    "market_line": market_total,
+                    "fair_line": pred['fair_total'],
+                    "win_prob": round(prob_under, 3),
+                    "edge": round(abs(line_diff), 1), # Point Edge (positive value)
+                    "odds": over.get('price'),
+                    "book": bookmakers[0]['title']
+                })
+                    
         return edges
 
-    def _map_name(self, name):
-        """
-        Map Odds API name to SR name using mapping file then heuristic.
-        """
-        # 1. Direct Map
-        if name in self.team_mapping:
-            return self.team_mapping[name]
-            
-        if not self.team_stats:
-            return name
-            
-        # 2. Heuristic: Substring Match
-        # Sort keys by length desc to prevent "Iowa" matching "Iowa State" first
-        sorted_keys = sorted(self.team_stats.keys(), key=len, reverse=True)
-        
-        for key in sorted_keys:
-            if key in name:
-                return key
-                
-        # 3. Log Failure
-        # print(f"  [WARN] Could not map team: {name}")
-        return name
-
-    def _get_market_total(self, game):
-        # Average the lines or take DraftKings
-        for book in game.get('bookmakers', []):
-            if book['key'] in ['draftkings', 'fanduel', 'mgm', 'actionnetwork']:
-                for mkt in book.get('markets', []):
-                    if mkt['key'] == 'totals':
-                        # Usually has outcomes "Over" and "Under" with same 'point'
-                        # Return 'point'
-                        if len(mkt['outcomes']) > 0:
-                            return mkt['outcomes'][0]['point'], "Total"
-        return None, None
-
-    def evaluate(self, predictions):
+    def evaluate(self, predictions: List[Dict[str, Any]]):
         pass
-
-if __name__ == "__main__":
-    model = NCAAMModel()
-    edges = model.find_edges()
-    print(f"\nFound {len(edges)} edges:")
-    for e in edges:
-        print(f"{e['game']} | Bet {e['bet_on']} {e['market_line']} (Fair: {e['fair_line']}) | Edge: {e['edge']}")

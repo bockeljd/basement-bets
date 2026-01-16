@@ -84,6 +84,77 @@ class DraftKingsTransactionParser(TransactionParser):
         # ... (truncated for brevity, user file is HTML now)
         return []
 
+class DraftKingsManualFinancialsParser(TransactionParser):
+    def parse(self, filepath: str) -> List[Dict]:
+        transactions = []
+        with open(filepath, 'r') as f:
+            lines = [l.strip() for l in f if l.strip()]
+        
+        i = 0
+        while i + 2 < len(lines):
+            try:
+                typ = lines[i]
+                date_str = lines[i+1] # "9:26pm 10/05/24"
+                amt_str = lines[i+2]
+                
+                # Parse date
+                dt = datetime.strptime(date_str, "%I:%M%p %m/%d/%y")
+                
+                # Parse Amount
+                clean_amt = amt_str.replace('$','').replace(',','').replace('+','')
+                amt = float(clean_amt)
+                
+                txn = {
+                    "provider": "DraftKings",
+                    "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "type": typ,
+                    "description": "Manual Import",
+                    "id": f"DK-MANUAL-{dt.timestamp()}",
+                    "amount": amt,
+                    "balance": 0.0, # Unknown
+                    "raw_data": f"{typ}|{date_str}|{amt_str}"
+                }
+                transactions.append(txn)
+                i += 3
+            except Exception as e:
+                print(f"Error parsing DK Manual chunk starting line {i}: {e}")
+                i += 1
+        return transactions
+
+class LegacyFinancialsParser(TransactionParser):
+    def parse(self, filepath: str) -> List[Dict]:
+        transactions = []
+        with open(filepath, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    # Person,Date,Agency,Method,Amount
+                    raw_date = row['Date'] # "13-Feb-23"
+                    dt = datetime.strptime(raw_date, "%d-%b-%y")
+                    
+                    amt = float(row['Amount'])
+                    
+                    # Create unique ID
+                    # Since person matters, include it in ID to avoid collisions if Joel/Jordan have same txn
+                    clean_desc = f"{row['Method']} - {row['Person']}"
+                    txn_id = f"LEGACY-{dt.strftime('%Y%m%d')}-{abs(amt)}-{row['Person']}-{row['Agency']}"
+                    
+                    txn = {
+                        "provider": row['Agency'],
+                        "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": row['Method'], # Deposit, Withdrawal
+                        "description": clean_desc,
+                        "id": txn_id,
+                        "amount": amt,
+                        "balance": 0.0,
+                        "raw_data": str(row)
+                    }
+                    transactions.append(txn)
+                except Exception as e:
+                    print(f"Error parsing legacy row: {e}")
+                    
+        return transactions
+
 class FanDuelTransactionParser(TransactionParser):
     def parse(self, filepath: str) -> List[Dict]:
         transactions = []
@@ -91,6 +162,10 @@ class FanDuelTransactionParser(TransactionParser):
             reader = csv.DictReader(f)
             for row in reader:
                 try:
+                    # Skip repeated headers or noise
+                    if row.get('Date') == 'Date' or not row.get('Date'): 
+                        continue
+
                     # Type,Details,Product,Date,Before,Change,Balance
                     # Date: "Jan 12, 2026, 12:17am ET"
                     raw_date = row['Date']

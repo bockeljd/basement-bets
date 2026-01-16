@@ -98,6 +98,29 @@ def process_sport(sport, dates_or_weeks):
 
     print(f"Saving {len(filtered_df)} rows to {db_path} (was {len(df_all)})")
     filtered_df.to_csv(db_path, index=False)
+    
+    # NEW: Ingest into odds_snapshots table
+    try:
+        from src.services.odds_adapter import OddsAdapter
+        adapter = OddsAdapter()
+        # Convert DataFrame to list of dicts
+        raw_data = filtered_df.to_dict('records')
+        
+        # Map to canonical league
+        league_map = {
+            'nfl': 'NFL',
+            'ncaaf': 'NCAAF',
+            'nba': 'NBA',
+            'ncaab': 'NCAAM',
+            'mlb': 'MLB',
+            'soccer': 'SOCCER'
+        }
+        canonical_league = league_map.get(sport, sport.upper())
+        
+        count = adapter.normalize_and_store(raw_data, league=canonical_league, provider="action_network")
+        print(f"Ingested {count} snapshots into database for {canonical_league}.")
+    except Exception as e:
+        print(f"Database Ingestion Error: {e}")
 
 
 def main():

@@ -30,6 +30,26 @@ class BaseModel(ABC):
         """
         pass
 
+    def apply_feature_adjustments(self, base_prob: float, features: List[Dict[str, Any]]) -> float:
+        """
+        Adjusts a baseline probability based on qualitative FeatureEvents.
+        Features have: direction (positive/negative), magnitude_hint (low/medium/high).
+        """
+        adj = 0.0
+        magnitude_map = {
+            "low": 0.02,
+            "medium": 0.05,
+            "high": 0.10
+        }
+        
+        for f in features:
+            mag = magnitude_map.get(f.get('magnitude_hint', 'low'), 0.02)
+            direction = 1 if f.get('direction') == 'positive' else -1 if f.get('direction') == 'negative' else 0
+            adj += (direction * mag)
+            
+        final_prob = max(0.01, min(0.99, base_prob + adj))
+        return final_prob
+
     @abstractmethod
     def evaluate(self, predictions: List[Dict[str, Any]]):
         """

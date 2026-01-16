@@ -30,6 +30,8 @@ def get_todays_games(sport, dates_or_weeks, headers=None):
             data = response.json()
             
             games_list = data.get('games', [])
+            # if games_list:
+            #     print(f"[DEBUG] Raw Game Object (First): {games_list[0]}")
             for game in games_list:
                 home_team_data = next((box for box in game.get('teams', []) if box['id'] == game['home_team_id']), {})
                 away_team_data = next((box for box in game.get('teams', []) if box['id'] == game['away_team_id']), {})
@@ -89,11 +91,55 @@ def get_todays_games(sport, dates_or_weeks, headers=None):
                     if outcomes_spread:
                         bookmaker['markets'].append({"key": "spreads", "outcomes": outcomes_spread})
 
+                    # Totals
+                    outcomes_total = []
+                    # Check for total and over/under prices (default -110 if missing but total exists)
+                    if valid_odd.get('total') is not None:
+                        val_total = valid_odd.get('total')
+                        
+                        # Over
+                        outcomes_total.append({
+                            "name": "Over",
+                            "point": val_total,
+                            "price": valid_odd.get('over', -110)
+                        })
+                        # Under
+                        outcomes_total.append({
+                             "name": "Under",
+                             "point": val_total,
+                             "price": valid_odd.get('under', -110)
+                        })
+                        
+                    if outcomes_total:
+                        bookmaker['markets'].append({"key": "totals", "outcomes": outcomes_total})
+
                     event['bookmakers'].append(bookmaker)
                 
+                # EXTENSION: Extract Scores if available
+                home_score = home_team_data.get('score')
+                away_score = away_team_data.get('score')
+                
+                # Check Boxscore if team data missing score
+                if home_score is None:
+                    box = game.get('boxscore', {})
+                    home_score = box.get('total_home_points')
+                    away_score = box.get('total_away_points')
+
+                if home_score is not None and away_score is not None:
+                    event['scores'] = [
+                        {'name': home_team_name, 'score': str(home_score)},
+                        {'name': away_team_name, 'score': str(away_score)}
+                    ]
+
+                # EXTENSION: Map Status
+                # Action Network status: 'scheduled', 'inprogress', 'complete', 'closed'
+                raw_status = game.get('status', 'scheduled')
+                event['status'] = raw_status # Keep raw for reference
+                if raw_status in ['complete', 'closed', 'final']:
+                    event['completed'] = True
+                    
                 # EXTENSION: Add flat metrics for CSV script
                 event['game_id'] = str(game.get('id'))
-                event['status'] = game.get('status', 'scheduled')
                 if valid_odd:
                     event['home_money_line'] = valid_odd.get('ml_home')
                     event['away_money_line'] = valid_odd.get('ml_away')
@@ -121,7 +167,7 @@ class ActionNetworkClient:
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36'
     }
 
-    def fetch_odds(self, sport_key: str) -> list:
+    def fetch_odds(self, sport_key: str, dates: list = None) -> list:
         """
         Fetches odds for a given sport from Action Network.
         Returns a list of dictionaries in a unified format similar to The Odds API.
@@ -141,11 +187,13 @@ class ActionNetworkClient:
         
         an_sport = sport_map.get(sport_key, sport_key)
         
-        # Get today's date string
-        today = datetime.date.today().strftime('%Y%m%d')
+        if not dates:
+            # Get today's date string
+            today = datetime.date.today().strftime('%Y%m%d')
+            dates = [today]
         
         # Call standalone function
-        return get_todays_games(an_sport, [today], headers=self.HEADERS)
+        return get_todays_games(an_sport, dates, headers=self.HEADERS)
 
 def filter_data_on_change(df_combined, dimension_cols, metric_cols):
     """

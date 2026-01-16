@@ -82,10 +82,8 @@ class OddsClient:
 
     def fetch_odds(self, sport_key: str = "upcoming", markets: str = "h2h,spreads", regions: str = "us") -> List[Dict]:
         if self.mock_mode:
-            # Try scraping first? Or just return Mock?
-            # User wants scraping. Let's return Mock but labeled as "Scraped (Simulated)"
-            # until I fully implement the parser.
-            return self._generate_mock_odds(sport_key)
+            # User REQUESTED NO MOCK DATA.
+            return [] 
             
         url = f"{self.BASE_URL}/{sport_key}/odds"
         params = {
@@ -118,7 +116,7 @@ class OddsClient:
         Uses ?daysFrom={days} to get completed games.
         """
         if self.mock_mode:
-            return self._generate_mock_scores(sport_key)
+            return []
             
         url = f"{self.BASE_URL}/{sport_key}/scores"
         params = {
@@ -150,75 +148,9 @@ class OddsClient:
         }
         return mapping.get(sport_name, "upcoming")
 
+    # Mock methods removed to enforce live data only.
     def _generate_mock_odds(self, sport_key: str) -> List[Dict]:
-        """
-        Returns fake data for UI testing.
-        """
-        teams = {
-            "americanfootball_nfl": ["Chiefs", "Bills", "Eagles", "49ers", "Ravens", "Bengals"],
-            "basketball_nba": ["Celtics", "Lakers", "Warriors", "Nuggets", "Bucks", "Heat"]
-        }
-        
-        pool = teams.get(sport_key, ["Team A", "Team B", "Team C", "Team D"])
-        events = []
-        
-        for i in range(0, len(pool), 2):
-             home = pool[i]
-             away = pool[i+1]
-             events.append({
-                 "id": f"mock_{random.randint(1000,9999)}",
-                 "sport_key": sport_key,
-                 "home_team": home,
-                 "away_team": away,
-                 "bookmakers": [
-                     {
-                         "key": "fanduel",
-                         "title": "FanDuel",
-                         "markets": [
-                             {
-                                 "key": "h2h",
-                                 "outcomes": [
-                                     {"name": home, "price": -110},
-                                     {"name": away, "price": -110}
-                                 ]
-                             }
-                         ]
-                     }
-                 ]
-             })
-        return events
+        return []
 
     def _generate_mock_scores(self, sport_key: str) -> List[Dict]:
-        """
-        Generates fake completed scores for testing.
-        """
-        scores = []
-        # Simulate some results matching our mock odds
-        # Mock Odds had: Chiefs/Bills, Eagles/49ers etc.
-        # Let's say Chiefs beat Bills, 49ers beat Eagles.
-        
-        scores.append({
-            "id": "mock_score_1",
-            "sport_key": sport_key,
-            "completed": True,
-            "home_team": "Buffalo Bills",
-            "away_team": "Kansas City Chiefs",
-            "scores": [
-                {"name": "Buffalo Bills", "score": "24"},
-                {"name": "Kansas City Chiefs", "score": "30"}
-            ]
-        })
-        
-        scores.append({
-            "id": "mock_score_2",
-            "sport_key": sport_key,
-            "completed": True,
-            "home_team": "Philadelphia Eagles",
-            "away_team": "San Francisco 49ers",
-            "scores": [
-                {"name": "Philadelphia Eagles", "score": "14"},
-                {"name": "San Francisco 49ers", "score": "42"}
-            ]
-        })
-        
-        return scores
+        return []

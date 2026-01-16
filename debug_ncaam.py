@@ -1,43 +1,49 @@
 import sys
 import os
-import json
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
-from models.ncaam_model import NCAAMModel
+# Ensure src is in path
+sys.path.append(os.path.abspath("."))
 
-def test_mapping():
-    print("Initializing NCAAM Model (Torvik)...")
+from src.models.ncaam_model import NCAAMModel
+from src.services.grading_service import GradingService
+
+def test_ncaam_edges():
+    print("\n--- Testing NCAAMModel.find_edges ---")
     model = NCAAMModel()
+    try:
+        edges = model.find_edges()
+        print(f"Found {len(edges)} edges.")
+        for e in edges[:3]:
+            print(f"  {e['home_team']} vs {e['away_team']}: {e['bet_on']} {e['market_line']} (Edge: {e['edge']:.1%})")
+    except Exception as e:
+        print(f"Error in find_edges: {e}")
+        import traceback
+        traceback.print_exc()
+
+def test_grading_logic():
+    print("\n--- Testing GradingService ---")
+    service = GradingService()
     
-    # Load Data (will cache)
-    stats = model.fetch_data()
-    print(f"Loaded {len(stats)} teams.")
-    
-    # Test Common Mismatches
-    test_cases = [
-        "UConn", "Connecticut", 
-        "Ole Miss", "Mississippi",
-        "NC State", "North Carolina St.", "N.C. State",
-        "Miami (FL)", "Miami FL", "Miami",
-        "Iowa State", "Iowa St.",
-        "Penn State", "Penn St.",
-        "St. John's", "St Johns",
-        "Saint Mary's", "St. Mary's (CA)",
-        "VCU", "Va Commonwealth"
-    ]
-    
-    print("\n--- Testing Mappings ---")
-    failures = []
-    for name in test_cases:
-        mapped = model._map_name(name)
-        if mapped in stats:
-            print(f"✅ '{name}' -> '{mapped}'")
-        else:
-            print(f"❌ '{name}' -> '{mapped}' (Not found in stats)")
-            failures.append(name)
-            
-    # Also Check League Averages
-    print(f"\nLeague Avg: {model.league_avg}")
+    # We can try to run grade_predictions directly if DB has pending bets
+    # Or mock one.
+    try:
+        res = service.grade_predictions()
+        print(f"Grade Result: {res}")
+    except Exception as e:
+        print(f"Error in grading: {e}")
+        import traceback
+        traceback.print_exc()
+
+from src.database import get_db_connection, _exec
+
+def clear_cache():
+    print("Clearing API Cache...")
+    with get_db_connection() as conn:
+        _exec(conn, "DELETE FROM api_cache")
+        conn.commit()
+    print("Cache Cleared.")
 
 if __name__ == "__main__":
-    test_mapping()
+    clear_cache()
+    test_ncaam_edges()
+    test_grading_logic()

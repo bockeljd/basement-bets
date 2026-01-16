@@ -31,9 +31,9 @@ class ResearchAuditor:
         
         # Default
         return {
-            "audit_class": "high",
-            "audit_score": 1.0, 
-            "audit_reason": "Standard Edge"
+            "audit_class": "medium",
+            "audit_score": 0.5, 
+            "audit_reason": "Standard Edge (Baseline)"
         }
 
     def _audit_nfl(self, deviation: float) -> dict:
@@ -51,8 +51,8 @@ class ResearchAuditor:
                 "audit_reason": f"Aggressive Edge (>3.5pts). Crosses key number variance."
             }
         return {
-            "audit_class": "high",
-            "audit_score": 0.9,
+            "audit_class": "medium",
+            "audit_score": 0.7,
             "audit_reason": "Solid statistical edge within normal variance."
         }
 
@@ -86,8 +86,8 @@ class ResearchAuditor:
                  reason_extras.append("High 3P Variance")
 
         base_res = {
-            "audit_class": "high",
-            "audit_score": 0.9,
+            "audit_class": "medium",
+            "audit_score": 0.6,
             "audit_reason": "Valid efficiency mismatch."
         }
         
@@ -129,7 +129,7 @@ class ResearchAuditor:
                 "audit_reason": f"High EV (>20%). Market may know something about lineups."
             }
         return {
-            "audit_class": "high",
-            "audit_score": 0.9,
-            "audit_reason": "Strong value play backed by xG metrics."
+            "audit_class": "medium",
+            "audit_score": 0.65,
+            "audit_reason": "Value play backed by xG metrics."
         }

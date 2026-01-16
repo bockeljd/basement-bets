@@ -107,15 +107,17 @@ class DraftKingsTextParser:
             wager = 0.0
             profit = 0.0
             
-            wager_match = re.search(r'Wager: \$([\d\.]+)', wager_line)
+            wager_match = re.search(r'Wager:[\s\xa0]*\$([\d\.]+)', wager_line)
             if wager_match:
                 wager = float(wager_match.group(1))
             
-            paid_match = re.search(r'Paid: \$([\d\.]+)', wager_line)
+            # Using \s* to handle potential non-breaking spaces or lack of space
+            paid_match = re.search(r'Paid:[\s\xa0]*\$([\d\.]+)', wager_line)
             paid = float(paid_match.group(1)) if paid_match else 0.0
             
             # Calculate Profit
-            if status == "Won" or status == "Cashed Out":
+            s_up = status.upper()
+            if s_up == "WON" or s_up == "CASHED OUT":
                 profit = paid - wager
             else:
                 profit = -wager

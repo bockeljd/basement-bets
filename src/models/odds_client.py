@@ -199,15 +199,24 @@ class OddsAPIClient:
         # 2. Fallback: Action Network (API)
         print(f"  [FALLBACK] Odds API failed. Engaging Action Network (API) for scores ({sport_key})...")
         try:
-            cache_key = f"action:scores:{sport_key}:{datetime.date.today()}"
+            cache_key = f"action:scores:{sport_key}:{datetime.date.today()}:{days_from}"
             cached_data = self._get_from_cache(cache_key)
             if cached_data:
+                print("  [CACHE HIT] Using cached Action Network scores.")
                 return cached_data
 
             from src.action_network import ActionNetworkClient
             scraper = ActionNetworkClient()
+            
+            # Generate list of dates for the last N days
+            date_list = []
+            today = datetime.date.today()
+            for i in range(days_from + 1): 
+                d = today - datetime.timedelta(days=i)
+                date_list.append(d.strftime('%Y%m%d'))
+            
             # fetch_odds returns full event objects which include scores/status
-            fallback_data = scraper.fetch_odds(sport_key) 
+            fallback_data = scraper.fetch_odds(sport_key, date_list) 
             
             if fallback_data:
                 self._save_to_cache(cache_key, fallback_data)
