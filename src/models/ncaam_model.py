@@ -21,6 +21,14 @@ class NCAAMModel(BaseModel):
         self.market_allowlist = {} # Map of market -> {status, limits}
         self.model_config = {} # Map of version -> {weights, sigma}
         
+        # Initialize ESPN client for injury data
+        try:
+            from src.services.espn_ncaa_client import ESPNNCAAClient
+            self.espn_client = ESPNNCAAClient()
+        except Exception as e:
+            print(f"[NCAAM] Warning: ESPN client not available: {e}")
+            self.espn_client = None
+        
     # [Rest of init methods...]
     
     def fetch_data(self):
