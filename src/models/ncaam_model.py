@@ -582,7 +582,8 @@ class NCAAMModel(BaseModel):
                     "market_line": target_spread['point'],
                     "model_line": round(model_spread, 1),
                     "fair_line": round(model_spread, 1),
-                    "edge": round(edge_prob, 3),
+                    "edge": round(abs(model_spread - target_spread['point']), 1),
+                    "edge_prob": round(edge_prob, 3),
                     "ev": round(ev_pct, 4),
                     "book": target_spread['book'],
                     "is_actionable": is_live
@@ -645,11 +646,12 @@ class NCAAMModel(BaseModel):
                         "market_line": best_total_line['point'],
                         "model_line": round(snapshot.prediction.mu_final_total, 1),
                         "fair_line": round(snapshot.prediction.mu_final_total, 1),
-                        "edge": round(edge_prob_total, 3),
+                        "edge": round(abs(snapshot.prediction.mu_final_total - best_total_line['point']), 1),
+                        "edge_prob": round(edge_prob_total, 3),
                         "ev": round(ev_pct_total, 4),
                         "book": best_total_line['book'],
                         "is_actionable": is_live_total
-                })
+                    })
 
         print(f"[NCAAM] Found {len(edges)} potential edges.")
         return edges
