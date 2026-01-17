@@ -520,23 +520,43 @@ class NCAAMModel(BaseModel):
             snapshot = self.predict_v1(home_team, away_team, market_input, signals=game_signals)
             if not snapshot: continue
             
-            # Apply injury adjustments from ESPN
-            injury_adj = {'spread_adj': 0.0, 'total_adj': 0.0, 'injury_summary': 'No data'}
+            # Apply ensemble adjustments (injuries + season stats)
+            ensemble_adj = {'spread_adj': 0.0, 'total_adj': 0.0, 'summary': 'Standard'}
+            
+            # 1. Injury adjustments (13% weight)
             if self.espn_client:
                 try:
                     from src.models.injury_impact import get_injury_adjustment
                     injury_adj = get_injury_adjustment(self.espn_client, home_team, away_team)
                     
-                    # Adjust model predictions
                     if injury_adj['spread_adj'] != 0.0:
                         snapshot.prediction.mu_final_margin += injury_adj['spread_adj']
-                        print(f"[INJURY] {home_team} vs {away_team}: Spread adj {injury_adj['spread_adj']:+.1f} pts ({injury_adj['injury_summary']})")
+                        ensemble_adj['spread_adj'] += injury_adj['spread_adj']
+                        print(f"[INJURY] {home_team} vs {away_team}: Spread adj {injury_adj['spread_adj']:+.1f} pts")
                     
                     if injury_adj['total_adj'] != 0.0:
                         snapshot.prediction.mu_final_total += injury_adj['total_adj']
-                        print(f"[INJURY] {home_team} vs {away_team}: Total adj {injury_adj['total_adj']:+.1f} pts")
+                        ensemble_adj['total_adj'] += injury_adj['total_adj']
                 except Exception as e:
-                    print(f"[INJURY] Error applying injury adjustment: {e}")
+                    print(f"[INJURY] Error: {e}")
+            
+            # 2. Season stats adjustments (10% weight)
+            try:
+                from src.services.season_stats_client import SeasonStatsClient
+                season_client = SeasonStatsClient()
+                season_adj = season_client.calculate_season_adjustment(home_team, away_team)
+                
+                if season_adj['spread_adj'] != 0.0:
+                    snapshot.prediction.mu_final_margin += season_adj['spread_adj']
+                    ensemble_adj['spread_adj'] += season_adj['spread_adj']
+                    print(f"[SEASON] {home_team} vs {away_team}: {season_adj['summary']}, Spread adj {season_adj['spread_adj']:+.1f} pts")
+                
+                if season_adj['total_adj'] != 0.0:
+                    snapshot.prediction.mu_final_total += season_adj['total_adj']
+                    ensemble_adj['total_adj'] += season_adj['total_adj']
+            except Exception as e:
+                print(f"[SEASON] Error: {e}")
+
 
             
             # Now Evaluate Specific Lines against Model (Finding Specific Edges)
