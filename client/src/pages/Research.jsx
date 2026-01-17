@@ -55,6 +55,21 @@ const Research = () => {
         }
     };
 
+    const refreshData = async () => {
+        try {
+            setLoading(true);
+            const res = await api.post('/api/jobs/ingest_torvik');
+            const result = res.data;
+            alert(`Data Refresh Complete! ${result.teams_count || 0} teams updated.`);
+            await fetchEdges();
+        } catch (err) {
+            console.error(err);
+            alert('Data refresh failed: ' + (err.response?.data?.message || err.message));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleSort = (key) => {
         let direction = 'desc';
         if (sortConfig.key === key && sortConfig.direction === 'desc') {
@@ -143,12 +158,22 @@ const Research = () => {
                 <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
                     Bet Research
                 </h1>
-                <button
-                    onClick={fetchEdges}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm transition-all"
-                >
-                    {loading ? 'Running Models...' : 'Refresh Models'}
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={refreshData}
+                        disabled={loading}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                        Refresh Data
+                    </button>
+                    <button
+                        onClick={fetchEdges}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm transition-all"
+                    >
+                        {loading ? 'Running Models...' : 'Refresh Models'}
+                    </button>
+                </div>
             </div>
 
             {/* Tabs */}
