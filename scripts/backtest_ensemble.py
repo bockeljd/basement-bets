@@ -14,13 +14,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.database import get_db_connection, _exec
 
 def backtest_yesterday():
-    """Backtest ensemble model on yesterday's completed games"""
+    """Backtest ensemble model on last 10 days of completed games"""
     
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    print(f"[BACKTEST] Testing ensemble model on games from {yesterday}")
+    ten_days_ago = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+    print(f"[BACKTEST] Testing ensemble model on games from last 10 days ({ten_days_ago} to today)")
     
     with get_db_connection() as conn:
-        # Fetch yesterday's completed games with results
+        # Fetch last 10 days of completed games with results
         query = """
         SELECT 
             id, game_id, sport, matchup, home_team, away_team,
@@ -28,12 +28,12 @@ def backtest_yesterday():
             home_score, away_score, result, created_at
         FROM model_predictions
         WHERE sport = 'NCAAM'
-          AND DATE(created_at) = %s
+          AND created_at >= %s
           AND result IS NOT NULL
           AND result != 'Pending'
         ORDER BY created_at DESC
         """
-        cursor = _exec(conn, query, (yesterday,))
+        cursor = _exec(conn, query, (ten_days_ago,))
         games = cursor.fetchall()
     
     if not games:
