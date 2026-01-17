@@ -520,6 +520,25 @@ class NCAAMModel(BaseModel):
             snapshot = self.predict_v1(home_team, away_team, market_input, signals=game_signals)
             if not snapshot: continue
             
+            # Apply injury adjustments from ESPN
+            injury_adj = {'spread_adj': 0.0, 'total_adj': 0.0, 'injury_summary': 'No data'}
+            if self.espn_client:
+                try:
+                    from src.models.injury_impact import get_injury_adjustment
+                    injury_adj = get_injury_adjustment(self.espn_client, home_team, away_team)
+                    
+                    # Adjust model predictions
+                    if injury_adj['spread_adj'] != 0.0:
+                        snapshot.prediction.mu_final_margin += injury_adj['spread_adj']
+                        print(f"[INJURY] {home_team} vs {away_team}: Spread adj {injury_adj['spread_adj']:+.1f} pts ({injury_adj['injury_summary']})")
+                    
+                    if injury_adj['total_adj'] != 0.0:
+                        snapshot.prediction.mu_final_total += injury_adj['total_adj']
+                        print(f"[INJURY] {home_team} vs {away_team}: Total adj {injury_adj['total_adj']:+.1f} pts")
+                except Exception as e:
+                    print(f"[INJURY] Error applying injury adjustment: {e}")
+
+            
             # Now Evaluate Specific Lines against Model (Finding Specific Edges)
             
             # --- Spread Evaluation ---
