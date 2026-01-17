@@ -1,16 +1,23 @@
 import axios from 'axios';
 import { config } from '../config';
 
-const password = localStorage.getItem('basement_password');
-
 const api = axios.create({
-    baseURL: config.API_URL,
-    headers: {
-        'X-BASEMENT-KEY': password
-    }
+    baseURL: config.API_URL
 });
 
-// Interceptor removed. App.jsx handles 403.
+// Request Interceptor: Inject Token Dynamically
+api.interceptors.request.use(
+    (config) => {
+        const password = localStorage.getItem('basement_password');
+        if (password) {
+            config.headers['X-BASEMENT-KEY'] = password;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+// Response Interceptor
 api.interceptors.response.use(
     response => response,
     error => Promise.reject(error)
