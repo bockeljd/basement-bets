@@ -17,6 +17,10 @@
         {
             "path": "/api/jobs/policy_refresh",
             "schedule": "0 8 * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_torvik",
+            "schedule": "0 6 * * *"
         }
     ],
     "buildCommand": "cd client && npm install && npm rebuild && npm run build"

@@ -528,6 +528,34 @@ async def trigger_policy_refresh(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/jobs/ingest_torvik")
+async def trigger_torvik_ingestion(request: Request):
+    """
+    Cron Job / Manual Trigger: Ingests latest NCAAM team metrics from BartTorvik.
+    Protected by CRON_SECRET or API Key.
+    """
+    try:
+        from src.database import init_bt_team_metrics_db, upsert_team_metrics
+        from src.services.barttorvik import BartTorvikClient
+        
+        # Initialize tables if needed
+        init_bt_team_metrics_db()
+        
+        # Fetch and upsert
+        client = BartTorvikClient()
+        ratings = client.get_efficiency_ratings(year=2026)
+        
+        if ratings:
+            return {
+                "status": "success", 
+                "message": f"Ingested {len(ratings)} teams",
+                "teams_count": len(ratings)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to fetch ratings from BartTorvik")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/reports/model-health")
 async def get_model_health_report(request: Request):
     """
