@@ -191,62 +191,7 @@ const Research = () => {
                     History
                 </button>
             </div>
-            {/* Filters Section (Applied to both tabs) */}
-            <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700 mb-8 flex flex-wrap gap-10 items-end shadow-inner">
-                <div className="flex-1 min-w-[250px]">
-                    <div className="flex justify-between items-center mb-3">
-                        <div className="flex items-center text-xs font-black text-slate-400 uppercase tracking-widest">
-                            <ArrowUpDown size={12} className="mr-2 text-blue-400" />
-                            Edge Threshold
-                        </div>
-                        <span className="text-sm font-black text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded shadow-sm border border-blue-400/20">
-                            {edgeThreshold} pts / {(edgeThreshold * 2.5).toFixed(0)}% EV
-                        </span>
-                    </div>
-                    <input
-                        type="range"
-                        min="0"
-                        max="10"
-                        step="0.5"
-                        value={edgeThreshold}
-                        onChange={(e) => setEdgeThreshold(parseFloat(e.target.value))}
-                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
-                    />
-                    <div className="flex justify-between mt-2 text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
-                        <span>High Volume</span>
-                        <span>High Value</span>
-                    </div>
-                </div>
 
-                <div className="flex-1 min-w-[250px]">
-                    <div className="flex justify-between items-center mb-3">
-                        <div className="flex items-center text-xs font-black text-slate-400 uppercase tracking-widest">
-                            <Shield size={12} className="mr-2 text-purple-400" />
-                            Model Confidence
-                        </div>
-                        <span className="text-sm font-black text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded shadow-sm border border-purple-400/20">
-                            {confidenceThreshold}%+
-                        </span>
-                    </div>
-                    <input
-                        type="range"
-                        min="50"
-                        max="95"
-                        step="5"
-                        value={confidenceThreshold}
-                        onChange={(e) => setConfidenceThreshold(parseInt(e.target.value))}
-                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500 hover:accent-purple-400 transition-all"
-                    />
-                    <div className="flex justify-between mt-2 text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
-                        <span>Aggressive</span>
-                        <span>Conservative</span>
-                    </div>
-                </div>
-
-                <div className="text-[11px] text-slate-500 max-w-[220px] leading-relaxed font-medium bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 italic">
-                    "Use these sliders to backtest. Increasing thresholds improves win rates but narrows the betting pool."
-                </div>
-            </div>
 
             {activeTab === 'live' && (
                 <>
@@ -323,19 +268,19 @@ const Research = () => {
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('start_time')}>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('start_time')}>
                                                 <div className="flex items-center">Time <SortIcon column="start_time" /></div>
                                             </th>
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
                                                 <div className="flex items-center">Sport <SortIcon column="sport" /></div>
                                             </th>
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
                                                 <div className="flex items-center">Matchup <SortIcon column="game" /></div>
                                             </th>
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
                                                 <div className="flex items-center">Best Bet <SortIcon column="bet_on" /></div>
                                             </th>
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider">
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
                                                 <div className="flex items-center group relative cursor-help">
                                                     Market / Fair
                                                     <Info size={14} className="ml-2 text-slate-500 group-hover:text-blue-400 transition-colors" />
@@ -360,13 +305,13 @@ const Research = () => {
                                                     </div>
                                                 </div>
                                             </th>
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
                                                 <div className="flex items-center">Edge <SortIcon column="edge" /></div>
                                             </th>
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider">
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
                                                 <div className="flex items-center">Size / Risk</div>
                                             </th>
-                                            <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('audit_score')}>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('audit_score')}>
                                                 <div className="flex items-center">Conf <SortIcon column="audit_score" /></div>
                                             </th>
                                         </tr>
@@ -380,11 +325,11 @@ const Research = () => {
 
                                             return (
                                                 <tr key={idx} className={`group hover:bg-slate-700/30 transition-all ${!isEdge ? 'opacity-50 grayscale-[0.5]' : ''}`}>
-                                                    <td className="py-4 px-6 text-slate-400 text-xs whitespace-nowrap">
+                                                    <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
                                                         <div className="font-bold text-slate-300">{dateStr}</div>
                                                         <div>{timeStr}</div>
                                                     </td>
-                                                    <td className="py-4 px-6">
+                                                    <td className="py-2 px-4">
                                                         <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
                                                                 ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
                                                                 edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
@@ -392,8 +337,8 @@ const Research = () => {
                                                             {edge.sport}
                                                         </span>
                                                     </td>
-                                                    <td className="py-4 px-6 font-semibold text-slate-200 text-sm">{edge.game}</td>
-                                                    <td className="py-4 px-6">
+                                                    <td className="py-2 px-4 font-semibold text-slate-200 text-sm">{edge.game}</td>
+                                                    <td className="py-2 px-4">
                                                         <div className="text-white font-bold flex items-center">
                                                             {edge.market === 'Total' ? edge.bet_on : edge.bet_on}
                                                             {isEdge && <CheckCircle size={12} className="ml-2 text-green-500" />}
@@ -405,13 +350,13 @@ const Research = () => {
                                                             </div>
                                                         )}
                                                     </td>
-                                                    <td className="py-4 px-6">
+                                                    <td className="py-2 px-4">
                                                         <div className="flex flex-col">
                                                             <div className="text-xs text-slate-300">Market: <span className="text-white font-mono">{edge.market_line}</span></div>
                                                             <div className="text-xs text-slate-500">Fair: <span className="font-mono">{edge.fair_line}</span></div>
                                                         </div>
                                                     </td>
-                                                    <td className={`py-4 px-6 w-32 ${getEdgeColor(edge.edge, edge.sport)}`}>
+                                                    <td className={`py-2 px-4 w-32 ${getEdgeColor(edge.edge, edge.sport)}`}>
                                                         <div className="flex flex-col items-start whitespace-nowrap">
                                                             <span className="text-lg font-bold">
                                                                 {edge.sport === 'EPL' ? `${edge.edge}%` : `${edge.edge} pts`}
@@ -421,7 +366,7 @@ const Research = () => {
                                                             </span>
                                                         </div>
                                                     </td>
-                                                    <td className="py-4 px-6">
+                                                    <td className="py-2 px-4">
                                                         <div className="flex flex-col">
                                                             {edge.suggested_stake ? (
                                                                 <>
@@ -433,7 +378,7 @@ const Research = () => {
                                                             )}
                                                         </div>
                                                     </td>
-                                                    <td className="py-4 px-6">
+                                                    <td className="py-2 px-4">
                                                         <div className="group relative flex items-center cursor-help">
                                                             {edge.audit_class === 'high' ? (
                                                                 <ShieldCheck className="text-green-400" size={18} />
@@ -539,32 +484,32 @@ const Research = () => {
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
                                             <div className="flex items-center">Date <SortIcon column="created_at" /></div>
                                         </th>
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
                                             <div className="flex items-center">Sport <SortIcon column="sport" /></div>
                                         </th>
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
                                             <div className="flex items-center">Matchup <SortIcon column="matchup" /></div>
                                         </th>
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
                                             <div className="flex items-center">Pick <SortIcon column="bet_on" /></div>
                                         </th>
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider">Lines</th>
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Lines</th>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
                                             <div className="flex items-center">Edge <SortIcon column="edge" /></div>
                                         </th>
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
                                             <div className="flex items-center">Result <SortIcon column="result" /></div>
                                         </th>
-                                        <th className="py-4 px-6 text-xs font-bold uppercase tracking-wider">Score</th>
+                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Score</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {getSortedHistory().map((item, idx) => (
                                         <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                            <td className="py-4 px-6 text-slate-400 text-xs whitespace-nowrap">
+                                            <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
                                                 <div className="font-bold text-slate-300">
                                                     {new Date(item.date || item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
                                                 </div>
@@ -572,7 +517,7 @@ const Research = () => {
                                                     {new Date(item.date || item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                                                 </div>
                                             </td>
-                                            <td className="py-4 px-6">
+                                            <td className="py-2 px-4">
                                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
                                                     ${item.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
                                                         item.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
@@ -580,20 +525,20 @@ const Research = () => {
                                                     {item.sport}
                                                 </span>
                                             </td>
-                                            <td className="py-4 px-6 font-medium text-sm text-slate-200">{item.matchup}</td>
-                                            <td className="py-4 px-6 text-white font-bold">
+                                            <td className="py-2 px-4 font-medium text-sm text-slate-200">{item.matchup}</td>
+                                            <td className="py-2 px-4 text-white font-bold">
                                                 {item.bet_on}
                                             </td>
-                                            <td className="py-4 px-6 text-slate-400 text-xs">
+                                            <td className="py-2 px-4 text-slate-400 text-xs">
                                                 <div className="flex flex-col">
                                                     <span>Mkt: <span className="text-slate-300 font-mono">{item.market_line}</span></span>
                                                     <span>Fair: <span className="text-slate-500 font-mono">{item.fair_line}</span></span>
                                                 </div>
                                             </td>
-                                            <td className={`py-4 px-6 font-bold ${getEdgeColor(item.edge, item.sport)}`}>
+                                            <td className={`py-2 px-4 font-bold ${getEdgeColor(item.edge, item.sport)}`}>
                                                 {item.edge}{item.sport === 'EPL' ? '%' : ' pts'}
                                             </td>
-                                            <td className="py-4 px-6 text-right sm:text-left">
+                                            <td className="py-2 px-4 text-right sm:text-left">
                                                 <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
                                                     ${item.result === 'Win' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
                                                         item.result === 'Loss' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
@@ -602,7 +547,7 @@ const Research = () => {
                                                     {item.result || 'Pending'}
                                                 </span>
                                             </td>
-                                            <td className="py-4 px-6 text-slate-300 font-mono text-xs">
+                                            <td className="py-2 px-4 text-slate-300 font-mono text-xs">
                                                 {item.home_score !== null && item.away_score !== null ? (
                                                     <div className="flex flex-col">
                                                         <span className="text-white font-bold">{item.home_score}-{item.away_score}</span>
