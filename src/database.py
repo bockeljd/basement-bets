@@ -30,6 +30,7 @@ def get_db_connection():
             conn.close()
     else:
         # LOCAL SQLITE
+        print(f"[DEBUG] Connecting to SQLite: {DB_PATH}")
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         try:
@@ -54,7 +55,8 @@ def _exec(conn, sql, params=None):
         # Look for :key where it is NOT preceded by :
         if ':' in sql and not '%(' in sql:
             import re
-            sql = re.sub(r'(?<!:):(\w+)', r'%(\1)s', sql)
+            # Only match :identifier where identifier starts with a letter or underscore
+            sql = re.sub(r'(?<!:):([a-zA-Z_]\w*)', r'%(\1)s', sql)
             
         # 3. Handle INSERT OR IGNORE
         if "INSERT OR IGNORE" in sql:
@@ -132,6 +134,153 @@ def init_db():
                 cur.execute(schema)
         conn.commit()
     print(f"Database ({db_type}) bets table initialized.")
+
+    # Initialize other tables
+    init_transactions_tab()
+    init_events_db()
+    init_game_results_db()
+    init_model_history()
+    init_odds_snapshots_db()
+    init_linking_queue_db()
+    init_settlement_db()
+    init_model_health_db()
+    init_model_health_insights_db()
+    init_policy_db()
+    init_ingestion_runs_db()
+    init_smart_curation_db()
+    init_bt_team_metrics_db()
+
+def init_bt_team_metrics_db():
+    db_type = get_db_type()
+    if db_type == 'sqlite':
+        schema = """
+        CREATE TABLE IF NOT EXISTS bt_team_metrics_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_text TEXT NOT NULL,
+            date TEXT NOT NULL,
+            adj_off REAL,
+            adj_def REAL,
+            adj_tempo REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(team_text, date)
+        );
+        """
+    else:
+        schema = """
+        CREATE TABLE IF NOT EXISTS bt_team_metrics_daily (
+            id SERIAL PRIMARY KEY,
+            team_text TEXT NOT NULL,
+            date TEXT NOT NULL,
+            adj_off REAL,
+            adj_def REAL,
+            adj_tempo REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(team_text, date)
+        );
+        """
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(schema)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(schema)
+        conn.commit()
+    print("Torvik Team Metrics table initialized.")
+
+def init_smart_curation_db():
+    db_type = get_db_type()
+    if db_type == 'sqlite':
+        schema = """
+        CREATE TABLE IF NOT EXISTS model_registry (
+            version TEXT PRIMARY KEY, -- e.g. "ncaam_v1_2024"
+            status TEXT DEFAULT 'CANDIDATE', -- PRIMARY, SHADOW, DISABLED
+            w_spread REAL,
+            w_total REAL,
+            sigma_margin_base REAL,
+            sigma_total_base REAL,
+            signal_caps_json TEXT, -- JSON
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT
+        );
+        CREATE TABLE IF NOT EXISTS market_allowlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            league TEXT NOT NULL,
+            market_type TEXT NOT NULL, -- SPREAD, TOTAL, etc.
+            status TEXT DEFAULT 'SHADOW', -- ENABLED, DISABLED
+            min_edge REAL,
+            min_confidence REAL,
+            max_units_per_day REAL,
+            max_units_per_game REAL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT,
+            UNIQUE(league, market_type)
+        );
+        CREATE TABLE IF NOT EXISTS market_performance_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            league TEXT NOT NULL,
+            market_type TEXT NOT NULL,
+            model_version TEXT NOT NULL,
+            roi REAL,
+            clv REAL,
+            hit_rate REAL,
+            brier_score REAL,
+            sample_size INTEGER,
+            data_quality_score REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(date, league, market_type, model_version)
+        );
+        """
+    else:
+        schema = """
+        CREATE TABLE IF NOT EXISTS model_registry (
+            version TEXT PRIMARY KEY,
+            status TEXT DEFAULT 'CANDIDATE',
+            w_spread REAL,
+            w_total REAL,
+            sigma_margin_base REAL,
+            sigma_total_base REAL,
+            signal_caps_json TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT
+        );
+        CREATE TABLE IF NOT EXISTS market_allowlist (
+            id SERIAL PRIMARY KEY,
+            league TEXT NOT NULL,
+            market_type TEXT NOT NULL,
+            status TEXT DEFAULT 'SHADOW',
+            min_edge REAL,
+            min_confidence REAL,
+            max_units_per_day REAL,
+            max_units_per_game REAL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT,
+            UNIQUE(league, market_type)
+        );
+        CREATE TABLE IF NOT EXISTS market_performance_daily (
+            id SERIAL PRIMARY KEY,
+            date TEXT NOT NULL,
+            league TEXT NOT NULL,
+            market_type TEXT NOT NULL,
+            model_version TEXT NOT NULL,
+            roi REAL,
+            clv REAL,
+            hit_rate REAL,
+            brier_score REAL,
+            sample_size INTEGER,
+            data_quality_score REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(date, league, market_type, model_version)
+        );
+        """
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(schema)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(schema)
+        conn.commit()
+    print("Smart Curation (Registry/Allowlist) tables initialized.")
 
 def add_closing_odds_column():
     pass # Deprecated / Managed by schema defaults now
@@ -963,6 +1112,7 @@ def init_props_parlays_db():
             side TEXT, -- HOME, AWAY, OVER, UNDER
             selection_team_id TEXT, -- UUID
             status TEXT DEFAULT 'PENDING',
+            link_status TEXT DEFAULT 'PENDING', -- PENDING, LINKED, QUARANTINED
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(bet_id) REFERENCES bets(id)
         );
@@ -984,6 +1134,7 @@ def init_props_parlays_db():
             side TEXT,
             selection_team_id TEXT,
             status TEXT DEFAULT 'PENDING',
+            link_status TEXT DEFAULT 'PENDING',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(bet_id) REFERENCES bets(id)
         );
@@ -1026,8 +1177,8 @@ def insert_bet_v2(bet_data: dict, legs: list = None):
             
         if legs:
             leg_query = """
-            INSERT INTO bet_legs (bet_id, event_id, leg_type, subject_id, market_key, selection, line_value, odds_american, status)
-            VALUES (:bet_id, :event_id, :leg_type, :subject_id, :market_key, :selection, :line_value, :odds_american, :status)
+            INSERT INTO bet_legs (bet_id, event_id, leg_type, subject_id, market_key, selection, line_value, odds_american, status, link_status, side, selection_team_id)
+            VALUES (:bet_id, :event_id, :leg_type, :subject_id, :market_key, :selection, :line_value, :odds_american, :status, :link_status, :side, :selection_team_id)
             """
             for leg in legs:
                 leg['bet_id'] = bet_id
@@ -1388,6 +1539,181 @@ def init_linking_queue_db():
         conn.commit()
     print("Unmatched Legs Queue initialized.")
 
+def init_model_health_db():
+    db_type = get_db_type()
+    schema = """
+    CREATE TABLE IF NOT EXISTS model_health_daily (
+        date TEXT NOT NULL,
+        model_version_id TEXT NOT NULL,
+        league TEXT NOT NULL,
+        market_type TEXT NOT NULL,
+        metric_name TEXT NOT NULL,
+        metric_value REAL NOT NULL,
+        sample_size INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(date, model_version_id, league, market_type, metric_name)
+    );
+    """
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(schema)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(schema)
+        conn.commit()
+    print("Model Health Daily table initialized.")
+
+def init_model_health_insights_db():
+    db_type = get_db_type()
+    schema = """
+    CREATE TABLE IF NOT EXISTS model_health_insights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        summary TEXT,
+        anomalies_json TEXT,
+        hypothesis TEXT,
+        action_items_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(date) -- One insight per day per run? Or allows multiple? Let's say one per day usually.
+        -- Actually, we might run multiple times. Let's make it APPEND log or use date as key.
+        -- User asked for "Store analysis". Let's assume daily log.
+    );
+    """
+    if db_type == 'postgres':
+        schema = schema.replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id SERIAL PRIMARY KEY")
+        
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(schema)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(schema)
+        conn.commit()
+    print("Model Health Insights table initialized.")
+
+def store_health_insight(insight: dict, date_str: str):
+    import json
+    q = """
+    INSERT INTO model_health_insights (date, summary, anomalies_json, hypothesis, action_items_json)
+    VALUES (:date, :summary, :anomalies, :hypothesis, :actions)
+    """
+    params = {
+        "date": date_str,
+        "summary": insight.get("summary", ""),
+        "anomalies": json.dumps(insight.get("anomalies", [])),
+        "hypothesis": insight.get("hypothesis", ""),
+        "actions": json.dumps(insight.get("action_items", []))
+    }
+    with get_db_connection() as conn:
+        _exec(conn, q, params)
+        conn.commit()
+
+def init_policy_db():
+    db_type = get_db_type()
+    
+    # 1. market_allowlist
+    schema_market = """
+    CREATE TABLE IF NOT EXISTS market_allowlist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        league TEXT NOT NULL,
+        market_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'SHADOW', -- ENABLED, SHADOW, DISABLED
+        max_units_per_day INTEGER DEFAULT 1,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        reason TEXT,
+        UNIQUE(league, market_type)
+    );
+    """
+    
+    # 2. model_registry
+    schema_model = """
+    CREATE TABLE IF NOT EXISTS model_registry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_version TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'SHADOW', -- PRIMARY, SHADOW, DISABLED
+        allocation_weight REAL DEFAULT 0.0,
+        min_sample_for_promotion INTEGER DEFAULT 150,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    
+    # 3. policy_decisions (audit trail)
+    schema_audit = """
+    CREATE TABLE IF NOT EXISTS policy_decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        decision_type TEXT NOT NULL, -- MARKET_UPDATE, MODEL_UPDATE
+        target TEXT NOT NULL, -- "NCAAM/Spread" or "v1_basic"
+        old_value TEXT,
+        new_value TEXT,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    
+    if db_type == 'postgres':
+        schema_market = schema_market.replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id SERIAL PRIMARY KEY")
+        schema_model = schema_model.replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id SERIAL PRIMARY KEY")
+        schema_audit = schema_audit.replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id SERIAL PRIMARY KEY")
+        
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(schema_market)
+            conn.executescript(schema_model)
+            conn.executescript(schema_audit)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(schema_market)
+                cur.execute(schema_model)
+                cur.execute(schema_audit)
+        conn.commit()
+    print("Policy Control Plane (Allowlist, Registry, Audit) initialized.")
+    init_signal_db()
+
+def init_signal_db():
+    db_type = get_db_type()
+    
+    # 1. signal_registry (Meta)
+    schema_registry = """
+    CREATE TABLE IF NOT EXISTS signal_registry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        signal_family TEXT NOT NULL UNIQUE, -- e.g. "INJURY_NEWS", "LINEUP_CHANGE"
+        status TEXT DEFAULT 'SHADOW', -- ENABLED, SHADOW, DISABLED
+        min_confidence REAL DEFAULT 0.0,
+        max_adjustment_points REAL DEFAULT 3.0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    
+    # 2. signal_performance_daily
+    schema_perf = """
+    CREATE TABLE IF NOT EXISTS signal_performance_daily (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        signal_family TEXT NOT NULL,
+        clv_lift REAL, -- Incremental CLV vs baseline
+        roi_lift REAL,
+        sample_size INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(date, signal_family)
+    );
+    """
+    
+    if db_type == 'postgres':
+         schema_registry = schema_registry.replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id SERIAL PRIMARY KEY")
+         schema_perf = schema_perf.replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id SERIAL PRIMARY KEY")
+
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(schema_registry)
+            conn.executescript(schema_perf)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(schema_registry)
+                cur.execute(schema_perf)
+        conn.commit()
+    print("Signal Curation Tables initialized.")
+
 def store_daily_evaluation(metrics: list):
     """
     Store a batch of daily evaluation metrics.
@@ -1417,9 +1743,9 @@ def store_daily_evaluation(metrics: list):
              # Our _exec wrapper handles single query.
              # For batch, we can loop or use specific cursor method.
              # Simple loop for MVP robustness:
-             with conn.cursor() as cur:
-                 for m in metrics:
-                     cur.execute(query, m)
+             # Use _exec for each item to handle param style
+             for m in metrics:
+                 _exec(conn, query, m)
         conn.commit()
 
 def fetch_model_health_daily(date=None, league=None, market_type=None):
@@ -1476,8 +1802,8 @@ def init_odds_snapshots_db():
             book TEXT NOT NULL,
             market_type TEXT NOT NULL,
             side TEXT NOT NULL,
-            line REAL,
-            price REAL NOT NULL,
+            line DECIMAL(10,1),
+            price DECIMAL(10,3) NOT NULL,
             captured_at TIMESTAMP NOT NULL,
             captured_bucket TIMESTAMP NOT NULL,
             UNIQUE(event_id, market_type, side, line, book, captured_bucket)
@@ -1557,3 +1883,54 @@ def get_last_prestart_snapshot(event_id: str, market_type: str):
                 latest[key] = dict(r)
         
         return list(latest.values())
+
+def fetch_model_health_daily(date: str = None, league: str = None, market_type: str = None):
+    """
+    Fetch model health metrics for analysis/UI.
+    """
+    q = "SELECT * FROM model_health_daily WHERE 1=1"
+    params = {}
+    if date:
+        q += " AND date = :date"
+        params['date'] = date
+    if league:
+        q += " AND league = :league"
+        params['league'] = league
+    if market_type:
+        q += " AND market_type = :market_type"
+        params['market_type'] = market_type
+        
+    q += " ORDER BY date DESC, league, market_type"
+    
+    with get_db_connection() as conn:
+        cursor = _exec(conn, q, params)
+        return [dict(r) for r in cursor.fetchall()]
+
+def upsert_team_metrics(metrics: list):
+    """
+    Store batch of team metrics (BartTorvik).
+    metrics: List[Dict] with team_text, date, adj_off, adj_def, adj_tempo
+    """
+    if not metrics: return
+    
+    q = """
+    INSERT INTO bt_team_metrics_daily (
+        team_text, date, adj_off, adj_def, adj_tempo
+    ) VALUES (
+        :team_text, :date, :adj_off, :adj_def, :adj_tempo
+    ) ON CONFLICT(team_text, date) DO UPDATE SET
+        adj_off = excluded.adj_off,
+        adj_def = excluded.adj_def,
+        adj_tempo = excluded.adj_tempo,
+        created_at = CURRENT_TIMESTAMP
+    """
+    
+    with get_db_connection() as conn:
+        if hasattr(conn, 'executemany'): # SQLite
+             conn.executemany(q, metrics)
+        else: # Postgres simple loop
+             for m in metrics:
+                 _exec(conn, q, m)
+        conn.commit()
+    print(f"Upserted {len(metrics)} team metrics.")
+

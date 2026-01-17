@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+psycopg2-binary
+requests
+pandas
+numpy
+python-dotenv
+beautifulsoup4
+lxml
+html5lib
+supabase
+python-jose[cryptography]

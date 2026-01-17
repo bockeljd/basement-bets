@@ -148,23 +148,22 @@ class EventIngestionService:
         """
         print(f"[DEBUG] Upserting Game Result for {event_id}: {result}")
         # Schema: event_id, home_score, away_score, final, period
+        # Schema: event_id, home_score, away_score, final_flag
         query = """
-        INSERT INTO game_results (event_id, home_score, away_score, final, period)
-        VALUES (:eid, :hs, :as, :final, :period)
+        INSERT INTO game_results (event_id, home_score, away_score, final_flag)
+        VALUES (:eid, :hs, :as, :final)
         ON CONFLICT(event_id) DO UPDATE SET
             home_score = excluded.home_score,
             away_score = excluded.away_score,
-            final = excluded.final,
-            period = excluded.period,
-            updated_at = CURRENT_TIMESTAMP
+            final_flag = excluded.final_flag,
+            last_updated_at = CURRENT_TIMESTAMP
         """
         
         params = {
             "eid": event_id,
             "hs": result.get('home_score'),
             "as": result.get('away_score'),
-            "final": result.get('final', False),
-            "period": result.get('period', '') 
+            "final": result.get('final', False)
         }
         
         # Note: SQLite `ON CONFLICT` support relies on version >= 3.24.

@@ -87,6 +87,28 @@ class SettlementEngine:
                     stats["missing_fields"] += 1
                     continue
 
+                # Fetch CLV (Closing Line Value)
+                # Looking for the snapshot closest to start time for this book/market
+                from src.database import get_last_prestart_snapshot
+                clv_snapshots = get_last_prestart_snapshot(event_id, leg.get("market_type"))
+                
+                # Filter for this book
+                book_key = leg.get("book")
+                # Normalize book key if needed (e.g. 'draftkings' vs 'DK') - Adapter usually normalizes
+                # For now assume exact match or try loose match
+                
+                clv_data = next((s for s in clv_snapshots if s['book'] == book_key), None)
+                if not clv_data and clv_snapshots:
+                    # Fallback to Consensus (Average of all books) if specific book missing
+                    avg_line = sum(s['line'] for s in clv_snapshots) / len(clv_snapshots)
+                    # For price, avg probability implies... let's just take avg price
+                    avg_price = sum(s['price'] for s in clv_snapshots) / len(clv_snapshots)
+                    clv_data = {
+                        "line": avg_line, 
+                        "price": avg_price, 
+                        "book": "consensus_fallback"
+                    }
+
                 # Build settlement event inputs (Full context for storage)
                 inputs_json = {
                     "event_id": event_id,
@@ -95,7 +117,9 @@ class SettlementEngine:
                     "selection_team_id": leg.get("selection_team_id"),
                     "side": leg.get("side"),
                     "line": leg.get("line"),
+                    "price": leg.get("odds_american"), # Capture bet price too if avail
                     "book": leg.get("book"),
+                    "clv": clv_data, # NEW: Store CLV
                     "result": result,
                     "computed": grade_inputs,
                 }

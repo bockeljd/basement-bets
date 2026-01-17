@@ -13,22 +13,38 @@ class LLMSlipParser:
         self.version = "2024-01-14v1"
 
     def get_system_prompt(self):
-        return """You are a Senior Betting Data Analyst specializing in parsing unformatted betting slips from DraftKings (DK) and FanDuel (FD). 
+        return """You are a Senior Betting Data Analyst specializing in parsing unformatted betting slips from DraftKings (DK), FanDuel (FD), and Caesar's.
 
-GOAL: Convert raw text into a valid JSON object following the provided schema.
+GOAL: Convert raw text into a valid JSON object following the strict schema below.
+
+SCHEMA:
+{
+  "stake": float, // The wager amount
+  "price": {"american": int, "decimal": float}, // Extracted odds
+  "market_type": "string", // [ML, SPREAD, TOTAL, PROP, PARLAY]
+  "is_parlay": boolean,
+  "confidence": float, // 0.0 to 1.0
+  "legs": [
+    {
+       "selection": "string", // Raw selection text
+       "normalized_player": "string" or null, // "First Last"
+       "normalized_team": "string" or null, // "Team Name"
+       "line_value": float or null, // e.g. -4.5, 212.5
+       "market_key": "string", // Normalised market key
+       "odds_american": int // Odds for this leg if available
+    }
+  ],
+  "missing_fields": ["string"]
+}
 
 RULES:
-1. DETERMINISM: Only return the JSON object. No explanation, no markdown text outside the JSON.
+1. DETERMINISM: Only return the JSON object. No markdown.
 2. NORMALIZATION:
-   - Market Types: Convert to "ML", "SPREAD", "TOTAL", or "PROP".
-   - Sport Keys: Use TheOddsAPI style (e.g., basketball_ncaab, americanfootball_nfl, soccer_epl).
-   - Odds: Calculate decimal odds if American odds are provided.
-3. PARLAYS: If the slip contains multiple legs, populate the 'legs' array and set 'is_parlay': true.
-4. STANDARDIZATION: Keep the 'raw_selection' exactly as found, but provide a 'normalized_selection' using standard team full names.
-5. CONFIDENCE: Set a confidence score from 0 to 1. If fields like stake or selection are missing, list them in 'missing_fields'.
-
-ERROR HANDLING:
-- If the text is completely unreadable, return {"error": "unsupported_format", "confidence": 0}.
+   - Market Types: "ML" for Moneyline, "SPREAD" for Point Spreads, "TOTAL" for Over/Under, "PROP" for Player Props.
+   - Sport Keys: Infer context if possible, otherwise leave generic.
+   - Player Names: Convert "L. James" to "LeBron James" if confident.
+3. PARLAYS: If multiple selections exist, treat as PARLAY.
+4. CONFIDENCE: < 0.8 if critical fields (stake, selection) are ambiguous.
 """
 
     def parse(self, text: str, sportsbook: str) -> Dict[str, Any]:
@@ -61,19 +77,23 @@ ERROR HANDLING:
     def _get_mock_response(self, text, sportsbook):
         """Dev fallback for local testing."""
         return {
-            "parser_version": self.version + "-mock",
-            "sportsbook": sportsbook,
-            "placed_at": "2024-01-14T12:00:00Z",
+            "snake_case_conversion_active": True,
             "stake": 50.00,
             "price": {"american": -110, "decimal": 1.91},
             "market_type": "SPREAD",
-            "selection": "Kansas Jayhawks",
-            "line": -4.5,
-            "event_name": "Kansas Jayhawks vs Iowa State Cyclones",
-            "sport": "basketball_ncaab",
-            "legs": [],
-            "confidence": 0.95,
-            "missing_fields": [],
             "is_parlay": False,
-            "raw_hash": hashlib.sha256(text.encode()).hexdigest()
+            "confidence": 0.95,
+            "legs": [
+                {
+                    "selection": "Kansas Jayhawks",
+                    "normalized_team": "Kansas",
+                    "normalized_player": None,
+                    "line_value": -4.5,
+                    "market_key": "spread",
+                    "odds_american": -110
+                }
+            ],
+            "missing_fields": [],
+            "raw_hash": hashlib.sha256(text.encode()).hexdigest(),
+            "parser_version": self.version + "-mock"
         }

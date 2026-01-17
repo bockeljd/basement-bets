@@ -1,0 +1,81 @@
+game_id,start_time,status,home_team,away_team,home_score,away_score,home_money_line,away_money_line,home_spread,away_spread,home_spread_odds,away_spread_odds,total_score,over_odds,under_odds,date_scraped,id,sport_key,commence_time,bookmakers
+262149,2026-01-13T00:00:00.000Z,scheduled,Cleveland Cavaliers,Utah Jazz,,,-700.0,500.0,-13.0,13.0,-110.0,-110.0,250.5,-110.0,-110.0,2026-01-12 10:36:45.051605,,,,
+263218,2026-01-16T01:30:00.000Z,scheduled,Dallas Mavericks,Utah Jazz,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263214,2026-01-16T00:00:00.000Z,scheduled,Detroit Pistons,Phoenix Suns,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263158,2026-01-15T00:00:00.000Z,scheduled,Philadelphia 76ers,Cleveland Cavaliers,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263219,2026-01-16T03:00:00.000Z,scheduled,Portland Trail Blazers,Atlanta Hawks,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263159,2026-01-15T01:00:00.000Z,scheduled,New Orleans Pelicans,Brooklyn Nets,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263217,2026-01-16T01:00:00.000Z,scheduled,San Antonio Spurs,Milwaukee Bucks,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263163,2026-01-15T03:30:00.000Z,scheduled,Los Angeles Clippers,Washington Wizards,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263161,2026-01-15T02:30:00.000Z,scheduled,Dallas Mavericks,Denver Nuggets,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263216,2026-01-16T00:30:00.000Z,scheduled,Houston Rockets,Oklahoma City Thunder,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263162,2026-01-15T03:00:00.000Z,scheduled,Sacramento Kings,New York Knicks,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263160,2026-01-15T01:00:00.000Z,scheduled,Chicago Bulls,Utah Jazz,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263215,2026-01-16T00:30:00.000Z,scheduled,Miami Heat,Boston Celtics,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263220,2026-01-16T03:00:00.000Z,scheduled,Golden State Warriors,New York Knicks,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263213,2026-01-15T19:00:00.000Z,scheduled,Orlando Magic,Memphis Grizzlies,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263148,2026-01-14T04:00:00.000Z,scheduled,Golden State Warriors,Portland Trail Blazers,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263143,2026-01-14T01:00:00.000Z,scheduled,Oklahoma City Thunder,San Antonio Spurs,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263142,2026-01-14T00:30:00.000Z,scheduled,Miami Heat,Phoenix Suns,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263145,2026-01-14T01:00:00.000Z,scheduled,Milwaukee Bucks,Minnesota Timberwolves,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263144,2026-01-14T01:00:00.000Z,scheduled,Houston Rockets,Chicago Bulls,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263221,2026-01-16T03:30:00.000Z,scheduled,Los Angeles Lakers,Charlotte Hornets,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263157,2026-01-15T00:00:00.000Z,scheduled,Indiana Pacers,Toronto Raptors,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+263147,2026-01-14T03:30:00.000Z,scheduled,Los Angeles Lakers,Atlanta Hawks,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+262153,2026-01-13T03:00:00.000Z,scheduled,Sacramento Kings,Los Angeles Lakers,,,300.0,-380.0,9.5,-9.5,-115.0,-105.0,228.5,-105.0,-115.0,2026-01-12 10:36:45.051605,,,,
+263146,2026-01-14T01:00:00.000Z,scheduled,New Orleans Pelicans,Denver Nuggets,,,,,,,,,,,,2026-01-12 10:36:45.051605,,,,
+262151,2026-01-13T00:30:00.000Z,scheduled,Toronto Raptors,Philadelphia 76ers,,,130.0,-155.0,3.5,-3.5,-110.0,-110.0,221.5,100.0,-115.0,2026-01-12 10:36:45.051605,,,,
+262150,2026-01-13T00:30:00.000Z,scheduled,Indiana Pacers,Boston Celtics,,,190.0,-230.0,5.5,-5.5,-105.0,-115.0,225.5,-115.0,-110.0,2026-01-12 10:36:45.051605,,,,
+262154,2026-01-13T03:30:00.000Z,scheduled,Los Angeles Clippers,Charlotte Hornets,,,-185.0,154.0,-4.5,4.5,-110.0,-110.0,223.5,-110.0,-110.0,2026-01-12 10:36:45.051605,,,,
+262152,2026-01-13T01:30:00.000Z,scheduled,Dallas Mavericks,Brooklyn Nets,,,-157.0,132.0,-3.5,3.5,-110.0,-110.0,220.5,-115.0,-109.0,2026-01-12 10:36:45.051605,,,,
+263144,,scheduled,Houston Rockets,Chicago Bulls,,,-550.0,425.0,-13.0,13.0,-110.0,-110.0,223.5,-115.0,-110.0,2026-01-13 13:13:28.612519,263144.0,nba,2026-01-14T01:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Houston Rockets', 'price': -550}, {'name': 'Chicago Bulls', 'price': 425}]}, {'key': 'spreads', 'outcomes': [{'name': 'Houston Rockets', 'price': -110, 'point': -13}, {'name': 'Chicago Bulls', 'price': -110, 'point': 13}]}]}]"
+263252,,scheduled,Sacramento Kings,Washington Wizards,,,,,,,,,,,,2026-01-13 13:13:28.612519,263252.0,nba,2026-01-17T03:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': []}]"
+263248,,scheduled,Philadelphia 76ers,Cleveland Cavaliers,,,,,,,,,,,,2026-01-13 13:13:28.612519,263248.0,nba,2026-01-17T00:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': []}]"
+263148,,scheduled,Golden State Warriors,Portland Trail Blazers,,,-425.0,345.0,-10.5,10.5,-110.0,-110.0,227.5,-110.0,-110.0,2026-01-13 13:13:28.612519,263148.0,nba,2026-01-14T04:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Golden State Warriors', 'price': -425}, {'name': 'Portland Trail Blazers', 'price': 345}]}, {'key': 'spreads', 'outcomes': [{'name': 'Golden State Warriors', 'price': -110, 'point': -10.5}, {'name': 'Portland Trail Blazers', 'price': -110, 'point': 10.5}]}]}]"
+263147,,scheduled,Los Angeles Lakers,Atlanta Hawks,,,124.0,-149.0,3.5,-3.5,-114.0,-106.0,231.5,-110.0,-110.0,2026-01-13 13:13:28.612519,263147.0,nba,2026-01-14T03:30:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Los Angeles Lakers', 'price': 124}, {'name': 'Atlanta Hawks', 'price': -149}]}, {'key': 'spreads', 'outcomes': [{'name': 'Los Angeles Lakers', 'price': -114, 'point': 3.5}, {'name': 'Atlanta Hawks', 'price': -106, 'point': -3.5}]}]}]"
+263142,,scheduled,Miami Heat,Phoenix Suns,,,-115.0,-105.0,-1.5,1.5,105.0,-118.0,230.5,-110.0,-110.0,2026-01-13 13:13:28.612519,263142.0,nba,2026-01-14T00:30:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Miami Heat', 'price': -115}, {'name': 'Phoenix Suns', 'price': -105}]}, {'key': 'spreads', 'outcomes': [{'name': 'Miami Heat', 'price': 105, 'point': -1.5}, {'name': 'Phoenix Suns', 'price': -118, 'point': 1.5}]}]}]"
+263146,,scheduled,New Orleans Pelicans,Denver Nuggets,,,110.0,-130.0,1.5,-1.5,-105.0,-115.0,233.5,-110.0,-110.0,2026-01-13 13:13:28.612519,263146.0,nba,2026-01-14T01:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'New Orleans Pelicans', 'price': 110}, {'name': 'Denver Nuggets', 'price': -130}]}, {'key': 'spreads', 'outcomes': [{'name': 'New Orleans Pelicans', 'price': -105, 'point': 1.5}, {'name': 'Denver Nuggets', 'price': -115, 'point': -1.5}]}]}]"
+263247,,scheduled,Brooklyn Nets,Chicago Bulls,,,,,,,,,,,,2026-01-13 13:13:28.612519,263247.0,nba,2026-01-17T00:30:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': []}]"
+263251,,scheduled,Houston Rockets,Minnesota Timberwolves,,,,,,,,,,,,2026-01-13 13:13:28.612519,263251.0,nba,2026-01-17T02:30:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': []}]"
+263143,,scheduled,Oklahoma City Thunder,San Antonio Spurs,,,-325.0,270.0,-8.5,8.5,-115.0,-105.0,229.5,-114.0,-110.0,2026-01-13 13:13:28.612519,263143.0,nba,2026-01-14T01:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Oklahoma City Thunder', 'price': -325}, {'name': 'San Antonio Spurs', 'price': 270}]}, {'key': 'spreads', 'outcomes': [{'name': 'Oklahoma City Thunder', 'price': -115, 'point': -8.5}, {'name': 'San Antonio Spurs', 'price': -105, 'point': 8.5}]}]}]"
+263250,,scheduled,Toronto Raptors,Los Angeles Clippers,,,,,,,,,,,,2026-01-13 13:13:28.612519,263250.0,nba,2026-01-17T00:30:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': []}]"
+263249,,scheduled,Indiana Pacers,New Orleans Pelicans,,,,,,,,,,,,2026-01-13 13:13:28.612519,263249.0,nba,2026-01-17T00:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': []}]"
+263145,,scheduled,Milwaukee Bucks,Minnesota Timberwolves,,,-148.0,124.0,-3.5,3.5,-108.0,-112.0,227.5,-110.0,-110.0,2026-01-13 13:13:28.612519,263145.0,nba,2026-01-14T01:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Milwaukee Bucks', 'price': -148}, {'name': 'Minnesota Timberwolves', 'price': 124}]}, {'key': 'spreads', 'outcomes': [{'name': 'Milwaukee Bucks', 'price': -108, 'point': -3.5}, {'name': 'Minnesota Timberwolves', 'price': -112, 'point': 3.5}]}]}]"
+263145,,scheduled,Milwaukee Bucks,Minnesota Timberwolves,,,-148.0,124.0,-3.5,3.5,-110.0,-110.0,227.5,-110.0,-110.0,2026-01-13 13:43:40.104851,263145.0,nba,2026-01-14T01:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Milwaukee Bucks', 'price': -148}, {'name': 'Minnesota Timberwolves', 'price': 124}]}, {'key': 'spreads', 'outcomes': [{'name': 'Milwaukee Bucks', 'price': -110, 'point': -3.5}, {'name': 'Minnesota Timberwolves', 'price': -110, 'point': 3.5}]}]}]"
+263144,,scheduled,Houston Rockets,Chicago Bulls,,,-550.0,432.0,-13.0,13.0,-110.0,-110.0,223.5,-115.0,-109.0,2026-01-13 13:43:40.104851,263144.0,nba,2026-01-14T01:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Houston Rockets', 'price': -550}, {'name': 'Chicago Bulls', 'price': 432}]}, {'key': 'spreads', 'outcomes': [{'name': 'Houston Rockets', 'price': -110, 'point': -13}, {'name': 'Chicago Bulls', 'price': -110, 'point': 13}]}]}]"
+263146,,scheduled,New Orleans Pelicans,Denver Nuggets,,,105.0,-125.0,1.5,-1.5,-110.0,-110.0,233.5,-110.0,-110.0,2026-01-13 13:43:40.104851,263146.0,nba,2026-01-14T01:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'New Orleans Pelicans', 'price': 105}, {'name': 'Denver Nuggets', 'price': -125}]}, {'key': 'spreads', 'outcomes': [{'name': 'New Orleans Pelicans', 'price': -110, 'point': 1.5}, {'name': 'Denver Nuggets', 'price': -110, 'point': -1.5}]}]}]"
+263147,,scheduled,Los Angeles Lakers,Atlanta Hawks,,,120.0,-142.0,3.0,-3.0,-114.0,-106.0,231.5,-110.0,-110.0,2026-01-13 13:43:40.104851,263147.0,nba,2026-01-14T03:30:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Los Angeles Lakers', 'price': 120}, {'name': 'Atlanta Hawks', 'price': -142}]}, {'key': 'spreads', 'outcomes': [{'name': 'Los Angeles Lakers', 'price': -114, 'point': 3}, {'name': 'Atlanta Hawks', 'price': -106, 'point': -3}]}]}]"
+263148,,scheduled,Golden State Warriors,Portland Trail Blazers,,,-425.0,340.0,-10.5,10.5,-110.0,-110.0,226.5,-105.0,-112.0,2026-01-13 13:43:40.104851,263148.0,nba,2026-01-14T04:00:00.000Z,"[{'key': 'actionnetwork', 'title': 'Action Network (Consensus)', 'markets': [{'key': 'h2h', 'outcomes': [{'name': 'Golden State Warriors', 'price': -425}, {'name': 'Portland Trail Blazers', 'price': 340}]}, {'key': 'spreads', 'outcomes': [{'name': 'Golden State Warriors', 'price': -110, 'point': -10.5}, {'name': 'Portland Trail Blazers', 'price': -110, 'point': 10.5}]}]}]"
+263283,2026-01-18T02:00:00.000Z,scheduled,Denver Nuggets,Washington Wizards,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263282,2026-01-18T01:30:00.000Z,scheduled,Golden State Warriors,Charlotte Hornets,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263278,2026-01-18T00:30:00.000Z,scheduled,Detroit Pistons,Indiana Pacers,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263276,2026-01-17T22:00:00.000Z,scheduled,Dallas Mavericks,Utah Jazz,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263252,2026-01-17T03:00:00.000Z,scheduled,Sacramento Kings,Washington Wizards,,,-272.0,222.0,-7.5,7.5,-105.0,-115.0,233.5,-105.0,-115.0,2026-01-16 10:40:55.825381,,,,
+263251,2026-01-17T02:30:00.000Z,scheduled,Houston Rockets,Minnesota Timberwolves,,,-180.0,150.0,-4.5,4.5,-110.0,-110.0,222.5,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263352,2026-01-20T01:00:00.000Z,scheduled,Detroit Pistons,Boston Celtics,,,-198.0,164.0,,,,,227.5,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263247,2026-01-17T00:30:00.000Z,scheduled,Brooklyn Nets,Chicago Bulls,,,-125.0,106.0,-1.5,1.5,-112.0,-108.0,226.0,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263249,2026-01-17T00:00:00.000Z,scheduled,Indiana Pacers,New Orleans Pelicans,,,-170.0,142.0,-4.0,4.0,-110.0,-110.0,241.5,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263248,2026-01-17T00:00:00.000Z,scheduled,Philadelphia 76ers,Cleveland Cavaliers,,,-141.0,120.0,-2.5,2.5,-115.0,-105.0,232.5,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263279,2026-01-18T00:30:00.000Z,scheduled,New York Knicks,Phoenix Suns,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263281,2026-01-18T01:00:00.000Z,scheduled,San Antonio Spurs,Minnesota Timberwolves,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263250,2026-01-17T00:30:00.000Z,scheduled,Toronto Raptors,Los Angeles Clippers,,,110.0,-130.0,2.0,-2.0,-110.0,-110.0,215.0,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263280,2026-01-18T01:00:00.000Z,scheduled,Miami Heat,Oklahoma City Thunder,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263354,2026-01-20T03:00:00.000Z,scheduled,Golden State Warriors,Miami Heat,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263313,2026-01-19T00:00:00.000Z,scheduled,Chicago Bulls,Brooklyn Nets,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263314,2026-01-19T00:00:00.000Z,scheduled,Houston Rockets,New Orleans Pelicans,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263277,2026-01-18T00:30:00.000Z,scheduled,Atlanta Hawks,Boston Celtics,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263347,2026-01-19T19:30:00.000Z,scheduled,Cleveland Cavaliers,Oklahoma City Thunder,,,-110.0,-110.0,-1.5,1.5,102.0,-122.0,229.5,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263351,2026-01-20T00:30:00.000Z,scheduled,Brooklyn Nets,Phoenix Suns,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263316,2026-01-19T02:00:00.000Z,scheduled,Sacramento Kings,Portland Trail Blazers,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263317,2026-01-19T02:30:00.000Z,scheduled,Los Angeles Lakers,Toronto Raptors,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263348,2026-01-19T20:00:00.000Z,scheduled,Washington Wizards,Los Angeles Clippers,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263315,2026-01-19T01:00:00.000Z,scheduled,Denver Nuggets,Charlotte Hornets,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263349,2026-01-19T22:00:00.000Z,scheduled,New York Knicks,Dallas Mavericks,,,-270.0,215.0,-5.5,5.5,-118.0,-102.0,,,,2026-01-16 10:40:55.825381,,,,
+263353,2026-01-19T22:00:00.000Z,scheduled,San Antonio Spurs,Utah Jazz,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263350,2026-01-20T00:00:00.000Z,scheduled,Philadelphia 76ers,Indiana Pacers,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263312,2026-01-18T17:00:00.000Z,scheduled,Memphis Grizzlies,Orlando Magic,,,170.0,-205.0,5.5,-5.5,-114.0,-109.0,227.5,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263284,2026-01-18T03:00:00.000Z,scheduled,Portland Trail Blazers,Los Angeles Lakers,,,,,,,,,,,,2026-01-16 10:40:55.825381,,,,
+263346,2026-01-19T18:00:00.000Z,scheduled,Atlanta Hawks,Milwaukee Bucks,,,-218.0,185.0,-4.5,4.5,-120.0,-100.0,233.5,-110.0,-110.0,2026-01-16 10:40:55.825381,,,,
+263252,2026-01-17T03:00:00.000Z,scheduled,Sacramento Kings,Washington Wizards,,,-272.0,222.0,-7.5,7.5,-105.0,-115.0,233.5,-105.0,-110.0,2026-01-16 10:50:13.341057,,,,
+263247,2026-01-17T00:30:00.000Z,scheduled,Brooklyn Nets,Chicago Bulls,,,-127.0,107.0,-1.5,1.5,-112.0,-108.0,226.0,-110.0,-110.0,2026-01-16 10:55:59.471613,,,,
+263252,2026-01-17T03:00:00.000Z,scheduled,Sacramento Kings,Washington Wizards,,,-272.0,222.0,-7.5,7.5,-105.0,-115.0,233.5,-110.0,-110.0,2026-01-16 10:55:59.471613,,,,

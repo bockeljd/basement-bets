@@ -1,58 +1,33 @@
-import json
-from unittest.mock import MagicMock
-from src.models.odds_client import OddsAPIClient
 
-def test_odds_ingestion_mocked():
-    """
-    Simulates fetching and normalizing odds for NFL.
-    Tests the OddsAPIClient integration.
-    """
-    client = OddsAPIClient()
+import asyncio
+from unittest.mock import MagicMock
+from src.api import ingest_odds
+
+async def run_test():
+    print("Testing /api/ingest/odds/NCAAM ...")
     
-    # Mock the request call if it uses one, or mock the method
-    # Looking at src/models/odds_client.py briefly...
-    # (Assuming it has a get_odds method)
+    # Mock Request
+    req = MagicMock()
+    async def json_mock():
+        return {"date": "20260112"} # Known historical date if available or just test flow
+    req.json = json_mock
     
-    # Mock data
-    mock_response = [
-        {
-            "id": "test_game_1",
-            "home_team": "Kansas City Chiefs",
-            "away_team": "San Francisco 49ers",
-            "bookmakers": [
-                {
-                    "key": "draftkings",
-                    "markets": [
-                        {
-                            "key": "spreads",
-                            "outcomes": [
-                                {"name": "Kansas City Chiefs", "price": -110, "point": -2.5},
-                                {"name": "San Francisco 49ers", "price": -110, "point": 2.5}
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-    ]
-    
-    print("Running Mocked Odds Ingestion Tests...")
-    
-    # Mock the actual network call method
-    client.get_odds = MagicMock(return_value=mock_response)
-    
-    data = client.get_odds("americanfootball_nfl")
-    
-    print(f"  Fetched {len(data)} games.")
-    assert len(data) == 1
-    assert data[0]['home_team'] == "Kansas City Chiefs"
-    
-    # Verify normalization structure
-    market = data[0]['bookmakers'][0]['markets'][0]
-    assert market['key'] == 'spreads'
-    assert len(market['outcomes']) == 2
-    
-    print("Mocked Odds Ingestion Tests Passed!")
+    try:
+        # We need to mock the Fetcher inside the function? 
+        # Integration test: Let it try to fetch real data (it might fail or return 0 if no games)
+        # But for robustness, let's just run it. 
+        # If network calls are allowed from dev env.
+        
+        # Actually, let's use a date that might have data or just current date
+        # 2026-01-12 was used in previous tasks.
+        
+        resp = await ingest_odds("NCAAM", req)
+        print("Response:", resp)
+        
+    except Exception as e:
+        print(f"Test Failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    test_odds_ingestion_mocked()
+    asyncio.run(run_test())

@@ -20,94 +20,102 @@ class EventResolver:
     
     def resolve_event_id_for_leg(self, leg: Dict, sport: str, bet_date: str, bet_description: str = None) -> Optional[str]:
         """
-        Attempt to resolve a canonical event ID for a given leg.
-        
-        Args:
-           leg: dict with 'selection', 'leg_type', 'market_key'
-           sport: e.g. 'NFL', 'NCAAM'
-           bet_date: 'YYYY-MM-DD'
-           bet_description: (Optional) context from parent bet
-           
-        Returns:
-           event_id (uuid string) or None
+        Backward compatible method. Returns ID if exactly one high-confidence match found.
+        """
+        candidates = self.find_candidates(leg, sport, bet_date, bet_description)
+        if len(candidates) == 1:
+             return candidates[0]['event_id']
+        return None
+
+    def find_candidates(self, leg: Dict, sport: str, bet_date: str, bet_description: str = None) -> List[Dict]:
+        """
+        Find potential event matches with scores.
+        Returns: 
+           [ {'event_id': str, 'score': float, 'reason': str, 'selection_team_id': str} ]
         """
         selection = leg.get('selection', '')
-        # 1. Extract Potential Team Name
-        candidates = self._extract_names(selection)
+        extracted_names = self._extract_names(selection)
         
-        if not candidates and bet_description:
-            # Fallback: Extract from Description
-            # e.g. "Parlay (3 legs): UNC Wilmington vs Hampton ..."
-            # We can extract all potential teams from description?
-            # Or just rely on heuristics.
-            candidates = self._extract_names(bet_description)
+        if not extracted_names and bet_description:
+            extracted_names = self._extract_names(bet_description)
             
-        if not candidates:
-             return None
+        if not extracted_names:
+            return []
 
         # 2. Resolve Team Identity
-        team_id = None
-        for name in candidates:
-            # Try exact/alias match
-            # We map 'NCAAM' sport to 'NCAAM' league, 'NFL' to 'NFL'
-            tid = self.identity.get_team_by_name(name, sport) # Need to add this method to IdentityService or just use SQL
+        team_ids = []
+        for name in extracted_names:
+            tid = self.identity.get_team_by_name(name, sport)
             if tid:
-                team_id = tid
-                break
-        
-        if not team_id:
-            # Try simple SQL lookup on alias table directly if service doesn't have the method
-             with get_db_connection() as conn:
-                for name in candidates:
+                team_ids.append(tid)
+            else:
+                 with get_db_connection() as conn:
                     norm = name.lower().strip()
                     row = _exec(conn, "SELECT team_id FROM team_aliases WHERE alias = :a", {"a": norm}).fetchone()
                     if row:
-                        team_id = row[0]
-                        break
-        
-        if not team_id:
-            return None # Failed to identify team
+                        team_ids.append(row[0])
 
+        if not team_ids:
+            return []
+            
         # 3. Search Events
-        # Window: Bet Date +/- 1 day (handled in SQL)
-        # We search where home_team_id OR away_team_id matches
-        found_event_id = None
+        # Window: Bet Date +/- 1 day
+        start_date = None
+        try:
+            dt = datetime.datetime.strptime(bet_date, "%Y-%m-%d")
+            start_date = dt
+        except:
+             try:
+                 dt = datetime.datetime.fromisoformat(bet_date)
+                 start_date = dt
+             except:
+                 pass
+                 
+        if not start_date:
+            return [] # Can't search without date
+
+        start_window = start_date - datetime.timedelta(days=1)
+        end_window = start_date + datetime.timedelta(days=2)
+        
+        unique_matches = {} # event_id -> candidate
         
         with get_db_connection() as conn:
             query = """
             SELECT id, start_time, home_team_id, away_team_id, league 
             FROM events_v2
             WHERE league = :l
-              AND (home_team_id = :tid OR away_team_id = :tid)
+              AND (home_team_id = ANY(:tids) OR away_team_id = ANY(:tids))
               AND start_time >= :start AND start_time <= :end
             """
-            # Date window
-            try:
-                dt = datetime.datetime.strptime(bet_date, "%Y-%m-%d")
-            except:
-                # Try iso
-                dt = datetime.datetime.fromisoformat(bet_date)
+            # SQLite doesn't support ANY array syntax easily, need loop or IN clause.
+            # Helper to handle both (or just loop for now since team_ids is small)
             
-            start_window = dt - datetime.timedelta(days=1)
-            end_window = dt + datetime.timedelta(days=2) # +2 to be safe for late games
-            
-            rows = _exec(conn, query, {
-                "l": sport, 
-                "tid": team_id,
-                "start": start_window.isoformat(),
-                "end": end_window.isoformat()
-            }).fetchall()
-            
-            # 4. Ambiguity Check
-            if len(rows) == 1:
-                found_event_id = rows[0][0]
-            elif len(rows) > 1:
-                # Multiple games? (Doubleheader or dense schedule)
-                # Pick separate by closest time if we had exact leg time, but we usually just have bet date.
-                # Logic: Return None and log ambiguity
-                pass
-                
-        return found_event_id
+            # Simple loop for compatibility
+            for tid in team_ids:
+                 q = """
+                 SELECT id, start_time, home_team_id, away_team_id, league 
+                 FROM events_v2
+                 WHERE league = :l
+                   AND (home_team_id = :tid OR away_team_id = :tid)
+                   AND start_time >= :start AND start_time <= :end
+                 """
+                 rows = _exec(conn, q, {
+                    "l": sport, 
+                    "tid": tid,
+                    "start": start_window.isoformat(),
+                    "end": end_window.isoformat()
+                 }).fetchall()
+                 
+                 for r in rows:
+                     eid = r[0]
+                     unique_matches[eid] = {
+                         "event_id": eid,
+                         "score": 1.0, # Perfect match on team ID
+                         "reason": f"Matched team_id {tid}",
+                         "selection_team_id": tid
+                     }
+
+        return list(unique_matches.values())
 
     def _extract_names(self, text: str) -> List[str]:
         # Very basic extractor

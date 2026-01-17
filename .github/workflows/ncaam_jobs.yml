@@ -1,0 +1,27 @@
+
+name: NCAAM Frequent Jobs
+
+on:
+  schedule:
+    # Run every 10 minutes
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-jobs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ingest Odds
+        run: |
+          curl -X POST ${{ secrets.DEPLOYMENT_URL }}/api/jobs/ingest_odds \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          
+      - name: Ingest Results
+        run: |
+          curl -X POST ${{ secrets.DEPLOYMENT_URL }}/api/jobs/ingest_results \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          
+      - name: Run Settlement
+        run: |
+          curl -X POST ${{ secrets.DEPLOYMENT_URL }}/api/jobs/run_settlement \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

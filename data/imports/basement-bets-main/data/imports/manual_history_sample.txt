@@ -1,0 +1,53 @@
+Bet #	Date	Bookmaker	Bet Type	League	Home Team	Away Team	Bet Placed	Odds	Stake	Live Bet?	Win	Bonus Bet?		 At Risk 	 Normalized Result 	Odds Probability	 Potential Payout 	 Potential Gain 	 Bet Result 		Notes
+																			 Payout 	 Profit / Loss 	
+1	2/12/2023	DraftKings	Winner (ML)	NFL	Philadlephia Eagles	Kansas City Chiefs	Eagles ML	-120	$20.00	No	No	No		 $ 20.00 	-1.04	55%	 $ 36.67 	 $ 16.67 	 $ -   	 $ (20.00)	
+2	2/12/2023	DraftKings	3 Leg Parlay	NFL	Philadlephia Eagles	Kansas City Chiefs	See Below:	245	$20.00	No	No	No		 $ 20.00 	-0.55	29%	 $ 69.00 	 $ 49.00 	 $ -   	 $ (20.00)	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Eagles ML			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Eagles over 22.5			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Boston Scott over 10 Rush Yards			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+3	2/12/2023	DraftKings	Prop	NFL	Philadlephia Eagles	Kansas City Chiefs	Heads Coin Toss	100	$10.00	No	No	No		 $ 10.00 	-0.95	50%	 $ 20.00 	 $ 10.00 	 $ -   	 $ (10.00)	For Fun
+4	2/12/2023	DraftKings	Spread	NFL	Philadlephia Eagles	Kansas City Chiefs	Eagles -5.5	160	$10.00	No	No	No		 $ 10.00 	-0.73	38%	 $ 26.00 	 $ 16.00 	 $ -   	 $ (10.00)	
+5	2/12/2023	DraftKings	4+ Parlay	NFL	Philadlephia Eagles	Kansas City Chiefs	See Below:	1567	$20.00	No	No	No		 $ 20.00 	-0.11	6%	 $ 333.40 	 $ 313.40 	 $ -   	 $ (20.00)	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	AJ Brown 5+ Receptions			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Pacheco 10+ Receiving Yards			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Mahomes Under 29.5 Rushing			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Hurts over 199.5 Passing			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Mahomes over 249.5 Passing			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Eagles -1.5			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Eagles 2+ Sacks			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/12/2023	DraftKings	     Leg	NFL	Philadlephia Eagles	Kansas City Chiefs	Eagles over 17.5 points			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+6	2/12/2023	DraftKings	Prop	NFL	Philadlephia Eagles	Kansas City Chiefs	Boston Scott over 10 Rush Yards	150	$20.00	No	No	No		 $ 20.00 	-0.76	40%	 $ 50.00 	 $ 30.00 	 $ -   	 $ (20.00)	
+7	2/13/2023	DraftKings	3 Leg Parlay	NCAAM			See Below:	450	$20.00	No	Yes	No		 $ 20.00 	2.88	18%	 $ 110.00 	 $ 90.00 	 $ 110.00 	 $ 90.00 	Grambling BABY!
+	2/13/2023	DraftKings	     Leg	NCAAM	Baylor Bears	West Virginia	Baylor ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/13/2023	DraftKings	     Leg	NCAAM	North Carolina	Miami Hurricanes	Miami +5.5			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/13/2023	DraftKings	     Leg	NCAAM	Grambling	Prarie View	Grambling ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+8	2/14/2023	DraftKings	2 Leg Parlay	NCAAM			See Below:	250	$20.00	No	Yes	No		 $ 20.00 	1.83	29%	 $ 70.00 	 $ 50.00 	 $ 70.00 	 $ 50.00 	
+	2/14/2023	DraftKings	     Leg	NCAAM	Providence	Creighton	Providence ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/14/2023	DraftKings	     Leg	NCAAM	Oklahoma St	Kansas	Kansas ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+9	2/14/2023	DraftKings	3 Leg Parlay	NCAAM			See Below:	150	$20.00	No	Yes	No		 $ 20.00 	1.31	40%	 $ 50.00 	 $ 30.00 	 $ 50.00 	 $ 30.00 	
+	2/14/2023	DraftKings	     Leg	NCAAM	Seton Hall	Georgetown	Seton Hall ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/14/2023	DraftKings	     Leg	NCAAM	Villanova	Butler	Villanova ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/14/2023	DraftKings	     Leg	NCAAM	Depaul	St. Johns	St. Johns ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+10	2/14/2023	DraftKings	Spread	NCAAM	Rutgers	Nebraska	Rutgers +6.5	-114	$10.00	Yes	No	No		 $ 10.00 	-1.02	53%	 $ 18.77 	 $ 8.77 	 $ -   	 $ (10.00)	Stupid Bet based on Rutgers playing at home
+11	2/15/2023	DraftKings	Winner (ML)	Champions League	Club Brugge	Benfica 	Benfica ML	-120	$40.00	No	Yes	No		 $ 40.00 	0.96	55%	 $ 73.33 	 $ 33.33 	 $ 73.33 	 $ 33.33 	
+12	2/15/2023	DraftKings	Over / Under	NCAAM	Northwestern	Indiana	Totlal Over 134	-110	$20.00	No	No	No		 $ 20.00 	-1.00	52%	 $ 38.18 	 $ 18.18 	 $ -   	 $ (20.00)	
+13	2/15/2023	DraftKings	Winner (ML)	NCAAM	Marquette	Xavier	Xavier ML	245	$10.00	No	No	No		 $ 10.00 	-0.55	29%	 $ 34.50 	 $ 24.50 	 $ -   	 $ (10.00)	
+14	2/15/2023	DraftKings	2 Leg Parlay	NCAAM			See Below:	129	$20.00	No	Yes	No		 $ 20.00 	1.20	44%	 $ 45.80 	 $ 25.80 	 $ 45.80 	 $ 25.80 	
+	2/15/2023	DraftKings	     Leg	NCAAM	Marquette	Xavier	Xavier +7			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/15/2023	DraftKings	     Leg	NCAAM	Clemson	Florida State	Clemson ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+15	2/16/2023	DraftKings	Winner (ML)	NCAAM	St Francis (PA)	St Francis (Brooklyn)	St Francis Brooklyn ML	-115	$20.00	No	No	No		 $ 20.00 	-1.02	53%	 $ 37.39 	 $ 17.39 	 $ -   	 $ (20.00)	
+16	2/16/2023	DraftKings	Spread	NCAAM	Maryland	Purdue	Purdue -1	-110	$40.00	No	No	No		 $ 40.00 	-1.00	52%	 $ 76.36 	 $ 36.36 	 $ -   	 $ (40.00)	
+17	2/16/2023	DraftKings	3 Leg Parlay	NCAAM			See Below:	251	$10.00	No	No	No		 $ 10.00 	-0.54	28%	 $ 35.10 	 $ 25.10 	 $ -   	 $ (10.00)	
+	2/16/2023	DraftKings	     Leg	NCAAM	Iowa	Ohio State	Iowa -1.5			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/16/2023	DraftKings	     Leg	NCAAM	AZ State	Colorado	Arizona St ML			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/16/2023	DraftKings	     Leg	NCAAM	Middle Tennessee	FAU	FAU ML			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+18	2/16/2023	DraftKings	3 Leg Parlay	NCAAM			See Below:	134	$20.00	No	No	No		 $ 20.00 	-0.82	43%	 $ 46.80 	 $ 26.80 	 $ -   	 $ (20.00)	
+	2/16/2023	DraftKings	     Leg	NCAAM	Iowa	Ohio State	Iowa ML			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/16/2023	DraftKings	     Leg	NCAAM	AZ State	Colorado	AZ State ML			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/16/2023	DraftKings	     Leg	NCAAM	Memphis	UCF	Memphis ML			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+19	2/17/2023	DraftKings	4+ Parlay	NCAAM			See Below:	-128	$20.00	No	No	No		 $ 20.00 	-1.07	56%	 $ 35.63 	 $ 15.63 	 $ -   	 $ (20.00)	
+	2/17/2023	DraftKings	     Leg	NCAAM	Kent State	Eastern Michigan	Kent State ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/17/2023	DraftKings	     Leg	NCAAM	Cornell	Dartmouth	Cornell ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/17/2023	DraftKings	     Leg	NCAAM	Iona	Manhattan	Iona ML			No	Yes	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+	2/17/2023	DraftKings	     Leg	NCAAM	Rider	Canisius	Rider ML			No	No	No				0%	 $ -   	 $ -   	 $ -   	 $ -   	
+20	2/18/2023	DraftKings	Winner (ML)	Premier League	Crystal Palace	Brentford	Crystal Palace ML	360	$10.00	No	No	No		 $ 10.00 	-0.42	22%	 $ 46.00 	 $ 36.00 	 $ -   	 $ (10.00)	

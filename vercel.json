@@ -8,5 +8,11 @@
             "source": "/((?!api/|assets/|favicon.ico).*)",
             "destination": "/index.html"
         }
+    ],
+    "crons": [
+        {
+            "path": "/api/jobs/policy_refresh",
+            "schedule": "0 8 * * *"
+        }
     ]
 }

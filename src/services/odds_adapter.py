@@ -66,8 +66,8 @@ class OddsAdapter:
             "book": book,
             "market_type": mkt,
             "side": side,
-            "line": float(line),
-            "price": float(price),
+            "line": round(float(line), 1),
+            "price": round(float(price), 3),
             "captured_at": cat,
             "captured_bucket": cub
         }
