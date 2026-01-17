@@ -395,10 +395,15 @@ const Research = () => {
                                                     <td className="py-4 px-6 font-semibold text-slate-200 text-sm">{edge.game}</td>
                                                     <td className="py-4 px-6">
                                                         <div className="text-white font-bold flex items-center">
-                                                            {edge.bet_on}
+                                                            {edge.market === 'Total' ? edge.bet_on : edge.bet_on}
                                                             {isEdge && <CheckCircle size={12} className="ml-2 text-green-500" />}
                                                         </div>
                                                         <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-0.5">{edge.market}</div>
+                                                        {edge.audit_reason && (
+                                                            <div className="text-[10px] text-slate-400 mt-1 italic leading-tight">
+                                                                {edge.audit_reason}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="py-4 px-6">
                                                         <div className="flex flex-col">
@@ -406,8 +411,8 @@ const Research = () => {
                                                             <div className="text-xs text-slate-500">Fair: <span className="font-mono">{edge.fair_line}</span></div>
                                                         </div>
                                                     </td>
-                                                    <td className={`py-4 px-6 ${getEdgeColor(edge.edge, edge.sport)}`}>
-                                                        <div className="flex flex-col items-start">
+                                                    <td className={`py-4 px-6 w-32 ${getEdgeColor(edge.edge, edge.sport)}`}>
+                                                        <div className="flex flex-col items-start whitespace-nowrap">
                                                             <span className="text-lg font-bold">
                                                                 {edge.sport === 'EPL' ? `${edge.edge}%` : `${edge.edge} pts`}
                                                             </span>
