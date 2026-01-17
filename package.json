@@ -1,0 +1,14 @@
+{
+    "name": "bet-tracker-monorepo",
+    "private": true,
+    "workspaces": [
+        "client"
+    ],
+    "scripts": {
+        "build": "cd client && npm install && npm rebuild && npm run build",
+        "vercel-build": "cd client && npm install && npm rebuild && npm run build"
+    },
+    "engines": {
+        "node": ">=18"
+    }
+}

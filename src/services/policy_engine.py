@@ -1,112 +1,103 @@
 
 from typing import List, Dict
-import datetime
-from src.database import get_db_connection, _exec
+from datetime import datetime, timedelta
+from src.database import (
+    get_db_connection, _exec, 
+    aggregate_daily_performance, 
+    get_market_performance_window,
+    get_market_allowlist,
+    update_market_status
+)
 
 class PolicyEngine:
     """
     The Brain of the Operation.
-    curates weights ($w_M$, $w_T$), expands/contracts sigma ($\sigma$), 
+    Curates weights ($w_M$, $w_T$), expands/contracts sigma ($\sigma$), 
     and manages the market allowlist based on realized performance.
     """
 
     def refresh_policies(self):
         """
         Daily Cron Job:
-        1. Calculate Rolling Metrics (7d, 30d) for each market type.
-        2. Adjust Weights (Hill Climbing / Pid Controller style).
+        1. Aggregate yesterday's performance.
+        2. Calculate Rolling Metrics (30d).
         3. Update Allowlist Status (Shadow -> Available).
+        4. Adjust Weights (Hill Climbing / Pid Controller style).
         """
         print("[Policy] Starting Daily Refresh...")
-        self._curate_ncaam_weights()
+        
+        # 1. Aggregate Yesterday
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        aggregate_daily_performance(yesterday)
+        
+        # 2. Curate
         self._curate_allowlist()
+        self._curate_ncaam_weights()
+        
         print("[Policy] Refresh Complete.")
 
     def _curate_ncaam_weights(self):
         """
         Adjust weights based on rolling CLV.
         """
-        # 1. Get current config
-        # For MVP we assume single global config for NCAAM or per-market? 
-        # User said "Each day, by market type".
-        
         market_types = ['Spread', 'Total']
         
         for mkt in market_types:
-            stats = self._fetch_performance(league="NCAAM", market_type=mkt, days=30)
+            stats = get_market_performance_window(league="basketball_ncaab", market_type=mkt, days=30)
             if not stats: continue
             
-            clv_mean = stats.get('clv_mean', 0.0)
+            clv_mean = stats.get('clv', 0.0)
             n = stats.get('sample_size', 0)
             
             # Simple Controller Logic
-            # If N > 50 and CLV > 0.5% => Boost
-            # If N > 50 and CLV < -0.5% => Cut
+            # If N > 50 and CLV > 0.5% => Trust Model More (Boost Weight?) OR Trust Market Less?
+            # Actually, CLV = (Closing - Bet). +/- means Model beat Closing Line?
+            # If avg_clv > 0, Model is finding value. Maintain or Boost Model Weight.
+            # If avg_clv < 0, Model is losing to market. Decrease Model Weight ($w_T$).
             
-            current_w = self._get_current_weight("NCAAM", mkt)
+            # Current Weight (Mock)
+            current_w = 0.5 # Default balanced
             new_w = current_w
             
             if n > 50:
                 if clv_mean > 0.5:
-                    new_w = min(0.50, current_w + 0.05)
-                    print(f"[Policy] {mkt}: Promoting Weight {current_w:.2f} -> {new_w:.2f} (CLV: {clv_mean:.2f}%, N={n})")
+                    # Model beating market. Trust Torvik/Model.
+                    new_w = min(0.80, current_w + 0.05)
+                    print(f"[Policy] {mkt}: Boosting Model Weight {current_w:.2f} -> {new_w:.2f} (CLV: {clv_mean:.2f}%, N={n})")
                 elif clv_mean < -0.5:
-                    new_w = max(0.00, current_w - 0.05)
-                    print(f"[Policy] {mkt}: Demoting Weight {current_w:.2f} -> {new_w:.2f} (CLV: {clv_mean:.2f}%, N={n})")
+                    # Model losing. Trust Market.
+                    new_w = max(0.20, current_w - 0.05)
+                    print(f"[Policy] {mkt}: Reducing Model Weight {current_w:.2f} -> {new_w:.2f} (CLV: {clv_mean:.2f}%, N={n})")
             
-            if new_w != current_w:
-                self._update_weight("NCAAM", mkt, new_w)
-
-    def _get_current_weight(self, league, market_type):
-        # Fetch from model_registry
-        # Placeholder mock
-        return 0.20
-        
-    def _update_weight(self, league, market_type, new_weight):
-        # Update model_registry
-        pass
-
-    def _fetch_performance(self, league: str, market_type: str, days: int) -> Dict:
-        # Query market_performance_daily
-        query = """
-        SELECT AVG(clv) as clv_mean, SUM(sample_size) as total_n
-        FROM market_performance_daily
-        WHERE league = :league AND market_type = :market_type
-        AND date >= date('now', :days)
-        """
-        # Placeholder return for dry run
-        return {'clv_mean': 1.2, 'sample_size': 60} # Fake success
- 
+            # TODO: Write new weight to model_registry
+            # For now, just logging decision.
 
     def _curate_allowlist(self):
         """
         Move markets between Shadow and Active based on performance.
         """
         # Tier 1: Spread, Total
-        # Tier 2: 1H Spread/Total (Shadow until Tier 1 proven)
-        
         market_types = ['Spread', 'Total']
+        current_status_map = get_market_allowlist()
         
         for mkt in market_types:
-            stats = self._fetch_performance(league="NCAAM", market_type=mkt, days=30)
+            stats = get_market_performance_window(league="basketball_ncaab", market_type=mkt, days=30)
             if not stats: continue
             
-            # Promotion Logic: N > 100, ROI > 2%, CLV > 0.5%
-            # Demotion Logic: ROI < -5% (Stop Loss)
-            
-            roi = stats.get('roi', 0.0) # Need to fetch ROI too
+            roi = stats.get('roi', 0.0)
             n = stats.get('sample_size', 0)
             
-            if n > 100:
-                if roi > 0.02:
-                    print(f"[Policy] {mkt}: Promoting to ENABLED (ROI: {roi:.1%})")
-                    # Update DB to ENABLED
-                elif roi < -0.05:
-                     print(f"[Policy] {mkt}: Demoting to SHADOW (ROI: {roi:.1%})")
-                     # Update DB to SHADOW
-
-    def _fetch_performance_window(self, league: str) -> List[Dict]:
-        return []
+            # Current Status
+            key = ("basketball_ncaab", mkt)
+            status = current_status_map.get(key, 'SHADOW')
+            
+            # Promotion Logic: N > 20, ROI > 2%
+            if status == 'SHADOW' and n > 20 and roi > 0.02:
+                update_market_status("basketball_ncaab", mkt, 'ENABLED', f"Promoted: ROI {roi:.1%} over {n} bets")
+                
+            # Demotion Logic: ROI < -5% (Stop Loss)
+            elif status == 'ENABLED' and n > 20 and roi < -0.05:
+                update_market_status("basketball_ncaab", mkt, 'SHADOW', f"Demoted: ROI {roi:.1%} over {n} bets")
 
 if __name__ == "__main__":
     engine = PolicyEngine()

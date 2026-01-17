@@ -2,8 +2,6 @@ fastapi
 uvicorn
 psycopg2-binary
 requests
-pandas
-numpy
 python-dotenv
 beautifulsoup4
 lxml

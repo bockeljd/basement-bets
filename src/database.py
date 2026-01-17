@@ -3,6 +3,7 @@ import os
 import psycopg2
 import psycopg2.extras
 from contextlib import contextmanager
+from datetime import datetime
 from urllib.parse import urlparse
 
 from src.config import settings
@@ -185,7 +186,181 @@ def init_bt_team_metrics_db():
             with conn.cursor() as cur:
                 cur.execute(schema)
         conn.commit()
-    print("Torvik Team Metrics table initialized.")
+# --- Curation / Policy Helpers ---
+
+def aggregate_daily_performance(target_date: str):
+    """
+    Calculates aggregate stats (ROI, CLV, Hit Rate) for a given date
+    from the 'bets' table and populates 'market_performance_daily'.
+    """
+    print(f"Aggregating performance for {target_date}...")
+    
+    # 1. Clear existing entry for this date (Idempotency)
+    with get_db_connection() as conn:
+        _exec(conn, "DELETE FROM market_performance_daily WHERE date = :date", {"date": target_date})
+        conn.commit()
+
+    # 2. Aggregate from Bets (Real Skin in the Game)
+    # Group by sport (League) and bet_type (Market Type)
+    query = """
+    SELECT 
+        sport as league,
+        bet_type as market_type,
+        SUM(wager) as total_wager,
+        SUM(profit) as total_profit,
+        COUNT(*) as sample_size,
+        SUM(CASE WHEN status = 'Won' THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN status = 'Lost' THEN 1 ELSE 0 END) as losses,
+        SUM(CASE WHEN status = 'Push' THEN 1 ELSE 0 END) as pushes,
+        -- Approximate CLV: (Closing Prob - Bet Prob)
+        -- We'd need to convert odds to prob. For now, placeholder or use 0.
+        0.0 as avg_clv 
+    FROM bets
+    WHERE date = :date
+    AND status IN ('Won', 'Lost', 'Push')
+    GROUP BY sport, bet_type
+    """
+    
+    with get_db_connection() as conn:
+        rows = _exec(conn, query, {"date": target_date}).fetchall()
+        
+        for row in rows:
+            league = row['league']
+            mkt = row['market_type']
+            vol = row['total_wager']
+            profit = row['total_profit']
+            n = row['sample_size']
+            
+            roi = profit / vol if vol > 0 else 0.0
+            # Hit Rate (ignoring pushes for den? or including?)
+            # Standard: Wins / (Wins + Losses)
+            decisive = row['wins'] + row['losses']
+            hit_rate = row['wins'] / decisive if decisive > 0 else 0.0
+            clv = 0.0 # TODO: Implement Odds->Prob conversion for CLV
+            
+            # Insert
+            ins_q = """
+            INSERT INTO market_performance_daily 
+            (date, league, market_type, roi, clv, hit_rate, sample_size)
+            VALUES (:date, :league, :mkt, :roi, :clv, :hr, :n)
+            """
+            _exec(conn, ins_q, {
+                "date": target_date,
+                "league": league,
+                "mkt": mkt,
+                "roi": roi,
+                "clv": clv,
+                "hr": hit_rate,
+                "n": n
+            })
+        conn.commit()
+    print(f"Aggregation complete for {target_date}.")
+
+def get_market_performance_window(league: str, market_type: str, days: int = 30) -> dict:
+    """
+    Fetch rolling performance stats.
+    """
+    query = """
+    SELECT 
+        SUM(roi * sample_size) / SUM(sample_size) as weighted_roi, -- approx
+        AVG(clv) as avg_clv,
+        SUM(sample_size) as total_n
+    FROM market_performance_daily
+    WHERE league = :league AND market_type = :mkt
+    AND date >= date('now', :modifier)
+    """
+    # SQLite modifier format: '-30 days'
+    mod = f"-{days} days"
+    
+    # Postgres uses interval.
+    # We used date('now', ...) which is SQLite. 
+    # For compatibility we might need separate logic, but let's stick to existing pattern or generic SQL.
+    # Generic: date >= CURRENT_DATE - INTERVAL '30 days' (PG) vs date('now', '-30 days') (SQLite).
+    
+    # Let's use Python date math to be safe across DBs.
+    from datetime import datetime, timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    
+    q_safe = """
+    SELECT 
+        SUM(profit) as total_profit,
+        SUM(wager) as total_wager,
+        AVG(clv) as avg_clv, -- average of daily averages (imperfect but okay)
+        SUM(sample_size) as total_n
+    FROM market_performance_daily
+    WHERE league = :league AND market_type = :mkt
+    AND date >= :cutoff
+    """
+    # Wait, market_performance_daily has ROI, not profit/wager? 
+    # I didn't store profit/wager in market_performance_daily above. 
+    # I stored ROI. 
+    # To aggregate ROIs efficiently, I need weighted avg.
+    # sum(roi * n) / sum(n).
+    
+    q_weighted = """
+    SELECT 
+        SUM(roi * sample_size) as total_roi_weight, 
+        SUM(sample_size) as total_n,
+        AVG(clv) as avg_clv
+    FROM market_performance_daily
+    WHERE league = :league AND market_type = :mkt
+    AND date >= :cutoff
+    """
+    
+    with get_db_connection() as conn:
+        row = _exec(conn, q_weighted, {"league": league, "mkt": market_type, "cutoff": cutoff}).fetchone()
+        if row and row['total_n'] and row['total_n'] > 0:
+            return {
+                "roi": row['total_roi_weight'] / row['total_n'],
+                "clv": row['avg_clv'],
+                "sample_size": row['total_n']
+            }
+        return None
+
+def get_market_allowlist() -> dict:
+    """
+    Returns dict: {(league, market_type): status}
+    """
+    with get_db_connection() as conn:
+        rows = _exec(conn, "SELECT league, market_type, status FROM market_allowlist").fetchall()
+        return {(r['league'], r['market_type']): r['status'] for r in rows}
+
+def update_market_status(league: str, market_type: str, status: str, reason: str):
+    """
+    Update Allowlist Status.
+    """
+    print(f"[DB] Updating {league}/{market_type} -> {status} ({reason})")
+    q = """
+    INSERT INTO market_allowlist (league, market_type, status, reason, updated_at)
+    VALUES (:l, :m, :s, :r, CURRENT_TIMESTAMP)
+    ON CONFLICT(league, market_type) DO UPDATE SET
+        status = excluded.status,
+        reason = excluded.reason,
+        updated_at = CURRENT_TIMESTAMP
+    """
+    with get_db_connection() as conn:
+        _exec(conn, q, {"l": league, "m": market_type, "s": status, "r": reason})
+        conn.commit()
+
+# --- End Curation Helpers ---
+
+def get_team_efficiency_by_name(team_name: str, date: str = None) -> dict:
+    """
+    Fetch raw efficiency metrics for a team by name.
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+        
+    query = """
+    SELECT * FROM bt_team_metrics_daily 
+    WHERE team_text = :team_text AND date = :date
+    """
+    with get_db_connection() as conn:
+        cursor = _exec(conn, query, {"team_text": team_name, "date": date})
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    return None
 
 def init_smart_curation_db():
     db_type = get_db_type()
@@ -1650,6 +1825,20 @@ def init_policy_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
+
+    # 4. market_performance_daily
+    schema_perf = """
+    CREATE TABLE IF NOT EXISTS market_performance_daily (
+        date TEXT NOT NULL,
+        league TEXT NOT NULL,
+        market_type TEXT NOT NULL,
+        roi REAL DEFAULT 0.0,
+        clv REAL DEFAULT 0.0,
+        hit_rate REAL DEFAULT 0.0,
+        sample_size INTEGER DEFAULT 0,
+        PRIMARY KEY(date, league, market_type)
+    );
+    """
     
     if db_type == 'postgres':
         schema_market = schema_market.replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id SERIAL PRIMARY KEY")
@@ -1661,11 +1850,13 @@ def init_policy_db():
             conn.executescript(schema_market)
             conn.executescript(schema_model)
             conn.executescript(schema_audit)
+            conn.executescript(schema_perf)
         else:
             with conn.cursor() as cur:
                 cur.execute(schema_market)
                 cur.execute(schema_model)
                 cur.execute(schema_audit)
+                cur.execute(schema_perf)
         conn.commit()
     print("Policy Control Plane (Allowlist, Registry, Audit) initialized.")
     init_signal_db()
@@ -1811,14 +2002,97 @@ def init_odds_snapshots_db():
         CREATE INDEX IF NOT EXISTS idx_odds_event ON odds_snapshots(event_id);
         CREATE INDEX IF NOT EXISTS idx_odds_captured ON odds_snapshots(captured_at);
         """
+        
+    # Derived Features Table
+    schema_features = """
+    CREATE TABLE IF NOT EXISTS market_line_features (
+        game_id TEXT NOT NULL,
+        market_type TEXT NOT NULL, -- SPREAD, TOTAL
+        open_line REAL,
+        current_line REAL,
+        line_movement REAL DEFAULT 0.0,
+        volatility REAL DEFAULT 0.0,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(game_id, market_type)
+    );
+    """
+
     with get_db_connection() as conn:
         if db_type == 'sqlite':
             conn.executescript(schema)
+            conn.executescript(schema_features)
         else:
             with conn.cursor() as cur:
                 cur.execute(schema)
+                cur.execute(schema_features)
         conn.commit()
-    print("Odds Snapshots table initialized.")
+    print("Odds Snapshots & Market Features initialized.")
+
+def calc_market_features(game_id: str):
+    """
+    Computes Open vs Current line movement from odds_snapshots.
+    """
+    # 1. Get Snapshots
+    q = """
+    SELECT line, captured_at, market_type 
+    FROM odds_snapshots 
+    WHERE event_id = :gid 
+    ORDER BY captured_at ASC
+    """
+    with get_db_connection() as conn:
+        rows = _exec(conn, q, {"gid": game_id}).fetchall()
+        
+    if not rows: return
+    
+    # Group by Market Type
+    by_type = {}
+    for r in rows:
+        mt = r['market_type']
+        if mt not in by_type: by_type[mt] = []
+        by_type[mt].append(r)
+        
+    # Calculate Features
+    for mt, data in by_type.items():
+        if not data: continue
+        
+        # Open = First chronologically
+        open_val = data[0]['line']
+        # Current = Last chronologically
+        curr_val = data[-1]['line']
+        
+        movement = curr_val - open_val
+        
+        # Volatility? (simple stddev placeholder)
+        # If we had list of lines: [l for r in data].std()
+        
+        # Upsert
+        uq = """
+        INSERT INTO market_line_features (game_id, market_type, open_line, current_line, line_movement)
+        VALUES (:gid, :mt, :op, :cur, :mov)
+        ON CONFLICT(game_id, market_type) DO UPDATE SET
+            open_line = excluded.open_line,
+            current_line = excluded.current_line,
+            line_movement = excluded.line_movement,
+            last_updated = CURRENT_TIMESTAMP
+        """
+        with get_db_connection() as conn:
+            _exec(conn, uq, {
+                "gid": game_id,
+                "mt": mt,
+                "op": open_val,
+                "cur": curr_val,
+                "mov": movement
+            })
+            conn.commit()
+
+def get_market_features(game_id: str) -> dict:
+    """
+    Returns dict: {market_type: {open, current, movement}}
+    """
+    q = "SELECT * FROM market_line_features WHERE game_id = :gid"
+    with get_db_connection() as conn:
+        rows = _exec(conn, q, {"gid": game_id}).fetchall()
+        return {r['market_type']: dict(r) for r in rows}
 
 def store_odds_snapshots(snapshots: list):
     """

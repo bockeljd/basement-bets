@@ -13,6 +13,7 @@ class Config:
         self.SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
         self.BASEMENT_PASSWORD = os.environ.get("BASEMENT_PASSWORD")
+        self.CRON_SECRET = os.environ.get("CRON_SECRET")
         
         # Validation
         self._validate()

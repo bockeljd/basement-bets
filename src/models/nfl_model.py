@@ -1,7 +1,11 @@
-import pandas as pd
-import numpy as np
+import math
 from typing import Dict, Any, List
 from src.models.base_model import BaseModel
+
+# Pure Python Norm CDF (Error Function)
+def norm_cdf(x, mu=0.0, sigma=1.0):
+    val = (x - mu) / sigma
+    return (1.0 + math.erf(val / math.sqrt(2.0))) / 2.0
 
 class NFLModel(BaseModel):
     def __init__(self):
@@ -10,42 +14,42 @@ class NFLModel(BaseModel):
 
     def fetch_data(self):
         """
-        In a real scenario, this would fetch from a database or API.
-        For MVP, we use a simple static map of current power ratings (0-100 scale).
+        Loads 2026 Predictive Power Ratings (Scraped Jan 17, 2026).
+        Source: TeamRankings (Points Above Average).
         """
         self.team_ratings = {
-            "Kansas City Chiefs": 92.5,
-            "San Francisco 49ers": 91.0,
-            "Baltimore Ravens": 89.5,
-            "Buffalo Bills": 88.0,
-            "Detroit Lions": 87.5,
-            "Dallas Cowboys": 86.0,
-            "Philadelphia Eagles": 85.5,
-            "Miami Dolphins": 84.0,
-            "Houston Texans": 83.5,
-            "Cleveland Browns": 82.0,
-            "Los Angeles Rams": 81.5,
-            "Green Bay Packers": 81.0,
-            "Tampa Bay Buccaneers": 79.5,
-            "Jacksonville Jaguars": 78.0,
-            "Seattle Seahawks": 77.5,
-            "Cincinnati Bengals": 77.0,
-            "Pittsburgh Steelers": 76.5,
-            "Indianapolis Colts": 75.0,
-            "Minnesota Vikings": 74.5,
-            "Chicago Bears": 73.0,
-            "Atlanta Falcons": 72.5,
-            "New Orleans Saints": 72.0,
-            "Denver Broncos": 71.5,
-            "Las Vegas Raiders": 70.0,
-            "New York Jets": 69.5,
-            "Tennessee Titans": 68.0,
-            "New York Giants": 67.5,
-            "Washington Commanders": 66.0,
-            "Arizona Cardinals": 65.5,
-            "New England Patriots": 64.0,
-            "Carolina Panthers": 62.0,
-            "Los Angeles Chargers": 70.0
+            "Seattle Seahawks": 8.6,
+            "Los Angeles Rams": 8.6,
+            "Houston Texans": 6.8,
+            "Buffalo Bills": 5.6,
+            "Jacksonville Jaguars": 5.6,
+            "New England Patriots": 4.7,
+            "Detroit Lions": 4.5,
+            "San Francisco 49ers": 4.2,
+            "Philadelphia Eagles": 3.7,
+            "Denver Broncos": 3.2,
+            "Baltimore Ravens": 2.8,
+            "Kansas City Chiefs": 2.8,
+            "Indianapolis Colts": 2.3,
+            "Green Bay Packers": 2.1,
+            "Minnesota Vikings": 1.2,
+            "Chicago Bears": 1.1,
+            "Los Angeles Chargers": 0.9,
+            "Pittsburgh Steelers": -0.1,
+            "Tampa Bay Buccaneers": -0.8,
+            "Atlanta Falcons": -2.7,
+            "Dallas Cowboys": -2.8,
+            "Cincinnati Bengals": -2.9,
+            "Washington Commanders": -3.5,
+            "New York Giants": -3.6,
+            "Carolina Panthers": -3.7,
+            "Arizona Cardinals": -4.4,
+            "Miami Dolphins": -5.0,
+            "New Orleans Saints": -5.8,
+            "Cleveland Browns": -6.2,
+            "Tennessee Titans": -8.3,
+            "Las Vegas Raiders": -8.6,
+            "New York Jets": -10.3
         }
 
     def predict(self, game_id: str, home_team: str, away_team: str, market_spread: float = 0) -> Dict[str, Any]:
@@ -56,18 +60,17 @@ class NFLModel(BaseModel):
         if not self.team_ratings:
             self.fetch_data()
 
-        h_rate = self.team_ratings.get(home_team, 75.0)
-        a_rate = self.team_ratings.get(away_team, 75.0)
+        h_rate = self.team_ratings.get(home_team, 0.0)
+        a_rate = self.team_ratings.get(away_team, 0.0)
         
         home_field = 1.8 
         raw_margin = (h_rate - a_rate) + home_field
         
         # Convert Margin to Spread Win Prob
         std_dev = 13.5
-        from scipy.stats import norm
         
         # Prob cover: Margin vs -Spread (since spread is usually -7.5 for favorite)
-        win_prob_cover = 1 - norm.cdf(-market_spread, loc=raw_margin, scale=std_dev)
+        win_prob_cover = 1.0 - norm_cdf(-market_spread, mu=raw_margin, sigma=std_dev)
         
         fair_spread = round(-raw_margin * 2) / 2
         

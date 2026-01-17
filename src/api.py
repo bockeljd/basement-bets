@@ -26,7 +26,14 @@ async def check_access_key(request: Request, call_next):
          return await call_next(request)
          
     if request.url.path.startswith("/api"):
-        # Get Key from Header
+        # 1. Check CRON Secret (Vercel Cron)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            if settings.CRON_SECRET and token == settings.CRON_SECRET:
+                 return await call_next(request)
+
+        # 2. Check Client Key
         client_key = request.headers.get(API_KEY_NAME)
         server_key = settings.BASEMENT_PASSWORD
         

@@ -5,8 +5,12 @@
             "destination": "/api/index.py"
         },
         {
+            "source": "/assets/(.*)",
+            "destination": "/client/dist/assets/$1"
+        },
+        {
             "source": "/((?!api/|assets/|favicon.ico).*)",
-            "destination": "/index.html"
+            "destination": "/client/dist/index.html"
         }
     ],
     "crons": [
@@ -14,5 +18,6 @@
             "path": "/api/jobs/policy_refresh",
             "schedule": "0 8 * * *"
         }
-    ]
+    ],
+    "buildCommand": "cd client && npm install && npm rebuild && npm run build"
 }

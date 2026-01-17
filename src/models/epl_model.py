@@ -1,8 +1,10 @@
-import pandas as pd
-import numpy as np
+import math
 from typing import Dict, Any, List
 from src.models.base_model import BaseModel
-from scipy.stats import poisson
+
+# Pure Python Poisson PMF
+def poisson_pmf(k: int, lam: float) -> float:
+    return (math.pow(lam, k) * math.exp(-lam)) / math.factorial(k)
 
 class EPLModel(BaseModel):
     def __init__(self):
@@ -45,27 +47,47 @@ class EPLModel(BaseModel):
         away_lambda = (a['att'] * h['def']) / self.league_avg_goals
         
         # Calculate probabilities for scores up to 5-5
-        probs = np.zeros((6, 6))
-        for i in range(6): # Home goals
-            for j in range(6): # Away goals
-                probs[i, j] = poisson.pmf(i, home_lambda) * poisson.pmf(j, away_lambda)
-                
-        prob_home_win = np.sum(np.tril(probs, -1).T) # Home goals > Away goals
-        prob_draw = np.sum(np.diag(probs))
-        prob_away_win = np.sum(np.triu(probs, 1).T)
+        # Pure Python Matrix Logic
+        prob_home_win = 0.0
+        prob_draw = 0.0
+        prob_away_win = 0.0
         
-        # Normalize to 1.0 (since we capped at 5 goals)
-        total_p = prob_home_win + prob_draw + prob_away_win
-        prob_home_win /= total_p
+        max_goals = 6
+        total_p = 0.0
+        
+        for i in range(max_goals): # Home goals
+            p_home_i = poisson_pmf(i, home_lambda)
+            for j in range(max_goals): # Away goals
+                p_away_j = poisson_pmf(j, away_lambda)
+                
+                joint_prob = p_home_i * p_away_j
+                total_p += joint_prob
+                
+                if i > j:
+                    prob_home_win += joint_prob
+                elif i == j:
+                    prob_draw += joint_prob
+                else:
+                    prob_away_win += joint_prob
+        
+        # Normalize (since we truncated infinite series at 5 goals)
+        if total_p > 0:
+            prob_home_win /= total_p
+            prob_draw /= total_p
+            prob_away_win /= total_p
+        
+        fair_odds_home = 1 / prob_home_win if prob_home_win > 0 else 999
         
         return {
             "game_id": game_id,
             "win_prob_home": prob_home_win,
-            "win_prob_draw": prob_draw / total_p,
-            "win_prob_away": prob_away_win / total_p,
-            "fair_odds_home": 1 / prob_home_win if prob_home_win > 0 else 999,
-            "model_version": "2024-01-14-epl-v1"
+            "win_prob_draw": prob_draw,
+            "win_prob_away": prob_away_win,
+            "fair_odds_home": fair_odds_home,
+            "model_version": "2024-01-14-epl-v1-py"
         }
+
+
 
     def find_edges(self):
         return []

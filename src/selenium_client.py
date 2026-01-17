@@ -1,6 +1,11 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    HAS_SELENIUM = True
+except ImportError:
+    HAS_SELENIUM = False
+    
 import time
 import os
 
@@ -11,6 +16,10 @@ class SeleniumDriverFactory:
     
     @staticmethod
     def create_driver(headless=True):
+        if not HAS_SELENIUM:
+            print("[SELENIUM] Selenium not installed. Skipping driver creation.")
+            return None
+            
         options = Options()
         if headless:
             options.add_argument("--headless=new")
@@ -25,10 +34,10 @@ class SeleniumDriverFactory:
         options.add_experimental_option('excludeSwitches', ['enable-logging'])
         
         # Try to find chromedriver in env or path
-        # Assuming chromedriver is in path for now as per previous successful selenium runs in this workspace
         try:
             driver = webdriver.Chrome(options=options)
             return driver
         except Exception as e:
             print(f"[SELENIUM] Failed to init driver: {e}")
             return None
+

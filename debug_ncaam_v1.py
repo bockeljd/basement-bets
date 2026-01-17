@@ -13,6 +13,8 @@ def test_v1_logic():
     model = NCAAMModel()
     
     # Mock Data
+    from datetime import datetime
+    model.last_loaded = datetime.now().strftime("%Y-%m-%d")
     model.team_stats = {
         "Duke": {"eff_off": 118.0, "eff_def": 94.0, "tempo": 67.0},
         "North Carolina": {"eff_off": 115.0, "eff_def": 96.0, "tempo": 70.0}
