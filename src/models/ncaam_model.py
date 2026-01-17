@@ -556,6 +556,24 @@ class NCAAMModel(BaseModel):
                     ensemble_adj['total_adj'] += season_adj['total_adj']
             except Exception as e:
                 print(f"[SEASON] Error: {e}")
+            
+            # 3. KenPom adjustments (5% weight)
+            try:
+                from src.services.kenpom_client import KenPomClient
+                kenpom_client = KenPomClient()
+                kenpom_adj = kenpom_client.calculate_kenpom_adjustment(home_team, away_team)
+                
+                if kenpom_adj['spread_adj'] != 0.0:
+                    snapshot.prediction.mu_final_margin += kenpom_adj['spread_adj']
+                    ensemble_adj['spread_adj'] += kenpom_adj['spread_adj']
+                    print(f"[KENPOM] {home_team} vs {away_team}: Spread adj {kenpom_adj['spread_adj']:+.1f} pts")
+                
+                if kenpom_adj['total_adj'] != 0.0:
+                    snapshot.prediction.mu_final_total += kenpom_adj['total_adj']
+                    ensemble_adj['total_adj'] += kenpom_adj['total_adj']
+            except Exception as e:
+                print(f"[KENPOM] Error: {e}")
+
 
 
             
