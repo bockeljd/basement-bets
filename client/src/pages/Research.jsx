@@ -334,7 +334,10 @@ const Research = () => {
                                                                 ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
                                                                 edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
                                                                     'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
-                                                            {edge.sport}
+                                                            {edge.sport === 'NCAAM' ? 'NCAA Basketball' :
+                                                                edge.sport === 'NFL' ? 'NFL' :
+                                                                    edge.sport === 'EPL' ? 'Premier League' :
+                                                                        edge.sport}
                                                         </span>
                                                     </td>
                                                     <td className="py-2 px-4 font-semibold text-slate-200 text-sm">{edge.game}</td>
