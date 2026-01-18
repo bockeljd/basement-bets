@@ -483,106 +483,109 @@ const Research = () => {
                     )}
 
                     {!loading && history.length > 0 && (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
-                                            <div className="flex items-center">Date <SortIcon column="created_at" /></div>
-                                        </th>
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
-                                            <div className="flex items-center">Sport <SortIcon column="sport" /></div>
-                                        </th>
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
-                                            <div className="flex items-center">Matchup <SortIcon column="matchup" /></div>
-                                        </th>
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
-                                            <div className="flex items-center">Pick <SortIcon column="bet_on" /></div>
-                                        </th>
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Lines</th>
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
-                                            <div className="flex items-center">Edge <SortIcon column="edge" /></div>
-                                        </th>
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
-                                            <div className="flex items-center">Result <SortIcon column="result" /></div>
-                                        </th>
-                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Score</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {getSortedHistory().map((item, idx) => (
-                                        <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                            <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
-                                                <div className="font-bold text-slate-300">
-                                                    {new Date(item.date || item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
-                                                </div>
-                                                <div className="opacity-70">
-                                                    {new Date(item.date || item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                                </div>
-                                            </td>
-                                            <td className="py-2 px-4">
-                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
-                                                    ${item.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
-                                                        item.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                            'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
-                                                    {item.sport}
-                                                </span>
-                                            </td>
-                                            <td className="py-2 px-4 font-medium text-sm text-slate-200">{item.matchup}</td>
-                                            <td className="py-2 px-4 text-white font-bold">
-                                                {item.bet_on}
-                                            </td>
-                                            <td className="py-2 px-4 text-slate-400 text-xs">
-                                                <div className="flex flex-col">
-                                                    <span>Mkt: <span className="text-slate-300 font-mono">{item.market_line}</span></span>
-                                                    <span>Fair: <span className="text-slate-500 font-mono">{item.fair_line}</span></span>
-                                                </div>
-                                            </td>
-                                            <td className={`py-2 px-4 font-bold ${getEdgeColor(item.edge, item.sport)}`}>
-                                                {item.edge}{item.sport === 'EPL' ? '%' : ' pts'}
-                                            </td>
-                                            <td className="py-2 px-4 text-right sm:text-left">
-                                                <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
-                                                    ${item.result === 'Win' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
-                                                        item.result === 'Loss' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
-                                                            item.result === 'Push' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
-                                                                'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
-                                                    {item.result || 'Pending'}
-                                                </span>
-                                            </td>
-                                            <td className="py-2 px-4 text-slate-300 font-mono text-xs">
-                                                {item.home_score !== null && item.away_score !== null ? (
-                                                    <div className="flex flex-col">
-                                                        <span className="text-white font-bold">{item.home_score}-{item.away_score}</span>
-                                                        <span className="text-[10px] text-slate-500">T: {item.home_score + item.away_score}</span>
-                                                    </div>
-                                                ) : '-'}
-                                            </td>
+                        <>
+                            <ModelPerformanceAnalytics history={history} />
+
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
+                                                <div className="flex items-center">Date <SortIcon column="created_at" /></div>
+                                            </th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
+                                                <div className="flex items-center">Sport <SortIcon column="sport" /></div>
+                                            </th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
+                                                <div className="flex items-center">Matchup <SortIcon column="matchup" /></div>
+                                            </th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
+                                                <div className="flex items-center">Pick <SortIcon column="bet_on" /></div>
+                                            </th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Lines</th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
+                                                <div className="flex items-center">Edge <SortIcon column="edge" /></div>
+                                            </th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
+                                                <div className="flex items-center">Result <SortIcon column="result" /></div>
+                                            </th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Score</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        {getSortedHistory().map((item, idx) => (
+                                            <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                                <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
+                                                    <div className="font-bold text-slate-300">
+                                                        {new Date(item.date || item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
+                                                    </div>
+                                                    <div className="opacity-70">
+                                                        {new Date(item.date || item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                    </div>
+                                                </td>
+                                                <td className="py-2 px-4">
+                                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
+                                                    ${item.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
+                                                            item.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
+                                                                'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
+                                                        {item.sport}
+                                                    </span>
+                                                </td>
+                                                <td className="py-2 px-4 font-medium text-sm text-slate-200">{item.matchup}</td>
+                                                <td className="py-2 px-4 text-white font-bold">
+                                                    {item.bet_on}
+                                                </td>
+                                                <td className="py-2 px-4 text-slate-400 text-xs">
+                                                    <div className="flex flex-col">
+                                                        <span>Mkt: <span className="text-slate-300 font-mono">{item.market_line}</span></span>
+                                                        <span>Fair: <span className="text-slate-500 font-mono">{item.fair_line}</span></span>
+                                                    </div>
+                                                </td>
+                                                <td className={`py-2 px-4 font-bold ${getEdgeColor(item.edge, item.sport)}`}>
+                                                    {item.edge}{item.sport === 'EPL' ? '%' : ' pts'}
+                                                </td>
+                                                <td className="py-2 px-4 text-right sm:text-left">
+                                                    <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
+                                                    ${item.result === 'Win' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
+                                                            item.result === 'Loss' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
+                                                                item.result === 'Push' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
+                                                                    'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
+                                                        {item.result || 'Pending'}
+                                                    </span>
+                                                </td>
+                                                <td className="py-2 px-4 text-slate-300 font-mono text-xs">
+                                                    {item.home_score !== null && item.away_score !== null ? (
+                                                        <div className="flex flex-col">
+                                                            <span className="text-white font-bold">{item.home_score}-{item.away_score}</span>
+                                                            <span className="text-[10px] text-slate-500">T: {item.home_score + item.away_score}</span>
+                                                        </div>
+                                                    ) : '-'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                     )}
-                </div>
+                        </div>
             )}
 
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
-                    <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges &gt;1.5pts.</p>
+                    <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                            <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
+                            <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges &gt;1.5pts.</p>
+                        </div>
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                            <h3 className="font-bold text-orange-400 mb-2">NCAAM Model</h3>
+                            <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals &gt;4pt edge.</p>
+                        </div>
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                            <h3 className="font-bold text-purple-400 mb-2">EPL Model</h3>
+                            <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with &gt;5% Expected Value.</p>
+                        </div>
+                    </div>
                 </div>
-                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 className="font-bold text-orange-400 mb-2">NCAAM Model</h3>
-                    <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals &gt;4pt edge.</p>
-                </div>
-                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 className="font-bold text-purple-400 mb-2">EPL Model</h3>
-                    <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with &gt;5% Expected Value.</p>
-                </div>
-            </div>
-        </div>
-    );
+            );
 };
 
-export default Research;
+            export default Research;
