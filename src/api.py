@@ -113,6 +113,13 @@ _analytics_engines = {}
 _analytics_refresh_times = {}
 ANALYTICS_TTL = timedelta(seconds=60) # Cache for 60 seconds
 
+# --- Research Cache ---
+_research_cache = {
+    "data": None,
+    "last_updated": None
+}
+RESEARCH_TTL = timedelta(minutes=5)
+
 def get_analytics_engine(user_id=None):
     global _analytics_engines, _analytics_refresh_times
     
@@ -374,10 +381,22 @@ async def get_history():
     return fetch_model_history()
 
 @app.get("/api/research")
-async def get_research_edges(user: dict = Depends(get_current_user)):
+async def get_research_edges(refresh: bool = False, user: dict = Depends(get_current_user)):
     """
     Runs all predictive models (NFL, NCAAM, EPL) and returns actionable edges.
+    Cached for 5 minutes unless refresh=True.
     """
+    global _research_cache
+    
+    # Check Cache
+    now = datetime.now()
+    if not refresh and _research_cache["data"] and _research_cache["last_updated"]:
+        if now - _research_cache["last_updated"] < RESEARCH_TTL:
+            print(f"[API] Serving Cached Research Data (Age: {(now - _research_cache['last_updated']).seconds}s)")
+            return _research_cache["data"]
+            
+    print(f"[API] Running Models (Refresh={refresh})...")
+            
     edges = []
     
     from src.models.nfl_model import NFLModel
@@ -483,6 +502,12 @@ async def get_research_edges(user: dict = Depends(get_current_user)):
             except Exception as e:
                 print(f"[API] Failed to auto-track edge: {e}")
 
+    return edges
+
+    # Update Cache
+    _research_cache["data"] = edges
+    _research_cache["last_updated"] = datetime.now()
+    
     return edges
 
 @app.get("/api/settlement/reconcile")

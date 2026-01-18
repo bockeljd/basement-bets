@@ -585,7 +585,10 @@ const Research = () => {
                         </div>
                     </div>
                 </div>
-            );
+            )}
+
+        </div>
+    );
 };
 
-            export default Research;
+export default Research;
