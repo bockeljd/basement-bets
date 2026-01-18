@@ -269,16 +269,16 @@ const Research = () => {
                                     <thead>
                                         <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('start_time')}>
-                                                <div className="flex items-center">Time <SortIcon column="start_time" /></div>
+                                                <div className="flex items-center">Game Date/Time <SortIcon column="start_time" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
-                                                <div className="flex items-center">Sport <SortIcon column="sport" /></div>
+                                                <div className="flex items-center">League <SortIcon column="sport" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
                                                 <div className="flex items-center">Matchup <SortIcon column="game" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
-                                                <div className="flex items-center">Best Bet <SortIcon column="bet_on" /></div>
+                                                <div className="flex items-center">Recommended Bet <SortIcon column="bet_on" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
                                                 <div className="flex items-center group relative cursor-help">
@@ -306,13 +306,13 @@ const Research = () => {
                                                 </div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
-                                                <div className="flex items-center">Edge <SortIcon column="edge" /></div>
+                                                <div className="flex items-center">Model Edge <SortIcon column="edge" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Size / Risk</div>
+                                                <div className="flex items-center">Suggested Stake</div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('audit_score')}>
-                                                <div className="flex items-center">Conf <SortIcon column="audit_score" /></div>
+                                                <div className="flex items-center">Confidence <SortIcon column="audit_score" /></div>
                                             </th>
                                         </tr>
                                     </thead>
