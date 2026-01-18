@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
+import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
 
 const Research = () => {
     const [edges, setEdges] = useState([]);
@@ -566,9 +567,8 @@ const Research = () => {
                                     </tbody>
                                 </table>
                             </div>
+                        </>
                     )}
-                        </div>
-            )}
 
                     <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
