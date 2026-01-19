@@ -1343,7 +1343,8 @@ const FinancialCard = ({ label, value, icon: Icon, colorClass, borderColor }) =>
 const FinancialHeader = ({ financials, mode = 'all' }) => {
     if (!financials) return null;
     return (
-        <>
+        <div className="flex flex-wrap gap-4 mb-8">
+            <div className="text-[10px] text-slate-500 absolute top-2 right-4">v1.2</div>
             <FinancialCard
                 label="Total In Play"
                 value={financials.total_in_play}
@@ -1374,7 +1375,7 @@ const FinancialHeader = ({ financials, mode = 'all' }) => {
                     />
                 </>
             )}
-        </>
+        </div>
     );
 };
 
