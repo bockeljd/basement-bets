@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import api from './api/axios';
 import {
-    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
+    ScatterChart, Scatter, ZAxis
 } from 'recharts';
 import {
-    LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, Activity,
-    DollarSign, Calendar, Filter, Download, Plus, AlertCircle, RefreshCw, Trash, PlusCircle
+    LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown, Activity,
+    DollarSign, Calendar, Filter, Download, Plus, AlertCircle, RefreshCw, Trash, PlusCircle, BarChart3
 } from 'lucide-react';
 import axios from 'axios';
 import BetTypeAnalysis from './components/BetTypeAnalysis';
 import Research from './pages/Research';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
-import { StagingBanner } from './components/StagingBanner';
+// import { StagingBanner } from './components/StagingBanner';
 
 // --- Login Modal Component ---
 const LoginModal = ({ onSubmit }) => {
@@ -89,6 +90,7 @@ function App() {
     const [drawdown, setDrawdown] = useState(null);
     const [financials, setFinancials] = useState({ total_in_play: 0, total_deposited: 0, total_withdrawn: 0, realized_profit: 0 });
     const [periodStats, setPeriodStats] = useState({ '7d': null, '30d': null, 'ytd': null, 'all': null });
+    const [edgeBreakdown, setEdgeBreakdown] = useState([]);
     const [showAddBet, setShowAddBet] = useState(false);
 
     // Auth State
@@ -126,7 +128,8 @@ function App() {
                     api.get('/api/balances'),
                     api.get('/api/financials'),
                     api.get('/api/analytics/series'),
-                    api.get('/api/analytics/drawdown')
+                    api.get('/api/analytics/drawdown'),
+                    api.get('/api/breakdown/edge')
                 ]);
 
                 // Check for 403 or 500 in results to alert user
@@ -153,11 +156,71 @@ function App() {
                 setSportBreakdown(getVal(results[2], []));
                 setPlayerBreakdown(getVal(results[3], []));
                 setMonthlyBreakdown(getVal(results[4], []));
-                setBetTypeBreakdown(getVal(results[5], []));
+
+                // Manual Fallback for Bet Type Wins if API returns 0s
+                const rawBets = getVal(results[1], []);
+                const apiBetBreakdown = getVal(results[5], []);
+
+                // Re-calculate wins from raw bets to be safe
+                const calculatedBreakdown = {};
+                apiBetBreakdown.forEach(b => {
+                    calculatedBreakdown[b.bet_type] = { ...b };
+                });
+
+                if (rawBets.length > 0) {
+                    rawBets.forEach(bet => {
+                        const type = bet.bet_type || 'Unknown';
+                        if (!calculatedBreakdown[type]) {
+                            calculatedBreakdown[type] = { bet_type: type, bets: 0, wins: 0, profit: 0, wager: 0, roi: 0 };
+                        }
+
+                        // Force recalculation
+                        // We trust total count and profit from API, but Wins might be 0 due to backend bug?
+                        // Actually, let's just re-aggregate wins here.
+                        if (bet.status && bet.status.toUpperCase() === 'WON') {
+                            // Note: API returns aggregated wins. If we just += 1 here, we might double count if we started with API val.
+                            // But since user says API returns 0 wins...
+                            // Let's rely on our calc if API says 0.
+                            if (calculatedBreakdown[type].wins === 0) {
+                                // Just increment local counter (we need a separate tracker or assume 0 start)
+                            }
+                        }
+                    });
+
+                    // Better approach: Re-build breakdown completely from raw bets to guarantee accuracy
+                    const freshBreakdown = {};
+                    rawBets.forEach(bet => {
+                        const type = bet.bet_type || 'Unknown';
+                        if (!freshBreakdown[type]) {
+                            freshBreakdown[type] = { bet_type: type, bets: 0, wins: 0, profit: 0, wager: 0 };
+                        }
+                        freshBreakdown[type].bets += 1;
+                        freshBreakdown[type].profit += bet.profit;
+                        freshBreakdown[type].wager += bet.wager;
+                        if (bet.status && bet.status.toUpperCase() === 'WON') {
+                            freshBreakdown[type].wins += 1;
+                        }
+                    });
+
+                    // Convert to array and calc rates, filtering out financials
+                    const finalBreakdown = Object.values(freshBreakdown)
+                        .filter(item => item.bet_type !== 'Deposit' && item.bet_type !== 'Withdrawal' && item.bet_type !== 'Other')
+                        .map(item => ({
+                            ...item,
+                            win_rate: item.bets > 0 ? (item.wins / item.bets * 100) : 0,
+                            roi: item.wager > 0 ? (item.profit / item.wager * 100) : 0
+                        })).sort((a, b) => b.profit - a.profit);
+
+                    setBetTypeBreakdown(finalBreakdown);
+                } else {
+                    setBetTypeBreakdown(apiBetBreakdown);
+                }
+
                 setBalances(getVal(results[6], {}));
                 setFinancials(getVal(results[7], { total_in_play: 0, total_deposited: 0, total_withdrawn: 0, realized_profit: 0 }));
                 setTimeSeries(getVal(results[8], []));
                 setDrawdown(getVal(results[9], { max_drawdown: 0.0, current_drawdown: 0.0, peak_profit: 0.0 }));
+                setEdgeBreakdown(getVal(results[10], []));
 
                 setPeriodStats({
                     '7d': getVal(periodResults[0], { net_profit: 0, roi: 0, wins: 0, losses: 0, total_bets: 0, actual_win_rate: 0, implied_win_rate: 0 }),
@@ -219,7 +282,7 @@ function App() {
 
     return (
         <ErrorBoundary>
-            <StagingBanner />
+            {/* <StagingBanner /> */}
             <div className="min-h-screen bg-slate-950 text-white p-8 font-sans selection:bg-green-500 selection:text-black">
                 <div className="max-w-7xl mx-auto">
                     {/* Header */}
@@ -291,6 +354,7 @@ function App() {
                             balances={balances}
                             periodStats={periodStats}
                             financials={financials}
+                            edgeBreakdown={edgeBreakdown}
                         />
                     ) : view === 'transactions' ? (
                         <TransactionView bets={bets} financials={financials} />
@@ -408,11 +472,30 @@ const BankrollCard = ({ provider, data }) => (
     </div>
 );
 
-function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown, betTypeBreakdown, balances, periodStats, financials }) {
-    const [chartMode, setChartMode] = useState('monthly'); // 'sport' or 'monthly'
+function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown, betTypeBreakdown, edgeBreakdown, balances, periodStats, financials }) {
+    const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
 
     // Sort sport breakdown by profit for chart
     const sortedSportBreakdown = [...sportBreakdown].sort((a, b) => b.profit - a.profit);
+
+    // Sorting Logic for Edge Analysis
+    const handleSort = (key) => {
+        let direction = 'desc';
+        if (sortConfig.key === key && sortConfig.direction === 'desc') {
+            direction = 'asc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const sortedEdgeBreakdown = [...edgeBreakdown].sort((a, b) => {
+        if (a[sortConfig.key] < b[sortConfig.key]) {
+            return sortConfig.direction === 'asc' ? -1 : 1;
+        }
+        if (a[sortConfig.key] > b[sortConfig.key]) {
+            return sortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+    });
 
     return (
         <div className="space-y-8">
@@ -453,46 +536,45 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                                     <span>{data.wins}W - {data.losses}L</span>
                                     <span>{data.total_bets} Bets</span>
                                 </div>
-                                {(data.adj_wins !== undefined) && (
-                                    <div className="text-[10px] text-gray-600 mt-2 pt-2 border-t border-slate-800 flex justify-between" title="Risk-Adjusted Record (Wins discounted by Implied Prob)">
-                                        <span>Fair Record:</span>
-                                        <span className="font-mono text-gray-400">{data.adj_wins} - {data.adj_losses}</span>
-                                    </div>
-                                )}
                             </div>
                         );
-
                     })}
                 </div>
             </div>
 
-            {/* Implied Win Rate Table */}
+            {/* Bet Performance Summary Table */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden p-6">
-                <h3 className="text-xl font-bold mb-4">Win Rate Analysis (Actual vs Implied)</h3>
+                <h3 className="text-xl font-bold mb-4">Bet Performance Summary</h3>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                         <thead>
-                            <tr className="text-gray-400 border-b border-slate-800">
+                            <tr className="text-gray-400 border-b border-slate-800 text-[10px] uppercase tracking-wider">
                                 <th className="pb-3 pl-2">Period</th>
                                 <th className="pb-3 text-right">Record</th>
-                                <th className="pb-3 text-right">Actual WR</th>
                                 <th className="pb-3 text-right">Implied WR</th>
+                                <th className="pb-3 text-right">Actual WR</th>
                                 <th className="pb-3 text-right pr-2">Edge</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/50">
                             {['7d', '30d', 'ytd', 'all'].map(p => {
                                 const d = periodStats[p];
-                                if (!d) return null;
-                                const edge = d.actual_win_rate - d.implied_win_rate;
+                                if (!d || d.total_bets === 0) return null;
                                 const label = p === 'all' ? 'All Time' : p === 'ytd' ? 'Year to Date' : `Last ${p.replace('d', ' Days')}`;
+                                const edge = d.actual_win_rate - d.implied_win_rate;
                                 return (
                                     <tr key={p} className="hover:bg-slate-800/20">
                                         <td className="py-3 pl-2 font-medium text-white">{label}</td>
-                                        <td className="py-3 text-right text-gray-400">{d.wins}-{d.losses}-{d.total_bets - d.wins - d.losses}</td>
-                                        <td className="py-3 text-right font-bold text-gray-200">{d.actual_win_rate.toFixed(1)}%</td>
-                                        <td className="py-3 text-right text-gray-400">{d.implied_win_rate.toFixed(1)}%</td>
-                                        <td className={`py-3 text-right pr-2 font-bold ${edge > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        <td className="py-3 text-right text-gray-400">
+                                            {d.wins} - {d.losses} {(d.total_bets - d.wins - d.losses) > 0 ? `- ${d.total_bets - d.wins - d.losses} (P/V)` : ''}
+                                        </td>
+                                        <td className="py-3 text-right text-gray-400">
+                                            {d.implied_win_rate.toFixed(1)}%
+                                        </td>
+                                        <td className={`py-3 text-right font-bold ${d.actual_win_rate >= d.implied_win_rate ? 'text-green-400' : 'text-gray-200'}`}>
+                                            {d.actual_win_rate.toFixed(1)}%
+                                        </td>
+                                        <td className={`py-3 text-right pr-2 font-bold ${edge >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                             {edge > 0 ? '+' : ''}{edge.toFixed(1)}%
                                         </td>
                                     </tr>
@@ -504,96 +586,238 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
             </div>
 
             {/* Charts Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Chart Section */}
-                <div className="lg:col-span-2 bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-xl font-bold flex items-center gap-2">
-                            {chartMode === 'monthly' ? "Bankroll Growth" : "Profit by Sport"}
-                        </h3>
-                        <div className="flex bg-slate-800 rounded-lg p-1 gap-1">
-                            <button
-                                onClick={() => setChartMode('monthly')}
-                                className={`px-3 py-1 text-sm rounded-md transition-all ${chartMode === 'monthly' ? 'bg-slate-600 text-white' : 'text-gray-400 hover:text-white'}`}
-                            >
-                                Monthly
-                            </button>
-                            <button
-                                onClick={() => setChartMode('sport')}
-                                className={`px-3 py-1 text-sm rounded-md transition-all ${chartMode === 'sport' ? 'bg-slate-600 text-white' : 'text-gray-400 hover:text-white'}`}
-                            >
-                                By Sport
-                            </button>
-                        </div>
-                    </div>
-
+            {/* Charts Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Monthly Bankroll Growth */}
+                <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
+                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                        Bankroll Growth
+                    </h3>
                     <div className="h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
-                            {chartMode === 'monthly' ? (
-                                <LineChart data={monthlyBreakdown}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                    <XAxis dataKey="month" stroke="#94a3b8" />
-                                    <YAxis stroke="#94a3b8" />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
-                                        itemStyle={{ color: '#fff' }}
-                                        formatter={(value) => formatCurrency(value)}
-                                    />
-                                    <Line type="monotone" dataKey="cumulative" stroke="#22c55e" strokeWidth={3} dot={{ r: 4, fill: '#22c55e' }} activeDot={{ r: 8 }} />
-                                </LineChart>
-                            ) : (
-                                <BarChart data={sortedSportBreakdown}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                                    <XAxis dataKey="sport" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} height={60} angle={-45} textAnchor="end" interval={0} />
-                                    <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
-                                        itemStyle={{ color: '#fff' }}
-                                        formatter={(value) => formatCurrency(value)}
-                                    />
-                                    <Bar dataKey="profit" radius={[4, 4, 0, 0]}>
-                                        {sortedSportBreakdown.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#22c55e' : '#ef4444'} />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            )}
+                            <LineChart data={monthlyBreakdown}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                <XAxis dataKey="month" stroke="#94a3b8" />
+                                <YAxis stroke="#94a3b8" />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
+                                    itemStyle={{ color: '#fff' }}
+                                    formatter={(value) => formatCurrency(value)}
+                                />
+                                <Line type="monotone" dataKey="cumulative" stroke="#22c55e" strokeWidth={3} dot={{ r: 4, fill: '#22c55e' }} activeDot={{ r: 8 }} />
+                            </LineChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
-                {/* Top Players Table (Column 3) */}
-                <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm overflow-hidden flex flex-col">
-                    <h3 className="text-xl font-bold mb-4">Top Players</h3>
-                    <div className="overflow-y-auto flex-1 max-h-[300px] pr-2 custom-scrollbar">
-                        <table className="w-full text-left">
-                            <thead>
-                                <tr className="text-gray-400 border-b border-slate-800">
-                                    <th className="pb-2 font-medium">Player</th>
-                                    <th className="pb-2 font-medium text-right">Profit</th>
-                                    <th className="pb-2 font-medium text-right">Win Rates</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {playerBreakdown.slice(0, 10).map((p, i) => (
-                                    <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                                        <td className="py-3 text-sm font-medium text-white">{p.player}</td>
-                                        <td className={`py-3 text-sm text-right font-bold ${p.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                            {formatCurrency(p.profit)}
-                                        </td>
-                                        <td className="py-3 text-sm text-right text-gray-400">
-                                            {p.win_rate.toFixed(0)}%
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                {/* Profit by Sport (Bar Chart) */}
+                <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
+                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                        Profit by Sport
+                    </h3>
+                    <div className="h-[300px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={sortedSportBreakdown}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                                <XAxis dataKey="sport" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} height={60} angle={-45} textAnchor="end" interval={0} />
+                                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
+                                    itemStyle={{ color: '#fff' }}
+                                    formatter={(value) => formatCurrency(value)}
+                                />
+                                <Bar dataKey="profit" radius={[4, 4, 0, 0]}>
+                                    {sortedSportBreakdown.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#22c55e' : '#ef4444'} />
+                                    ))}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
                     </div>
                 </div>
             </div>
 
-            {/* Bet Type Analysis */}
-            <BetTypeAnalysis data={betTypeBreakdown} formatCurrency={formatCurrency} />
+            {/* Advanced Edge Analysis Segment */}
+            <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm mt-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                        <BarChart3 className="text-blue-400" /> Integrated Edge Analysis
+                    </h3>
+
+                    {edgeBreakdown.length > 0 && (
+                        <div className="flex flex-wrap gap-4 text-xs">
+                            {(() => {
+                                const total = edgeBreakdown.reduce((s, i) => s + i.bets, 0);
+                                const wins = edgeBreakdown.reduce((s, i) => s + i.wins, 0);
+                                const profit = edgeBreakdown.reduce((s, i) => s + i.profit, 0);
+                                const impliedSum = edgeBreakdown.reduce((s, i) => s + (i.implied_win_rate * i.bets), 0);
+                                const avgImplied = total > 0 ? impliedSum / total : 0;
+                                const avgActual = total > 0 ? (wins / total) * 100 : 0;
+
+                                return (
+                                    <>
+                                        <div className="bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">
+                                            <span className="text-slate-400">Total Bets: </span>
+                                            <span className="text-white font-bold">{total}</span>
+                                            <span className="text-slate-500 ml-2">({wins}W - {total - wins}L)</span>
+                                        </div>
+                                        <div className="bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">
+                                            <span className="text-slate-400">Actual WR: </span>
+                                            <span className="text-white font-bold">{avgActual.toFixed(1)}%</span>
+                                        </div>
+                                        <div className="bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">
+                                            <span className="text-slate-400">Implied WR: </span>
+                                            <span className="text-white font-bold">{avgImplied.toFixed(1)}%</span>
+                                        </div>
+                                        <div className="bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">
+                                            <span className="text-slate-400">Total P/L: </span>
+                                            <span className={profit >= 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+                                                {formatCurrency(profit)}
+                                            </span>
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    )}
+                </div>
+
+                {/* Weighted Performance Visualization */}
+                <div className="h-[400px] mb-8 bg-slate-800/20 rounded-xl border border-slate-800/50 p-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                            <XAxis
+                                type="number"
+                                dataKey="implied_win_rate"
+                                name="Implied Win Rate"
+                                unit="%"
+                                stroke="#94a3b8"
+                                fontSize={10}
+                                domain={[0, 100]}
+                                label={{ value: 'Market Expectation (Implied WR)', position: 'bottom', fill: '#64748b', fontSize: 10 }}
+                            />
+                            <YAxis
+                                type="number"
+                                dataKey="actual_win_rate"
+                                name="Actual Win Rate"
+                                unit="%"
+                                stroke="#94a3b8"
+                                fontSize={10}
+                                domain={[0, 100]}
+                                label={{ value: 'Your Performance (Actual WR)', angle: -90, position: 'left', fill: '#64748b', fontSize: 10 }}
+                            />
+                            <ZAxis type="number" dataKey="bets" range={[50, 400]} name="Volume" />
+                            <Tooltip
+                                cursor={{ strokeDasharray: '3 3' }}
+                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '8px' }}
+                                itemStyle={{ color: '#fff' }}
+                                content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                        const data = payload[0].payload;
+                                        return (
+                                            <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl">
+                                                <p className="font-bold text-blue-400 mb-1">{data.sport} - {data.bet_type}</p>
+                                                <div className="grid grid-cols-2 gap-x-4 text-[10px]">
+                                                    <span className="text-slate-400">Bets:</span> <span className="text-white text-right">{data.bets}</span>
+                                                    <span className="text-slate-400">Profit:</span> <span className={data.profit >= 0 ? 'text-green-400 text-right' : 'text-red-400 text-right'}>{formatCurrency(data.profit)}</span>
+                                                    <span className="text-slate-400">Actual WR:</span> <span className="text-white text-right">{data.actual_win_rate}%</span>
+                                                    <span className="text-slate-400">Implied WR:</span> <span className="text-white text-right">{data.implied_win_rate}%</span>
+                                                    <span className="text-slate-400">Edge:</span> <span className={data.edge >= 0 ? 'text-green-400 text-right' : 'text-red-400 text-right'}>{data.edge > 0 ? '+' : ''}{data.edge}%</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                }}
+                            />
+                            <Scatter name="Segments" data={edgeBreakdown}>
+                                {edgeBreakdown.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} stroke={entry.profit >= 0 ? '#10b981' : '#ef4444'} />
+                                ))}
+                            </Scatter>
+                            {/* Line of neutrality (Actual = Implied) */}
+                            <Line type="monotone" data={[{ implied_win_rate: 0, actual_win_rate: 0 }, { implied_win_rate: 100, actual_win_rate: 100 }]} dataKey="actual_win_rate" stroke="#475569" strokeDasharray="5 5" strokeWidth={1} dot={false} />
+                        </ScatterChart>
+                    </ResponsiveContainer>
+                    <div className="text-[10px] text-slate-500 text-center mt-2 italic">
+                        Bubbles above the dashed line indicate a positive edge. Bubble size represents bet volume.
+                    </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="text-slate-400 border-b border-slate-700 text-[10px] uppercase tracking-wider">
+                            <tr>
+                                <th
+                                    className="pb-3 pl-2 cursor-pointer hover:text-white transition-colors"
+                                    onClick={() => handleSort('sport')}
+                                >
+                                    Segment {sortConfig.key === 'sport' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th
+                                    className="pb-3 text-right cursor-pointer hover:text-white transition-colors"
+                                    onClick={() => handleSort('bets')}
+                                >
+                                    Volume {sortConfig.key === 'bets' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th
+                                    className="pb-3 text-right cursor-pointer hover:text-white transition-colors"
+                                    onClick={() => handleSort('profit')}
+                                >
+                                    Profit {sortConfig.key === 'profit' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th
+                                    className="pb-3 text-right cursor-pointer hover:text-white transition-colors"
+                                    onClick={() => handleSort('roi')}
+                                >
+                                    ROI {sortConfig.key === 'roi' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                                <th
+                                    className="pb-3 text-right pr-2 cursor-pointer hover:text-white transition-colors"
+                                    onClick={() => handleSort('edge')}
+                                >
+                                    Edge vs Market {sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/50">
+                            {sortedEdgeBreakdown.map((item, idx) => {
+                                const isPositive = item.edge >= 0;
+                                return (
+                                    <tr key={idx} className="hover:bg-slate-800/20 transition-colors group">
+                                        <td className="py-3 pl-2">
+                                            <div className="flex flex-col">
+                                                <span className="font-bold text-slate-200">{item.sport}</span>
+                                                <span className="text-xs text-slate-500">{item.bet_type}</span>
+                                            </div>
+                                        </td>
+                                        <td className="py-3 text-right text-slate-400 font-mono">
+                                            {item.bets} <span className="text-[10px] text-slate-600">bets</span>
+                                        </td>
+                                        <td className={`py-3 text-right font-bold ${item.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                            {formatCurrency(item.profit)}
+                                        </td>
+                                        <td className={`py-3 text-right font-medium ${item.roi >= 0 ? 'text-slate-300' : 'text-red-400/80'}`}>
+                                            {item.roi > 0 ? '+' : ''}{item.roi.toFixed(1)}%
+                                        </td>
+                                        <td className={`py-3 text-right pr-2 font-bold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            <div className="flex items-center justify-end gap-1 font-mono">
+                                                <span>{item.edge > 0 ? '+' : ''}{item.edge.toFixed(1)}%</span>
+                                                {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+                <div className="mt-4 p-3 bg-blue-900/10 border border-blue-900/20 rounded-lg text-[11px] text-blue-300 leading-relaxed">
+                    <strong>How to read this:</strong> We compare your actual win percentage for each (Sport + Bet Type) combination against the market's implied expectations.
+                    Segments with high <strong>positive edge</strong> are where you consistently find value. Focus your bankroll on these green zones.
+                </div>
+            </div>
 
 
 
@@ -667,6 +891,7 @@ function OddsTicker() {
 function TransactionView({ bets, financials }) {
     const [filters, setFilters] = useState({
         date: "",
+        sportsbook: "All",
         sport: "All",
         type: "All",
         selection: "",
@@ -674,10 +899,27 @@ function TransactionView({ bets, financials }) {
     });
 
     // Extract unique options for dropdowns
+    const sportsbooks = ["All", ...new Set(bets.map(b => b.provider).filter(Boolean))].sort();
     const sports = ["All", ...new Set(bets.map(b => b.sport).filter(Boolean))].sort();
     const types = ["All", ...new Set(bets.map(b => b.bet_type).filter(Boolean))].sort();
+    const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'descending' });
     const [error, setError] = useState(null);
     const [isUpdating, setIsUpdating] = useState(false);
+
+    const requestSort = (key) => {
+        let direction = 'ascending';
+        if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const getSortIcon = (name) => {
+        if (sortConfig.key !== name) return <div className="w-3 h-3 inline-block ml-1 opacity-20">↕</div>;
+        return sortConfig.direction === 'ascending' ?
+            <div className="w-3 h-3 inline-block ml-1">↑</div> :
+            <div className="w-3 h-3 inline-block ml-1">↓</div>;
+    };
 
     const handleSettle = async (betId, status) => {
         setIsUpdating(true);
@@ -709,15 +951,52 @@ function TransactionView({ bets, financials }) {
 
     const statuses = ['All', 'PENDING', 'WON', 'LOST', 'PUSH'];
     const filtered = bets.filter(b => {
+        // Filter out internal Wallet Transfers
+        if ((b.description || "").toLowerCase().includes("wallet transfer")) return false;
+
         const matchDate = b.date.includes(filters.date);
+        const matchSportsbook = filters.sportsbook === "All" || b.provider === filters.sportsbook;
         const matchSport = filters.sport === "All" || b.sport === filters.sport;
         const matchType = filters.type === "All" || b.bet_type === filters.type;
         const matchSelection = (b.selection || b.description || "").toLowerCase().includes(filters.selection.toLowerCase());
         const matchStatus = filters.status === "All" || b.status === filters.status;
-        return matchDate && matchSport && matchType && matchSelection && matchStatus;
+        return matchDate && matchSportsbook && matchSport && matchType && matchSelection && matchStatus;
     });
 
-    const resetFilters = () => setFilters({ date: "", sport: "All", type: "All", selection: "", status: "All" });
+    const sortedBets = React.useMemo(() => {
+        let sortableItems = [...filtered];
+        if (sortConfig.key !== null) {
+            sortableItems.sort((a, b) => {
+                let aValue = a[sortConfig.key];
+                let bValue = b[sortConfig.key];
+
+                // Special handling for selection fallback
+                if (sortConfig.key === 'selection') {
+                    aValue = a.selection || a.description || "";
+                    bValue = b.selection || b.description || "";
+                }
+
+                // Handle string comparisons
+                if (typeof aValue === 'string') aValue = aValue.toLowerCase();
+                if (typeof bValue === 'string') bValue = bValue.toLowerCase();
+
+                // Handle null/undefined (push to bottom usually, or top? let's standardise)
+                if (aValue === null || aValue === undefined) return 1;
+                if (bValue === null || bValue === undefined) return -1;
+
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'ascending' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'ascending' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [filtered, sortConfig]);
+
+    const resetFilters = () => setFilters({ date: "", sportsbook: "All", sport: "All", type: "All", selection: "", status: "All" });
 
     return (
         <div className="space-y-8">
@@ -725,9 +1004,7 @@ function TransactionView({ bets, financials }) {
                 <FinancialHeader financials={financials} mode="all" />
             </div>
 
-
-
-            {/* Provider Breakdown Table (New Request) */}
+            {/* Provider Breakdown Table */}
             {
                 financials?.breakdown && (
                     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl mb-8 p-6">
@@ -780,14 +1057,60 @@ function TransactionView({ bets, financials }) {
                         <thead className="bg-gray-800 text-gray-400 font-medium uppercase text-xs tracking-wider">
                             {/* Header Labels */}
                             <tr>
-                                <th className="px-6 py-3 border-b border-gray-700">Date</th>
-                                <th className="px-6 py-3 border-b border-gray-700">Sport</th>
-                                <th className="px-6 py-3 border-b border-gray-700">Type</th>
-                                <th className="px-6 py-3 border-b border-gray-700">Selection</th>
-                                <th className="px-6 py-3 border-b border-gray-700 text-right">Odds</th>
-                                <th className="px-6 py-3 border-b border-gray-700 text-right">Wager</th>
-                                <th className="px-6 py-3 border-b border-gray-700 text-center">Status</th>
-                                <th className="px-6 py-3 border-b border-gray-700 text-right">Profit</th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('date')}
+                                >
+                                    Date {getSortIcon('date')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('provider')}
+                                >
+                                    Sportsbook {getSortIcon('provider')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('sport')}
+                                >
+                                    Sport {getSortIcon('sport')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('bet_type')}
+                                >
+                                    Type {getSortIcon('bet_type')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('selection')}
+                                >
+                                    Selection {getSortIcon('selection')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 text-right cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('odds')}
+                                >
+                                    Odds {getSortIcon('odds')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 text-right cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('wager')}
+                                >
+                                    Wager {getSortIcon('wager')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 text-center cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('status')}
+                                >
+                                    Status {getSortIcon('status')}
+                                </th>
+                                <th
+                                    className="px-6 py-3 border-b border-gray-700 text-right cursor-pointer hover:bg-gray-800 select-none"
+                                    onClick={() => requestSort('profit')}
+                                >
+                                    Profit / Loss {getSortIcon('profit')}
+                                </th>
                                 <th className="px-6 py-3 border-b border-gray-700 text-right">Actions</th>
                             </tr>
                             {/* Filter Row */}
@@ -804,10 +1127,21 @@ function TransactionView({ bets, financials }) {
                                 <th className="px-2 py-2">
                                     <select
                                         className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-blue-500 outline-none"
+                                        value={filters.sportsbook}
+                                        onChange={e => setFilters({ ...filters, sportsbook: e.target.value })}
+                                    >
+                                        <option value="All">All Books</option>
+                                        {sportsbooks.filter(s => s !== 'All').map(s => <option key={s} value={s}>{s}</option>)}
+                                    </select>
+                                </th>
+                                <th className="px-2 py-2">
+                                    <select
+                                        className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-blue-500 outline-none"
                                         value={filters.sport}
                                         onChange={e => setFilters({ ...filters, sport: e.target.value })}
                                     >
-                                        {sports.map(s => <option key={s} value={s}>{s}</option>)}
+                                        <option value="All">All Sports</option>
+                                        {sports.filter(s => s !== 'All').map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
                                 </th>
                                 <th className="px-2 py-2">
@@ -844,15 +1178,20 @@ function TransactionView({ bets, financials }) {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-800">
-                            {filtered.map((bet) => {
+                            {sortedBets.map((bet) => {
                                 const isTxn = bet.category === 'Transaction';
                                 const isDeposit = bet.bet_type === 'Deposit' || (bet.bet_type === 'Other' && bet.amount > 0);
                                 return (
                                     <tr key={bet.id || bet.txn_id} className="hover:bg-gray-800/50 transition duration-150">
                                         <td className="px-6 py-3 text-gray-300 font-mono text-xs">{bet.date}</td>
                                         <td className="px-6 py-3">
-                                            <span className={`px-2 py-1 rounded text-[10px] text-gray-300 border shadow-sm uppercase font-bold tracking-wider ${isTxn ? 'bg-indigo-900/30 border-indigo-800 text-indigo-300' : 'bg-gray-800 border-gray-700'}`}>
-                                                {isTxn ? bet.provider : bet.sport}
+                                            <span className="px-2 py-1 rounded text-[10px] text-gray-300 border border-gray-700 bg-gray-800 shadow-sm uppercase font-bold tracking-wider">
+                                                {bet.provider}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-3">
+                                            <span className="px-2 py-1 rounded text-[10px] text-gray-300 border border-gray-700 bg-gray-800 shadow-sm uppercase font-bold tracking-wider">
+                                                {bet.sport}
                                             </span>
                                         </td>
                                         <td className="px-6 py-3 text-gray-400 text-xs">{bet.bet_type}</td>

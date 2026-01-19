@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../api/supabase';
-import axios from 'axios';
+import api from '../api/axios';
 import { AlertCircle, CheckCircle2, Loader2, Save, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -32,20 +32,15 @@ export function PasteSlipContainer({ onSaveSuccess, onClose }) {
 
         try {
             // API call to LLM Parser
-            const { data: { session } } = await supabase.auth.getSession();
-            const response = await axios.post('/api/parse-slip', {
+            const response = await api.post('/api/parse-slip', {
                 raw_text: rawText,
                 sportsbook,
                 account_name: bankrollAccount
-            }, {
-                headers: {
-                    Authorization: `Bearer ${session?.access_token}`
-                }
             });
 
             setParsedData(response.data);
         } catch (err) {
-            setError(err.response?.data?.detail || 'Failed to parse slip. Please check the format.');
+            setError(err.response?.data?.detail || err.response?.data?.message || 'Failed to parse slip. Please check the format.');
         } finally {
             setIsParsing(false);
         }
@@ -56,15 +51,10 @@ export function PasteSlipContainer({ onSaveSuccess, onClose }) {
 
         setIsSaving(true);
         try {
-            const { data: { session } } = await supabase.auth.getSession();
-            await axios.post('/api/bets/manual', {
+            await api.post('/api/bets/manual', {
                 ...parsedData,
                 sportsbook,
                 account_id: bankrollAccount // UI uses 'Main'/'Test' for now
-            }, {
-                headers: {
-                    Authorization: `Bearer ${session?.access_token}`
-                }
             });
 
             setRawText('');
@@ -157,12 +147,14 @@ export function PasteSlipContainer({ onSaveSuccess, onClose }) {
                             </div>
 
                             <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                                <DetailItem label="Event" value={parsedData.event_name} />
+                                <DetailItem label="Matchup" value={parsedData.event_name} />
+                                <DetailItem label="Sport" value={parsedData.sport || 'Unknown'} />
                                 <DetailItem label="Market" value={parsedData.market_type} />
                                 <DetailItem label="Selection" value={parsedData.selection} />
-                                <DetailItem label="Line" value={parsedData.line || '-'} />
                                 <DetailItem label="Odds" value={parsedData.price?.american > 0 ? `+${parsedData.price?.american}` : parsedData.price?.american} />
                                 <DetailItem label="Stake" value={`$${parsedData.stake}`} />
+                                <DetailItem label="Status" value={parsedData.status || 'PENDING'} />
+                                <DetailItem label="Date/Time" value={parsedData.placed_at} />
                             </div>
                         </div>
 

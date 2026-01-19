@@ -124,18 +124,26 @@ class FanDuelParser:
              status = "LOST"
 
         # 3. Bet Type & Sport
-        # Top lines usually have "Same Game Parlay", "2 leg parlay", or just Team Name (Moneyline/Spread)
-        first_line = block[0]
-        bet_type = "Straight"
-        
-        if "Parlay" in first_line:
-            bet_type = "Parlay"
-            if "Same Game" in first_line:
-                bet_type = "SGP"
-        elif "Round Robin" in first_line:
+        bet_type = "ML"
+        first_line_up = block[0].upper()
+        if "PARLAY" in first_line_up or "LEG" in first_line_up:
+            match = re.search(r'(\d+)', block[0])
+            bet_type = f"{match.group(1)} leg parlay" if match else "parlay"
+        elif "ROUND ROBIN" in first_line_up:
             bet_type = "Round Robin"
-        else:
-            bet_type = "Straight" # Likely Moneyline or Spread
+        elif any(x in first_line_up for x in ["TOTAL", "OVER", "UNDER"]):
+            bet_type = "Over/Under"
+        elif "MONEYLINE" in first_line_up:
+            bet_type = "ML"
+        
+        # Matchup Detection
+        matchup = block[0] 
+        for line in block:
+            if "@" in line or " vs " in line.lower():
+                matchup = line
+                break
+        
+        description = matchup
 
         # Sport Inference (Heuristic)
         # Look for keywords in the whole block
@@ -145,22 +153,23 @@ class FanDuelParser:
         # NCAA: "Universities" (look for heuristics)
         
         sport = "Unknown"
-        text_lower = full_text.lower()
+        text_to_scan = (full_text + " " + matchup).lower()
         
-        nfl_terms = ["passing", "rushing", "touchdown", "receptions", "quarterback", "nfl", "bills", "chiefs", "49ers", "eagles", "ravens", "bengals", "cowboys", "lions", "packers", "bears"]
-        nba_terms = ["points", "assists", "rebounds", "nba", "spurs", "pacers", "lakers", "celtics", "threes"]
-        ncaab_terms = ["ncaa", "gonzaga", "duke", "unc", "xavier", "marquette", "depaul", "indiana @ penn state"] # Intersection with CFB?
-        ncaaf_terms = ["alabama", "georgia", "texas", "ohio state", "michigan", "cfb", "recieving yds"] # "receiving" vs "receptions"
-        
-        # Refine heuristics
-        if any(t in text_lower for t in nfl_terms):
-            sport = "NFL"
-        elif any(t in text_lower for t in nba_terms):
-            sport = "NBA"
-        elif any(t in text_lower for t in ncaab_terms):
-            sport = "NCAAB"
-        elif any(t in text_lower for t in ncaaf_terms):
-            sport = "NCAAF" # Hard to distinguish NCAA sports without team DB, but start basics
+        nfl_t = ["passing", "rushing", "touchdown", "receptions", "quarterback", "nfl", "chiefs", "bills", "49ers", "ravens", "lions", "packers", "bears", "qb", "yardage", "interception"]
+        nba_t = ["points", "assists", "rebounds", "nba", "lakers", "celtics", "warriors", "threes", "bucks", "mavs", "block", "steals"]
+        ncaam_t = ["ncaam", "ncaa basketball", "purdue", "kansas", "duke", "unc", "marquette", "gonzaga", "ncaa", "uconn", "kentucky", "jayhawks", "college basketball", "march madness"]
+        ncaaf_t = ["ncaaf", "cfb", "alabama", "georgia", "texas", "ohio state", "michigan", "bowl game", "college football"]
+        mlb_t = ["mlb", "dodgers", "yankees", "red sox", "runs", "innings", "strikeouts", "stolen base", "home run"]
+        nhl_t = ["nhl", "puck line", "bruins", "leafs", "rangers", "goals", "goalie", "slapshot", "icing"]
+        soccer_t = ["soccer", "epl", "chelsea", "liverpool", "arsenal", "man city", "champions league", "premier league", "la liga", "bundesliga"]
+
+        if any(t in text_to_scan for t in nfl_t): sport = "NFL"
+        elif any(t in text_to_scan for t in nba_t): sport = "NBA"
+        elif any(t in text_to_scan for t in ncaam_t): sport = "NCAAM"
+        elif any(t in text_to_scan for t in ncaaf_t): sport = "NCAAF"
+        elif any(t in text_to_scan for t in mlb_t): sport = "MLB"
+        elif any(t in text_to_scan for t in nhl_t): sport = "NHL"
+        elif any(t in text_to_scan for t in soccer_t): sport = "SOCCER"
         
         # 4. Odds
         # Look for the first line starting with "+" or "-" that represents the total odds.
@@ -200,11 +209,11 @@ class FanDuelParser:
             selection_lines.append(line)
             
         selection = ", ".join(selection_lines[:5]) # First 5 lines as summary
-        description = f"{bet_type} - {sport}"
+        description = matchup
 
         # 6. Live / Bonus
         is_live = "Live" in full_text
-        is_bonus = "Bonus" in full_text or "Free Bet" in full_text or "profit boost" in text_lower
+        is_bonus = "Bonus" in full_text or "Free Bet" in full_text or "profit boost" in text_to_scan
 
         return {
             "provider": "FanDuel",

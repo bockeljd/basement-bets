@@ -159,8 +159,31 @@ class OddsAPIClient:
         
         if data is not None:
              return data
-             
-        # 2. Fallback: Action Network (API)
+        
+        # 2. Fallback: ESPN (Free, Robust) - Specific for NCAAM
+        if sport_key == "basketball_ncaab":
+             print(f"  [FALLBACK] Odds API failed. Engaging ESPN Client for {sport_key}...")
+             try:
+                 cache_key = f"espn:odds:{sport_key}:{datetime.date.today()}"
+                 cached = self._get_from_cache(cache_key)
+                 if cached:
+                     print("  [CACHE HIT] Using cached ESPN data.")
+                     return cached
+                 
+                 from src.services.espn_ncaa_client import ESPNNCAAClient
+                 espn = ESPNNCAAClient()
+                 # Force today explicitly to avoid implicit TZ issues
+                 today_str = datetime.date.today().strftime('%Y%m%d')
+                 espn_data = espn.fetch_odds(date=today_str)
+                 
+                 if espn_data:
+                      print(f"  [FALLBACK SUCCESS] Retrieved {len(espn_data)} events from ESPN.")
+                      self._save_to_cache(cache_key, espn_data)
+                      return espn_data
+             except Exception as e:
+                 print(f"  [ESPN FALLBACK ERROR] {e}")
+
+        # 3. Fallback: Action Network (API)
         print(f"  [FALLBACK] Odds API failed. Engaging Action Network (API) for {sport_key}...")
         try:
             cache_key = f"action:odds:{sport_key}:{datetime.date.today()}"

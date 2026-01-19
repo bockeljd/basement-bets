@@ -12,35 +12,52 @@ class AnalyticsEngine:
         import re
         for b in self.bets:
             raw = b.get('bet_type') or ''
-            norm = raw.strip().title()
+            norm = raw.strip()
             
-            # 1. Moneyline variations
-            if norm in ["Winner (Ml)", "Straight", "Moneyline"]:
-                norm = "Moneyline"
+            # Case-insensitive check
+            check = norm.lower()
+
+            # 1. Moneyline
+            if check in ["winner (ml)", "straight", "moneyline", "ml"]:
+                norm = "Winner (ML)"
             
-            # 2. Prop variations
-            elif "Prop" in norm:
+            # 2. Spread
+            elif "spread" in check or "point spread" in check:
+                norm = "Spread"
+
+            # 3. Totals
+            elif any(x in check for x in ["over", "under", "total"]):
+                norm = "Over / Under"
+
+            # 4. Props
+            elif "prop" in check:
                 norm = "Prop"
-                
-            # 3. Total variations
-            elif any(x in norm for x in ["Over / Under", "Total Over/Under", "Total (Over/Under)", "Total"]):
-                norm = "Total (Over/Under)"
-                
-            # 4. Parlay / SGP variations
-            elif any(x in norm for x in ["Parlay", "Sgp", "Picks", "Leg"]):
-                # Attempt to extract leg count
-                match = re.search(r'(\d+)', norm)
+
+            # 5. SGP (Same Game Parlay)
+            elif "sgp" in check or "same game" in check:
+                norm = "SGP"
+
+            # 6. Parlays (check last so SGP matches first if labeled SGP)
+            elif "parlay" in check or "leg" in check or "picks" in check:
+                # Extract leg count
+                match = re.search(r'(\d+)', check)
                 if match:
                     count = int(match.group(1))
-                    if count >= 4:
-                        norm = "4+ Leg Parlay"
+                    if count == 2:
+                        norm = "2 Leg Parlay"
+                    elif count == 3:
+                        norm = "3 Leg Parlay"
+                    elif count >= 4:
+                        norm = "4+ Parlay"
                     else:
-                        norm = f"{count}-Leg Parlay"
-                elif "4+" in norm:
-                    norm = "4+ Leg Parlay"
-                else:
-                    norm = "Parlay (includes SGP)"
-
+                        norm = "2 Leg Parlay" # Default to 2 if 1 logic fails or parse error
+                elif "4+" in check:
+                    norm = "4+ Parlay"
+                else: 
+                     # If generic "Parlay", assume 2 or 3? Or default bucket.
+                     # User spec: 2 Leg, 3 Leg, 4+.
+                     # Let's map generic "Parlay" to "2 Leg Parlay" as baseline or check selection count (not avail here easily)
+                     norm = "2 Leg Parlay"
 
             b['bet_type'] = norm
 
@@ -55,7 +72,7 @@ class AnalyticsEngine:
         total_wagered = sum(b['wager'] for b in bets)
         net_profit = sum(b['profit'] for b in bets)
         roi = (net_profit / total_wagered * 100) if total_wagered > 0 else 0.0
-        wins = sum(1 for b in bets if b['status'] == 'WON')
+        wins = sum(1 for b in bets if b['status'].strip().upper() == 'WON' or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0))
         total = len(bets)
         win_rate = (wins / total * 100) if total > 0 else 0.0
         
@@ -84,44 +101,22 @@ class AnalyticsEngine:
             groups[key]['wager'] += b['wager']
             groups[key]['profit'] += b['profit']
             groups[key]['total'] += 1
-            if b['status'] == 'WON':
+            if b['status'].strip().upper() == 'WON' or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0):
                 groups[key]['wins'] += 1
-                
-        # Merge Financials for 'bet_type' breakdown to align with Realized Profit
-        if field == 'bet_type':
-            query = "SELECT type, amount FROM transactions WHERE type IN ('Deposit', 'Withdrawal')"
-            with get_db_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(query)
-                for r in cur.fetchall():
-                    # Treat Type as Key (Deposit, Withdrawal)
-                    key = r['type']
-                    amt = r['amount']
-                
-                    # Filter out financial transactions from "Bet Type" performance
-                    if key in ['Deposit', 'Withdrawal', 'Other', 'Free Bet']:
-                        continue
-                        
-                    groups[key]['total'] += 1
-                    groups[key]['wager'] += float(amt)
-                    groups[key]['profit'] += float(profit)
-                    if r['status'] == 'WON':
-                         groups[key]['wins'] += 1
-
         results = []
-        for key, data in groups.items():
-            win_rate = (data['wins'] / data['total'] * 100) if data['total'] > 0 else 0
-            roi = (data['profit'] / data['wager'] * 100) if data['wager'] > 0 else 0.0
+        for key, vals in groups.items():
+            wins = vals['wins']
+            total = vals['total']
             results.append({
                 field: key,
-                "bets": data['total'],
-                "wins": data['wins'],
-                "wagered": data['wager'],
-                "profit": data['profit'],
-                "roi": roi,
-                "win_rate": win_rate
+                "bets": total,
+                "wins": wins,
+                "profit": vals['profit'],
+                "wager": vals['wager'],
+                "win_rate": (wins / total * 100) if total > 0 else 0.0,
+                "roi": (vals['profit'] / vals['wager'] * 100) if vals['wager'] > 0 else 0.0
             })
-            
+
         return sorted(results, key=lambda x: x['profit'], reverse=True)
 
     def get_predictions(self):
@@ -154,6 +149,67 @@ class AnalyticsEngine:
                 
         return green_lights, red_lights
 
+    def get_edge_analysis(self, user_id=None):
+        """
+        Groups bets by (sport, bet_type) and calculates profitability vs market expectations.
+        """
+        bets = self.bets
+        if user_id and user_id != self.user_id:
+             bets = [b for b in self.bets if b.get('user_id') == user_id]
+
+        groups = defaultdict(lambda: {
+            'wager': 0.0, 
+            'profit': 0.0, 
+            'wins': 0, 
+            'total': 0, 
+            'implied_probs': []
+        })
+
+        for b in bets:
+            # Skip financial transactions
+            if b.get('bet_type') in ['Deposit', 'Withdrawal', 'Other']:
+                continue
+                
+            sport = b.get('sport', 'Unknown')
+            btype = b.get('bet_type', 'Straight')
+            key = (sport, btype)
+            
+            groups[key]['wager'] += b['wager']
+            groups[key]['profit'] += b['profit']
+            groups[key]['total'] += 1
+            
+            status = b.get('status', 'PENDING').strip().upper()
+            if status == 'WON' or (status == 'CASHED OUT' and b['profit'] > 0):
+                groups[key]['wins'] += 1
+            
+            if b.get('odds'):
+                prob = self._calculate_implied_probability(b['odds'])
+                if prob:
+                    groups[key]['implied_probs'].append(prob)
+
+        results = []
+        for (sport, btype), vals in groups.items():
+            total = vals['total']
+            if total == 0: continue
+            
+            actual_wr = (vals['wins'] / total * 100)
+            avg_implied = (sum(vals['implied_probs']) / len(vals['implied_probs']) * 100) if vals['implied_probs'] else 0.0
+            
+            results.append({
+                "sport": sport,
+                "bet_type": btype,
+                "bets": total,
+                "wins": vals['wins'],
+                "actual_win_rate": round(actual_wr, 1),
+                "implied_win_rate": round(avg_implied, 1),
+                "edge": round(actual_wr - avg_implied, 1),
+                "profit": round(vals['profit'], 2),
+                "roi": round((vals['profit'] / vals['wager'] * 100), 1) if vals['wager'] > 0 else 0.0
+            })
+
+        # Sort by edge descending
+        return sorted(results, key=lambda x: x['edge'], reverse=True)
+
     def get_player_performance(self, user_id=None):
         """
         Aggregates performance by player name extracted from bet selections.
@@ -180,7 +236,7 @@ class AnalyticsEngine:
                 player_stats[player]['wager'] += b['wager'] # Full wager
                 player_stats[player]['profit'] += b['profit']
                 player_stats[player]['total'] += 1
-                if b['status'] == 'WON':
+                if b['status'].upper() == 'WON':
                     player_stats[player]['wins'] += 1
 
         results = []
@@ -285,7 +341,7 @@ class AnalyticsEngine:
             day_key = date_str.split(' ')[0] if ' ' in date_str else date_str
             daily_profit[day_key] += b['profit']
             
-        # 2. Transactions
+        # 2. Transactions (Deposits/Withdrawals) to show Total Bankroll
         query = "SELECT date, type, amount FROM transactions WHERE type IN ('Deposit', 'Withdrawal')"
         with get_db_connection() as conn:
             cur = conn.cursor()
@@ -294,13 +350,22 @@ class AnalyticsEngine:
                 date_str = r['date']
                 if not date_str: continue
                 day_key = date_str.split(' ')[0] if ' ' in date_str else date_str
+                
+                # Bankroll Logic:
+                # Deposit = Increase Balance (+Amount)
+                # Withdrawal = Decrease Balance (-Amount, assuming amount is stored as positive or we use ABS)
+                # Note: Analysis elsewhere suggests Deposit is positive, Withdrawal is signed negative?
+                # Let's check: seed script used negative for withdrawals.
+                # So just adding raw amount is correct for net change.
+                # (Deposit 100) -> +100
+                # (Withdrawal -50) -> -50
+                # WAIT: Earlier I saw Withdrawal stored as POSITIVE magnitude in some places?
+                # Let's use logic: Deposit = +Abs, Withdrawal = -Abs to be safe.
+                
                 if r['type'] == 'Deposit':
-                    daily_profit[day_key] += r['amount'] # Equity Increase
-                else:
-                    daily_profit[day_key] -= abs(r['amount']) # Equity Decrease
-                    # Wait, if I deposit $1000, my "Profit" chart shouldn't spike up $1000 unless it's "Bankroll".
-                    # If it's "Profit/Loss", deposits should NOT count. 
-                    # User asked for "Bankroll Curve".
+                    daily_profit[day_key] += abs(float(r['amount']))
+                elif r['type'] == 'Withdrawal':
+                    daily_profit[day_key] -= abs(float(r['amount']))
                     # If chart is inverse, it means it's going DOWN when it should go UP.
                     # Debug output showed: 2023-12-25 | 125.00. This is POSITIVE.
                     # So if they see it going down, maybe the frontend flips it?
@@ -456,22 +521,52 @@ class AnalyticsEngine:
         filtered_bets = []
         now = datetime.now()
         
+        # 1. Calculate Anchor Date (Latest Bet) to support historical data viewing
+        # This ensures 'Last 7 Days' shows the last 7 days of *activity*, not calendar time.
+        valid_dates = []
+        parsed_bets = []
+        
         for b in bets:
             date_str = b.get('date', '')
-            if not date_str or date_str == 'Unknown': continue
+            if not date_str or date_str == 'Unknown': 
+                parsed_bets.append((b, None))
+                continue
             
             try:
                 # Robust parsing
                 d_str = date_str.split(' ')[0] if ' ' in date_str else date_str
-                bet_date = datetime.strptime(d_str, "%Y-%m-%d")
-            except:
-                continue
+                # Try multiple formats if needed, but ISO expected
+                if '/' in d_str:
+                     bet_date = datetime.strptime(d_str, "%m/%d/%Y")
+                else:
+                     bet_date = datetime.strptime(d_str, "%Y-%m-%d")
                 
+                valid_dates.append(bet_date)
+                parsed_bets.append((b, bet_date))
+            except:
+                parsed_bets.append((b, None))
+
+        anchor = now
+        if valid_dates:
+            last_bet_date = max(valid_dates)
+            # If last bet is older than 30 days, assume historical mode
+            if (now - last_bet_date).days > 30:
+                anchor = last_bet_date
+                # Adjust year filter if it matches current calendar year to anchor year
+                if year and year == now.year:
+                    year = anchor.year
+
+        for b, bet_date in parsed_bets:
+            if not bet_date: continue
+            
             if year:
                 if bet_date.year == year:
                     filtered_bets.append(b)
             elif days:
-                cutoff = now - timedelta(days=days)
+                cutoff = anchor - timedelta(days=days)
+                # Include the anchor day fully? anchor is timestamp. 
+                # If anchor is 2024-01-21, cutoff 7d is 2024-01-14. 
+                # bet_date >= 2024-01-14 covers it.
                 if bet_date >= cutoff:
                     filtered_bets.append(b)
             else:
@@ -484,8 +579,8 @@ class AnalyticsEngine:
         net_profit = sum(b['profit'] for b in filtered_bets)
         roi = (net_profit / total_wagered * 100) if total_wagered > 0 else 0.0
         
-        wins = sum(1 for b in filtered_bets if b['status'] == 'WON')
-        losses = sum(1 for b in filtered_bets if b['status'] == 'LOST')
+        wins = sum(1 for b in filtered_bets if b['status'].strip().upper() == 'WON' or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0))
+        losses = sum(1 for b in filtered_bets if b['status'].strip().upper() == 'LOST')
         total = len(filtered_bets)
         actual_win_rate = (wins / total * 100) if total > 0 else 0.0
         
@@ -597,9 +692,8 @@ class AnalyticsEngine:
                 typ = r['type']
                 desc = r['description'] or ''
                 
-                # Filter logic: Exclude 'Manual Import' if user wants cleaner view
-                if 'Manual' in desc:
-                    continue
+                # No longer filtering 'Manual' - we want ALL deposit/withdrawal transactions
+                # This includes manual adjustments, imports, and corrections
                 
                 if typ == 'Deposit':
                     provider_stats[p]['deposited'] += amt

@@ -182,6 +182,8 @@ async def get_breakdown(field: str, user: dict = Depends(get_current_user)):
         return engine.get_player_performance(user_id=user_id)
     if field == "monthly":
         return engine.get_monthly_performance(user_id=user_id)
+    if field == "edge":
+        return engine.get_edge_analysis(user_id=user_id)
     return engine.get_breakdown(field, user_id=user_id)
 
 @app.get("/api/bets")
@@ -253,22 +255,49 @@ async def save_manual_bet(request: Request, user: dict = Depends(get_current_use
         bet_data['user_id'] = user_id
         
         # Basic mapping to DB schema
+        status = bet_data.get("status", "PENDING").upper()
+        stake = float(bet_data.get("stake", 0))
+        american_odds = bet_data.get("price", {}).get("american")
+        decimal_odds = bet_data.get("price", {}).get("decimal")
+        
+        # Calculate profit if not provided
+        profit = bet_data.get("profit")
+        if profit is None:
+            if status == "WON":
+                if decimal_odds and decimal_odds > 1:
+                    profit = stake * (decimal_odds - 1)
+                elif american_odds:
+                    if american_odds > 0:
+                        profit = stake * (american_odds / 100)
+                    else:
+                        profit = stake * (100 / abs(american_odds))
+                else:
+                    profit = 0.0
+            elif status == "LOST":
+                profit = -stake
+            else:
+                profit = 0.0
+
+        placed_at = bet_data.get("placed_at", "")
+        # Handle '2026-01-11 19:57:51' or ISO format
+        date_part = placed_at.split(" ")[0].split("T")[0] if placed_at else datetime.now().strftime("%Y-%m-%d")
+
         doc = {
             "user_id": user_id,
             "account_id": bet_data.get("account_id"),
             "provider": bet_data.get("sportsbook"),
-            "date": bet_data.get("placed_at", "").split("T")[0],
-            "sport": bet_data.get("sport"),
+            "date": date_part,
+            "sport": bet_data.get("sport") or "Unknown",
             "bet_type": bet_data.get("market_type"),
-            "wager": bet_data.get("stake"),
-            "profit": (bet_data.get("stake") * (bet_data.get("price", {}).get("decimal", 0) - 1)) if bet_data.get("status") == "WON" else 0.0,
-            "status": bet_data.get("status") or "PENDING",
+            "wager": stake,
+            "profit": round(profit, 2) if profit is not None else 0.0,
+            "status": status,
             "description": bet_data.get("event_name"),
             "selection": bet_data.get("selection"),
-            "odds": bet_data.get("price", {}).get("american"),
+            "odds": american_odds,
             "is_live": bet_data.get("is_live", False),
             "is_bonus": bet_data.get("is_bonus", False),
-            "raw_text": bet_data.get("raw_text") # Should have been passed back
+            "raw_text": bet_data.get("raw_text")
         }
         
         # Generate Hash for Idempotency

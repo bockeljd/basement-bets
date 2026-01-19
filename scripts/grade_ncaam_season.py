@@ -121,7 +121,7 @@ def grade_predictions():
     with get_db_connection() as conn:
         # Get all pending NCAAM predictions
         cursor = _exec(conn, """
-            SELECT id, matchup, home_team, away_team, market, bet_on, market_line
+            SELECT game_id, id, matchup, home_team, away_team, market, bet_on, market_line
             FROM model_predictions
             WHERE sport = 'NCAAM'
               AND (result IS NULL OR result = 'Pending')
@@ -132,18 +132,32 @@ def grade_predictions():
         
         graded = 0
         for pred in predictions:
-            # Find matching game in ESPN schedule
-            cursor = _exec(conn, """
-                SELECT home_score, away_score, completed
-                FROM espn_schedule
-                WHERE (home_team LIKE %s OR away_team LIKE %s)
-                  AND (home_team LIKE %s OR away_team LIKE %s)
-                  AND completed = TRUE
-                LIMIT 1
-            """, (f'%{pred["home_team"]}%', f'%{pred["home_team"]}%',
-                  f'%{pred["away_team"]}%', f'%{pred["away_team"]}%'))
+            # Find matching game in ESPN schedule by ID if possible
+            if pred.get('game_id') and str(pred['game_id']).isdigit():
+                 cursor = _exec(conn, """
+                    SELECT home_score, away_score, completed
+                    FROM espn_schedule
+                    WHERE game_id = %s
+                """, (pred['game_id'],))
+            else:
+                 # Fallback to fuzzy match (legacy)
+                 cursor = _exec(conn, """
+                    SELECT home_score, away_score, completed
+                    FROM espn_schedule
+                    WHERE (home_team LIKE %s OR away_team LIKE %s)
+                      AND (home_team LIKE %s OR away_team LIKE %s)
+                      AND completed = TRUE
+                    LIMIT 1
+                """, (f'%{pred["home_team"]}%', f'%{pred["home_team"]}%',
+                      f'%{pred["away_team"]}%', f'%{pred["away_team"]}%'))
             
+            # (Duplicate block removed)
+
             game = cursor.fetchone()
+            
+            if not game:
+                # print(f"No match for {pred['home_team']} vs {pred['away_team']} (ID: {pred.get('game_id')})")
+                continue # Skip if no game found
             
             if not game:
                 continue

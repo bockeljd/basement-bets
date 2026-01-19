@@ -318,95 +318,113 @@ const Research = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-700/50">
-                                        {getProcessedEdges().map((edge, idx) => {
-                                            const date = edge.start_time ? new Date(edge.start_time) : null;
-                                            const dateStr = date ? date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : '-';
-                                            const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
-                                            const isEdge = edge.is_actionable;
+                                        {getProcessedEdges().length === 0 ? (
+                                            <tr>
+                                                <td colSpan="8" className="py-12 text-center text-slate-500">
+                                                    <div className="flex flex-col items-center justify-center">
+                                                        <Filter size={32} className="mb-3 opacity-20" />
+                                                        <p className="text-lg font-medium text-slate-400">No edges match your filters.</p>
+                                                        <p className="text-sm mb-4">Try lowering the threshold or enabling "Show No Edge Games".</p>
+                                                        <button
+                                                            onClick={() => setShowAll(true)}
+                                                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-white transition-colors"
+                                                        >
+                                                            View All Games
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            getProcessedEdges().map((edge, idx) => {
+                                                const date = edge.start_time ? new Date(edge.start_time) : null;
+                                                const dateStr = date ? date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : '-';
+                                                const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+                                                const isEdge = edge.is_actionable;
 
-                                            return (
-                                                <tr key={idx} className={`group hover:bg-slate-700/30 transition-all ${!isEdge ? 'opacity-50 grayscale-[0.5]' : ''}`}>
-                                                    <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
-                                                        <div className="font-bold text-slate-300">{dateStr}</div>
-                                                        <div>{timeStr}</div>
-                                                    </td>
-                                                    <td className="py-2 px-4">
-                                                        <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
+                                                return (
+                                                    <tr key={idx} className={`group hover:bg-slate-700/30 transition-all ${!isEdge ? 'opacity-50 grayscale-[0.5]' : ''}`}>
+                                                        <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
+                                                            <div className="font-bold text-slate-300">{dateStr}</div>
+                                                            <div>{timeStr}</div>
+                                                        </td>
+                                                        <td className="py-2 px-4">
+                                                            <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
                                                                 ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
-                                                                edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                                    'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
-                                                            {edge.sport === 'NCAAM' ? 'NCAA Basketball' :
-                                                                edge.sport === 'NFL' ? 'NFL' :
-                                                                    edge.sport === 'EPL' ? 'Premier League' :
-                                                                        edge.sport}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-2 px-4 font-semibold text-slate-200 text-sm">{edge.game}</td>
-                                                    <td className="py-2 px-4">
-                                                        <div className="text-white font-bold flex items-center">
-                                                            {edge.market === 'Total' ? edge.bet_on : edge.bet_on}
-                                                            {isEdge && <CheckCircle size={12} className="ml-2 text-green-500" />}
-                                                        </div>
-                                                        <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-0.5">{edge.market}</div>
-                                                        {edge.audit_reason && (
-                                                            <div className="text-[10px] text-slate-400 mt-1 italic leading-tight">
-                                                                {edge.audit_reason}
+                                                                    edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
+                                                                        'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
+                                                                {edge.sport === 'NCAAM' ? 'NCAA Basketball' :
+                                                                    edge.sport === 'NFL' ? 'NFL' :
+                                                                        edge.sport === 'EPL' ? 'Premier League' :
+                                                                            edge.sport}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-4 font-semibold text-slate-200 text-sm">{edge.game}</td>
+                                                        <td className="py-2 px-4">
+                                                            <div className="text-white font-bold flex items-center">
+                                                                {edge.market === 'Total' ? edge.bet_on : edge.bet_on}
+                                                                {isEdge && <CheckCircle size={12} className="ml-2 text-green-500" />}
                                                             </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="py-2 px-4">
-                                                        <div className="flex flex-col">
-                                                            <div className="text-xs text-slate-300">Market: <span className="text-white font-mono">{edge.market_line}</span></div>
-                                                            <div className="text-xs text-slate-500">Fair: <span className="font-mono">{edge.fair_line}</span></div>
-                                                        </div>
-                                                    </td>
-                                                    <td className={`py-2 px-4 w-32 ${getEdgeColor(edge.edge, edge.sport)}`}>
-                                                        <div className="flex flex-col items-start whitespace-nowrap">
-                                                            <span className="text-lg font-bold">
-                                                                {edge.sport === 'EPL' ? `${edge.edge}%` : `${edge.edge} pts`}
-                                                            </span>
-                                                            <span className="text-[10px] uppercase tracking-tighter opacity-70 font-black">
-                                                                {edge.sport === 'EPL' ? 'Exp. Value' : 'Line Value'}
-                                                            </span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="py-2 px-4">
-                                                        <div className="flex flex-col">
-                                                            {edge.suggested_stake ? (
-                                                                <>
-                                                                    <div className="text-green-400 font-bold">${edge.suggested_stake}</div>
-                                                                    <div className="text-[10px] text-slate-500">{edge.bankroll_pct}% Bankroll</div>
-                                                                </>
-                                                            ) : (
-                                                                <span className="text-slate-600">No Edge</span>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                    <td className="py-2 px-4">
-                                                        <div className="group relative flex items-center cursor-help">
-                                                            {edge.audit_class === 'high' ? (
-                                                                <ShieldCheck className="text-green-400" size={18} />
-                                                            ) : edge.audit_class === 'medium' ? (
-                                                                <Shield className="text-yellow-400" size={18} />
-                                                            ) : (
-                                                                <ShieldAlert className="text-red-400 animate-pulse" size={18} />
-                                                            )}
-
-                                                            {/* Tooltip */}
-                                                            <div className="absolute right-full mr-2 w-48 p-3 bg-slate-900 border border-slate-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-[10px]">
-                                                                <div className={`font-bold uppercase tracking-wider mb-1 ${edge.audit_class === 'high' ? 'text-green-400' :
-                                                                    edge.audit_class === 'medium' ? 'text-yellow-400' : 'text-red-400'
-                                                                    }`}>
-                                                                    {edge.audit_class === 'high' ? 'High Confidence' :
-                                                                        edge.audit_class === 'medium' ? 'Medium Confidence' : 'Low Confidence'}
+                                                            <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-0.5">{edge.market}</div>
+                                                            {edge.audit_reason && (
+                                                                <div className="text-[10px] text-slate-400 mt-1 italic leading-tight">
+                                                                    {edge.audit_reason}
                                                                 </div>
-                                                                <p className="text-slate-300 leading-tight">{edge.audit_reason}</p>
+                                                            )}
+                                                        </td>
+                                                        <td className="py-2 px-4">
+                                                            <div className="flex flex-col">
+                                                                <div className="text-xs text-slate-300">Market: <span className="text-white font-mono">{edge.market_line}</span></div>
+                                                                <div className="text-xs text-slate-500">Fair: <span className="font-mono">{edge.fair_line}</span></div>
                                                             </div>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
+                                                        </td>
+                                                        <td className={`py-2 px-4 w-32 ${getEdgeColor(edge.edge, edge.sport)}`}>
+                                                            <div className="flex flex-col items-start whitespace-nowrap">
+                                                                <span className="text-lg font-bold">
+                                                                    {edge.sport === 'EPL' ? `${edge.edge}%` : `${edge.edge} pts`}
+                                                                </span>
+                                                                <span className="text-[10px] uppercase tracking-tighter opacity-70 font-black">
+                                                                    {edge.sport === 'EPL' ? 'Exp. Value' : 'Line Value'}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-2 px-4">
+                                                            <div className="flex flex-col">
+                                                                {edge.suggested_stake ? (
+                                                                    <>
+                                                                        <div className="text-green-400 font-bold">${edge.suggested_stake}</div>
+                                                                        <div className="text-[10px] text-slate-500">{edge.bankroll_pct}% Bankroll</div>
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-slate-600">No Edge</span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-2 px-4">
+                                                            <div className="group relative flex items-center cursor-help">
+                                                                {edge.audit_class === 'high' ? (
+                                                                    <ShieldCheck className="text-green-400" size={18} />
+                                                                ) : edge.audit_class === 'medium' ? (
+                                                                    <Shield className="text-yellow-400" size={18} />
+                                                                ) : (
+                                                                    <ShieldAlert className="text-red-400 animate-pulse" size={18} />
+                                                                )}
+
+                                                                {/* Tooltip */}
+                                                                <div className="absolute right-full mr-2 w-48 p-3 bg-slate-900 border border-slate-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-[10px]">
+                                                                    <div className={`font-bold uppercase tracking-wider mb-1 ${edge.audit_class === 'high' ? 'text-green-400' :
+                                                                        edge.audit_class === 'medium' ? 'text-yellow-400' : 'text-red-400'
+                                                                        }`}>
+                                                                        {edge.audit_class === 'high' ? 'High Confidence' :
+                                                                            edge.audit_class === 'medium' ? 'Medium Confidence' : 'Low Confidence'}
+                                                                    </div>
+                                                                    <p className="text-slate-300 leading-tight">{edge.audit_reason}</p>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
                                     </tbody>
                                 </table>
                             </div>

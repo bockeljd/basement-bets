@@ -31,7 +31,10 @@ class ESPNNCAAClient:
             Dict with games, scores, and status
         """
         url = f"{self.BASE_URL}/scoreboard"
-        params = {}
+        params = {
+            'groups': 50,  # 50 = NCAA Division I (All conferences)
+            'limit': 1000  # Ensure we get everything
+        }
         if date:
             params['dates'] = date
         
@@ -207,7 +210,123 @@ class ESPNNCAAClient:
         
         return " | ".join(parts) if parts else "No additional context"
 
+    def fetch_odds(self, date: Optional[str] = None) -> List[Dict]:
+        """
+        Fetch odds in a standardized format (The Odds API style)
+        
+        Args:
+            date: Date string (YYYYMMDD)
+            
+        Returns:
+            List of game objects with 'bookmakers'
+        """
+        scoreboard = self.get_scoreboard(date)
+        events = scoreboard.get('events', [])
+        
+        formatted_games = []
+        
+        for event in events:
+            try:
+                game_id = event.get('id')
+                status = event.get('status', {}).get('type', {}).get('name')
+                
+                # competition
+                comp = event['competitions'][0]
+                competitors = comp['competitors']
+                
+                home_team = next((t['team']['displayName'] for t in competitors if t['homeAway'] == 'home'), "Home")
+                away_team = next((t['team']['displayName'] for t in competitors if t['homeAway'] == 'away'), "Away")
+                
+                # Check for odds
+                if 'odds' not in comp:
+                    continue
+                    
+                # Parse Odds (Assuming first provider is the main one, usually DK)
+                odds_data = comp['odds'][0] # Provider list
+                provider_name = odds_data.get('provider', {}).get('name', 'Consensus')
+                
+                # Build Bookmaker Object
+                bookmaker = {
+                    "key": provider_name.lower().replace(" ", "_"),
+                    "title": provider_name,
+                    "markets": []
+                }
+                
+                # 1. Moneyline
+                h2h_outcomes = []
+                if odds_data.get('homeTeamOdds', {}).get('moneyLine'):
+                    h2h_outcomes.append({"name": home_team, "price": odds_data['homeTeamOdds']['moneyLine']})
+                if odds_data.get('awayTeamOdds', {}).get('moneyLine'):
+                    h2h_outcomes.append({"name": away_team, "price": odds_data['awayTeamOdds']['moneyLine']})
+                
+                if h2h_outcomes:
+                    bookmaker['markets'].append({"key": "h2h", "outcomes": h2h_outcomes})
+                    
+                # 2. Spread
+                spread_outcomes = []
+                # Ensure we have lines. ESPN gives 'spread' (-16.5) and 'spreadOdds' (-112).
+                if 'spread' in odds_data:
+                    # Logic: details "HOU -16.5". spread is -16.5 (for Home? logic check needed).
+                    # 'homeTeamOdds' has 'spreadOdds' and 'favorite'.
+                    # We need explicitly the line for home and away.
+                    # Usually spread is symmetrical.
+                    
+                    # Inspect JSON: "pointSpread": { "home": { "line": "-16.5" ... } }
+                    # Ah, currentDetails is nice but pointSpread dict is better (if available in new format).
+                    # My debug dump showed 'pointSpread' inside 'competition'? No, inside 'odds' items sometimes?
+                    # The debug output showed 'provider' and 'details' and 'homeTeamOdds'.
+                    # No explicitly 'pointSpread' dictionary in the 'odds' array item 0?
+                    # Wait, the debug output showed keys: provider, details, overUnder, spread, awayTeamOdds, homeTeamOdds.
+                    # It did NOT show `pointSpread` object at the top level of the odds item?
+                    # Let's assume symmetric spread from 'spread' field.
+                    # 'spread' = -16.5. Usually relative to HOME if negative? Or Favorite?
+                    # "details": "HOU -16.5".
+                    
+                    val_spread = odds_data.get('spread')
+                    # Need to know who covers what.
+                    # homeTeamOdds['favorite'] = true.
+                    # If home is favorite, spread is negative for them.
+                    
+                    h_line = val_spread
+                    a_line = -val_spread if val_spread else None
+                    
+                    # Careful: ESPN 'spread' might be absolute or relative to favorite.
+                    # "details": "HOU -16.5". If HOU is home?
+                    # If HOU is home, Home Line is -16.5.
+                    
+                    h_price = odds_data.get('homeTeamOdds', {}).get('spreadOdds', -110)
+                    a_price = odds_data.get('awayTeamOdds', {}).get('spreadOdds', -110)
+                    
+                    if h_line is not None:
+                        spread_outcomes.append({"name": home_team, "point": h_line, "price": h_price})
+                        spread_outcomes.append({"name": away_team, "point": a_line, "price": a_price})
+                        bookmaker['markets'].append({"key": "spreads", "outcomes": spread_outcomes})
 
+                # 3. Totals
+                if 'overUnder' in odds_data:
+                    val_total = odds_data['overUnder']
+                    total_outcomes = [
+                        {"name": "Over", "point": val_total, "price": -110}, # Prices not always explicit?
+                        {"name": "Under", "point": val_total, "price": -110}
+                    ]
+                    bookmaker['markets'].append({"key": "totals", "outcomes": total_outcomes})
+                
+                # Build Game Object
+                game_obj = {
+                    "id": game_id,
+                    "sport_key": "basketball_ncaab",
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "commence_time": event.get('date'),
+                    "bookmakers": [bookmaker]
+                }
+                formatted_games.append(game_obj)
+                
+            except Exception as e:
+                print(f"[ESPN] Error parsing event {event.get('id')}: {e}")
+                continue
+                
+        return formatted_games
 # Example usage
 if __name__ == "__main__":
     client = ESPNNCAAClient()
