@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import psycopg2
+import psycopg2.pool
 import psycopg2.extras
 from contextlib import contextmanager
 from datetime import datetime
@@ -15,6 +16,9 @@ IS_VERCEL = os.environ.get("VERCEL") == "1"
 # Default to SQLite if no DATABASE_URL is set
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'bets.db')
 
+# Global Postgres Connection Pool
+pg_pool = None
+
 def get_db_type():
     if settings.DATABASE_URL:
         return 'postgres'
@@ -22,16 +26,31 @@ def get_db_type():
 
 @contextmanager
 def get_db_connection():
+    global pg_pool
     if settings.DATABASE_URL:
-        # PRODUCTION/PREVIEW/STAGING: Use Postgres
-        conn = psycopg2.connect(settings.DATABASE_URL, cursor_factory=psycopg2.extras.DictCursor)
+        # PRODUCTION/PREVIEW/STAGING: Use Postgres with Pooling
+        if pg_pool is None:
+            try:
+                # Initialize pool (Min 1, Max 20)
+                # ThreadedConnectionPool is safer for FastAPI scenarios
+                pg_pool = psycopg2.pool.ThreadedConnectionPool(
+                    1, 20, 
+                    dsn=settings.DATABASE_URL, 
+                    cursor_factory=psycopg2.extras.DictCursor
+                )
+                print("[DB] Initialized Postgres Connection Pool")
+            except Exception as e:
+                print(f"[DB] Pool init failed: {e}")
+                raise e
+
+        conn = pg_pool.getconn()
         try:
             yield conn
         finally:
-            conn.close()
+            pg_pool.putconn(conn)
     else:
         # LOCAL SQLITE
-        print(f"[DEBUG] Connecting to SQLite: {DB_PATH}")
+        # print(f"[DEBUG] Connecting to SQLite: {DB_PATH}")
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         try:
@@ -150,6 +169,7 @@ def init_db():
     init_ingestion_runs_db()
     init_smart_curation_db()
     init_bt_team_metrics_db()
+    init_enrichment_db()
 
 def init_bt_team_metrics_db():
     db_type = get_db_type()
@@ -186,6 +206,150 @@ def init_bt_team_metrics_db():
             with conn.cursor() as cur:
                 cur.execute(schema)
         conn.commit()
+
+def init_enrichment_db():
+    db_type = get_db_type()
+    if db_type == 'sqlite':
+        schema = """
+        CREATE TABLE IF NOT EXISTS action_game_enrichment (
+            id TEXT PRIMARY KEY, -- UUID
+            event_id TEXT NOT NULL, -- FK to events_v2
+            provider TEXT DEFAULT 'ACTION_NETWORK',
+            provider_game_id TEXT,
+            as_of_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            payload_json TEXT,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_injuries (
+            id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            team_id TEXT, -- Nullable FK
+            player_name TEXT NOT NULL,
+            player_id TEXT,
+            status TEXT, -- OUT/QUESTIONABLE
+            description TEXT,
+            reported_at TIMESTAMP,
+            source_url TEXT,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_splits (
+            id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            market_type TEXT, -- SPREAD/TOTAL/ML
+            selection TEXT, -- HOME/AWAY/OVER
+            line REAL,
+            bet_pct REAL,
+            handle_pct REAL,
+            sharp_indicator TEXT,
+            as_of_ts TIMESTAMP,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_props (
+            id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            prop_type TEXT, -- PLAYER_POINTS
+            player_name TEXT,
+            player_id TEXT,
+            side TEXT, -- OVER/UNDER
+            line REAL,
+            price INTEGER,
+            book TEXT,
+            as_of_ts TIMESTAMP,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_news (
+            id TEXT PRIMARY KEY,
+            league TEXT,
+            team_id TEXT,
+            event_id TEXT,
+            headline TEXT,
+            summary TEXT,
+            url TEXT,
+            published_at TIMESTAMP,
+            source TEXT DEFAULT 'ACTION_NETWORK',
+            fingerprint TEXT UNIQUE
+        );
+        -- Indexes for SQLite
+        CREATE INDEX IF NOT EXISTS idx_enrich_event ON action_game_enrichment(event_id);
+        CREATE INDEX IF NOT EXISTS idx_splits_event ON action_splits(event_id);
+        CREATE INDEX IF NOT EXISTS idx_props_player ON action_props(player_name);
+        """
+    else:
+        # Postgres
+        schema = """
+        CREATE TABLE IF NOT EXISTS action_game_enrichment (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id UUID NOT NULL,
+            provider TEXT DEFAULT 'ACTION_NETWORK',
+            provider_game_id TEXT,
+            as_of_ts TIMESTAMPTZ DEFAULT NOW(),
+            payload_json JSONB,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_injuries (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id UUID NOT NULL,
+            team_id UUID,
+            player_name TEXT NOT NULL,
+            player_id TEXT,
+            status TEXT,
+            description TEXT,
+            reported_at TIMESTAMPTZ,
+            source_url TEXT,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_splits (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id UUID NOT NULL,
+            market_type TEXT, 
+            selection TEXT,
+            line REAL,
+            bet_pct REAL,
+            handle_pct REAL,
+            sharp_indicator TEXT,
+            as_of_ts TIMESTAMPTZ,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_props (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id UUID NOT NULL,
+            prop_type TEXT,
+            player_name TEXT,
+            player_id TEXT,
+            side TEXT,
+            line REAL,
+            price INTEGER,
+            book TEXT,
+            as_of_ts TIMESTAMPTZ,
+            fingerprint TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS action_news (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            league TEXT,
+            team_id UUID,
+            event_id UUID,
+            headline TEXT,
+            summary TEXT,
+            url TEXT,
+            published_at TIMESTAMPTZ,
+            source TEXT DEFAULT 'ACTION_NETWORK',
+            fingerprint TEXT UNIQUE
+        );
+        -- Indexes for Postgres
+        CREATE INDEX IF NOT EXISTS idx_enrich_event ON action_game_enrichment(event_id);
+        CREATE INDEX IF NOT EXISTS idx_splits_event ON action_splits(event_id);
+        CREATE INDEX IF NOT EXISTS idx_props_player ON action_props(player_name);
+        """
+
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(schema)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(schema)
+        conn.commit()
+    print("Action Network Enrichment tables initialized.")
+
 # --- Curation / Policy Helpers ---
 
 def aggregate_daily_performance(target_date: str):

@@ -12,41 +12,51 @@ class AutoGrader:
         """
         Main entry point.
         1. Fetch all 'Pending' predictions from DB.
-        2. Group by sport.
-        3. Fetch scores for each sport.
-        4. Match and Grade.
-        5. Update DB.
+        2. Fetch recent results from local DB (game_results joined with events_v2).
+        3. Match and Grade.
+        4. Update DB.
         """
         pending = self._get_pending_picks()
         if not pending:
             return {"message": "No pending picks to grade."}
             
-        # Group by sport to minimize API calls
-        by_sport = {}
-        for p in pending:
-            # map DB sport keys if needed. 
-            # Our DB has 'NFL', 'NCAAM'.
-            # OddsClient needs 'americanfootball_nfl', etc.
-            s_key = self.odds_client.get_sport_key(p['sport'])
-            if s_key not in by_sport:
-                by_sport[s_key] = []
-            by_sport[s_key].append(p)
+        # 2. Fetch Recent Local Results
+        local_results = self._get_local_results()
+        if not local_results:
+            return {"message": "No local results found to grade against.", "pending_count": len(pending)}
             
         results_log = []
-        
-        for sport_key, picks in by_sport.items():
-            print(f"[Grader] Fetching scores for {sport_key}...")
-            scores = self.odds_client.fetch_scores(sport_key, days_from=3)
-            if not scores:
-                continue
-                
-            for pick in picks:
-                result = self._grade_pick(pick, scores)
-                if result:
-                    self._update_db(pick['id'], result)
-                    results_log.append(f"Pick {pick['id']} ({pick['matchup']}): {result}")
+        for pick in pending:
+            # We pass local_results as the score_data
+            result = self._grade_pick(pick, local_results)
+            if result:
+                self._update_db(pick['id'], result)
+                results_log.append(f"Pick {pick['id']} ({pick['matchup']}): {result}")
                     
         return {"graded_count": len(results_log), "logs": results_log}
+
+    def _get_local_results(self):
+        """
+        Fetch game results from local database for the last 7 days.
+        """
+        query = """
+        SELECT 
+            e.home_team, 
+            e.away_team, 
+            e.league, 
+            e.start_time,
+            r.home_score, 
+            r.away_score, 
+            r.final as completed
+        FROM game_results r
+        JOIN events_v2 e ON r.event_id = e.id
+        WHERE r.final = 1
+           OR r.final = 'true'
+        ORDER BY e.start_time DESC
+        LIMIT 1000
+        """
+        with get_db_connection() as conn:
+            return [dict(row) for row in conn.execute(query).fetchall()]
 
     def _get_pending_picks(self):
         query = "SELECT * FROM model_predictions WHERE result = 'Pending'"

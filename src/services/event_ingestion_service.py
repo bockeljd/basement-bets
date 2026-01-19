@@ -150,13 +150,13 @@ class EventIngestionService:
         # Schema: event_id, home_score, away_score, final, period
         # Schema: event_id, home_score, away_score, final_flag
         query = """
-        INSERT INTO game_results (event_id, home_score, away_score, final_flag)
+        INSERT INTO game_results (event_id, home_score, away_score, final)
         VALUES (:eid, :hs, :as, :final)
         ON CONFLICT(event_id) DO UPDATE SET
             home_score = excluded.home_score,
             away_score = excluded.away_score,
-            final_flag = excluded.final_flag,
-            last_updated_at = CURRENT_TIMESTAMP
+            final = excluded.final,
+            updated_at = CURRENT_TIMESTAMP
         """
         
         params = {

@@ -610,6 +610,117 @@ async def trigger_torvik_ingestion(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/jobs/ingest_results/{league}")
+async def trigger_result_ingestion(league: str, date: Optional[str] = None):
+    """
+    Cron Job / Manual Trigger: Ingests scoreboard/results from ESPN for a specific league.
+    Supports NFL, NCAAM, EPL.
+    """
+    try:
+        from src.parsers.espn_client import EspnClient
+        client = EspnClient()
+        
+        # If date is 'today', passing None to fetch_scoreboard works
+        ingest_date = date if date and date.lower() != 'today' else None
+        
+        print(f"[JOB] Triggering result ingestion for {league} (date: {date or 'today'})")
+        events = client.fetch_scoreboard(league, date=ingest_date)
+        
+        return {
+            "status": "success",
+            "message": f"Processed {len(events)} events for {league}",
+            "events_count": len(events),
+            "league": league,
+            "date": date or "today"
+        }
+    except Exception as e:
+        print(f"[JOB ERROR] Result ingestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/jobs/reconcile")
+
+@app.post("/api/jobs/ingest_enrichment")
+async def trigger_enrichment_ingestion(league: str, date: Optional[str] = None):
+    """
+    Ingests Action Network enrichment (Splits, Enrichment JSON).
+    """
+    try:
+        from src.services.action_enrichment_service import ActionEnrichmentService
+        service = ActionEnrichmentService()
+        stats = service.ingest_enrichment_for_league(league, date_str=date)
+        return {"status": "success", "stats": stats}
+    except Exception as e:
+        print(f"[JOB ERROR] Enrichment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/enrichment/status")
+async def get_enrichment_status():
+    """
+    Returns latest enrichment stats.
+    """
+    # Simple query to get max timestamps
+    from src.database import get_db_connection, _exec
+    stats = {}
+    with get_db_connection() as conn:
+        try:
+            r1 = _exec(conn, "SELECT MAX(as_of_ts) as last_split FROM action_splits").fetchone()
+            stats['last_split'] = r1['last_split'] if r1 else None
+            
+            r2 = _exec(conn, "SELECT MAX(as_of_ts) as last_raw FROM action_game_enrichment").fetchone()
+            stats['last_raw'] = r2['last_raw'] if r2 else None
+            
+            r3 = _exec(conn, "SELECT COUNT(*) as count FROM action_splits").fetchone()
+            stats['split_rows'] = r3['count'] if r3 else 0
+        except Exception:
+             pass
+    return stats
+
+@app.get("/api/enrichment/event/{event_id}")
+async def get_event_enrichment(event_id: str):
+    from src.database import get_db_connection, _exec
+    with get_db_connection() as conn:
+        splits = _exec(conn, "SELECT * FROM action_splits WHERE event_id = :eid ORDER BY as_of_ts DESC", {"eid": event_id}).fetchall()
+        # props = ...
+        # injuries = ...
+        return {
+            "event_id": event_id,
+            "splits": [dict(r) for r in splits]
+        }
+async def trigger_settlement_reconcile(league: Optional[str] = None):
+    """
+    Cron Job / Manual Trigger: Settles pending bets using ingested results.
+    """
+    try:
+        from src.services.settlement_service import SettlementEngine
+        engine = SettlementEngine()
+        stats = engine.run_settlement_cycle(league=league)
+        return {
+            "status": "success",
+            "message": "Settlement reconciliation completed",
+            "stats": stats
+        }
+    except Exception as e:
+        print(f"[JOB ERROR] Settlement reconciliation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/jobs/grade_predictions")
+async def trigger_prediction_grading():
+    """
+    Cron Job / Manual Trigger: Grades model predictions using local game results.
+    """
+    try:
+        from src.models.auto_grader import AutoGrader
+        grader = AutoGrader()
+        results = grader.grade_pending_picks()
+        return {
+            "status": "success",
+            "message": "Prediction grading completed",
+            "results": results
+        }
+    except Exception as e:
+        print(f"[JOB ERROR] Prediction grading failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/reports/model-health")
 async def get_model_health_report(request: Request):
     """

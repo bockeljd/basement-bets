@@ -21,6 +21,38 @@
         {
             "path": "/api/jobs/ingest_torvik",
             "schedule": "0 6 * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_results/NFL",
+            "schedule": "*/15 * * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_results/NCAAM",
+            "schedule": "*/15 * * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_results/EPL",
+            "schedule": "*/15 * * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_enrichment?league=NFL",
+            "schedule": "5,25,45 * * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_enrichment?league=NCAAM",
+            "schedule": "5,25,45 * * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_enrichment?league=EPL",
+            "schedule": "5,25,45 * * * *"
+        },
+        {
+            "path": "/api/jobs/reconcile",
+            "schedule": "*/15 * * * *"
+        },
+        {
+            "path": "/api/jobs/grade_predictions",
+            "schedule": "*/30 * * * *"
         }
     ],
     "buildCommand": "cd client && npm install && npm rebuild && npm run build"

@@ -11,17 +11,29 @@ jobs:
   run-jobs:
     runs-on: ubuntu-latest
     steps:
-      - name: Ingest Odds
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Dependencies
         run: |
-          curl -X POST ${{ secrets.DEPLOYMENT_URL }}/api/jobs/ingest_odds \
-          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          pip install -r requirements-worker.txt
           
       - name: Ingest Results
-        run: |
-          curl -X POST ${{ secrets.DEPLOYMENT_URL }}/api/jobs/ingest_results \
-          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python3 src/scripts/ingest_results.py
           
       - name: Run Settlement
-        run: |
-          curl -X POST ${{ secrets.DEPLOYMENT_URL }}/api/jobs/run_settlement \
-          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 src/scripts/run_settlement.py
+
+      - name: Grade Predictions
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 src/scripts/grade_predictions.py

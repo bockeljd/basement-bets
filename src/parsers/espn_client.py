@@ -29,7 +29,8 @@ class EspnClient(IngestionEngine):
     LEAGUE_MAP = {
         'NFL': 'football/nfl',
         'NCAAM': 'basketball/mens-college-basketball',
-        'NBA': 'basketball/nba' # Future proof
+        'NBA': 'basketball/nba',
+        'EPL': 'soccer/eng.1'
     }
 
     def __init__(self):
