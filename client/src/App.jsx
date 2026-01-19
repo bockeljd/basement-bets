@@ -717,13 +717,14 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                             <XAxis
                                 type="number"
-                                dataKey="implied_win_rate"
-                                name="Implied Win Rate"
-                                unit="%"
+                                dataKey="profit"
+                                name="Profit"
+                                unit="$"
                                 stroke="#94a3b8"
                                 fontSize={10}
-                                domain={[0, 100]}
-                                label={{ value: 'Market Expectation (Implied WR)', position: 'bottom', fill: '#64748b', fontSize: 10 }}
+                                domain={['auto', 'auto']}
+                                label={{ value: 'Profit', position: 'bottom', fill: '#64748b', fontSize: 10 }}
+                                tickFormatter={(val) => `$${val}`}
                             />
                             <YAxis
                                 type="number"
@@ -926,10 +927,10 @@ function TransactionView({ bets, financials }) {
         status: "All"
     });
 
-    // Extract unique options for dropdowns
-    const sportsbooks = ["All", ...new Set(bets.map(b => b.provider).filter(Boolean))].sort();
-    const sports = ["All", ...new Set(bets.map(b => b.sport).filter(Boolean))].sort();
-    const types = ["All", ...new Set(bets.map(b => b.bet_type).filter(Boolean))].sort();
+    // Extract unique options for dropdowns - keep "All" at top
+    const sportsbooks = ["All", ...[...new Set(bets.map(b => b.provider).filter(Boolean))].sort()];
+    const sports = ["All", ...[...new Set(bets.map(b => b.sport).filter(Boolean))].sort()];
+    const types = ["All", ...[...new Set(bets.map(b => b.bet_type).filter(Boolean))].sort()];
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'descending' });
     const [error, setError] = useState(null);
     const [isUpdating, setIsUpdating] = useState(false);

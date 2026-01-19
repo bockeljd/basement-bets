@@ -452,6 +452,89 @@ async def grade_research_history():
 async def get_history():
     return fetch_model_history()
 
+
+@app.get("/api/schedule")
+async def get_schedule(sport: str = "all", days: int = 1, user: dict = Depends(get_current_user)):
+    """
+    Fetch upcoming scheduled games for display WITHOUT running models.
+    Returns games from ESPN API.
+    """
+    from src.espn_client import EspnClient
+    from datetime import datetime, timedelta
+    
+    client = EspnClient()
+    games = []
+    
+    leagues = ['NFL', 'NCAAM', 'EPL'] if sport.lower() == 'all' else [sport.upper()]
+    
+    for league in leagues:
+        for i in range(days):
+            target_date = datetime.now() + timedelta(days=i)
+            try:
+                events = client.fetch_scoreboard(league, target_date, groups=50 if league == 'NCAAM' else None, limit=1000 if league == 'NCAAM' else None)
+                for ev in events:
+                    if ev['status'] == 'scheduled':
+                        games.append({
+                            'id': ev['id'],
+                            'sport': league,
+                            'game': f"{ev['away_team']} @ {ev['home_team']}",
+                            'home_team': ev['home_team'],
+                            'away_team': ev['away_team'],
+                            # Force UTC 'Z' if naive, so frontend parses correctly as UTC
+                            'start_time': (ev['start_time'].isoformat() + ('Z' if not ev['start_time'].tzinfo else '')) if ev['start_time'] else None,
+                            'status': ev['status'],
+                            # No model data yet
+                            'edge': None,
+                            'market_line': None,
+                            'fair_line': None,
+                            'bet_on': None,
+                            'is_actionable': False,
+                            'audit_score': None,
+                            'audit_class': None,
+                            'audit_reason': 'Model not run',
+                            'suggested_stake': None,
+                            'bankroll_pct': None
+                        })
+            except Exception as e:
+                print(f"[API] Error fetching {league} schedule: {e}")
+    
+    # Sort by start time
+    games.sort(key=lambda x: x['start_time'] or '9999')
+    
+    return games
+
+
+@app.post("/api/analyze/{game_id}")
+async def analyze_game(game_id: str, request: Request, user: dict = Depends(get_current_user)):
+    """
+    Run model analysis for a specific game.
+    Returns betting recommendations with narrative.
+    """
+    try:
+        data = await request.json()
+        sport = data.get("sport", "NCAAM")
+        home_team = data.get("home_team")
+        away_team = data.get("away_team")
+        
+        if not home_team or not away_team:
+            raise HTTPException(status_code=400, detail="home_team and away_team are required")
+        
+        from src.services.game_analyzer import GameAnalyzer
+        analyzer = GameAnalyzer()
+        
+        result = analyzer.analyze(
+            game_id=game_id,
+            sport=sport,
+            home_team=home_team,
+            away_team=away_team
+        )
+        
+        return result
+        
+    except Exception as e:
+        print(f"[API] Analyze error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/research")
 async def get_research_edges(refresh: bool = False, user: dict = Depends(get_current_user)):
     """
@@ -632,7 +715,9 @@ async def trigger_torvik_ingestion(request: Request):
     Protected by CRON_SECRET or API Key.
     """
     try:
+        from datetime import datetime
         from src.database import init_bt_team_metrics_db, upsert_team_metrics
+        from src.selenium_client import SeleniumDriverFactory
         from src.services.barttorvik import BartTorvikClient
         
         # Initialize tables if needed

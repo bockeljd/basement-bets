@@ -11,6 +11,11 @@ const Research = () => {
     const [error, setError] = useState(null);
     const [showAll, setShowAll] = useState(false);
 
+    // Game Analysis Modal State
+    const [selectedGame, setSelectedGame] = useState(null);
+    const [analysisResult, setAnalysisResult] = useState(null);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+
     // Sorting & Filtering State
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
     const [sportFilter, setSportFilter] = useState('All');
@@ -18,15 +23,37 @@ const Research = () => {
     const [confidenceThreshold, setConfidenceThreshold] = useState(50); // Default 50%
 
     useEffect(() => {
-        fetchEdges();
+        fetchSchedule();
     }, []);
 
-    const fetchEdges = async () => {
+    const fetchSchedule = async () => {
         try {
             setLoading(true);
+            setError(null);
+
+            const [scheduleRes, historyRes] = await Promise.all([
+                api.get('/api/schedule?sport=all&days=3'),
+                api.get('/api/research/history')
+            ]);
+
+            setEdges(scheduleRes.data || []);
+            setHistory(historyRes.data || []);
+
+        } catch (err) {
+            console.error(err);
+            setError('Failed to load schedule.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const runModels = async () => {
+        try {
+            setLoading(true);
+            setError(null);
 
             const [edgesRes, historyRes] = await Promise.all([
-                api.get('/api/research'),
+                api.get('/api/research?refresh=true'),
                 api.get('/api/research/history')
             ]);
 
@@ -35,7 +62,7 @@ const Research = () => {
 
         } catch (err) {
             console.error(err);
-            setError('Failed to load predictive models.');
+            setError('Failed to run models.');
         } finally {
             setLoading(false);
         }
@@ -54,6 +81,31 @@ const Research = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const analyzeGame = async (game) => {
+        setSelectedGame(game);
+        setIsAnalyzing(true);
+        setAnalysisResult(null);
+
+        try {
+            const response = await api.post(`/api/analyze/${game.id}`, {
+                sport: game.sport,
+                home_team: game.home_team,
+                away_team: game.away_team
+            });
+            setAnalysisResult(response.data);
+        } catch (err) {
+            console.error('Analysis error:', err);
+            setAnalysisResult({ error: err.response?.data?.detail || 'Analysis failed' });
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
+
+    const closeAnalysisModal = () => {
+        setSelectedGame(null);
+        setAnalysisResult(null);
     };
 
     const refreshData = async () => {
@@ -100,7 +152,16 @@ const Research = () => {
 
     const getProcessedEdges = () => {
         let filtered = edges.filter(e => {
-            if (!showAll && !e.is_actionable) return false;
+            // Always show scheduled games (no edge data yet)
+            // Only filter by is_actionable when edge data exists (model has run)
+            const hasModelData = e.edge !== null && e.edge !== undefined;
+            if (!showAll && hasModelData && !e.is_actionable) return false;
+
+            // If no model data, just apply sport filter
+            if (!hasModelData) {
+                if (sportFilter !== 'All' && e.sport !== sportFilter) return false;
+                return true;
+            }
 
             const edgeVal = e.edge || 0;
             const confVal = e.audit_score || 50;
@@ -161,18 +222,20 @@ const Research = () => {
                 </h1>
                 <div className="flex gap-2">
                     <button
-                        onClick={refreshData}
+                        onClick={fetchSchedule}
                         disabled={loading}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                         <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                        Refresh Data
+                        Refresh Schedule
                     </button>
                     <button
-                        onClick={fetchEdges}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm transition-all"
+                        onClick={runModels}
+                        disabled={loading}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
-                        {loading ? 'Running Models...' : 'Refresh Models'}
+                        {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
+                        {loading ? 'Running Models...' : 'Run Models'}
                     </button>
                 </div>
             </div>
@@ -315,12 +378,15 @@ const Research = () => {
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('audit_score')}>
                                                 <div className="flex items-center">Confidence <SortIcon column="audit_score" /></div>
                                             </th>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                <div className="flex items-center">Action</div>
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-700/50">
                                         {getProcessedEdges().length === 0 ? (
                                             <tr>
-                                                <td colSpan="8" className="py-12 text-center text-slate-500">
+                                                <td colSpan="9" className="py-12 text-center text-slate-500">
                                                     <div className="flex flex-col items-center justify-center">
                                                         <Filter size={32} className="mb-3 opacity-20" />
                                                         <p className="text-lg font-medium text-slate-400">No edges match your filters.</p>
@@ -337,8 +403,8 @@ const Research = () => {
                                         ) : (
                                             getProcessedEdges().map((edge, idx) => {
                                                 const date = edge.start_time ? new Date(edge.start_time) : null;
-                                                const dateStr = date ? date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : '-';
-                                                const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+                                                const dateStr = date ? date.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'America/New_York' }) : '-';
+                                                const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
                                                 const isEdge = edge.is_actionable;
 
                                                 return (
@@ -421,6 +487,17 @@ const Research = () => {
                                                                 </div>
                                                             </div>
                                                         </td>
+                                                        <td className="py-2 px-4">
+                                                            <button
+                                                                onClick={() => analyzeGame(edge)}
+                                                                disabled={isAnalyzing && selectedGame?.id === edge.id}
+                                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs font-bold transition-all shadow-sm"
+                                                            >
+                                                                {isAnalyzing && selectedGame?.id === edge.id ? (
+                                                                    <RefreshCw className="animate-spin" size={14} />
+                                                                ) : 'Analyze'}
+                                                            </button>
+                                                        </td>
                                                     </tr>
                                                 );
                                             })
@@ -431,181 +508,301 @@ const Research = () => {
                         )}
                     </div>
                 </>
-            )}
+            )
+            }
 
-            {activeTab === 'history' && (
-                <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
-                        <h2 className="text-lg font-semibold text-slate-200">Model History (Auto-Tracked)</h2>
-                        <button
-                            onClick={gradeResults}
-                            disabled={loading}
-                            className="px-4 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/20 disabled:opacity-50 rounded-lg text-xs font-bold transition-all flex items-center"
-                        >
-                            {loading ? <RefreshCw className="animate-spin mr-2" size={12} /> : null}
-                            Grade Results
-                        </button>
-                    </div>
+            {
+                activeTab === 'history' && (
+                    <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+                            <h2 className="text-lg font-semibold text-slate-200">Model History (Auto-Tracked)</h2>
+                            <button
+                                onClick={gradeResults}
+                                disabled={loading}
+                                className="px-4 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/20 disabled:opacity-50 rounded-lg text-xs font-bold transition-all flex items-center"
+                            >
+                                {loading ? <RefreshCw className="animate-spin mr-2" size={12} /> : null}
+                                Grade Results
+                            </button>
+                        </div>
 
-                    {/* Model Performance Summary */}
-                    <div className="px-6 py-6 bg-slate-800/30 border-b border-slate-700 grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        {[
-                            {
-                                label: 'Graded Bets',
-                                value: getFilteredHistory().filter(h => h.result && h.result !== 'Pending').length,
-                                icon: <CheckCircle size={14} className="text-blue-400" />
-                            },
-                            {
-                                label: 'Record',
-                                value: (() => {
-                                    const h = getFilteredHistory();
-                                    const w = h.filter(x => x.result === 'Win').length;
-                                    const l = h.filter(x => x.result === 'Loss').length;
-                                    const p = h.filter(x => x.result === 'Push').length;
-                                    return `${w}-${l}${p > 0 ? `-${p}` : ''}`;
-                                })(),
-                                icon: <ArrowUpDown size={14} className="text-green-400" />
-                            },
-                            {
-                                label: 'Win Rate',
-                                value: (() => {
-                                    const h = getFilteredHistory().filter(x => x.result && x.result !== 'Pending');
-                                    const w = h.filter(x => x.result === 'Win').length;
-                                    return h.length > 0 ? `${((w / h.length) * 100).toFixed(1)}%` : '0.0%';
-                                })(),
-                                icon: <CheckCircle size={14} className="text-purple-400" />
-                            },
-                            {
-                                label: 'Est. Return ($10/bet)',
-                                value: `$${getFilteredHistory().reduce((acc, h) => {
-                                    if (h.result === 'Win') return acc + 9.09;
-                                    if (h.result === 'Loss') return acc - 10.0;
-                                    return acc;
-                                }, 0).toFixed(2)}`,
-                                icon: <RefreshCw size={14} className="text-emerald-400" />
-                            }
-                        ].map((stat, i) => (
-                            <div key={i} className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 shadow-sm relative overflow-hidden group">
-                                <div className="absolute top-0 right-0 p-2 opacity-20 group-hover:opacity-100 transition-opacity">
-                                    {stat.icon}
+                        {/* Model Performance Summary */}
+                        <div className="px-6 py-6 bg-slate-800/30 border-b border-slate-700 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            {[
+                                {
+                                    label: 'Graded Bets',
+                                    value: getFilteredHistory().filter(h => h.result && h.result !== 'Pending').length,
+                                    icon: <CheckCircle size={14} className="text-blue-400" />
+                                },
+                                {
+                                    label: 'Record',
+                                    value: (() => {
+                                        const h = getFilteredHistory();
+                                        const w = h.filter(x => x.result === 'Win').length;
+                                        const l = h.filter(x => x.result === 'Loss').length;
+                                        const p = h.filter(x => x.result === 'Push').length;
+                                        return `${w}-${l}${p > 0 ? `-${p}` : ''}`;
+                                    })(),
+                                    icon: <ArrowUpDown size={14} className="text-green-400" />
+                                },
+                                {
+                                    label: 'Win Rate',
+                                    value: (() => {
+                                        const h = getFilteredHistory().filter(x => x.result && x.result !== 'Pending');
+                                        const w = h.filter(x => x.result === 'Win').length;
+                                        return h.length > 0 ? `${((w / h.length) * 100).toFixed(1)}%` : '0.0%';
+                                    })(),
+                                    icon: <CheckCircle size={14} className="text-purple-400" />
+                                },
+                                {
+                                    label: 'Est. Return ($10/bet)',
+                                    value: `$${getFilteredHistory().reduce((acc, h) => {
+                                        if (h.result === 'Win') return acc + 9.09;
+                                        if (h.result === 'Loss') return acc - 10.0;
+                                        return acc;
+                                    }, 0).toFixed(2)}`,
+                                    icon: <RefreshCw size={14} className="text-emerald-400" />
+                                }
+                            ].map((stat, i) => (
+                                <div key={i} className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 shadow-sm relative overflow-hidden group">
+                                    <div className="absolute top-0 right-0 p-2 opacity-20 group-hover:opacity-100 transition-opacity">
+                                        {stat.icon}
+                                    </div>
+                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{stat.label}</div>
+                                    <div className="text-xl font-bold text-white">{stat.value}</div>
                                 </div>
-                                <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{stat.label}</div>
-                                <div className="text-xl font-bold text-white">{stat.value}</div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {!loading && history.length === 0 && (
-                        <div className="text-center py-10 text-slate-500">
-                            No history yet. Run models to auto-track.
+                            ))}
                         </div>
-                    )}
 
-                    {!loading && history.length > 0 && (
-                        <>
-                            <ModelPerformanceAnalytics history={history} />
+                        {!loading && history.length === 0 && (
+                            <div className="text-center py-10 text-slate-500">
+                                No history yet. Run models to auto-track.
+                            </div>
+                        )}
 
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
-                                                <div className="flex items-center">Date <SortIcon column="created_at" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
-                                                <div className="flex items-center">Sport <SortIcon column="sport" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
-                                                <div className="flex items-center">Matchup <SortIcon column="matchup" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
-                                                <div className="flex items-center">Pick <SortIcon column="bet_on" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Lines</th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
-                                                <div className="flex items-center">Edge <SortIcon column="edge" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
-                                                <div className="flex items-center">Result <SortIcon column="result" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Score</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {getSortedHistory().map((item, idx) => (
-                                            <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                                <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
-                                                    <div className="font-bold text-slate-300">
-                                                        {new Date(item.date || item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
-                                                    </div>
-                                                    <div className="opacity-70">
-                                                        {new Date(item.date || item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                                    </div>
-                                                </td>
-                                                <td className="py-2 px-4">
-                                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
-                                                    ${item.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
-                                                            item.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                                'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
-                                                        {item.sport}
-                                                    </span>
-                                                </td>
-                                                <td className="py-2 px-4 font-medium text-sm text-slate-200">{item.matchup}</td>
-                                                <td className="py-2 px-4 text-white font-bold">
-                                                    {item.bet_on}
-                                                </td>
-                                                <td className="py-2 px-4 text-slate-400 text-xs">
-                                                    <div className="flex flex-col">
-                                                        <span>Mkt: <span className="text-slate-300 font-mono">{item.market_line}</span></span>
-                                                        <span>Fair: <span className="text-slate-500 font-mono">{item.fair_line}</span></span>
-                                                    </div>
-                                                </td>
-                                                <td className={`py-2 px-4 font-bold ${getEdgeColor(item.edge, item.sport)}`}>
-                                                    {item.edge}{item.sport === 'EPL' ? '%' : ' pts'}
-                                                </td>
-                                                <td className="py-2 px-4 text-right sm:text-left">
-                                                    <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
-                                                    ${item.result === 'Win' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
-                                                            item.result === 'Loss' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
-                                                                item.result === 'Push' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
-                                                                    'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
-                                                        {item.result || 'Pending'}
-                                                    </span>
-                                                </td>
-                                                <td className="py-2 px-4 text-slate-300 font-mono text-xs">
-                                                    {item.home_score !== null && item.away_score !== null ? (
-                                                        <div className="flex flex-col">
-                                                            <span className="text-white font-bold">{item.home_score}-{item.away_score}</span>
-                                                            <span className="text-[10px] text-slate-500">T: {item.home_score + item.away_score}</span>
-                                                        </div>
-                                                    ) : '-'}
-                                                </td>
+                        {!loading && history.length > 0 && (
+                            <>
+                                <ModelPerformanceAnalytics history={history} />
+
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
+                                                    <div className="flex items-center">Date <SortIcon column="created_at" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
+                                                    <div className="flex items-center">Sport <SortIcon column="sport" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
+                                                    <div className="flex items-center">Matchup <SortIcon column="matchup" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
+                                                    <div className="flex items-center">Pick <SortIcon column="bet_on" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Lines</th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
+                                                    <div className="flex items-center">Edge <SortIcon column="edge" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
+                                                    <div className="flex items-center">Result <SortIcon column="result" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Score</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </>
-                    )}
+                                        </thead>
+                                        <tbody>
+                                            {getSortedHistory().map((item, idx) => (
+                                                <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                                    <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
+                                                        <div className="font-bold text-slate-300">
+                                                            {new Date(item.date || item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
+                                                        </div>
+                                                        <div className="opacity-70">
+                                                            {new Date(item.date || item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-2 px-4">
+                                                        <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
+                                                    ${item.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
+                                                                item.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
+                                                                    'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
+                                                            {item.sport}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2 px-4 font-medium text-sm text-slate-200">{item.matchup}</td>
+                                                    <td className="py-2 px-4 text-white font-bold">
+                                                        {item.bet_on}
+                                                    </td>
+                                                    <td className="py-2 px-4 text-slate-400 text-xs">
+                                                        <div className="flex flex-col">
+                                                            <span>Mkt: <span className="text-slate-300 font-mono">{item.market_line}</span></span>
+                                                            <span>Fair: <span className="text-slate-500 font-mono">{item.fair_line}</span></span>
+                                                        </div>
+                                                    </td>
+                                                    <td className={`py-2 px-4 font-bold ${getEdgeColor(item.edge, item.sport)}`}>
+                                                        {item.edge}{item.sport === 'EPL' ? '%' : ' pts'}
+                                                    </td>
+                                                    <td className="py-2 px-4 text-right sm:text-left">
+                                                        <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
+                                                    ${item.result === 'Win' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
+                                                                item.result === 'Loss' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
+                                                                    item.result === 'Push' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
+                                                                        'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
+                                                            {item.result || 'Pending'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2 px-4 text-slate-300 font-mono text-xs">
+                                                        {item.home_score !== null && item.away_score !== null ? (
+                                                            <div className="flex flex-col">
+                                                                <span className="text-white font-bold">{item.home_score}-{item.away_score}</span>
+                                                                <span className="text-[10px] text-slate-500">T: {item.home_score + item.away_score}</span>
+                                                            </div>
+                                                        ) : '-'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </>
+                        )}
 
-                    <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                            <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
-                            <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges &gt;1.5pts.</p>
-                        </div>
-                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                            <h3 className="font-bold text-orange-400 mb-2">NCAAM Model</h3>
-                            <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals &gt;4pt edge.</p>
-                        </div>
-                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                            <h3 className="font-bold text-purple-400 mb-2">EPL Model</h3>
-                            <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with &gt;5% Expected Value.</p>
+                        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
+                                <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges &gt;1.5pts.</p>
+                            </div>
+                            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                <h3 className="font-bold text-orange-400 mb-2">NCAAM Model</h3>
+                                <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals &gt;4pt edge.</p>
+                            </div>
+                            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                <h3 className="font-bold text-purple-400 mb-2">EPL Model</h3>
+                                <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with &gt;5% Expected Value.</p>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-        </div>
+            {/* Analysis Modal */}
+            {
+                selectedGame && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl relative animate-in fade-in zoom-in duration-200">
+                            {/* Header */}
+                            <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-slate-700 px-6 py-4 flex justify-between items-center z-10">
+                                <div>
+                                    <h2 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
+                                        {selectedGame.game}
+                                    </h2>
+                                    <div className="text-xs text-slate-400 mt-1 flex gap-2">
+                                        <span>{new Date(selectedGame.start_time).toLocaleString()}</span>
+                                        <span>•</span>
+                                        <span className="uppercase font-bold">{selectedGame.sport} Analysis</span>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={closeAnalysisModal}
+                                    className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            {/* Content */}
+                            <div className="p-6">
+                                {isAnalyzing && !analysisResult ? (
+                                    <div className="py-20 flex flex-col items-center justify-center text-slate-400">
+                                        <RefreshCw className="animate-spin w-12 h-12 text-blue-500 mb-4" />
+                                        <p className="font-medium">Cruching numbers...</p>
+                                        <p className="text-sm opacity-60 mt-2">Checking efficiency metrics & generating narrative</p>
+                                    </div>
+                                ) : analysisResult?.error ? (
+                                    <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-200">
+                                        <div className="font-bold flex items-center gap-2 mb-1">
+                                            <ShieldAlert size={16} /> Analysis Failed
+                                        </div>
+                                        {analysisResult.error}
+                                    </div>
+                                ) : analysisResult ? (
+                                    <div className="space-y-6">
+                                        {/* Recommendations */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {analysisResult.recommendations.map((rec, idx) => (
+                                                <div key={idx} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                                            {rec.bet_type} Recommendation
+                                                        </span>
+                                                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${rec.confidence === 'High' ? 'bg-green-500/20 text-green-400' :
+                                                            rec.confidence === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                                'bg-slate-700 text-slate-400'
+                                                            }`}>
+                                                            {rec.confidence} Confidence
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-2xl font-bold text-white mb-1">{rec.selection}</div>
+                                                    <div className="text-xs text-slate-400">
+                                                        Edge: <span className="text-green-400 font-bold">+{rec.edge}</span> •
+                                                        Fair: {rec.fair_line}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Narrative */}
+                                        <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700/50 relative overflow-hidden">
+                                            <div className="absolute top-0 right-0 p-4 opacity-5">
+                                                <Info size={100} />
+                                            </div>
+                                            <h3 className="font-bold text-slate-200 mb-3 flex items-center gap-2">
+                                                <Info size={16} className="text-blue-400" />
+                                                Why This Bet?
+                                            </h3>
+                                            <div className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed font-light">
+                                                <p>{analysisResult.narrative}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Key Factors */}
+                                        {analysisResult.key_factors && (
+                                            <div>
+                                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Key Factors</h3>
+                                                <div className="space-y-2">
+                                                    {analysisResult.key_factors.map((factor, i) => (
+                                                        <div key={i} className="flex items-center gap-3 text-sm text-slate-300">
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                                            {factor}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Risks */}
+                                        {analysisResult.risks && (
+                                            <div>
+                                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Risk Factors</h3>
+                                                <div className="space-y-2">
+                                                    {analysisResult.risks.map((risk, i) => (
+                                                        <div key={i} className="flex items-center gap-3 text-sm text-slate-300">
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                                                            {risk}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+        </div >
     );
 };
 

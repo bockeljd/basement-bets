@@ -1566,19 +1566,19 @@ def init_team_metrics_db():
 def upsert_team_metrics(metrics: list):
     query = """
     INSERT INTO bt_team_metrics_daily
-    (team_text, date, adj_off, adj_def, adj_tempo)
-    VALUES (:team_text, :date, :adj_off, :adj_def, :adj_tempo)
+    (team_text, date, adj_off, adj_def, adj_tempo, efg_off, efg_def, to_off, to_def, or_off, or_def, ftr_off, ftr_def)
+    VALUES (:team_text, :date, :adj_off, :adj_def, :adj_tempo, :efg_off, :efg_def, :to_off, :to_def, :or_off, :or_def, :ftr_off, :ftr_def)
     """
     with get_db_connection() as conn:
         is_pg = hasattr(conn, 'cursor_factory')
         if is_pg:
-            query = query.replace("INSERT INTO", "INSERT INTO") + " ON CONFLICT (team_text, date) DO UPDATE SET adj_off=excluded.adj_off, adj_def=excluded.adj_def, adj_tempo=excluded.adj_tempo"
+            query = query.replace("INSERT INTO", "INSERT INTO") + " ON CONFLICT (team_text, date) DO UPDATE SET adj_off=excluded.adj_off, adj_def=excluded.adj_def, adj_tempo=excluded.adj_tempo, efg_off=excluded.efg_off, efg_def=excluded.efg_def, to_off=excluded.to_off, to_def=excluded.to_def, or_off=excluded.or_off, or_def=excluded.or_def, ftr_off=excluded.ftr_off, ftr_def=excluded.ftr_def"
             import re
             query = re.sub(r':(\w+)', r'%(\1)s', query)
             with conn.cursor() as cur:
                 cur.executemany(query, metrics)
         else:
-            query += " ON CONFLICT(team_text, date) DO UPDATE SET adj_off=excluded.adj_off, adj_def=excluded.adj_def, adj_tempo=excluded.adj_tempo"
+            query += " ON CONFLICT(team_text, date) DO UPDATE SET adj_off=excluded.adj_off, adj_def=excluded.adj_def, adj_tempo=excluded.adj_tempo, efg_off=excluded.efg_off, efg_def=excluded.efg_def, to_off=excluded.to_off, to_def=excluded.to_def, or_off=excluded.or_off, or_def=excluded.or_def, ftr_off=excluded.ftr_off, ftr_def=excluded.ftr_def"
             conn.executemany(query, metrics)
         conn.commit()
 
@@ -1596,7 +1596,16 @@ def init_ingestion_backbone_db():
             "ALTER TABLE provider_ingestion_runs ADD COLUMN IF NOT EXISTS payload_snapshot_path TEXT",
             "ALTER TABLE provider_ingestion_runs ADD COLUMN IF NOT EXISTS schema_drift_detected BOOLEAN DEFAULT FALSE",
             # Backfill old status to run_status if null
-            "UPDATE provider_ingestion_runs SET run_status = status WHERE run_status IS NULL"
+            "UPDATE provider_ingestion_runs SET run_status = status WHERE run_status IS NULL",
+            # Four Factors Migration (Postgres)
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS efg_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS efg_def REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS to_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS to_def REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS or_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS or_def REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS ftr_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS ftr_def REAL"
         ]
     else:
         # Sqlite limited alter support, mostly append
@@ -1605,7 +1614,16 @@ def init_ingestion_backbone_db():
             "ALTER TABLE provider_ingestion_runs ADD COLUMN items_processed INTEGER DEFAULT 0",
             "ALTER TABLE provider_ingestion_runs ADD COLUMN items_changed INTEGER DEFAULT 0",
             "ALTER TABLE provider_ingestion_runs ADD COLUMN payload_snapshot_path TEXT",
-            "ALTER TABLE provider_ingestion_runs ADD COLUMN schema_drift_detected BOOLEAN DEFAULT FALSE"
+            "ALTER TABLE provider_ingestion_runs ADD COLUMN schema_drift_detected BOOLEAN DEFAULT FALSE",
+            # Four Factors Migration (NCAAM)
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN efg_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN efg_def REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN to_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN to_def REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN or_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN or_def REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN ftr_off REAL",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN ftr_def REAL"
         ]
 
     with get_db_connection() as conn:
