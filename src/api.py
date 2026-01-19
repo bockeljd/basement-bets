@@ -44,6 +44,15 @@ async def check_access_key(request: Request, call_next):
     response = await call_next(request)
     return response
 
+@app.get("/api/version")
+def get_version():
+    """Public endpoint to check the current deployed version and build time."""
+    return {
+        "version": "1.2.1",
+        "build_time": "2026-01-19T18:15:00Z",
+        "env": os.environ.get("VERCEL_ENV", "local")
+    }
+
 # --- Admin Routes ---
 @app.get("/api/admin/init-db")
 def run_init():
@@ -80,7 +89,7 @@ def health_check():
 
     return {
         "status": "Healthy" if db_ok else "Degraded",
-        "version": "1.0.0-mvp",
+        "version": "1.2.1-prod",
         "env": settings.APP_ENV,
         "database_connected": db_ok,
         "database_url_present": bool(settings.DATABASE_URL),

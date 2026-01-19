@@ -4,10 +4,9 @@ import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
     ScatterChart, Scatter, ZAxis
 } from 'recharts';
-import {
-    LayoutDashboard, List, ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown, Activity,
-    DollarSign, Calendar, Filter, Download, Plus, AlertCircle, RefreshCw, Trash, PlusCircle, BarChart3
-} from 'lucide-react';
+import { TrendingUp, ArrowUpRight, ArrowDownRight, DollarSign, Activity, PieChart, BarChart2, Calendar, Layout, Search, Menu, X, PlusCircle, Trash2, CheckCircle, Clock, Percent, List, FileText, Info, Settings, User, RefreshCw, AlertTriangle, Filter, ChevronDown, ChevronRight, MessageSquare, BookOpen, ExternalLink, ArrowRight, Table } from 'lucide-react';
+
+console.log("Basement Bets Frontend v1.2.1 Loaded");
 import axios from 'axios';
 import BetTypeAnalysis from './components/BetTypeAnalysis';
 import Research from './pages/Research';
@@ -1344,7 +1343,7 @@ const FinancialHeader = ({ financials, mode = 'all' }) => {
     if (!financials) return null;
     return (
         <div className="flex flex-wrap gap-4 mb-8">
-            <div className="text-[10px] text-slate-500 absolute top-2 right-4">v1.2</div>
+            <div className="text-[10px] text-slate-500 absolute top-2 right-4">v1.2.1</div>
             <FinancialCard
                 label="Total In Play"
                 value={financials.total_in_play}
