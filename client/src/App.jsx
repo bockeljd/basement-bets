@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { TrendingUp, ArrowUpRight, ArrowDownRight, DollarSign, Activity, PieChart, BarChart2, Calendar, Layout, Search, Menu, X, PlusCircle, Trash2, CheckCircle, Clock, Percent, List, FileText, Info, Settings, User, RefreshCw, AlertTriangle, Filter, ChevronDown, ChevronRight, MessageSquare, BookOpen, ExternalLink, ArrowRight, Table } from 'lucide-react';
 
-console.log("Basement Bets Frontend v1.2.1 Loaded");
+console.log("Basement Bets Frontend v1.2.1 Loaded at " + new Date().toISOString());
 import axios from 'axios';
 import BetTypeAnalysis from './components/BetTypeAnalysis';
 import Research from './pages/Research';

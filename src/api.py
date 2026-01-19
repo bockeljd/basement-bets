@@ -26,6 +26,10 @@ async def check_access_key(request: Request, call_next):
          return await call_next(request)
          
     if request.url.path.startswith("/api"):
+        # Allow public diagnostic endpoints
+        if request.url.path in ["/api/version", "/api/health"]:
+            return await call_next(request)
+
         # 1. Check CRON Secret (Vercel Cron)
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
