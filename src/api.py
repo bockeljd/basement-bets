@@ -234,10 +234,38 @@ async def parse_slip(request: Request, user: dict = Depends(get_current_user)):
         data = await request.json()
         raw_text = data.get("raw_text")
         sportsbook = data.get("sportsbook", "DK")
+        if sportsbook.upper() == "DK": sportsbook = "DraftKings"
+        if sportsbook.upper() in ["FD", "FANDUEL"]: sportsbook = "FanDuel"
         
-        from src.parsers.llm_parser import LLMSlipParser
-        parser = LLMSlipParser()
-        result = parser.parse(raw_text, sportsbook)
+        if sportsbook == "DraftKings":
+            from src.parsers.draftkings_text import DraftKingsTextParser
+            parser = DraftKingsTextParser()
+            results = parser.parse(raw_text)
+            if results:
+                parsed = results[0]
+                # Transform to frontend-expected schema
+                result = {
+                    "event_name": parsed.get("description"),
+                    "sport": parsed.get("sport"),
+                    "market_type": parsed.get("bet_type"),
+                    "selection": parsed.get("selection"),
+                    "price": {"american": parsed.get("odds"), "decimal": None},
+                    "stake": parsed.get("wager"),
+                    "status": parsed.get("status", "PENDING"),
+                    "placed_at": parsed.get("date"),
+                    "confidence": 0.95,  # Fixed confidence for regex parser
+                    "is_live": parsed.get("is_live", False),
+                    "is_bonus": parsed.get("is_bonus", False),
+                    "profit": parsed.get("profit"),
+                    "provider": parsed.get("provider", "DraftKings"),
+                    "raw_text": parsed.get("raw_text"),
+                }
+            else:
+                raise Exception("Failed to parse DraftKings slip")
+        else:
+            from src.parsers.llm_parser import LLMSlipParser
+            parser = LLMSlipParser()
+            result = parser.parse(raw_text, sportsbook)
         
         # Add duplicate check
         user_id = user.get("sub")
@@ -282,10 +310,25 @@ async def save_manual_bet(request: Request, user: dict = Depends(get_current_use
         # Handle '2026-01-11 19:57:51' or ISO format
         date_part = placed_at.split(" ")[0].split("T")[0] if placed_at else datetime.now().strftime("%Y-%m-%d")
 
+        # Sanitize account_id (Postgres requires UUID, skip if "Main" or short string)
+        raw_acc_id = bet_data.get("account_id")
+        account_id = None
+        if raw_acc_id and len(str(raw_acc_id)) > 30:
+             account_id = raw_acc_id
+
+        # Normalize provider name
+        provider_raw = bet_data.get("sportsbook") or bet_data.get("provider", "")
+        if provider_raw.upper() == "DK":
+            provider = "DraftKings"
+        elif provider_raw.upper() in ["FD", "FANDUEL"]:
+            provider = "FanDuel"
+        else:
+            provider = provider_raw
+
         doc = {
             "user_id": user_id,
-            "account_id": bet_data.get("account_id"),
-            "provider": bet_data.get("sportsbook"),
+            "account_id": account_id,
+            "provider": provider,
             "date": date_part,
             "sport": bet_data.get("sport") or "Unknown",
             "bet_type": bet_data.get("market_type"),

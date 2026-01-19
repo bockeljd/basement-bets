@@ -92,6 +92,7 @@ function App() {
     const [periodStats, setPeriodStats] = useState({ '7d': null, '30d': null, 'ytd': null, 'all': null });
     const [edgeBreakdown, setEdgeBreakdown] = useState([]);
     const [showAddBet, setShowAddBet] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
 
     // Auth State
     const [showLogin, setShowLogin] = useState(() => {
@@ -100,10 +101,29 @@ function App() {
 
     const handleLogin = (pass) => {
         localStorage.setItem('basement_password', pass);
-        // Force reload to apply key via axios interceptor or just state? 
-        // Axios reads from localStorage on create. We might need to reload or update api instance.
-        // Reload is safest for now to reset all state.
         window.location.reload();
+    };
+
+    const handleSyncResults = async () => {
+        setIsSyncing(true);
+        try {
+            // Sync all active leagues
+            const leagues = ['NFL', 'NCAAM', 'EPL'];
+            for (const league of leagues) {
+                await api.post(`/api/jobs/ingest_results/${league}`);
+            }
+            // Add reconciliation and grading
+            await api.post('/api/jobs/reconcile');
+            await api.post('/api/jobs/grade_predictions');
+
+            alert("Results synced and bets settled successfully!");
+            window.location.reload();
+        } catch (err) {
+            console.error("Sync Error", err);
+            alert("Failed to sync results. Check backend logs.");
+        } finally {
+            setIsSyncing(false);
+        }
     };
 
     if (showLogin) {
@@ -318,6 +338,14 @@ function App() {
                                 className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all ${view === 'performance' ? 'bg-blue-500 text-white font-bold shadow-[0_0_15px_rgba(59,130,246,0.4)]' : 'bg-slate-800 hover:bg-slate-700'}`}
                             >
                                 <TrendingUp size={18} /> Performance
+                            </button>
+                            <button
+                                onClick={handleSyncResults}
+                                disabled={isSyncing}
+                                className={`px-4 py-2 rounded-lg flex items-center gap-2 font-bold transition-all ${isSyncing ? 'bg-slate-800 text-gray-500 animate-pulse' : 'bg-slate-800 hover:bg-slate-700 text-blue-400'}`}
+                            >
+                                <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
+                                {isSyncing ? 'Syncing...' : 'Sync Scores'}
                             </button>
                             <button
                                 onClick={() => setShowAddBet(true)}
@@ -1223,8 +1251,8 @@ function TransactionView({ bets, financials }) {
                                         </td>
                                         <td className="px-6 py-3 text-center">
                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${isTxn ? (isDeposit ? 'bg-green-900/20 text-green-400 border-green-900' : 'bg-gray-800 text-gray-400 border-gray-700') :
-                                                bet.status === 'WON' ? 'bg-green-900/20 text-green-400 border-green-900' :
-                                                    bet.status === 'LOST' ? 'bg-red-900/20 text-red-400 border-red-900' :
+                                                ['WON', 'WIN'].includes(bet.status) ? 'bg-green-900/20 text-green-400 border-green-900' :
+                                                    ['LOST', 'LOSE'].includes(bet.status) ? 'bg-red-900/20 text-red-400 border-red-900' :
                                                         'bg-gray-800 text-gray-400 border-gray-700'
                                                 }`}>
                                                 {isTxn ? (isDeposit ? 'DEPOSIT' : 'WITHDRAWAL') : bet.status}

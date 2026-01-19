@@ -72,7 +72,7 @@ class AnalyticsEngine:
         total_wagered = sum(b['wager'] for b in bets)
         net_profit = sum(b['profit'] for b in bets)
         roi = (net_profit / total_wagered * 100) if total_wagered > 0 else 0.0
-        wins = sum(1 for b in bets if b['status'].strip().upper() == 'WON' or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0))
+        wins = sum(1 for b in bets if b['status'].strip().upper() in ('WON', 'WIN') or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0))
         total = len(bets)
         win_rate = (wins / total * 100) if total > 0 else 0.0
         
@@ -101,7 +101,7 @@ class AnalyticsEngine:
             groups[key]['wager'] += b['wager']
             groups[key]['profit'] += b['profit']
             groups[key]['total'] += 1
-            if b['status'].strip().upper() == 'WON' or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0):
+            if b['status'].strip().upper() in ('WON', 'WIN') or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0):
                 groups[key]['wins'] += 1
         results = []
         for key, vals in groups.items():
@@ -179,7 +179,7 @@ class AnalyticsEngine:
             groups[key]['total'] += 1
             
             status = b.get('status', 'PENDING').strip().upper()
-            if status == 'WON' or (status == 'CASHED OUT' and b['profit'] > 0):
+            if status in ('WON', 'WIN') or (status == 'CASHED OUT' and b['profit'] > 0):
                 groups[key]['wins'] += 1
             
             if b.get('odds'):
@@ -236,7 +236,7 @@ class AnalyticsEngine:
                 player_stats[player]['wager'] += b['wager'] # Full wager
                 player_stats[player]['profit'] += b['profit']
                 player_stats[player]['total'] += 1
-                if b['status'].upper() == 'WON':
+                if b['status'].upper() in ('WON', 'WIN'):
                     player_stats[player]['wins'] += 1
 
         results = []
@@ -579,8 +579,8 @@ class AnalyticsEngine:
         net_profit = sum(b['profit'] for b in filtered_bets)
         roi = (net_profit / total_wagered * 100) if total_wagered > 0 else 0.0
         
-        wins = sum(1 for b in filtered_bets if b['status'].strip().upper() == 'WON' or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0))
-        losses = sum(1 for b in filtered_bets if b['status'].strip().upper() == 'LOST')
+        wins = sum(1 for b in filtered_bets if b['status'].strip().upper() in ('WON', 'WIN') or (b['status'].strip().upper() == 'CASHED OUT' and b['profit'] > 0))
+        losses = sum(1 for b in filtered_bets if b['status'].strip().upper() in ('LOST', 'LOSE'))
         total = len(filtered_bets)
         actual_win_rate = (wins / total * 100) if total > 0 else 0.0
         
@@ -603,9 +603,9 @@ class AnalyticsEngine:
                     implied_probs.append(prob)
                     
                     # Fair Record Calculation
-                    if status == 'WON':
+                    if status in ('WON', 'WIN'):
                         adj_wins += (1 - prob)
-                    elif status == 'LOST':
+                    elif status in ('LOST', 'LOSE'):
                         adj_losses += prob
             
             if odds and closing:
@@ -672,11 +672,11 @@ class AnalyticsEngine:
         
         # Calculate "Total In Play" (Current Equity)
         balances = self.get_balances()
-        # balances is now {provider: {'balance': X, 'last_bet': Y}}
         total_equity = sum(v['balance'] for v in balances.values())
         
-        # Realized Profit = Total Withdrawn - Total Deposited
-        realized_profit = total_withdrawals - total_deposits
+        # Realized Profit includes Net Betting Profit + Net Flows
+        # Standard: P&L = (Current Equity + Withdrawals) - Deposits
+        realized_profit = (total_equity + total_withdrawals) - total_deposits
 
         # Breakdown by Provider
         # Re-query or iterate to group by provider

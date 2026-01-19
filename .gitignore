@@ -18,3 +18,7 @@ data/bets.db
 .vscode/
 .vercel
 .env*.local
+
+# Raw Data
+data/snapshots/
+data/imports/
