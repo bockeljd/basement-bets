@@ -1,4 +1,4 @@
-fastapi
+fastapi==0.103.1 # v1.2.1-v7
 uvicorn
 psycopg2-binary
 requests
