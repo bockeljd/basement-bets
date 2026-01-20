@@ -4,7 +4,7 @@ import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
     ScatterChart, Scatter, ZAxis, ReferenceLine
 } from 'recharts';
-import { TrendingUp, ArrowUpRight, ArrowDownRight, DollarSign, Activity, PieChart, BarChart2, Calendar, Layout, Search, Menu, X, PlusCircle, Trash2, CheckCircle, Clock, Percent, List, FileText, Info, Settings, User, RefreshCw, AlertTriangle, Filter, ChevronDown, ChevronRight, MessageSquare, BookOpen, ExternalLink, ArrowRight, Table } from 'lucide-react';
+import { TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, DollarSign, Activity, PieChart, BarChart2, BarChart3, Calendar, Layout, LayoutDashboard, Search, Menu, X, PlusCircle, Trash, Trash2, CheckCircle, Clock, Percent, List, FileText, Info, Settings, User, RefreshCw, AlertTriangle, AlertCircle, Filter, ChevronDown, ChevronRight, MessageSquare, BookOpen, ExternalLink, ArrowRight, Table } from 'lucide-react';
 
 console.log("Basement Bets Frontend v1.2.1 (Profit X-Axis) Loaded at " + new Date().toISOString());
 import axios from 'axios';
