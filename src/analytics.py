@@ -674,9 +674,13 @@ class AnalyticsEngine:
         balances = self.get_balances()
         total_equity = sum(v['balance'] for v in balances.values())
         
-        # Realized Profit includes Net Betting Profit + Net Flows
-        # Standard: P&L = (Current Equity + Withdrawals) - Deposits
-        realized_profit = (total_equity + total_withdrawals) - total_deposits
+        # Realized Profit = Simple Cash Out - Cash In
+        # This answers: "How much more/less money do I have from withdrawals vs deposits?"
+        realized_profit = total_withdrawals - total_deposits
+        
+        # Net Betting Profit = What the betting activity produced (excludes flows)
+        # (Current Equity + Withdrawals) - Deposits = realized gains from betting
+        net_bet_profit = (total_equity + total_withdrawals) - total_deposits
 
         # Breakdown by Provider
         # Re-query or iterate to group by provider
@@ -717,6 +721,7 @@ class AnalyticsEngine:
             "total_withdrawn": total_withdrawals,
             "total_in_play": total_equity,
             "realized_profit": realized_profit,
+            "net_bet_profit": net_bet_profit,
             "breakdown": provider_breakdown
         }
 
