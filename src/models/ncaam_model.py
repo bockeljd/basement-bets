@@ -331,6 +331,48 @@ class NCAAMModel(BaseModel):
         # Default Logic
         return {"eff_off": 105.0, "eff_def": 105.0, "tempo": 68.0}
 
+    def standardize_team_name(self, team_name: str) -> str:
+        """
+        Standardize team name for consistent matching across data sources.
+        """
+        if not team_name:
+            return team_name
+            
+        # Common normalizations
+        normalized = team_name.strip()
+        
+        # Known aliases
+        aliases = {
+            "uconn": "Connecticut",
+            "ole miss": "Mississippi",
+            "lsu": "LSU",
+            "ucla": "UCLA",
+            "usc": "USC",
+            "smu": "SMU",
+            "tcu": "TCU",
+            "byu": "BYU",
+            "uncw": "UNC Wilmington",
+            "unc": "North Carolina",
+            "umass": "Massachusetts",
+            "unlv": "UNLV",
+            "vcu": "VCU",
+            "utep": "UTEP",
+        }
+        
+        normalized_lower = normalized.lower()
+        for alias, full_name in aliases.items():
+            if normalized_lower == alias:
+                return full_name
+                
+        # Clean up common suffixes/prefixes
+        normalized = normalized.replace(".", "")
+        normalized = normalized.replace(" St", " State")
+        normalized = normalized.replace(" (FL)", "")
+        normalized = normalized.replace(" (PA)", "")
+        normalized = normalized.replace(" (OH)", "")
+        
+        return normalized
+
     def predict(self, game_id: str, home_team: str, away_team: str, market_total: float = 0) -> Dict[str, Any]:
         """
         Legacy predict shim, calling V1 if possible or falling back.
