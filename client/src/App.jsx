@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import api from './api/axios';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
-    ScatterChart, Scatter, ZAxis
+    ScatterChart, Scatter, ZAxis, ReferenceLine
 } from 'recharts';
 import { TrendingUp, ArrowUpRight, ArrowDownRight, DollarSign, Activity, PieChart, BarChart2, Calendar, Layout, Search, Menu, X, PlusCircle, Trash2, CheckCircle, Clock, Percent, List, FileText, Info, Settings, User, RefreshCw, AlertTriangle, Filter, ChevronDown, ChevronRight, MessageSquare, BookOpen, ExternalLink, ArrowRight, Table } from 'lucide-react';
 
-console.log("Basement Bets Frontend v1.2.1 Loaded at " + new Date().toISOString());
+console.log("Basement Bets Frontend v1.2.1 (Profit X-Axis) Loaded at " + new Date().toISOString());
 import axios from 'axios';
 import BetTypeAnalysis from './components/BetTypeAnalysis';
 import Research from './pages/Research';
@@ -759,17 +759,18 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                                     return null;
                                 }}
                             />
+                            {/* Profit/Loss Reference Line */}
+                            <ReferenceLine x={0} stroke="#475569" strokeWidth={1} />
+
                             <Scatter name="Segments" data={edgeBreakdown}>
                                 {edgeBreakdown.map((entry, index) => (
                                     <Cell key={`cell-${index}`} fill={entry.profit >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} stroke={entry.profit >= 0 ? '#10b981' : '#ef4444'} />
                                 ))}
                             </Scatter>
-                            {/* Line of neutrality (Actual = Implied) */}
-                            <Line type="monotone" data={[{ implied_win_rate: 0, actual_win_rate: 0 }, { implied_win_rate: 100, actual_win_rate: 100 }]} dataKey="actual_win_rate" stroke="#475569" strokeDasharray="5 5" strokeWidth={1} dot={false} />
                         </ScatterChart>
                     </ResponsiveContainer>
                     <div className="text-[10px] text-slate-500 text-center mt-2 italic">
-                        Bubbles above the dashed line indicate a positive edge. Bubble size represents bet volume.
+                        Segments plotted by Profit (X) and Actual Win Rate (Y). Bubble size represents bet volume.
                     </div>
                 </div>
 
