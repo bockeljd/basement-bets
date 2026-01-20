@@ -587,6 +587,7 @@ async def get_research_edges(refresh: bool = False, user: dict = Depends(get_cur
         for e in nfl_edges:
             e['market'] = 'Spread'
             e['logic'] = 'Logistic Regression'
+            e['is_actionable'] = True  # Enable history tracking
             
             # Calculate Risk Metrics (EV/Kelly)
             if e.get('win_prob') and e.get('market_odds'):
@@ -630,6 +631,7 @@ async def get_research_edges(refresh: bool = False, user: dict = Depends(get_cur
         for e in epl_edges:
             e['market'] = 'Moneyline'
             e['logic'] = 'Poisson (xG)'
+            e['is_actionable'] = True  # Enable history tracking
             
             if e.get('win_prob_home') and e.get('market_odds'):
                 e['ev'] = risk_mgr.calculate_ev(e['win_prob_home'], e['market_odds'])
