@@ -654,11 +654,12 @@ async def get_research_edges(refresh: bool = False, user: dict = Depends(get_cur
                 edge['audit_reason'] = audit_result['audit_reason']
                 
                 # Capture in DB
+                matchup = edge.get('game') or edge.get('matchup') or f"{edge.get('away_team', 'Away')} @ {edge.get('home_team', 'Home')}"
                 doc = {
-                    "game_id": edge.get('game_token') or edge.get('game_id') or edge.get('game'),
+                    "game_id": edge.get('game_token') or edge.get('game_id') or edge.get('game') or matchup,
                     "sport": edge.get('sport'),
                     "start_time": edge.get('start_time'),
-                    "game": edge.get('game'),
+                    "game": matchup,
                     "bet_on": str(edge.get('bet_on')),
                     "market": edge.get('market'),
                     "market_line": edge.get('market_line') or edge.get('market_spread') or 0,
