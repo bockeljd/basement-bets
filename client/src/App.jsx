@@ -107,7 +107,7 @@ function App() {
         setIsSyncing(true);
         try {
             // Sync all active leagues
-            const leagues = ['NFL', 'NCAAM', 'EPL'];
+            const leagues = ['NFL', 'NCAAM', 'NCAAF', 'EPL'];
             for (const league of leagues) {
                 await api.post(`/api/jobs/ingest_results/${league}`);
             }

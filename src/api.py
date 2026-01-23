@@ -219,6 +219,7 @@ async def get_odds(sport: str):
     sport_key = sport # for now
     if sport == 'NFL': sport_key = 'americanfootball_nfl'
     elif sport == 'NCAAM': sport_key = 'basketball_ncaab'
+    elif sport == 'NCAAF': sport_key = 'americanfootball_ncaaf'
     elif sport == 'EPL': sport_key = 'soccer_epl'
     
     return odds_client.get_odds(sport_key)
@@ -478,7 +479,7 @@ async def get_schedule(sport: str = "all", days: int = 1, user: dict = Depends(g
     client = EspnClient()
     games = []
     
-    leagues = ['NFL', 'NCAAM', 'EPL'] if sport.lower() == 'all' else [sport.upper()]
+    leagues = ['NFL', 'NCAAM', 'NCAAF', 'EPL'] if sport.lower() == 'all' else [sport.upper()]
     
     for league in leagues:
         for i in range(days):
@@ -758,7 +759,7 @@ async def trigger_torvik_ingestion(request: Request):
 async def trigger_result_ingestion(league: str, date: Optional[str] = None):
     """
     Cron Job / Manual Trigger: Ingests scoreboard/results from ESPN for a specific league.
-    Supports NFL, NCAAM, EPL.
+    Supports NFL, NCAAM, NCAAF, EPL.
     """
     try:
         from src.parsers.espn_client import EspnClient

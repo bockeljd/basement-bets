@@ -155,8 +155,8 @@ const Research = () => {
             return 'text-red-400';
         }
 
-        // Point-based (NFL/NCAAM)
-        const threshold = sport === 'NFL' ? 1.5 : 3.0;
+        // Point-based (NFL/NCAAM/NCAAF)
+        const threshold = (sport === 'NFL' || sport === 'NCAAF') ? 1.5 : 3.0;
         if (edge >= threshold * 2) return 'text-green-400 font-bold';
         if (edge >= threshold) return 'text-green-300';
         if (edge > 0) return 'text-green-200';
@@ -287,6 +287,7 @@ const Research = () => {
                                     <option value="All">All Sports</option>
                                     <option value="NFL">NFL</option>
                                     <option value="NCAAM">NCAAM</option>
+                                    <option value="NCAAF">NCAAF</option>
                                     <option value="EPL">EPL</option>
                                 </select>
                             </div>
@@ -432,9 +433,11 @@ const Research = () => {
                                                             <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
                                                                 ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
                                                                     edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                                        'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
+                                                                        edge.sport === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
+                                                                            'bg-slate-700/50 text-slate-400 border border-slate-600'
+                                                                }`}>
                                                                 {edge.sport === 'NCAAM' ? 'NCAA Basketball' :
-                                                                    edge.sport === 'NFL' ? 'NFL' :
+                                                                    edge.sport === 'NCAAF' ? 'NCAA Football' :
                                                                         edge.sport === 'EPL' ? 'Premier League' :
                                                                             edge.sport}
                                                             </span>
@@ -657,7 +660,8 @@ const Research = () => {
                                                         <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
                                                     ${item.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
                                                                 item.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                                    'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
+                                                                    item.sport === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
+                                                                        'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
                                                             {item.sport}
                                                         </span>
                                                     </td>

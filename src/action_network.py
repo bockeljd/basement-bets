@@ -175,6 +175,7 @@ class ActionNetworkClient:
         # Map TheOddsAPI keys to ActionNetwork keys
         sport_map = {
             "americanfootball_nfl": "nfl",
+            "americanfootball_ncaaf": "ncaaf",
             "basketball_nba": "nba",
             "basketball_ncaab": "ncaab",
             "baseball_mlb": "mlb",
