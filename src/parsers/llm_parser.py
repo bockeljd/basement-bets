@@ -2,7 +2,12 @@ import os
 import json
 import hashlib
 from typing import Dict, Any
-import openai
+from datetime import datetime
+
+try:
+    import openai
+except ImportError:
+    openai = None
 
 class LLMSlipParser:
     def __init__(self):

@@ -1,4 +1,4 @@
-fastapi==0.103.1 # v1.2.1-v7
+fastapi==0.103.1
 uvicorn
 psycopg2-binary
 requests
@@ -8,3 +8,4 @@ lxml
 html5lib
 supabase
 python-jose[cryptography]
+openai

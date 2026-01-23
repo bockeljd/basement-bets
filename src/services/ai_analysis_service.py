@@ -1,15 +1,20 @@
-
 import os
 import json
-import openai
+try:
+    import openai
+    from openai import OpenAI
+except ImportError:
+    openai = None
+    OpenAI = None
 from datetime import datetime, timedelta
 from src.database import get_db_connection, _exec
 
 class AiAnalysisService:
     def __init__(self):
         self.api_key = os.environ.get("OPENAI_API_KEY")
-        if self.api_key:
-            openai.api_key = self.api_key
+        self.client = None
+        if self.api_key and OpenAI:
+            self.client = OpenAI(api_key=self.api_key)
         self.model = "gpt-4-turbo-preview"
 
     def analyze_model_health(self, target_date: str = None) -> dict:
@@ -75,8 +80,8 @@ class AiAnalysisService:
         
         analysis = None
         
-        if not self.api_key:
-            print("[AI Analysis] No API Key. Using mock.")
+        if not self.api_key or not self.client:
+            print("[AI Analysis] No API Key or Client. Using mock.")
             analysis = {
                 "summary": "Mock Analysis (No Key)",
                 "anomalies": ["Mock Anomaly 1"],
@@ -85,7 +90,7 @@ class AiAnalysisService:
             }
         else:
             try:
-                response = openai.ChatCompletion.create(
+                response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": "You are a helpful quantitative analyst assistant."},
