@@ -258,11 +258,14 @@ class AnalyticsEngine:
         """
         Aggregates profit by Month (YYYY-MM).
         Includes both Bets and Financial Transactions (Deposits/Withdrawals).
+        Returns both realized profit and total balance (money in play) time series.
         """
         from datetime import datetime
         from src.database import get_db_connection
         
-        monthly_stats = defaultdict(float)
+        monthly_profit = defaultdict(float)  # Bet profit only
+        monthly_deposits = defaultdict(float)
+        monthly_withdrawals = defaultdict(float)
         
         # 1. Process Bets
         bets = self.bets
@@ -276,7 +279,7 @@ class AnalyticsEngine:
                 d_str = date_str.split(' ')[0] if ' ' in date_str else date_str
                 dt = datetime.strptime(d_str, "%Y-%m-%d")
                 month_key = dt.strftime("%Y-%m")
-                monthly_stats[month_key] += b['profit']
+                monthly_profit[month_key] += b['profit']
             except: continue
 
         # 2. Process Transactions (Deposits/Withdrawals)
@@ -291,35 +294,43 @@ class AnalyticsEngine:
                     d_str = date_str.split(' ')[0] if ' ' in date_str else date_str
                     dt = datetime.strptime(d_str, "%Y-%m-%d")
                     month_key = dt.strftime("%Y-%m")
-                    # Realized Profit logic: Withdrawal (out) is positive realizing, Deposit (in) is negative realizing?
-                    # Actually, we want a Bankroll Growth chart. 
-                    # For Bankroll Growth, we want cumulative balance.
-                    # profit from bets + deposits - withdrawals? 
-                    # If it's "Performance", usually it's just ROI.
-                    # But the user specifically asked for these 2023 numbers to show up.
-                    # Let's add them to the profit series if they are indeed financial gains/losses.
-                    # If it's a Deposit, it's cash IN. If it's Withdrawal, it's cash OUT.
-                    # Realized Profit = Withdrawn - Deposited.
-                    # So we should treat Withdrawal as + and Deposit as - for it to match "Realized Profit".
                     if r['type'] == 'Deposit':
-                        monthly_stats[month_key] -= r['amount']
+                        monthly_deposits[month_key] += abs(r['amount'])
                     else:
-                        monthly_stats[month_key] += abs(r['amount'])
+                        monthly_withdrawals[month_key] += abs(r['amount'])
                 except: continue
-                
-        # Sort by month
-        sorted_months = sorted(monthly_stats.items())
+            
+        # Get all month keys
+        all_months = set(monthly_profit.keys()) | set(monthly_deposits.keys()) | set(monthly_withdrawals.keys())
+        sorted_months = sorted(all_months)
         
         results = []
-        cumulative = 0.0
-        for month, profit in sorted_months:
-            cumulative += profit
+        cumulative_profit = 0.0  # Realized profit (Withdrawals - Deposits)
+        cumulative_balance = 0.0  # Total money in play (Deposits + Profits - Withdrawals)
+        
+        for month in sorted_months:
+            profit = monthly_profit.get(month, 0)
+            deposits = monthly_deposits.get(month, 0)
+            withdrawals = monthly_withdrawals.get(month, 0)
+            
+            # Realized profit = what you've taken out minus what you put in
+            realized_change = withdrawals - deposits + profit
+            cumulative_profit += realized_change
+            
+            # Balance = what's still in play = deposits + profits - withdrawals
+            balance_change = deposits + profit - withdrawals
+            cumulative_balance += balance_change
+            
             results.append({
                 "month": month,
-                "profit": profit,
-                "cumulative": round(cumulative, 2)
+                "profit": round(profit, 2),
+                "deposits": round(deposits, 2),
+                "withdrawals": round(withdrawals, 2),
+                "cumulative": round(cumulative_profit, 2),  # Backward compat
+                "balance": round(cumulative_balance, 2)  # Total money in play
             })
         return results
+
             
     def get_time_series_profit(self, user_id=None):
         """

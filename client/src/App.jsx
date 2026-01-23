@@ -615,10 +615,10 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
             {/* Charts Grid */}
             {/* Charts Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Monthly Bankroll Growth */}
+                {/* Total Money In Play */}
                 <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
                     <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                        Bankroll Growth
+                        Total Money In Play
                     </h3>
                     <div className="h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
@@ -631,7 +631,7 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                                     itemStyle={{ color: '#fff' }}
                                     formatter={(value) => formatCurrency(value)}
                                 />
-                                <Line type="monotone" dataKey="cumulative" stroke="#22c55e" strokeWidth={3} dot={{ r: 4, fill: '#22c55e' }} activeDot={{ r: 8 }} />
+                                <Line type="monotone" dataKey="balance" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 8 }} name="Balance" />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
