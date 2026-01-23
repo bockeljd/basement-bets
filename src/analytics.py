@@ -334,12 +334,14 @@ class AnalyticsEngine:
             
     def get_time_series_profit(self, user_id=None):
         """
-        Returns a day-by-day cumulative profit series including transactions.
+        Returns a day-by-day cumulative profit and balance series including transactions.
         """
         from datetime import datetime
         from src.database import get_db_connection
         
-        daily_profit = defaultdict(float)
+        daily_profit = defaultdict(float) # Net bet profit per day
+        daily_deposits = defaultdict(float)
+        daily_withdrawals = defaultdict(float)
         
         # 1. Bets
         bets = self.bets
@@ -352,7 +354,7 @@ class AnalyticsEngine:
             day_key = date_str.split(' ')[0] if ' ' in date_str else date_str
             daily_profit[day_key] += b['profit']
             
-        # 2. Transactions (Deposits/Withdrawals) to show Total Bankroll
+        # 2. Transactions (Deposits/Withdrawals)
         query = "SELECT date, type, amount FROM transactions WHERE type IN ('Deposit', 'Withdrawal')"
         with get_db_connection() as conn:
             cur = conn.cursor()
@@ -362,68 +364,34 @@ class AnalyticsEngine:
                 if not date_str: continue
                 day_key = date_str.split(' ')[0] if ' ' in date_str else date_str
                 
-                # Bankroll Logic:
-                # Deposit = Increase Balance (+Amount)
-                # Withdrawal = Decrease Balance (-Amount, assuming amount is stored as positive or we use ABS)
-                # Note: Analysis elsewhere suggests Deposit is positive, Withdrawal is signed negative?
-                # Let's check: seed script used negative for withdrawals.
-                # So just adding raw amount is correct for net change.
-                # (Deposit 100) -> +100
-                # (Withdrawal -50) -> -50
-                # WAIT: Earlier I saw Withdrawal stored as POSITIVE magnitude in some places?
-                # Let's use logic: Deposit = +Abs, Withdrawal = -Abs to be safe.
-                
                 if r['type'] == 'Deposit':
-                    daily_profit[day_key] += abs(float(r['amount']))
+                    daily_deposits[day_key] += abs(float(r['amount']))
                 elif r['type'] == 'Withdrawal':
-                    daily_profit[day_key] -= abs(float(r['amount']))
-                    # If chart is inverse, it means it's going DOWN when it should go UP.
-                    # Debug output showed: 2023-12-25 | 125.00. This is POSITIVE.
-                    # So if they see it going down, maybe the frontend flips it?
-                    # OR maybe withdrawals are surging it?
-                    # Let's try to align with standard Bankroll:
-                    # Deposit = +Balance. Withdrawal = -Balance.
-                    # Code was: Deposit += amount. Withdrawal -= abs(amount).
-                    # This looks CORRECT for Bankroll. 
-                    # But if user says "Inverse", and my code is "Correct", maybe the frontend is rendering "Profit" but I'm sending "Bankroll"?
-                    # Or maybe they want "Realized Profit"? (Withdrawals = Profit).
-                    # "The bankfroll curve is showing the inverse".
-                    # Let's assume they mean: Withdrawals should NOT tank the chart? 
-                    # No, withdrawals MUST tank the bankroll.
-                    # Unless... they labeled the transaction types wrong?
-                    # Let's try FLIPPING it just to satisfy "Inverse".
-                    
-                    # Hypotheses:
-                    # 1. User sees "Deposit" as a COST (Negative)? No.
-                    # 2. User sees "Withdrawal" as PROFIT (Positive)?
-                    # If I withdraw $1000, I "realized" $1000. Maybe that's what they track?
-                    # But "Bankroll" usually means "Funds Available".
-                    
-                    # Let's stick to standard Bankroll definition:
-                    # Bankroll = Sum(Bets Profit) + Deposits - Withdrawals.
-                    # My code DOES: daily += amount (Deposit) and daily -= abs(amount) (Withdrawal).
-                    # This IS correct for Bankroll.
-                    
-                    # IF user says inverse... 
-                    # Maybe they mean the "Realized Profit" chart?
-                    # If so, Withdrawal = +Profit, Deposit = -Profit (Investment).
-                    # Let's CHECK which chart they are looking at. "The bankfroll curve".
-                    
-                    # Let's try to FLIP it based on direct feedback "inverse".
-                    # New Logic: Deposit = -, Withdrawal = +? (This would be "Net Transfers Out")
-                    
-                    # Wait, let's look at the Debug Output again.
-                    # 2023-02-14: +33.69.
-                    # 2025-11-14: -10.00. Cumulative -485.
-                    
-                    # If it's inverse, maybe I should NEGATE the bets too?
-                    # No, "bets are matching".
-                    
-                    # Let's try treating it as "Net Profit Including Cashflow" vs "Wallet".
-                    # If I am tracking "My Pocket", Deposit = - (Left Pocket), Withdrawal = + (Entered Pocket).
-                    # Let's try that.
-                    
-                    daily_profit[day_key] -= abs(r['amount']) # Withdrawal from Pocket
+                    daily_withdrawals[day_key] += abs(float(r['amount']))
+
+        # Merge all dates
+        all_dates = set(daily_profit.keys()) | set(daily_deposits.keys()) | set(daily_withdrawals.keys())
+        sorted_dates = sorted(all_dates)
+        
+        results = []
+        cumulative_profit = 0.0 # Realized logic
+        cumulative_balance = 0.0 # Total Money In Play logic
+        
+        for date in sorted_dates:
+            profit = daily_profit.get(date, 0)
+            dep = daily_deposits.get(date, 0)
+            wd = daily_withdrawals.get(date, 0)
+            
+            cumulative_profit += (wd - dep + profit)
+            cumulative_balance += (dep + profit - wd)
+            
+            results.append({
+                "date": date,
+                "profit": round(profit, 2),
+                "cumulative": round(cumulative_profit, 2),
+                "balance": round(cumulative_balance, 2)
+            })
+        return results
 
         sorted_dates = sorted(daily_profit.items())
         

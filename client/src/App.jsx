@@ -377,6 +377,7 @@ function App() {
                             sportBreakdown={sportBreakdown}
                             playerBreakdown={playerBreakdown}
                             monthlyBreakdown={monthlyBreakdown}
+                            timeSeries={timeSeries}
                             betTypeBreakdown={betTypeBreakdown}
                             balances={balances}
                             periodStats={periodStats}
@@ -499,7 +500,7 @@ const BankrollCard = ({ provider, data }) => (
     </div>
 );
 
-function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown, betTypeBreakdown, edgeBreakdown, balances, periodStats, financials }) {
+function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown, timeSeries, betTypeBreakdown, edgeBreakdown, balances, periodStats, financials }) {
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
 
     // Sort sport breakdown by profit for chart
@@ -615,23 +616,29 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
             {/* Charts Grid */}
             {/* Charts Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Total Money In Play */}
+                {/* Total Money In Play (Daily) */}
                 <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
                     <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                         Total Money In Play
                     </h3>
                     <div className="h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={monthlyBreakdown}>
+                            <LineChart data={timeSeries}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                <XAxis dataKey="month" stroke="#94a3b8" />
+                                <XAxis
+                                    dataKey="date"
+                                    stroke="#94a3b8"
+                                    tickFormatter={(val) => new Date(val).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
+                                    minTickGap={30}
+                                />
                                 <YAxis stroke="#94a3b8" />
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b' }}
                                     itemStyle={{ color: '#fff' }}
                                     formatter={(value) => formatCurrency(value)}
+                                    labelFormatter={(label) => new Date(label).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' })}
                                 />
-                                <Line type="monotone" dataKey="balance" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 8 }} name="Balance" />
+                                <Line type="monotone" dataKey="balance" stroke="#3b82f6" strokeWidth={2} dot={false} activeDot={{ r: 6 }} name="Balance" />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>

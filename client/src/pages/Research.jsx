@@ -10,6 +10,7 @@ const Research = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [showAll, setShowAll] = useState(false);
+    const [historyShowAll, setHistoryShowAll] = useState(true);
 
     // Game Analysis Modal State
     const [selectedGame, setSelectedGame] = useState(null);
@@ -19,8 +20,8 @@ const Research = () => {
     // Sorting & Filtering State
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
     const [sportFilter, setSportFilter] = useState('All');
-    const [edgeThreshold, setEdgeThreshold] = useState(2.0); // Default to 2.0 pts or 5% EV
-    const [confidenceThreshold, setConfidenceThreshold] = useState(50); // Default 50%
+    const [edgeThreshold, setEdgeThreshold] = useState(2.0);
+    const [confidenceThreshold, setConfidenceThreshold] = useState(50);
 
     useEffect(() => {
         fetchSchedule();
@@ -74,7 +75,13 @@ const Research = () => {
             const res = await api.post('/api/research/grade');
             const result = res.data;
             alert(`Grading Complete! ${result.graded || 0} bets updated.`);
-            await fetchEdges();
+            // Fetch layout/refresh data
+            const [scheduleRes, historyRes] = await Promise.all([
+                api.get('/api/schedule?sport=all&days=3'),
+                api.get('/api/research/history')
+            ]);
+            setEdges(scheduleRes.data || []);
+            setHistory(historyRes.data || []);
         } catch (err) {
             console.error(err);
             alert('Grading failed: ' + (err.response?.data?.message || err.message));
@@ -114,7 +121,13 @@ const Research = () => {
             const res = await api.post('/api/jobs/ingest_torvik');
             const result = res.data;
             alert(`Data Refresh Complete! ${result.teams_count || 0} teams updated.`);
-            await fetchEdges();
+            // Fresh fetch
+            const [scheduleRes, historyRes] = await Promise.all([
+                api.get('/api/schedule?sport=all&days=3'),
+                api.get('/api/research/history')
+            ]);
+            setEdges(scheduleRes.data || []);
+            setHistory(historyRes.data || []);
         } catch (err) {
             console.error(err);
             alert('Data refresh failed: ' + (err.response?.data?.message || err.message));
@@ -188,9 +201,9 @@ const Research = () => {
 
     const getFilteredHistory = () => {
         return history.filter(h => {
+            if (historyShowAll) return true;
+
             const edgeVal = h.edge || 0;
-            // Missing audit_score in DB history. Default to High if Edge is high?
-            // If historical item exists, it WAS actionable.
             const confVal = h.audit_score || (h.is_actionable ? 85 : 50);
 
             const meetEdge = h.sport === 'EPL' ? edgeVal >= (edgeThreshold * 2.5) : edgeVal >= edgeThreshold;
@@ -201,13 +214,15 @@ const Research = () => {
 
     const getSortedHistory = () => {
         return [...getFilteredHistory()].sort((a, b) => {
-            let aVal = a[sortConfig.key] || '';
-            let bVal = b[sortConfig.key] || '';
+            const key = sortConfig.key === 'edge' ? 'created_at' : sortConfig.key; // Default history sort to time
+            let aVal = a[key] || '';
+            let bVal = b[key] || '';
             if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
             if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
             return 0;
         });
     };
+
 
     const SortIcon = ({ column }) => {
         if (sortConfig.key !== column) return <ArrowUpDown size={12} className="ml-1 opacity-20" />;
@@ -516,14 +531,31 @@ const Research = () => {
                     <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
                             <h2 className="text-lg font-semibold text-slate-200">Model History (Auto-Tracked)</h2>
-                            <button
-                                onClick={gradeResults}
-                                disabled={loading}
-                                className="px-4 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/20 disabled:opacity-50 rounded-lg text-xs font-bold transition-all flex items-center"
-                            >
-                                {loading ? <RefreshCw className="animate-spin mr-2" size={12} /> : null}
-                                Grade Results
-                            </button>
+                            <div className="flex items-center gap-6">
+                                <label className="flex items-center cursor-pointer group">
+                                    <div className="relative">
+                                        <input
+                                            type="checkbox"
+                                            className="sr-only"
+                                            checked={historyShowAll}
+                                            onChange={() => setHistoryShowAll(!historyShowAll)}
+                                        />
+                                        <div className={`block w-10 h-6 rounded-full transition-colors ${historyShowAll ? 'bg-blue-600' : 'bg-slate-700 border border-slate-600'}`}></div>
+                                        <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${historyShowAll ? 'transform translate-x-4' : ''}`}></div>
+                                    </div>
+                                    <div className="ml-3 text-xs text-slate-400 group-hover:text-slate-200 font-medium transition-colors">
+                                        Show All
+                                    </div>
+                                </label>
+                                <button
+                                    onClick={gradeResults}
+                                    disabled={loading}
+                                    className="px-4 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/20 disabled:opacity-50 rounded-lg text-xs font-bold transition-all flex items-center"
+                                >
+                                    {loading ? <RefreshCw className="animate-spin mr-2" size={12} /> : null}
+                                    Grade Results
+                                </button>
+                            </div>
                         </div>
 
                         {/* Model Performance Summary */}
