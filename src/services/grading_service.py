@@ -25,7 +25,7 @@ class GradingService:
         Main method to Grade 'Pending' predictions.
         """
         predictions = fetch_model_history()
-        pending = [p for p in predictions if p['result'] == 'Pending']
+        pending = [p for p in predictions if p.get('outcome') == 'PENDING' or p.get('outcome') is None]
         
         print(f"[GRADING] Found {len(pending)} pending predictions.")
         
@@ -56,20 +56,18 @@ class GradingService:
                 print(f"  [WARN] No scores fetched for {sport} ({sport_key})")
                 continue
             
-            # Persist Scores for History
+            # Persist Scores for History (optional, but keep it if desired)
             for game in scores:
                 self._persist_game_result(game)
             
             for p in preds:
                 eval_res = self._evaluate_prediction(p, scores)
-                # eval_res: {"result": "Win/Loss/Pending", "home_score": X, "away_score": Y}
+                # eval_res: {"outcome": "WON/LOST/PUSH/PENDING"}
                 
-                if eval_res and eval_res.get('result') != 'Pending':
+                if eval_res and eval_res.get('outcome') != 'PENDING':
                     update_model_prediction_result(
                         p['id'], 
-                        eval_res['result'],
-                        home_score=eval_res.get('home_score'),
-                        away_score=eval_res.get('away_score')
+                        eval_res['outcome']
                     )
                     graded_count += 1
                     
@@ -94,7 +92,7 @@ class GradingService:
         """
         Compare prediction against actual scores.
         """
-        game_id = pred['game_id'] 
+        game_id = pred.get('event_id') 
         
         match = None
         for s in scores:
@@ -104,33 +102,19 @@ class GradingService:
         
         # Fallback Matcher (if ID mismatch)
         if not match:
-             # Try to get teams from columns OR parse from matchup string
              pred_home = pred.get('home_team')
              pred_away = pred.get('away_team')
              
-             if not pred_home and pred.get('matchup'):
-                 # Matchup strings: "Team A @ Team B" or "Team A vs Team B"
-                 if ' @ ' in pred['matchup']:
-                     parts = pred['matchup'].split(' @ ')
-                     pred_away, pred_home = parts[0], parts[1]
-                 elif ' vs ' in pred['matchup']:
-                     parts = pred['matchup'].split(' vs ')
-                     pred_away, pred_home = parts[0], parts[1]
-
-             raw_date = pred.get('date') or ''
+             raw_date = pred.get('analyzed_at') or ''
              pred_date = raw_date.split('T')[0] if raw_date else ''
              
              if pred_home:
                  for s in scores:
-                      # Check team name (fuzzy or normalized)
                       s_home = s.get('home_team', '')
                       if s_home == pred_home or (s_home and pred_home and (pred_home in s_home or s_home in pred_home)):
                            s_date_raw = s.get('commence_time', '').split('T')[0]
-                           
-                           # Fuzzy date match (+/- 1 day for UTC)
                            match_found = False
                            try:
-                               from datetime import datetime, timedelta
                                p_dt = datetime.strptime(pred_date, '%Y-%m-%d')
                                s_dt = datetime.strptime(s_date_raw, '%Y-%m-%d')
                                if abs((p_dt - s_dt).days) <= 1:
@@ -141,11 +125,10 @@ class GradingService:
                                    
                            if match_found:
                                match = s
-                               print(f"  [GRADING] Matched by Name: {pred_home} (Date: {s_date_raw} vs {pred_date})")
                                break
              
         if not match or not (match.get('completed') or match.get('status') in ['complete', 'final', 'completed']):
-            return {"result": 'Pending', "home_score": None, "away_score": None}
+            return {"outcome": 'PENDING'}
             
         final_scores = match.get('scores')
         if not final_scores: return {"result": 'Pending', "home_score": None, "away_score": None}
@@ -163,60 +146,45 @@ class GradingService:
                 away_score = int(fs['score'])
                 
         # Prepare Response
-        res = {
-            "result": 'Pending',
-            "home_score": home_score,
-            "away_score": away_score
-        }
+        res = {"outcome": 'PENDING', "home_score": home_score, "away_score": away_score}
 
         # Evaluate Logic based on Market Type
-        bet_on = pred['bet_on'] 
+        # New model outputs: pick, market_type, bet_line
+        bet_on = pred.get('pick', '') 
+        market = pred.get('market_type', '')
+        line = pred.get('bet_line', 0)
         
-        # 1. Moneyline
-        if "HOME" in bet_on and "(" in bet_on:
-            if home_score > away_score: res["result"] = 'Win'
-            elif home_score == away_score: res["result"] = 'Loss'
-            else: res["result"] = 'Loss'
-        elif "AWAY" in bet_on and "(" in bet_on:
-             if away_score > home_score: res["result"] = 'Win'
-             else: res["result"] = 'Loss'
-        elif "DRAW" in bet_on:
-             if home_score == away_score: res["result"] = 'Win'
-             else: res["result"] = 'Loss'
-             
-        # 2. Spreads / Totals (NFL/NCAAM)
-        elif "OVER" in bet_on:
-            total_score = home_score + away_score
-            line = pred['market_line']
-            if total_score > line: res["result"] = 'Win'
-            elif total_score < line: res["result"] = 'Loss'
-            else: res["result"] = 'Push'
-            
-        elif "UNDER" in bet_on:
-            total_score = home_score + away_score
-            line = pred['market_line']
-            if total_score < line: res["result"] = 'Win'
-            elif total_score > line: res["result"] = 'Loss'
-            else: res["result"] = 'Push'
-            
-        elif bet_on == home_team:
-            spread = pred['market_line']
-            if (home_score + spread) > away_score: res["result"] = 'Win'
-            elif (home_score + spread) < away_score: res["result"] = 'Loss'
-            else: res["result"] = 'Push'
-            
-        elif bet_on == away_team:
-            spread = pred['market_line']
-            if (away_score + spread) > home_score: res["result"] = 'Win'
-            elif (away_score + spread) < home_score: res["result"] = 'Loss'
-            else: res["result"] = 'Push'
+        try:
+            if market == 'SPREAD':
+                team_score = home_score if bet_on == home_team else away_score
+                opp_score = away_score if bet_on == home_team else home_score
+                # line is relative to the picked team in v2
+                if (team_score + line) > opp_score: res["outcome"] = 'WON'
+                elif (team_score + line) < opp_score: res["outcome"] = 'LOST'
+                else: res["outcome"] = 'PUSH'
+                
+            elif market == 'TOTAL':
+                total_score = home_score + away_score
+                if bet_on.upper() == 'OVER':
+                    res["outcome"] = 'WON' if total_score > line else 'LOST' if total_score < line else 'PUSH'
+                else:
+                    res["outcome"] = 'WON' if total_score < line else 'LOST' if total_score > line else 'PUSH'
+                    
+            elif market == 'ML':
+                winner = home_team if home_score > away_score else away_team
+                res["outcome"] = 'WON' if bet_on == winner else 'LOST'
+                
+        except Exception as e:
+            print(f"[GradingService] Eval error: {e}")
+            return {"outcome": 'PENDING'}
 
         return res
 
     def _persist_game_result(self, game):
         """
-        Parse game data and upsert to 'games' table.
+        Parse game data and upsert to 'game_results' table.
         """
+        from src.database import upsert_game_result
         try:
             home_score = None
             away_score = None
@@ -228,18 +196,14 @@ class GradingService:
                     elif s['name'] == game.get('away_team'):
                         away_score = s['score']
             
-            game_data = {
-                'game_id': game.get('id'),
-                'sport_key': game.get('sport_key'),
-                'commence_time': game.get('commence_time'),
-                'home_team': game.get('home_team'),
-                'away_team': game.get('away_team'),
+            res_data = {
+                'event_id': game.get('id'),
                 'home_score': home_score,
                 'away_score': away_score,
-                'status': 'completed' if game.get('completed') else 'scheduled'
+                'final': True if game.get('completed') else False,
+                'period': game.get('status')
             }
-            
-            upsert_game(game_data)
+            upsert_game_result(res_data)
         except Exception as e:
             print(f"[GradingService] Error persisting game {game.get('id')}: {e}")
 

@@ -41,7 +41,7 @@ def verify_teams():
 
         # 6. Events Check
         print("\n[Events v2 Check]")
-        events_count = _exec(conn, "SELECT COUNT(*) FROM events_v2").fetchone()[0]
+        events_count = _exec(conn, "SELECT COUNT(*) FROM events").fetchone()[0]
         print(f"  Total Canonical Events: {events_count}")
         
         # 7. Coverage Check

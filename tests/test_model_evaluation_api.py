@@ -22,7 +22,7 @@ def setup_seeded_data():
         # Clean
         _exec(conn, "DELETE FROM model_health_daily WHERE date = :d", {"d": txn_date})
         # Insert event
-        _exec(conn, "INSERT OR IGNORE INTO events_v2 (id, league, start_time, home_team_id, away_team_id, home_team, away_team, status) VALUES ('evt_seed_99', 'NFL', '2025-01-01 20:00:00', 'team_A', 'team_B', 'Team A', 'Team B', 'SCHEDULED')")
+        _exec(conn, "INSERT OR IGNORE INTO events (id, league, start_time, home_team_id, away_team_id, home_team, away_team, status) VALUES ('evt_seed_99', 'NFL', '2025-01-01 20:00:00', 'team_A', 'team_B', 'Team A', 'Team B', 'SCHEDULED')")
         
         import uuid
         test_uid = str(uuid.uuid4())

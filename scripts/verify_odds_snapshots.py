@@ -10,7 +10,7 @@ def run_queries():
                    COUNT(*) AS rows,
                    COUNT(DISTINCT o.event_id) AS events_covered
             FROM odds_snapshots o
-            JOIN events_v2 e ON e.id = o.event_id
+            JOIN events e ON e.id = o.event_id
             GROUP BY 1,2
             ORDER BY 1,2;
         """,

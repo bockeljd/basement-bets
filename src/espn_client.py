@@ -213,7 +213,7 @@ class EspnClient:
                         "event_id": canonical_id,
                         "home_score": int(ev['home_score']),
                         "away_score": int(ev['away_score']),
-                        "final_flag": ev['final']
+                        "final": ev['final']
                     }
                     upsert_game_result(result_record)
             

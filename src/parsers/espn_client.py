@@ -83,6 +83,7 @@ class EspnClient(IngestionEngine):
                     nev['provider'] = 'ESPN'
                     canonical_id = self.events_service.process_event(nev)
                     if canonical_id:
+                        nev['id'] = canonical_id # Stabilize ID for frontend
                         count_ingested += 1
                 except Exception as e:
                     print(f"[ESPN] Error ingesting event for DB: {e}")

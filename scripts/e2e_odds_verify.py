@@ -20,7 +20,7 @@ def run_e2e():
     
     print("2. Running Ingestion (pull_odds.py logic) for NCAAM...")
     import scripts.pull_odds as puller
-    # Targeting a date with known events in events_v2 for join verification
+    # Targeting a date with known events in events for join verification
     target_date = "20260112"
     puller.process_sport('ncaab', [target_date])
     
@@ -33,14 +33,14 @@ def run_e2e():
                COUNT(*) AS rows,
                COUNT(DISTINCT o.event_id) AS events_covered
         FROM odds_snapshots o
-        JOIN events_v2 e ON e.id = o.event_id
+        JOIN events e ON e.id = o.event_id
         GROUP BY 1,2
         ORDER BY 1,2;
         """
         try:
             df3 = pd.read_sql(sql3, conn)
             if df3.empty:
-                print("No overlapping events found in events_v2 for the current ingestion.")
+                print("No overlapping events found in events for the current ingestion.")
                 # Show generic counts
                 rows = _exec(conn, "SELECT COUNT(*) FROM odds_snapshots").fetchone()[0]
                 print(f"Total rows in odds_snapshots: {rows}")

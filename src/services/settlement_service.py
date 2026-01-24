@@ -195,7 +195,7 @@ class SettlementEngine:
           bl.selection as selection_text
         FROM bet_legs bl
         JOIN bets b ON b.id = bl.bet_id
-        LEFT JOIN events_v2 e ON e.id = bl.event_id
+        LEFT JOIN events e ON e.id = bl.event_id
         WHERE (bl.status = 'PENDING' OR bl.status = 'UNSETTLED')
           AND bl.event_id IS NOT NULL
           AND (:league IS NULL OR e.league = :league)

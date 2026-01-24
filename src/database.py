@@ -43,14 +43,33 @@ def get_db_connection():
                 print(f"[DB] Pool init failed: {e}")
                 raise e
 
-        conn = pg_pool.getconn()
+        conn = None
         try:
+            conn = pg_pool.getconn()
+            # Validation: discard if already closed
+            if conn.closed != 0:
+                print("[DB] Connection from pool is closed. Discarding...")
+                pg_pool.putconn(conn, close=True)
+                conn = pg_pool.getconn()
+                
             yield conn
-        finally:
+            # Connection worked fine, return to pool
             pg_pool.putconn(conn)
+        except Exception as e:
+            # If a connection error occurs during use, discard it completely
+            is_connection_error = any(msg in str(e).lower() for msg in ["closed", "ssl", "broken", "terminate", "connection reset"])
+            if conn:
+                try:
+                    if is_connection_error:
+                        print(f"[DB] Connection error detected: {e}. Discarding connection.")
+                        pg_pool.putconn(conn, close=True)
+                    else:
+                        pg_pool.putconn(conn)
+                except Exception:
+                    pass # Pool might already be in a weird state
+            raise e
     else:
         # LOCAL SQLITE
-        # print(f"[DEBUG] Connecting to SQLite: {DB_PATH}")
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         try:
@@ -158,9 +177,9 @@ def init_db():
     # Initialize other tables
     init_transactions_tab()
     init_events_db()
-    init_game_results_db()
+    init_snapshots_db()
     init_model_history()
-    init_odds_snapshots_db()
+    init_game_results_db()
     init_linking_queue_db()
     init_settlement_db()
     init_model_health_db()
@@ -213,7 +232,7 @@ def init_enrichment_db():
         schema = """
         CREATE TABLE IF NOT EXISTS action_game_enrichment (
             id TEXT PRIMARY KEY, -- UUID
-            event_id TEXT NOT NULL, -- FK to events_v2
+            event_id TEXT NOT NULL, -- FK to events
             provider TEXT DEFAULT 'ACTION_NETWORK',
             provider_game_id TEXT,
             as_of_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -632,82 +651,97 @@ def update_closing_odds(bet_id: int, closing_odds: int):
 
 def init_model_history():
     db_type = get_db_type()
-    if db_type == 'sqlite':
-        schema = """
-        CREATE TABLE IF NOT EXISTS model_predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id TEXT NOT NULL,
-            sport TEXT NOT NULL,
-            date TEXT,
-            matchup TEXT NOT NULL,
-            bet_on TEXT NOT NULL,
-            market TEXT NOT NULL,
-            market_line REAL,
-            fair_line REAL,
-            edge REAL,
-            is_actionable BOOLEAN,
-            result TEXT DEFAULT 'Pending',
-            home_score REAL,
-            away_score REAL,
-            home_team TEXT,
-            away_team TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(game_id, bet_on)
-        );
-        """
-    else:
-        schema = """
-        CREATE TABLE IF NOT EXISTS model_predictions (
-            id SERIAL PRIMARY KEY,
-            game_id TEXT NOT NULL,
-            sport TEXT NOT NULL,
-            date TEXT,
-            matchup TEXT NOT NULL,
-            bet_on TEXT NOT NULL,
-            market TEXT NOT NULL,
-            market_line REAL,
-            fair_line REAL,
-            edge REAL,
-            is_actionable BOOLEAN,
-            result TEXT DEFAULT 'Pending',
-            home_score REAL,
-            away_score REAL,
-            home_team TEXT,
-            away_team TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(game_id, bet_on)
-        );
-        """
+    
+    # Force Recreation for Strict v2
+    drop_sql = "DROP TABLE IF EXISTS model_predictions CASCADE;" if db_type == 'postgres' else "DROP TABLE IF EXISTS model_predictions;"
+    
+    schema = """
+    CREATE TABLE IF NOT EXISTS model_predictions (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        model_version TEXT,
+        market_type TEXT, -- SPREAD, TOTAL, ML
+        pick TEXT,        -- HOME, AWAY, OVER, UNDER
+        bet_line REAL,
+        bet_price INTEGER,
+        book TEXT,
+        mu_market REAL,
+        mu_torvik REAL,
+        mu_final REAL,
+        sigma REAL,
+        win_prob REAL,
+        ev_per_unit REAL,
+        confidence_0_100 INTEGER,
+        inputs_json TEXT,  -- Raw JSON of inputs
+        outputs_json TEXT, -- Raw JSON of outputs
+        narrative_json TEXT,
+        outcome TEXT DEFAULT 'PENDING', -- PENDING, WON, LOST, VOID
+        close_line REAL,
+        close_price INTEGER,
+        FOREIGN KEY(event_id) REFERENCES events(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_model_event ON model_predictions(event_id);
+    """
+    
     with get_db_connection() as conn:
-        if db_type == 'sqlite':
-            conn.executescript(schema)
-        else:
-            with conn.cursor() as cur:
-                cur.execute(schema)
+        with conn.cursor() as cur:
+            cur.execute(drop_sql)
+            cur.execute(schema)
         conn.commit()
-    print("Model predictions table initialized.")
+    print("Model predictions table initialized (Strict v2).")
 
-def insert_model_prediction(pred: dict):
+def insert_model_prediction(doc: dict):
+    """
+    Writes to model_predictions (Analyze history).
+    """
+    import uuid
+    if not doc.get('id'):
+         doc['id'] = str(uuid.uuid4())
+         
     query = """
-    INSERT INTO model_predictions 
-    (game_id, sport, date, matchup, bet_on, market, market_line, fair_line, edge, is_actionable, home_team, away_team)
-    VALUES (:game_id, :sport, :start_time, :game, :bet_on, :market, :market_line, :fair_line, :edge, :is_actionable, :home_team, :away_team)
-    ON CONFLICT (game_id, bet_on) DO NOTHING
+    INSERT INTO model_predictions (
+        id, event_id, analyzed_at, model_version, market_type, pick,
+        bet_line, bet_price, book, mu_market, mu_torvik, mu_final,
+        sigma, win_prob, ev_per_unit, confidence_0_100, 
+        inputs_json, outputs_json, narrative_json
+    ) VALUES (
+        :id, :event_id, :analyzed_at, :model_version, :market_type, :pick,
+        :bet_line, :bet_price, :book, :mu_market, :mu_torvik, :mu_final,
+        :sigma, :win_prob, :ev_per_unit, :confidence_0_100,
+        :inputs_json, :outputs_json, :narrative_json
+    ) ON CONFLICT (id) DO NOTHING
     """
     with get_db_connection() as conn:
-        _exec(conn, query, pred)
+        _exec(conn, query, doc)
         conn.commit()
 
-def fetch_model_history():
-    query = "SELECT * FROM model_predictions ORDER BY created_at DESC"
+def fetch_model_history(limit=100):
+    """
+    Fetches enriched model history with event context.
+    """
+    query = """
+    SELECT m.*, e.league as sport, e.home_team, e.away_team, e.start_time
+    FROM model_predictions m
+    JOIN events e ON m.event_id = e.id
+    ORDER BY m.analyzed_at DESC
+    LIMIT :limit
+    """
     with get_db_connection() as conn:
-        cursor = _exec(conn, query)
+        cursor = _exec(conn, query, {"limit": limit})
         return [dict(row) for row in cursor.fetchall()]
 
-def update_model_prediction_result(prediction_id: int, result: str, home_score: float = None, away_score: float = None):
-    query = "UPDATE model_predictions SET result = ?, home_score = ?, away_score = ? WHERE id = ?"
+def update_model_prediction_result(prediction_id: str, outcome: str, close_line: float = None, close_price: int = None):
+    """
+    Updates outcome and lines for a prediction in model_predictions.
+    """
+    query = """
+    UPDATE model_predictions 
+    SET outcome = :o, close_line = :cl, close_price = :cp, analyzed_at = analyzed_at
+    WHERE id = :id
+    """
     with get_db_connection() as conn:
-        _exec(conn, query, (result, home_score, away_score, prediction_id))
+        _exec(conn, query, {"o": outcome.upper(), "cl": close_line, "cp": close_price, "id": prediction_id})
         conn.commit()
 
 def init_transactions_tab():
@@ -1005,82 +1039,193 @@ def upsert_game(game_data: dict):
 
 def init_events_db():
     db_type = get_db_type()
-    if db_type == 'sqlite':
-        schema = """
-        CREATE TABLE IF NOT EXISTS events (
-            id TEXT PRIMARY KEY,
-            league TEXT NOT NULL,
-            start_time TIMESTAMP,
-            home_team TEXT NOT NULL,
-            away_team TEXT NOT NULL,
-            status TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS event_providers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id TEXT NOT NULL,
-            provider TEXT NOT NULL,
-            provider_event_id TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(event_id) REFERENCES events(id),
-            UNIQUE(provider, provider_event_id)
-        );
-        CREATE TABLE IF NOT EXISTS game_results (
-            event_id TEXT PRIMARY KEY,
-            home_score INTEGER,
-            away_score INTEGER,
-            final_flag BOOLEAN DEFAULT FALSE,
-            last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(event_id) REFERENCES events(id)
-        );
-        """
-    else:
-        schema = """
-        CREATE TABLE IF NOT EXISTS events (
-            id TEXT PRIMARY KEY,
-            league TEXT NOT NULL,
-            start_time TIMESTAMP,
-            home_team TEXT NOT NULL,
-            away_team TEXT NOT NULL,
-            status TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS event_providers (
-            id SERIAL PRIMARY KEY,
-            event_id TEXT NOT NULL,
-            provider TEXT NOT NULL,
-            provider_event_id TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(event_id) REFERENCES events(id),
-            UNIQUE(provider, provider_event_id)
-        );
-        CREATE TABLE IF NOT EXISTS game_results (
-            event_id TEXT PRIMARY KEY,
-            home_score INTEGER,
-            away_score INTEGER,
-            final_flag BOOLEAN DEFAULT FALSE,
-            last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(event_id) REFERENCES events(id)
-        );
-        """
+    
+    # Force Recreation for Schema v2
+    drop_sql = """
+    DROP TABLE IF EXISTS event_providers CASCADE; 
+    DROP TABLE IF EXISTS game_results CASCADE; 
+    DROP TABLE IF EXISTS events CASCADE; 
+    """ if db_type == 'postgres' else """
+    DROP TABLE IF EXISTS event_providers; 
+    DROP TABLE IF EXISTS game_results; 
+    DROP TABLE IF EXISTS events; 
+    """
+
+    # --- 1. events (Canonical) ---
+    schema_events = """
+    CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY, -- espn:ncaam:<id>
+        league TEXT NOT NULL,
+        start_time TIMESTAMP NOT NULL,
+        home_team TEXT NOT NULL,
+        away_team TEXT NOT NULL,
+        home_team_id TEXT, -- internal UUID or Ref
+        away_team_id TEXT,
+        status TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    # Migration: Ensure updated_at exists if table was old
+    migration_events = "ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;" if db_type == 'postgres' else "ALTER TABLE events ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"
+
+    # --- 2. event_providers ---
+    schema_providers = """
+    CREATE TABLE IF NOT EXISTS event_providers (
+        event_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        provider_event_id TEXT NOT NULL,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(event_id, provider),
+        FOREIGN KEY(event_id) REFERENCES events(id),
+        UNIQUE(provider, provider_event_id)
+    );
+    """
+
+    # --- 3. game_results ---
+    schema_results = """
+    CREATE TABLE IF NOT EXISTS game_results (
+        event_id TEXT PRIMARY KEY,
+        home_score INTEGER,
+        away_score INTEGER,
+        final BOOLEAN DEFAULT FALSE,
+        period TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(event_id) REFERENCES events(id)
+    );
+    """
+
     with get_db_connection() as conn:
         if db_type == 'sqlite':
-            conn.executescript(schema)
+            conn.executescript(drop_sql)
+            conn.executescript(schema_events)
+            conn.executescript(schema_providers)
+            conn.executescript(schema_results)
         else:
             with conn.cursor() as cur:
-                cur.execute(schema)
+                cur.execute(drop_sql)
+                cur.execute(schema_events)
+                cur.execute(migration_events) # Execute migration
+                cur.execute(schema_providers)
+                cur.execute(schema_results)
         conn.commit()
+    
     print("Canonical events tables initialized.")
+
+def init_snapshots_db():
+    db_type = get_db_type()
+    
+    # Force Recreation for Schema v2
+    drop_sql = "DROP TABLE IF EXISTS odds_snapshots CASCADE; DROP TABLE IF EXISTS market_intel_snapshots CASCADE;" if db_type == 'postgres' else "DROP TABLE IF EXISTS odds_snapshots; DROP TABLE IF EXISTS market_intel_snapshots;"
+
+    # 1. odds_snapshots (STRICT PK/FINGERPRINT)
+    schema_odds = """
+    CREATE TABLE IF NOT EXISTS odds_snapshots (
+        id TEXT PRIMARY KEY, -- UUID
+        event_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        book TEXT,
+        market_type TEXT NOT NULL, -- SPREAD, TOTAL, ML
+        side TEXT NOT NULL,        -- HOME, AWAY, OVER, UNDER
+        line_value FLOAT,
+        price INTEGER,              -- American
+        captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        raw_json TEXT,
+        fingerprint TEXT UNIQUE,   -- Idempotency
+        FOREIGN KEY(event_id) REFERENCES events(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_odds_event_capture ON odds_snapshots(event_id, captured_at DESC);
+    """
+    
+    # 2. market_intel_snapshots (Retained for future but optional/flat)
+    schema_intel = """
+    CREATE TABLE IF NOT EXISTS market_intel_snapshots (
+        event_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        public_bet_pct REAL,
+        public_money_pct REAL,
+        sharp_side TEXT,
+        notes_json TEXT,
+        PRIMARY KEY(event_id, provider, captured_at),
+        FOREIGN KEY(event_id) REFERENCES events(id)
+    );
+    """
+    
+    if db_type == 'postgres':
+        # Foreign key syntax is the same, but let's be explicit if needed.
+        pass
+
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(drop_sql)
+            conn.executescript(schema_odds)
+            conn.executescript(schema_intel)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(drop_sql)
+                cur.execute(schema_odds)
+                cur.execute(schema_intel)
+        conn.commit()
+    print("Market snapshots (Odds/Intel) initialized.")
+
+def init_model_history_db():
+    db_type = get_db_type()
+    
+    # Force Recreation for Schema v2
+    drop_history = "DROP TABLE IF EXISTS model_predictions CASCADE; DROP TABLE IF EXISTS game_analysis_history CASCADE;" if db_type == 'postgres' else "DROP TABLE IF EXISTS model_predictions; DROP TABLE IF EXISTS game_analysis_history;"
+    
+    schema_history = """
+    CREATE TABLE IF NOT EXISTS model_predictions (
+        id TEXT PRIMARY KEY, -- UUID
+        event_id TEXT NOT NULL,
+        analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        model_version TEXT NOT NULL,
+        market_type TEXT NOT NULL,
+        pick TEXT NOT NULL,
+        bet_line FLOAT,
+        bet_price INTEGER,
+        book TEXT,
+        mu_market FLOAT,
+        mu_torvik FLOAT,
+        mu_final FLOAT,
+        sigma FLOAT,
+        win_prob FLOAT,
+        ev_per_unit FLOAT,
+        confidence_0_100 INTEGER,
+        inputs_json TEXT,
+        outputs_json TEXT,
+        narrative_json TEXT,
+        close_line FLOAT,
+        close_price INTEGER,
+        clv_points FLOAT,
+        outcome TEXT, -- WON, LOST, PUSH
+        FOREIGN KEY(event_id) REFERENCES events(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_prediction_event ON model_predictions(event_id, analyzed_at DESC);
+    """
+    
+    with get_db_connection() as conn:
+        if db_type == 'sqlite':
+            conn.executescript(drop_history)
+            conn.executescript(schema_history)
+        else:
+            with conn.cursor() as cur:
+                cur.execute(drop_history)
+                cur.execute(schema_history)
+        conn.commit()
+    print("Model predictions table initialized.")
 
 def upsert_event(event: dict):
     query = """
-    INSERT INTO events (id, league, start_time, home_team, away_team, status)
-    VALUES (:id, :league, :start_time, :home_team, :away_team, :status)
+    INSERT INTO events (id, league, start_time, home_team, away_team, home_team_id, away_team_id, status)
+    VALUES (:id, :league, :start_time, :home_team, :away_team, :home_team_id, :away_team_id, :status)
     ON CONFLICT(id) DO UPDATE SET
         start_time = excluded.start_time,
         status = excluded.status,
-        home_team = excluded.home_team,
-        away_team = excluded.away_team
+        home_team_id = excluded.home_team_id,
+        away_team_id = excluded.away_team_id,
+        updated_at = CURRENT_TIMESTAMP
     """
     with get_db_connection() as conn:
         _exec(conn, query, event)
@@ -1098,13 +1243,14 @@ def upsert_event_provider(mapping: dict):
 
 def upsert_game_result(result: dict):
     query = """
-    INSERT INTO game_results (event_id, home_score, away_score, final_flag, last_updated_at)
-    VALUES (:event_id, :home_score, :away_score, :final_flag, CURRENT_TIMESTAMP)
+    INSERT INTO game_results (event_id, home_score, away_score, final, period)
+    VALUES (:event_id, :home_score, :away_score, :final, :period)
     ON CONFLICT(event_id) DO UPDATE SET
         home_score = excluded.home_score,
         away_score = excluded.away_score,
-        final_flag = excluded.final_flag,
-        last_updated_at = CURRENT_TIMESTAMP
+        final = excluded.final,
+        period = excluded.period,
+        updated_at = CURRENT_TIMESTAMP
     """
     with get_db_connection() as conn:
         _exec(conn, query, result)
@@ -1183,7 +1329,7 @@ def init_settlement_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(bet_id) REFERENCES bets(id),
             FOREIGN KEY(leg_id) REFERENCES bet_legs(id),
-            FOREIGN KEY(event_id) REFERENCES events_v2(id)
+            FOREIGN KEY(event_id) REFERENCES events(id)
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_settlement_fingerprint ON settlement_events(fingerprint);
         
@@ -1224,7 +1370,7 @@ def init_settlement_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(bet_id) REFERENCES bets(id),
             FOREIGN KEY(leg_id) REFERENCES bet_legs(id),
-            FOREIGN KEY(event_id) REFERENCES events_v2(id)
+            FOREIGN KEY(event_id) REFERENCES events(id)
         );
         """
         # Index separate
@@ -1641,56 +1787,6 @@ def init_ingestion_backbone_db():
                 pass
                 
         # 2. Add New Tables
-        if db_type == 'sqlite':
-            schema = """
-            CREATE TABLE IF NOT EXISTS events_v2 (
-                id TEXT PRIMARY KEY, -- Canonical UUID
-                league TEXT NOT NULL,
-                season TEXT,
-                start_time TIMESTAMP NOT NULL,
-                home_team TEXT NOT NULL,
-                away_team TEXT NOT NULL,
-                status TEXT NOT NULL,
-                venue TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(league, start_time, home_team, away_team)
-            );
-            CREATE TABLE IF NOT EXISTS event_providers (
-                event_id TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                provider_event_id TEXT NOT NULL,
-                last_updated TIMESTAMP,
-                PRIMARY KEY(event_id, provider),
-                FOREIGN KEY(event_id) REFERENCES events_v2(id)
-            );
-            """
-            conn.executescript(schema)
-        else:
-            schema = """
-            CREATE TABLE IF NOT EXISTS events_v2 (
-                id TEXT PRIMARY KEY,
-                league TEXT NOT NULL,
-                season TEXT,
-                start_time TIMESTAMP NOT NULL,
-                home_team TEXT NOT NULL,
-                away_team TEXT NOT NULL,
-                status TEXT NOT NULL,
-                venue TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(league, start_time, home_team, away_team)
-            );
-            CREATE TABLE IF NOT EXISTS event_providers (
-                event_id TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                provider_event_id TEXT NOT NULL,
-                last_updated TIMESTAMP,
-                PRIMARY KEY(event_id, provider),
-                FOREIGN KEY(event_id) REFERENCES events_v2(id)
-            );
-            """
-            cursor.execute(schema)
-            
-        conn.commit()
     print("Ingestion Backbone tables initialized/migrated.")
 
 def log_ingestion_run(run_data: dict):
@@ -1782,67 +1878,7 @@ def init_team_identity_db():
         conn.commit()
     print("Team Identity tables initialized.")
 
-def migrate_events_v2_schema():
-    """
-    Add team_id columns to events_v2 if they don't exist.
-    """
-    alter_queries = [
-        "DROP TABLE IF EXISTS event_providers", # Force recreation to fix FK
-        "ALTER TABLE events_v2 ADD COLUMN home_team_id TEXT",
-        "ALTER TABLE events_v2 ADD COLUMN away_team_id TEXT",
-        # "ALTER TABLE event_providers ADD COLUMN last_updated TIMESTAMP" # Handled by recreation
-    ]
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        for q in alter_queries:
-            try:
-                if get_db_type() == 'sqlite':
-                     cursor.execute(q)
-                else:
-                     cursor.execute(q)
-                conn.commit()
-                print(f"Executed: {q}")
-            except Exception as e:
-                # Ignore duplicate column errors
-                # print(f"Migration note: {e}")
-                conn.rollback()
-    
-    # Re-create event_providers if dropped or missing
-    schema_ep = """
-    CREATE TABLE IF NOT EXISTS event_providers (
-        event_id TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        provider_event_id TEXT NOT NULL,
-        last_updated TIMESTAMP,
-        PRIMARY KEY(provider, provider_event_id),
-        UNIQUE(event_id, provider),
-        FOREIGN KEY(event_id) REFERENCES events_v2(id)
-    );
-    """
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(schema_ep)
-        conn.commit()
 
-    # Re-create index for uniqueness with IDs
-    # SQLite/PG: CREATE UNIQUE INDEX IF NOT EXISTS ...
-    # We replace the old constraint? 
-    # Old: UNIQUE(league, start_time, home_team, away_team)
-    # New: UNIQUE(league, start_time, home_team_id, away_team_id)
-    # We can create a new index for lookups.
-    idx_sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_v2_canonical ON events_v2(league, start_time, home_team_id, away_team_id)"
-    # Fix missing PK/Unique on event_providers if it was created incorrectly
-    # Execute Index Creation
-    with get_db_connection() as conn:
-        try:
-            conn.cursor().execute(idx_sql)
-            conn.commit()
-        except Exception as e:
-            # print(f"Index creation note: {e}")
-            pass
-
-    print("events_v2 schema migrated.")
 
 def init_game_results_db():
     db_type = get_db_type()
@@ -1862,7 +1898,7 @@ def init_game_results_db():
         source_provider TEXT,
         final_at TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(event_id) REFERENCES events_v2(id)
+        FOREIGN KEY(event_id) REFERENCES events(id)
     );
     """
     with get_db_connection() as conn:
@@ -2148,43 +2184,6 @@ def fetch_model_health_daily(date=None, league=None, market_type=None):
         cursor = _exec(conn, query, params)
         return [dict(row) for row in cursor.fetchall()]
 
-def init_odds_snapshots_db():
-    db_type = get_db_type()
-    if db_type == 'sqlite':
-        schema = """
-        CREATE TABLE IF NOT EXISTS odds_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id TEXT NOT NULL,
-            book TEXT NOT NULL,
-            market_type TEXT NOT NULL,
-            side TEXT NOT NULL,
-            line REAL,
-            price REAL NOT NULL,
-            captured_at TIMESTAMP NOT NULL,
-            captured_bucket TIMESTAMP NOT NULL,
-            UNIQUE(event_id, market_type, side, line, book, captured_bucket)
-        );
-        CREATE INDEX IF NOT EXISTS idx_odds_event ON odds_snapshots(event_id);
-        CREATE INDEX IF NOT EXISTS idx_odds_captured ON odds_snapshots(captured_at);
-        """
-    else:
-        schema = """
-        CREATE TABLE IF NOT EXISTS odds_snapshots (
-            id SERIAL PRIMARY KEY,
-            event_id TEXT NOT NULL,
-            book TEXT NOT NULL,
-            market_type TEXT NOT NULL,
-            side TEXT NOT NULL,
-            line DECIMAL(10,1),
-            price DECIMAL(10,3) NOT NULL,
-            captured_at TIMESTAMP NOT NULL,
-            captured_bucket TIMESTAMP NOT NULL,
-            UNIQUE(event_id, market_type, side, line, book, captured_bucket)
-        );
-        CREATE INDEX IF NOT EXISTS idx_odds_event ON odds_snapshots(event_id);
-        CREATE INDEX IF NOT EXISTS idx_odds_captured ON odds_snapshots(captured_at);
-        """
-        
     # Derived Features Table
     schema_features = """
     CREATE TABLE IF NOT EXISTS market_line_features (
@@ -2278,67 +2277,103 @@ def get_market_features(game_id: str) -> dict:
 
 def store_odds_snapshots(snapshots: list):
     """
-    Store a batch of odds snapshots.
-    snapshots: List[Dict] with canonical fields.
+    Store a batch of granular odds snapshots.
+    snapshots: List[Dict] matching the 1-row-per-market-side schema.
     """
     if not snapshots: return
     
+    import uuid
+    import hashlib
+
     q = """
     INSERT INTO odds_snapshots (
-        event_id, book, market_type, side, line, price, captured_at, captured_bucket
+        id, event_id, provider, book, market_type, side, 
+        line_value, price, captured_at, raw_json, fingerprint
     ) VALUES (
-        :event_id, :book, :market_type, :side, :line, :price, :captured_at, :captured_bucket
-    ) ON CONFLICT(event_id, market_type, side, line, book, captured_bucket) DO NOTHING
+        :id, :event_id, :provider, :book, :market_type, :side, 
+        :line_value, :price, :captured_at, :raw_json, :fingerprint
+    ) ON CONFLICT(fingerprint) DO NOTHING
+    """
+    
+    with get_db_connection() as conn:
+        for s in snapshots:
+            # 1. Enforce ID
+            if not s.get('id'):
+                s['id'] = str(uuid.uuid4())
+            
+            # 2. Timestamp check
+            if not s.get('captured_at'):
+                s['captured_at'] = datetime.now()
+            if not isinstance(s['captured_at'], str):
+                s['captured_at'] = s['captured_at'].isoformat()
+            
+            # 3. Fingerprint check
+            if not s.get('fingerprint'):
+                # Safe fingerprinting using .get with defaults
+                raw_fp = f"{s.get('event_id')}|{s.get('provider')}|{s.get('book','') or ''}|{s.get('market_type')}|{s.get('side')}|{s.get('line_value')}|{s.get('price')}"
+                s['fingerprint'] = hashlib.sha256(raw_fp.encode()).hexdigest()
+            
+            # 4. Ensure raw_json exists for DB query
+            if 'raw_json' not in s:
+                s['raw_json'] = None
+            
+            _exec(conn, q, s)
+        conn.commit()
+
+def store_market_intel(intel_list: list):
+    """
+    Store market intel (bet/money splits).
+    """
+    if not intel_list: return
+    
+    q = """
+    INSERT INTO market_intel_snapshots (
+        event_id, provider, captured_at, 
+        public_bet_pct, public_money_pct, sharp_side, notes_json
+    ) VALUES (
+        :event_id, :provider, :captured_at, 
+        :public_bet_pct, :public_money_pct, :sharp_side, :notes_json
+    ) ON CONFLICT(event_id, provider, captured_at) DO NOTHING
     """
     with get_db_connection() as conn:
-        is_pg = hasattr(conn, 'cursor_factory')
-        if is_pg:
-            import re
-            # Convert :key to %(key)s
-            q = re.sub(r'(?<!:):(\w+)', r'%(\1)s', q)
-            # ON CONFLICT DO NOTHING is already in q (mostly), but Postgres needs exact target usually for ON CONFLICT
-            # Wait, Postgres does support ON CONFLICT(col1, col2) DO NOTHING.
-            # My q already has: ON CONFLICT(event_id, market_type, side, line, book, captured_bucket) DO NOTHING
-            # Which is valid for Postgres too if the index exists.
-            
-        if is_pg:
-            with conn.cursor() as cur:
-                # In Postgres, use execute_batch for speed or just execute in loop
-                # psycopg2.extras.execute_batch(cur, q, snapshots)
-                # But to keep dependencies low, loop is fine for now.
-                for s in snapshots:
-                    cur.execute(q, s)
-        else:
-            # SQLite
-            conn.executemany(q, snapshots)
+        for i in intel_list:
+             if isinstance(i.get('captured_at'), datetime):
+                 i['captured_at'] = i['captured_at'].isoformat()
+             _exec(conn, q, i)
         conn.commit()
-    return len(snapshots)
 
-def get_last_prestart_snapshot(event_id: str, market_type: str):
+def get_latest_market_snapshot(event_id: str, provider: str = None):
     """
-    Fetches the latest odds snapshots for an event captured before the event start time.
+    Fetches the latest flat odds snapshot for an event.
     """
     q = """
-    SELECT o.*
-    FROM odds_snapshots o
-    JOIN events_v2 e ON e.id = o.event_id
-    WHERE o.event_id = :event_id
-      AND o.market_type = :market_type
-      AND o.captured_at <= e.start_time
-    ORDER BY o.captured_at DESC
+    SELECT * FROM odds_snapshots
+    WHERE event_id = :event_id
+    """
+    if provider:
+        q += " AND provider = :p"
+    q += " ORDER BY captured_at DESC LIMIT 1"
+    
+    with get_db_connection() as conn:
+        row = _exec(conn, q, {"event_id": event_id, "p": provider}).fetchone()
+        if row:
+            return dict(row)
+    return None
+
+def fetch_ncaam_analysis_history(limit: int = 100):
+    """
+    Fetch history from model_predictions.
+    """
+    q = """
+    SELECT h.*, e.home_team, e.away_team, e.start_time, e.league
+    FROM model_predictions h
+    JOIN events e ON h.event_id = e.id
+    ORDER BY h.analyzed_at DESC
+    LIMIT :limit
     """
     with get_db_connection() as conn:
-        cursor = _exec(conn, q, {"event_id": event_id, "market_type": market_type})
-        rows = cursor.fetchall()
-        
-        # Group by book, side, line to get the very latest set
-        latest = {}
-        for r in rows:
-            key = (r['book'], r['side'], r['line'])
-            if key not in latest:
-                latest[key] = dict(r)
-        
-        return list(latest.values())
+        rows = _exec(conn, q, {"limit": limit}).fetchall()
+        return [dict(r) for r in rows]
 
 def fetch_model_health_daily(date: str = None, league: str = None, market_type: str = None):
     """
@@ -2389,4 +2424,53 @@ def upsert_team_metrics(metrics: list):
                  _exec(conn, q, m)
         conn.commit()
     print(f"Upserted {len(metrics)} team metrics.")
+
+
+def migrate_events_schema():
+    """Adds missing columns to events table if they don't exist."""
+    db_type = get_db_type()
+    if db_type == 'sqlite':
+        # SQLite doesn't support IF NOT EXISTS in ALTER TABLE in all versions, 
+        # so we just try and catch.
+        cols = [
+            ("season", "TEXT"),
+            ("home_team_id", "TEXT"),
+            ("away_team_id", "TEXT"),
+            ("venue", "TEXT")
+        ]
+        with get_db_connection() as conn:
+            for col_name, col_type in cols:
+                try:
+                    conn.execute(f"ALTER TABLE events ADD COLUMN {col_name} {col_type}")
+                except Exception:
+                    pass # Already exists
+            conn.commit()
+    else:
+        # Postgres
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Add columns if they don't exist
+                cur.execute("""
+                    DO $$ 
+                    BEGIN 
+                        BEGIN
+                            ALTER TABLE events ADD COLUMN season TEXT;
+                        EXCEPTION WHEN duplicate_column THEN
+                        END;
+                        BEGIN
+                            ALTER TABLE events ADD COLUMN home_team_id TEXT;
+                        EXCEPTION WHEN duplicate_column THEN
+                        END;
+                        BEGIN
+                            ALTER TABLE events ADD COLUMN away_team_id TEXT;
+                        EXCEPTION WHEN duplicate_column THEN
+                        END;
+                        BEGIN
+                            ALTER TABLE events ADD COLUMN venue TEXT;
+                        EXCEPTION WHEN duplicate_column THEN
+                        END;
+                    END $$;
+                """)
+            conn.commit()
+        print("Migrated events schema (Postgres)")
 

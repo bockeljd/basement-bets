@@ -7,7 +7,7 @@ from src.services.evaluation_service import EvaluationService
 
 # Mock DB Schema
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS events_v2 (
+CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
     start_time TIMESTAMP
 );
@@ -70,7 +70,7 @@ class TestModelEvaluation(unittest.TestCase):
         eid = "event-123"
         
         # Event
-        self.conn.execute("INSERT INTO events_v2 (id, start_time) VALUES (?, ?)", (eid, today.isoformat()))
+        self.conn.execute("INSERT INTO events (id, start_time) VALUES (?, ?)", (eid, today.isoformat()))
         
         # Model
         self.conn.execute("INSERT INTO model_versions (id, sport, version_tag) VALUES (1, 'NFL', 'v1')")

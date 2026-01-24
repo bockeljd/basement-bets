@@ -36,7 +36,7 @@ class EvaluationService:
             LEFT JOIN predictions p ON p.event_id = s.event_id -- Optional: Metrics even if no prediction (manual bets)
             JOIN bet_legs bl ON bl.id = s.leg_id
             JOIN bets b ON b.id = bl.bet_id
-            JOIN events_v2 e ON s.event_id = e.id
+            JOIN events e ON s.event_id = e.id
             WHERE date(e.start_time) = :date
               AND s.outcome IN ('WON', 'LOST', 'PUSH') 
             """

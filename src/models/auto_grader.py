@@ -12,7 +12,7 @@ class AutoGrader:
         """
         Main entry point.
         1. Fetch all 'Pending' predictions from DB.
-        2. Fetch recent results from local DB (game_results joined with events_v2).
+        2. Fetch recent results from local DB (game_results joined with events).
         3. Match and Grade.
         4. Update DB.
         """
@@ -37,7 +37,7 @@ class AutoGrader:
 
     def _get_local_results(self):
         """
-        Fetch game results from local database for the last 7 days.
+        Fetch game results from canonical database.
         """
         query = """
         SELECT 
@@ -47,11 +47,10 @@ class AutoGrader:
             e.start_time,
             r.home_score, 
             r.away_score, 
-            r.final as completed
+            r.final
         FROM game_results r
-        JOIN events_v2 e ON r.event_id = e.id
-        WHERE r.final = 1
-           OR r.final = 'true'
+        JOIN events e ON r.event_id = e.id
+        WHERE r.final = 1 OR r.final = 'true'
         ORDER BY e.start_time DESC
         LIMIT 1000
         """
@@ -59,7 +58,7 @@ class AutoGrader:
             return [dict(row) for row in conn.execute(query).fetchall()]
 
     def _get_pending_picks(self):
-        query = "SELECT * FROM model_predictions WHERE result = 'Pending'"
+        query = "SELECT * FROM model_predictions WHERE outcome IS NULL OR outcome = 'PENDING'"
         with get_db_connection() as conn:
             return [dict(row) for row in conn.execute(query).fetchall()]
             
@@ -186,8 +185,8 @@ class AutoGrader:
             
         return None
 
-    def _update_db(self, pick_id, result):
-        query = "UPDATE model_predictions SET result = ? WHERE id = ?"
+    def _update_db(self, pick_id, outcome):
+        query = "UPDATE model_predictions SET outcome = :o WHERE id = :id"
         with get_db_connection() as conn:
-            conn.execute(query, (result, pick_id))
+            conn.execute(query, {"o": outcome.upper(), "id": pick_id})
             conn.commit()

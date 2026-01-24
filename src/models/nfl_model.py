@@ -158,46 +158,22 @@ class NFLModel(BaseModel):
             # If diff is negative (e.g. -6.5 - (-2.5) = -4.0), it means we think Home is STRONGER (more negative spread).
             # If diff is positive (e.g. -1.0 - (-2.5) = +1.5), we think Home is WEAKER.
             
-            # Threshold
-            threshold = 1.5 
-            
-            if diff <= -threshold:
-                # We show Home is better than market thinks
-                edges.append({
-                    "game_id": game_id,
-                    "sport": "NFL",
-                    "start_time": game.get('commence_time'), 
-                    "home_team": home_team,
-                    "away_team": away_team,
-                    "market": "Spread",
-                    "bet_on": home_team, # Betting Home Cover
-                    "market_line": market_spread,
-                    "fair_line": pred['fair_spread'],
-                    "win_prob": round(pred['win_prob'], 3),
-                    "edge": round(abs(diff), 1),
-                    "odds": home_outcome.get('price'),
-                    "book": bookmakers[0]['title']
-                })
-            elif diff >= threshold:
-                # Market is too high on Home, bet Away
-                # Away Line is roughly -1 * Market Line (usually)
-                away_outcome = next((o for o in best_market['outcomes'] if o['name'] == away_team), None)
-                if away_outcome:
-                    edges.append({
-                        "game_id": game_id,
-                        "sport": "NFL",
-                        "start_time": game.get('commence_time'),
-                        "home_team": home_team,
-                        "away_team": away_team,
-                        "market": "Spread",
-                        "bet_on": away_team, # Betting Away Cover
-                        "market_line": away_outcome.get('point'),
-                        "fair_line": -1 * pred['fair_spread'], # Invert for Away perspective
-                        "win_prob": round(1 - pred['win_prob'], 3), # Approx flip
-                        "edge": round(abs(diff), 1),
-                        "odds": away_outcome.get('price'),
-                        "book": bookmakers[0]['title']
-                    })
+            # Always show games, determining lean based on diff
+            edges.append({
+                "game_id": game_id,
+                "sport": "NFL",
+                "start_time": game.get('commence_time'), 
+                "home_team": home_team,
+                "away_team": away_team,
+                "market": "Spread",
+                "bet_on": home_team if diff < 0 else away_team,
+                "market_line": market_spread if diff < 0 else (-1 * market_spread if market_spread is not None else 0),
+                "fair_line": pred['fair_spread'] if diff < 0 else (-1 * pred['fair_spread']),
+                "win_prob": round(pred['win_prob'] if diff < 0 else (1 - pred['win_prob']), 3),
+                "edge": round(abs(diff), 1),
+                "odds": home_outcome.get('price') if diff < 0 else (next((o for o in best_market['outcomes'] if o['name'] == away_team), home_outcome)).get('price'),
+                "book": bookmakers[0]['title'] if bookmakers else 'consensus'
+            })
 
         return edges
 

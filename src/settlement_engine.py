@@ -61,7 +61,7 @@ class SettlementEngine:
         print("[SettlementEngine] Calculating daily model metrics...")
         # 1. Fetch all graded bets
         # Efficiently we would do this via SQL aggregation, but for complexity here let's fetch & compute in Python for flexibility with Brier scores
-        query = "SELECT * FROM model_predictions WHERE result IN ('Win', 'Loss', 'Push') ORDER BY date DESC"
+        query = "SELECT * FROM model_predictions WHERE outcome IN ('WON', 'LOST', 'PUSH') ORDER BY analyzed_at DESC"
         
         with get_db_connection() as conn:
             cursor = _exec(conn, query)
@@ -86,7 +86,7 @@ class SettlementEngine:
         print("[SettlementEngine] Daily metrics updated.")
 
     def _fetch_pending_predictions(self) -> List[Dict]:
-        query = "SELECT * FROM model_predictions WHERE result = 'Pending'"
+        query = "SELECT * FROM model_predictions WHERE outcome IS NULL OR outcome = 'PENDING'"
         with get_db_connection() as conn:
             cursor = _exec(conn, query)
             return [dict(r) for r in cursor.fetchall()]
@@ -103,7 +103,7 @@ class SettlementEngine:
         provider_id = pred.get('game_id')
         
         query = """
-        SELECT r.home_score, r.away_score, r.final_flag, e.start_time, e.status
+        SELECT r.home_score, r.away_score, r.final, e.start_time, e.status
         FROM game_results r
         JOIN event_providers ep ON r.event_id = ep.event_id
         JOIN events e ON r.event_id = e.id
@@ -258,7 +258,7 @@ class SettlementEngine:
         wager_total = 0 
         
         for b in bets:
-            if b['result'] == 'Push': 
+            if b.get('outcome') == 'PUSH': 
                 continue 
             
             resolved_count += 1

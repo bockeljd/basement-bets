@@ -28,7 +28,7 @@ def settlement_report():
         query_missing_res = """
         SELECT COUNT(*) 
         FROM bet_legs l
-        JOIN events_v2 e ON l.event_id = e.id
+        JOIN events e ON l.event_id = e.id
         LEFT JOIN game_results r ON e.id = r.event_id
         WHERE l.status = 'PENDING'
           AND (r.final IS NULL OR r.final = FALSE)

@@ -9,7 +9,7 @@ class OddsAdapter:
 
     def _resolve_canonical_event_id(self, league, home_team, away_team, start_time):
         """
-        Tries to find the canonical UUID in events_v2 by matching teams and timing.
+        Tries to find the canonical ID in 'events' table by matching teams and timing.
         """
         hid = self.identity.get_team_by_name(home_team, league)
         aid = self.identity.get_team_by_name(away_team, league)
@@ -17,9 +17,9 @@ class OddsAdapter:
         if not hid or not aid:
             return None
             
-        # Search events_v2
+        # Search events
         query = """
-        SELECT id FROM events_v2 
+        SELECT id FROM events 
         WHERE league = :l 
           AND home_team_id = :h AND away_team_id = :a
           AND start_time >= :start AND start_time <= :end
@@ -79,103 +79,100 @@ class OddsAdapter:
         if not raw_data:
             return 0
             
-        canonical_snapshots = []
+        final_snapshots = []
         captured_at = datetime.now()
-        # Bucket to 15 mins for idempotency
-        bucket_mins = 15
-        captured_bucket = captured_at.replace(
-            minute=(captured_at.minute // bucket_mins) * bucket_mins,
-            second=0,
-            microsecond=0
-        )
 
         for event in raw_data:
             if provider == "action_network":
-                snapshots = self._from_action_network(event, league, captured_at, captured_bucket)
-                canonical_snapshots.extend([s for s in snapshots if s is not None])
+                snap = self._from_action_network(event, league, captured_at)
+                if snap: final_snapshots.append(snap)
             else:
                 # Default Odds API
-                snapshots = self._from_odds_api(event, league, captured_at, captured_bucket)
-                canonical_snapshots.extend([s for s in snapshots if s is not None])
+                snaps = self._from_odds_api(event, league, captured_at)
+                final_snapshots.extend(snaps)
         
-        if not canonical_snapshots:
+        if not final_snapshots:
             return 0
             
-        return store_odds_snapshots(canonical_snapshots)
+        store_odds_snapshots(final_snapshots)
+        return len(final_snapshots)
 
-    def _from_odds_api(self, event, league, captured_at, captured_bucket):
-        snapshots = []
-        raw_event_id = event.get('id')
+    def _from_odds_api(self, event, league, captured_at):
+        final_snaps = []
         home_team = event.get('home_team')
         away_team = event.get('away_team')
         start_time = event.get('commence_time')
 
-        # Try to resolve canonical ID
         event_id = self._resolve_canonical_event_id(league, home_team, away_team, start_time)
-        if not event_id:
-            event_id = raw_event_id # Fallback to provider ID if not linked
+        if not event_id: return []
 
         bookmakers = event.get('bookmakers', [])
         for bm in bookmakers:
             book_key = bm.get('key')
-            # ... rest of the logic ...
-            # Wait, I should probably keep the existing logic and just swap the ID.
-            # But I need to be careful with the loop.
-            
-            markets = bm.get('markets', [])
-            for mkt in markets:
+            for mkt in bm.get('markets', []):
                 mkt_key = self._normalize_market(mkt.get('key'))
-                outcomes = mkt.get('outcomes', [])
-                for out in outcomes:
-                    outcome_name = out.get('name')
-                    side = self._detect_side(outcome_name, home_team, away_team)
-                    
-                    snap = self._make_snap(
-                        event_id, 
-                        book_key, 
-                        mkt_key, 
-                        side, 
-                        out.get('point'), 
-                        out.get('price'), 
-                        captured_at, 
-                        captured_bucket
-                    )
-                    if snap:
-                        snapshots.append(snap)
-        return snapshots
+                for out in mkt.get('outcomes', []):
+                    side = self._detect_side(out.get('name'), home_team, away_team)
+                    snap = {
+                        "event_id": event_id,
+                        "provider": "odds_api",
+                        "book": book_key,
+                        "market_type": mkt_key,
+                        "side": side,
+                        "line_value": out.get('point'),
+                        "price": out.get('price'),
+                        "captured_at": captured_at,
+                        "raw_json": None # Optional enrichment
+                    }
+                    final_snaps.append(snap)
+        return final_snaps
 
-    def _from_action_network(self, event, league, captured_at, captured_bucket):
-        snapshots = []
-        raw_event_id = event.get('game_id')
-        if not raw_event_id: return []
-        
+    def _from_action_network(self, event, league, captured_at):
         home_team = event.get('home_team')
         away_team = event.get('away_team')
         start_time = event.get('start_time')
 
-        # Try to resolve canonical ID
         event_id = self._resolve_canonical_event_id(league, home_team, away_team, start_time)
-        if not event_id:
-            event_id = str(raw_event_id)
+        if not event_id: return []
 
-        # Moneyline
-        if event.get('home_money_line'):
-            snapshots.append(self._make_snap(event_id, "action", "MONEYLINE", "HOME", 0.0, event['home_money_line'], captured_at, captured_bucket))
-        if event.get('away_money_line'):
-            snapshots.append(self._make_snap(event_id, "action", "MONEYLINE", "AWAY", 0.0, event['away_money_line'], captured_at, captured_bucket))
-            
+        snaps = []
         # Spread
-        if event.get('home_spread'):
-            snapshots.append(self._make_snap(event_id, "action", "SPREAD", "HOME", event['home_spread'], event.get('home_spread_odds', -110), captured_at, captured_bucket))
-        if event.get('away_spread'):
-            snapshots.append(self._make_snap(event_id, "action", "SPREAD", "AWAY", event['away_spread'], event.get('away_spread_odds', -110), captured_at, captured_bucket))
-            
+        if event.get('home_spread') is not None:
+             snaps.append({
+                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
+                 "market_type": "SPREAD", "side": "HOME", "line_value": event.get('home_spread'),
+                 "price": event.get('home_spread_odds'), "captured_at": captured_at
+             })
+             snaps.append({
+                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
+                 "market_type": "SPREAD", "side": "AWAY", "line_value": -event.get('home_spread'),
+                 "price": event.get('away_spread_odds'), "captured_at": captured_at
+             })
         # Total
-        if event.get('total_score'):
-            snapshots.append(self._make_snap(event_id, "action", "TOTAL", "OVER", event['total_score'], event.get('over_odds', -110), captured_at, captured_bucket))
-            snapshots.append(self._make_snap(event_id, "action", "TOTAL", "UNDER", event['total_score'], event.get('under_odds', -110), captured_at, captured_bucket))
-            
-        return [s for s in snapshots if s is not None]
+        if event.get('total_score') is not None:
+             snaps.append({
+                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
+                 "market_type": "TOTAL", "side": "OVER", "line_value": event.get('total_score'),
+                 "price": event.get('over_odds'), "captured_at": captured_at
+             })
+             snaps.append({
+                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
+                 "market_type": "TOTAL", "side": "UNDER", "line_value": event.get('total_score'),
+                 "price": event.get('under_odds'), "captured_at": captured_at
+             })
+        # ML
+        if event.get('home_money_line') is not None:
+             snaps.append({
+                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
+                 "market_type": "ML", "side": "HOME", "line_value": None,
+                 "price": event.get('home_money_line'), "captured_at": captured_at
+             })
+             snaps.append({
+                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
+                 "market_type": "ML", "side": "AWAY", "line_value": None,
+                 "price": event.get('away_money_line'), "captured_at": captured_at
+             })
+        return snaps
 
     def _detect_side(self, outcome_name, home_team, away_team):
         if home_team and outcome_name == home_team: return "HOME"

@@ -670,31 +670,30 @@ class NCAAMModel(BaseModel):
             
             ev_pct = (prob_cover_target * (dec - 1)) - ((1 - prob_cover_target) * 1)
             
-            if ev_pct > 0.01: # 1% ROI hurdle
-                 # Check Allowlist
-                 status = allowlist.get(("basketball_ncaab", "Spread"), "SHADOW")
-                 is_live = (status == "ENABLED")
-                 
-                 edges.append({
-                    "game_id": game_id,
-                    "market_type": "SPREAD", # Issue E
-                    "game": f"{away_team} @ {home_team}",
-                    "matchup": f"{away_team} @ {home_team}",
-                    "home_team": home_team,
-                    "away_team": away_team,
-                    "market": "Spread", # Legacy compact
-                    "bet_on": home_team, 
-                    "line": target_spread['point'],
-                    "price": target_spread['price'],
-                    "market_line": target_spread['point'],
-                    "model_line": round(model_spread, 1),
-                    "fair_line": round(model_spread, 1),
-                    "edge": round(abs(model_spread - target_spread['point']) * 0.6, 1),  # Conservative 40% haircut
-                    "edge_prob": round(edge_prob, 3),
-                    "ev": round(ev_pct, 4),
-                    "book": target_spread['book'],
-                    "is_actionable": is_live
-                })
+            # Always show spread edge
+            status = allowlist.get(("basketball_ncaab", "Spread"), "SHADOW")
+            is_live = (status == "ENABLED")
+            
+            edges.append({
+               "game_id": game_id,
+               "market_type": "SPREAD", # Issue E
+               "game": f"{away_team} @ {home_team}",
+               "matchup": f"{away_team} @ {home_team}",
+               "home_team": home_team,
+               "away_team": away_team,
+               "market": "Spread", # Legacy compact
+               "bet_on": home_team, 
+               "line": target_spread['point'],
+               "price": target_spread['price'],
+               "market_line": target_spread['point'],
+               "model_line": round(model_spread, 1),
+               "fair_line": round(model_spread, 1),
+               "edge": round(abs(model_spread - target_spread['point']), 1), 
+               "edge_prob": round(edge_prob, 3),
+               "ev": round(ev_pct, 4),
+               "book": target_spread['book'],
+               "is_actionable": is_live
+           })
                 
             # --- Total Evaluation ---
             # Similar logic.
@@ -734,31 +733,31 @@ class NCAAMModel(BaseModel):
                 
                 ev_pct_total = (model_prob * (dec_t - 1)) - ((1 - model_prob) * 1)
                 
-                if ev_pct_total > 0.01:
-                    # Check Allowlist
-                    status_total = allowlist.get(("basketball_ncaab", "Total"), "SHADOW")
-                    is_live_total = (status_total == "ENABLED")
-                    
-                    edges.append({
-                        "game_id": game_id,
-                        "market_type": "TOTAL",
-                        "game": f"{away_team} @ {home_team}",
-                        "matchup": f"{away_team} @ {home_team}",
-                        "home_team": home_team,
-                        "away_team": away_team,
-                        "market": "Total",
-                        "bet_on": lean,
-                        "line": best_total_line['point'],
-                        "price": best_total_line['price'],
-                        "market_line": best_total_line['point'],
-                        "model_line": round(snapshot.prediction.mu_final_total, 1),
-                        "fair_line": round(snapshot.prediction.mu_final_total, 1),
-                        "edge": round(abs(snapshot.prediction.mu_final_total - best_total_line['point']) * 0.6, 1),  # Conservative 40% haircut
-                        "edge_prob": round(edge_prob_total, 3),
-                        "ev": round(ev_pct_total, 4),
-                        "book": best_total_line['book'],
-                        "is_actionable": is_live_total
-                    })
+            # Always show total edge
+            # Check Allowlist
+            status_total = allowlist.get(("basketball_ncaab", "Total"), "SHADOW")
+            is_live_total = (status_total == "ENABLED")
+            
+            edges.append({
+                "game_id": game_id,
+                "market_type": "TOTAL",
+                "game": f"{away_team} @ {home_team}",
+                "matchup": f"{away_team} @ {home_team}",
+                "home_team": home_team,
+                "away_team": away_team,
+                "market": "Total",
+                "bet_on": lean,
+                "line": best_total_line['point'],
+                "price": best_total_line['price'],
+                "market_line": best_total_line['point'],
+                "model_line": round(snapshot.prediction.mu_final_total, 1),
+                "fair_line": round(snapshot.prediction.mu_final_total, 1),
+                "edge": round(abs(snapshot.prediction.mu_final_total - best_total_line['point']), 1),
+                "edge_prob": round(edge_prob_total, 3),
+                "ev": round(ev_pct_total, 4),
+                "book": best_total_line['book'],
+                "is_actionable": is_live_total
+            })
 
         print(f"[NCAAM] Found {len(edges)} potential edges.")
         return edges

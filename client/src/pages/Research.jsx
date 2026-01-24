@@ -9,19 +9,15 @@ const Research = () => {
     const [activeTab, setActiveTab] = useState('live');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [showAll, setShowAll] = useState(false);
-    const [historyShowAll, setHistoryShowAll] = useState(true);
+    const [sportFilter, setSportFilter] = useState('All');
 
     // Game Analysis Modal State
     const [selectedGame, setSelectedGame] = useState(null);
     const [analysisResult, setAnalysisResult] = useState(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-    // Sorting & Filtering State
+    // Sorting State
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
-    const [sportFilter, setSportFilter] = useState('All');
-    const [edgeThreshold, setEdgeThreshold] = useState(2.0);
-    const [confidenceThreshold, setConfidenceThreshold] = useState(50);
 
     useEffect(() => {
         fetchSchedule();
@@ -32,16 +28,24 @@ const Research = () => {
             setLoading(true);
             setError(null);
 
-            const [scheduleRes, historyRes] = await Promise.all([
-                api.get('/api/schedule?sport=all&days=3'),
-                api.get('/api/research/history')
+            // Fetch NCAAM specific board and overall history
+            const [boardRes, historyRes] = await Promise.all([
+                api.get('/api/ncaam/board'),
+                api.get('/api/ncaam/history')
             ]);
 
-            setEdges(scheduleRes.data || []);
+            setEdges(boardRes.data || []);
             setHistory(historyRes.data || []);
 
         } catch (err) {
             console.error(err);
+            if (err.response?.status === 403) {
+                const pass = prompt("Authentication failed. Please enter the Basement Password:");
+                if (pass) {
+                    localStorage.setItem('basement_password', pass);
+                    window.location.reload();
+                }
+            }
             setError('Failed to load schedule.');
         } finally {
             setLoading(false);
@@ -49,24 +53,9 @@ const Research = () => {
     };
 
     const runModels = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-
-            const [edgesRes, historyRes] = await Promise.all([
-                api.get('/api/research?refresh=true'),
-                api.get('/api/research/history')
-            ]);
-
-            setEdges(edgesRes.data || []);
-            setHistory(historyRes.data || []);
-
-        } catch (err) {
-            console.error(err);
-            setError('Failed to run models.');
-        } finally {
-            setLoading(false);
-        }
+        // For NCAAM v2, we don't "run models" globally. We just refresh the board.
+        // We can add a "Sync All" if needed, but the board fetch is cheap.
+        fetchSchedule();
     };
 
     const gradeResults = async () => {
@@ -96,12 +85,13 @@ const Research = () => {
         setAnalysisResult(null);
 
         try {
-            const response = await api.post(`/api/analyze/${game.id}`, {
-                sport: game.sport,
-                home_team: game.home_team,
-                away_team: game.away_team
+            const response = await api.post('/api/ncaam/analyze', {
+                event_id: game.id
             });
             setAnalysisResult(response.data);
+            // Refresh history in background
+            const histRes = await api.get('/api/ncaam/history');
+            setHistory(histRes.data || []);
         } catch (err) {
             console.error('Analysis error:', err);
             setAnalysisResult({ error: err.response?.data?.detail || 'Analysis failed' });
@@ -165,27 +155,8 @@ const Research = () => {
 
     const getProcessedEdges = () => {
         let filtered = edges.filter(e => {
-            // Always show scheduled games (no edge data yet)
-            // Only filter by is_actionable when edge data exists (model has run)
-            const hasModelData = e.edge !== null && e.edge !== undefined;
-            if (!showAll && hasModelData && !e.is_actionable) return false;
-
-            // If no model data, just apply sport filter
-            if (!hasModelData) {
-                if (sportFilter !== 'All' && e.sport !== sportFilter) return false;
-                return true;
-            }
-
-            const edgeVal = e.edge || 0;
-            const confVal = e.audit_score || 50;
-
-            // Adjust edge threshold based on sport
-            const meetEdge = e.sport === 'EPL' ? edgeVal >= (edgeThreshold * 2.5) : edgeVal >= edgeThreshold;
-            const meetConf = confVal >= confidenceThreshold;
-
             if (sportFilter !== 'All' && e.sport !== sportFilter) return false;
-
-            return meetEdge && meetConf;
+            return true;
         });
 
         return [...filtered].sort((a, b) => {
@@ -199,21 +170,8 @@ const Research = () => {
         });
     };
 
-    const getFilteredHistory = () => {
-        return history.filter(h => {
-            if (historyShowAll) return true;
-
-            const edgeVal = h.edge || 0;
-            const confVal = h.audit_score || (h.is_actionable ? 85 : 50);
-
-            const meetEdge = h.sport === 'EPL' ? edgeVal >= (edgeThreshold * 2.5) : edgeVal >= edgeThreshold;
-            const meetConf = confVal >= confidenceThreshold;
-            return meetEdge && meetConf;
-        });
-    };
-
     const getSortedHistory = () => {
-        return [...getFilteredHistory()].sort((a, b) => {
+        return [...history].sort((a, b) => {
             const key = sortConfig.key === 'edge' ? 'created_at' : sortConfig.key; // Default history sort to time
             let aVal = a[key] || '';
             let bVal = b[key] || '';
@@ -261,7 +219,7 @@ const Research = () => {
                     onClick={() => setActiveTab('live')}
                     className={`pb-2 px-4 text-sm font-medium transition-colors ${activeTab === 'live' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-slate-400 hover:text-slate-200'}`}
                 >
-                    Live Edges
+                    Market Board
                 </button>
                 <button
                     onClick={() => setActiveTab('history')}
@@ -292,27 +250,11 @@ const Research = () => {
                                 </select>
                             </div>
                         </div>
-
-                        <label className="flex items-center cursor-pointer group">
-                            <div className="relative">
-                                <input
-                                    type="checkbox"
-                                    className="sr-only"
-                                    checked={showAll}
-                                    onChange={() => setShowAll(!showAll)}
-                                />
-                                <div className={`block w-14 h-8 rounded-full transition-colors ${showAll ? 'bg-blue-600' : 'bg-slate-700 border border-slate-600'}`}></div>
-                                <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${showAll ? 'transform translate-x-6' : ''}`}></div>
-                            </div>
-                            <div className="ml-3 text-slate-400 group-hover:text-slate-200 font-medium transition-colors">
-                                Show No Edge Games
-                            </div>
-                        </label>
                     </div>
 
                     <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
-                            <h2 className="text-lg font-semibold text-slate-200">Live Model Edges</h2>
+                            <h2 className="text-lg font-semibold text-slate-200">Market Board</h2>
                             <div className="text-xs text-slate-500 flex items-center">
                                 <AlertCircle size={12} className="mr-1" />
                                 Updated in real-time
@@ -349,7 +291,7 @@ const Research = () => {
                                     <thead>
                                         <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('start_time')}>
-                                                <div className="flex items-center">Game Date/Time <SortIcon column="start_time" /></div>
+                                                <div className="flex items-center">Time <SortIcon column="start_time" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
                                                 <div className="flex items-center">League <SortIcon column="sport" /></div>
@@ -357,45 +299,14 @@ const Research = () => {
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
                                                 <div className="flex items-center">Matchup <SortIcon column="game" /></div>
                                             </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
-                                                <div className="flex items-center">Recommended Bet <SortIcon column="bet_on" /></div>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                <div className="flex items-center">Spread (Odds)</div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center group relative cursor-help">
-                                                    Market / Fair
-                                                    <Info size={14} className="ml-2 text-slate-500 group-hover:text-blue-400 transition-colors" />
-
-                                                    {/* Tooltip Content */}
-                                                    <div className="absolute left-0 bottom-full mb-2 w-72 p-4 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-[11px] leading-relaxed normal-case font-medium ring-1 ring-white/5">
-                                                        <div className="text-blue-400 font-black mb-2 tracking-widest uppercase">Market vs Fair</div>
-                                                        <div className="space-y-3">
-                                                            <p className="text-slate-300">
-                                                                <span className="text-white font-bold block mb-0.5">Market (The Book)</span>
-                                                                The current line offered by sportsbooks. It reflects public consensus and includes the "vig" (commission).
-                                                            </p>
-                                                            <div className="h-px bg-slate-800 w-full"></div>
-                                                            <p className="text-slate-300">
-                                                                <span className="text-white font-bold block mb-0.5">Fair (The Model)</span>
-                                                                Our model's statistical "true price" (via EPA, Monte Carlo, or Poisson). The difference between Market and Fair is your <span className="text-green-400 font-bold underline">Edge</span>.
-                                                            </p>
-                                                        </div>
-                                                        {/* Tooltip Arrow */}
-                                                        <div className="absolute top-full left-6 -mt-1 border-[6px] border-transparent border-t-slate-700"></div>
-                                                        <div className="absolute top-full left-6 -mt-1.5 border-[6px] border-transparent border-t-slate-900"></div>
-                                                    </div>
-                                                </div>
+                                                <div className="flex items-center">Total (Odds)</div>
                                             </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
-                                                <div className="flex items-center">Model Edge <SortIcon column="edge" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Suggested Stake</div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('audit_score')}>
-                                                <div className="flex items-center">Confidence <SortIcon column="audit_score" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Action</div>
+                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
+                                                <div className="flex items-center justify-center">Action</div>
                                             </th>
                                         </tr>
                                     </thead>
@@ -405,14 +316,7 @@ const Research = () => {
                                                 <td colSpan="9" className="py-12 text-center text-slate-500">
                                                     <div className="flex flex-col items-center justify-center">
                                                         <Filter size={32} className="mb-3 opacity-20" />
-                                                        <p className="text-lg font-medium text-slate-400">No edges match your filters.</p>
-                                                        <p className="text-sm mb-4">Try lowering the threshold or enabling "Show No Edge Games".</p>
-                                                        <button
-                                                            onClick={() => setShowAll(true)}
-                                                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-white transition-colors"
-                                                        >
-                                                            View All Games
-                                                        </button>
+                                                        <p className="text-lg font-medium text-slate-400">No games found for this sport.</p>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -424,92 +328,51 @@ const Research = () => {
                                                 const isEdge = edge.is_actionable;
 
                                                 return (
-                                                    <tr key={idx} className={`group hover:bg-slate-700/30 transition-all ${!isEdge ? 'opacity-50 grayscale-[0.5]' : ''}`}>
-                                                        <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
+                                                    <tr key={idx} className={`group hover:bg-slate-700/30 transition-all border-b border-slate-700/30`}>
+                                                        <td className="py-3 px-4 text-slate-400 text-xs whitespace-nowrap">
                                                             <div className="font-bold text-slate-300">{dateStr}</div>
                                                             <div>{timeStr}</div>
                                                         </td>
-                                                        <td className="py-2 px-4">
+                                                        <td className="py-3 px-4">
                                                             <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
                                                                 ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
                                                                     edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
                                                                         edge.sport === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
                                                                             'bg-slate-700/50 text-slate-400 border border-slate-600'
                                                                 }`}>
-                                                                {edge.sport === 'NCAAM' ? 'NCAA Basketball' :
-                                                                    edge.sport === 'NCAAF' ? 'NCAA Football' :
-                                                                        edge.sport === 'EPL' ? 'Premier League' :
-                                                                            edge.sport}
+                                                                {edge.sport}
                                                             </span>
                                                         </td>
-                                                        <td className="py-2 px-4 font-semibold text-slate-200 text-sm">{edge.game}</td>
-                                                        <td className="py-2 px-4">
-                                                            <div className="text-white font-bold flex items-center">
-                                                                {edge.market === 'Total' ? edge.bet_on : edge.bet_on}
-                                                                {isEdge && <CheckCircle size={12} className="ml-2 text-green-500" />}
-                                                            </div>
-                                                            <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mt-0.5">{edge.market}</div>
-                                                            {edge.audit_reason && (
-                                                                <div className="text-[10px] text-slate-400 mt-1 italic leading-tight">
-                                                                    {edge.audit_reason}
+                                                        <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
+                                                        <td className="py-3 px-4">
+                                                            {edge.home_spread !== null ? (
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-white font-mono font-bold leading-tight">
+                                                                        {edge.home_spread > 0 ? `+${edge.home_spread}` : edge.home_spread}
+                                                                    </span>
+                                                                    <span className="text-[10px] text-slate-500 font-medium">@{edge.moneyline_home || '-'}</span>
                                                                 </div>
+                                                            ) : (
+                                                                <span className="text-slate-600 font-mono text-xs">OFF</span>
                                                             )}
                                                         </td>
-                                                        <td className="py-2 px-4">
-                                                            <div className="flex flex-col">
-                                                                <div className="text-xs text-slate-300">Market: <span className="text-white font-mono">{edge.market_line}</span></div>
-                                                                <div className="text-xs text-slate-500">Fair: <span className="font-mono">{edge.fair_line}</span></div>
-                                                            </div>
-                                                        </td>
-                                                        <td className={`py-2 px-4 w-32 ${getEdgeColor(edge.edge, edge.sport)}`}>
-                                                            <div className="flex flex-col items-start whitespace-nowrap">
-                                                                <span className="text-lg font-bold">
-                                                                    {edge.sport === 'EPL' ? `${edge.edge}%` : `${edge.edge} pts`}
-                                                                </span>
-                                                                <span className="text-[10px] uppercase tracking-tighter opacity-70 font-black">
-                                                                    {edge.sport === 'EPL' ? 'Exp. Value' : 'Line Value'}
-                                                                </span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-2 px-4">
-                                                            <div className="flex flex-col">
-                                                                {edge.suggested_stake ? (
-                                                                    <>
-                                                                        <div className="text-green-400 font-bold">${edge.suggested_stake}</div>
-                                                                        <div className="text-[10px] text-slate-500">{edge.bankroll_pct}% Bankroll</div>
-                                                                    </>
-                                                                ) : (
-                                                                    <span className="text-slate-600">No Edge</span>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-2 px-4">
-                                                            <div className="group relative flex items-center cursor-help">
-                                                                {edge.audit_class === 'high' ? (
-                                                                    <ShieldCheck className="text-green-400" size={18} />
-                                                                ) : edge.audit_class === 'medium' ? (
-                                                                    <Shield className="text-yellow-400" size={18} />
-                                                                ) : (
-                                                                    <ShieldAlert className="text-red-400 animate-pulse" size={18} />
-                                                                )}
-
-                                                                {/* Tooltip */}
-                                                                <div className="absolute right-full mr-2 w-48 p-3 bg-slate-900 border border-slate-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-[10px]">
-                                                                    <div className={`font-bold uppercase tracking-wider mb-1 ${edge.audit_class === 'high' ? 'text-green-400' :
-                                                                        edge.audit_class === 'medium' ? 'text-yellow-400' : 'text-red-400'
-                                                                        }`}>
-                                                                        {edge.audit_class === 'high' ? 'High Confidence' :
-                                                                            edge.audit_class === 'medium' ? 'Medium Confidence' : 'Low Confidence'}
-                                                                    </div>
-                                                                    <p className="text-slate-300 leading-tight">{edge.audit_reason}</p>
+                                                        <td className="py-3 px-4">
+                                                            {edge.total_line !== null ? (
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-white font-mono font-bold leading-tight">
+                                                                        {edge.total_line}
+                                                                    </span>
+                                                                    <span className="text-[10px] text-slate-500 font-medium">{edge.moneyline_away ? `AWAY ML: ${edge.moneyline_away}` : ''}</span>
                                                                 </div>
-                                                            </div>
+                                                            ) : (
+                                                                <span className="text-slate-600 font-mono text-xs">OFF</span>
+                                                            )}
                                                         </td>
-                                                        <td className="py-2 px-4">
+                                                        <td className="py-3 px-4 text-center">
                                                             <button
                                                                 onClick={() => analyzeGame(edge)}
                                                                 disabled={isAnalyzing && selectedGame?.id === edge.id}
-                                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs font-bold transition-all shadow-sm"
+                                                                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs font-bold transition-all shadow-lg ring-1 ring-white/10 flex items-center justify-center mx-auto"
                                                             >
                                                                 {isAnalyzing && selectedGame?.id === edge.id ? (
                                                                     <RefreshCw className="animate-spin" size={14} />
@@ -535,21 +398,6 @@ const Research = () => {
                         <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
                             <h2 className="text-lg font-semibold text-slate-200">Model History (Auto-Tracked)</h2>
                             <div className="flex items-center gap-6">
-                                <label className="flex items-center cursor-pointer group">
-                                    <div className="relative">
-                                        <input
-                                            type="checkbox"
-                                            className="sr-only"
-                                            checked={historyShowAll}
-                                            onChange={() => setHistoryShowAll(!historyShowAll)}
-                                        />
-                                        <div className={`block w-10 h-6 rounded-full transition-colors ${historyShowAll ? 'bg-blue-600' : 'bg-slate-700 border border-slate-600'}`}></div>
-                                        <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${historyShowAll ? 'transform translate-x-4' : ''}`}></div>
-                                    </div>
-                                    <div className="ml-3 text-xs text-slate-400 group-hover:text-slate-200 font-medium transition-colors">
-                                        Show All
-                                    </div>
-                                </label>
                                 <button
                                     onClick={gradeResults}
                                     disabled={loading}
@@ -566,16 +414,15 @@ const Research = () => {
                             {[
                                 {
                                     label: 'Graded Bets',
-                                    value: getFilteredHistory().filter(h => h.result && h.result !== 'Pending').length,
+                                    value: history.filter(h => h.result && h.result !== 'Pending').length,
                                     icon: <CheckCircle size={14} className="text-blue-400" />
                                 },
                                 {
                                     label: 'Record',
                                     value: (() => {
-                                        const h = getFilteredHistory();
-                                        const w = h.filter(x => x.result === 'Win').length;
-                                        const l = h.filter(x => x.result === 'Loss').length;
-                                        const p = h.filter(x => x.result === 'Push').length;
+                                        const w = history.filter(x => x.result === 'Win').length;
+                                        const l = history.filter(x => x.result === 'Loss').length;
+                                        const p = history.filter(x => x.result === 'Push').length;
                                         return `${w}-${l}${p > 0 ? `-${p}` : ''}`;
                                     })(),
                                     icon: <ArrowUpDown size={14} className="text-green-400" />
@@ -583,7 +430,7 @@ const Research = () => {
                                 {
                                     label: 'Win Rate',
                                     value: (() => {
-                                        const h = getFilteredHistory().filter(x => x.result && x.result !== 'Pending');
+                                        const h = history.filter(x => x.result && x.result !== 'Pending');
                                         const w = h.filter(x => x.result === 'Win').length;
                                         return h.length > 0 ? `${((w / h.length) * 100).toFixed(1)}%` : '0.0%';
                                     })(),
@@ -591,7 +438,7 @@ const Research = () => {
                                 },
                                 {
                                     label: 'Est. Return ($10/bet)',
-                                    value: `$${getFilteredHistory().reduce((acc, h) => {
+                                    value: `$${history.reduce((acc, h) => {
                                         if (h.result === 'Win') return acc + 9.09;
                                         if (h.result === 'Loss') return acc - 10.0;
                                         return acc;
@@ -646,57 +493,61 @@ const Research = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {getSortedHistory().map((item, idx) => (
-                                                <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                                    <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
-                                                        <div className="font-bold text-slate-300">
-                                                            {new Date(item.date || item.created_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
-                                                        </div>
-                                                        <div className="opacity-70">
-                                                            {new Date(item.date || item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                                        </div>
-                                                    </td>
-                                                    <td className="py-2 px-4">
-                                                        <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
-                                                    ${item.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
-                                                                item.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                                    item.sport === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
-                                                                        'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
-                                                            {item.sport}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-2 px-4 font-medium text-sm text-slate-200">{item.matchup}</td>
-                                                    <td className="py-2 px-4 text-white font-bold">
-                                                        {item.bet_on}
-                                                    </td>
-                                                    <td className="py-2 px-4 text-slate-400 text-xs">
-                                                        <div className="flex flex-col">
-                                                            <span>Mkt: <span className="text-slate-300 font-mono">{item.market_line}</span></span>
-                                                            <span>Fair: <span className="text-slate-500 font-mono">{item.fair_line}</span></span>
-                                                        </div>
-                                                    </td>
-                                                    <td className={`py-2 px-4 font-bold ${getEdgeColor(item.edge, item.sport)}`}>
-                                                        {item.edge}{item.sport === 'EPL' ? '%' : ' pts'}
-                                                    </td>
-                                                    <td className="py-2 px-4 text-right sm:text-left">
-                                                        <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
-                                                    ${item.result === 'Win' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
-                                                                item.result === 'Loss' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
-                                                                    item.result === 'Push' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
-                                                                        'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
-                                                            {item.result || 'Pending'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-2 px-4 text-slate-300 font-mono text-xs">
-                                                        {item.home_score !== null && item.away_score !== null ? (
-                                                            <div className="flex flex-col">
-                                                                <span className="text-white font-bold">{item.home_score}-{item.away_score}</span>
-                                                                <span className="text-[10px] text-slate-500">T: {item.home_score + item.away_score}</span>
+                                            {getSortedHistory().map((item, idx) => {
+                                                const recs = JSON.parse(item.recommendation_json || '[]');
+                                                const mainRec = recs[0] || {};
+                                                return (
+                                                    <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                                        <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
+                                                            <div className="font-bold text-slate-300">
+                                                                {new Date(item.analyzed_at).toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
                                                             </div>
-                                                        ) : '-'}
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                                            <div className="opacity-70">
+                                                                {new Date(item.analyzed_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-2 px-4">
+                                                            <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
+                                                        ${item.league === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
+                                                                    item.league === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
+                                                                        item.league === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
+                                                                            'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
+                                                                {item.league}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-4 font-medium text-sm text-slate-200">{item.away_team} @ {item.home_team}</td>
+                                                        <td className="py-2 px-4 text-white font-bold">
+                                                            {mainRec.side} {mainRec.line || ''}
+                                                        </td>
+                                                        <td className="py-2 px-4 text-slate-400 text-xs">
+                                                            <div className="flex flex-col">
+                                                                <span>Mkt: <span className="text-slate-300 font-mono">{mainRec.market_line || '-'}</span></span>
+                                                                <span>Fair: <span className="text-slate-500 font-mono">{mainRec.fair_line || item.bet_line || '-'}</span></span>
+                                                            </div>
+                                                        </td>
+                                                        <td className={`py-2 px-4 font-bold ${getEdgeColor(item.edge || mainRec.edge, item.league)}`}>
+                                                            {item.edge || mainRec.edge}
+                                                        </td>
+                                                        <td className="py-2 px-4 text-right sm:text-left">
+                                                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
+                                                        ${item.graded_result === 'WON' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
+                                                                    item.graded_result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
+                                                                        item.graded_result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
+                                                                            'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
+                                                                {item.graded_result || 'Analyzed'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 px-4 text-slate-300 font-mono text-xs">
+                                                            {item.final_score_home !== null && item.final_score_away !== null ? (
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-white font-bold">{item.final_score_home}-{item.final_score_away}</span>
+                                                                    <span className="text-[10px] text-slate-500">T: {item.final_score_home + item.final_score_away}</span>
+                                                                </div>
+                                                            ) : '-'}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -765,7 +616,7 @@ const Research = () => {
                                     <div className="space-y-6">
                                         {/* Recommendations */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            {analysisResult.recommendations.map((rec, idx) => (
+                                            {analysisResult.recommendations?.map((rec, idx) => (
                                                 <div key={idx} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                                                     <div className="flex justify-between items-start mb-2">
                                                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -785,19 +636,49 @@ const Research = () => {
                                                     </div>
                                                 </div>
                                             ))}
+                                            {!analysisResult.recommendations?.length && (
+                                                <div className="col-span-2 text-center py-4 text-slate-500">
+                                                    No recommendations generated.
+                                                </div>
+                                            )}
                                         </div>
 
-                                        {/* Narrative */}
-                                        <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700/50 relative overflow-hidden">
-                                            <div className="absolute top-0 right-0 p-4 opacity-5">
-                                                <Info size={100} />
+                                        {/* Narrative & Torvik View */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700/50 relative overflow-hidden">
+                                                <h3 className="font-bold text-slate-200 mb-3 flex items-center gap-2 text-sm uppercase tracking-wider">
+                                                    <Info size={16} className="text-blue-400" />
+                                                    Model Narrative
+                                                </h3>
+                                                <div className="text-slate-300 text-sm leading-relaxed space-y-3">
+                                                    <p className="font-semibold text-blue-300">{analysisResult.narrative.market_summary}</p>
+                                                    <p>{analysisResult.narrative.recommendation}</p>
+                                                    <ul className="list-disc list-inside space-y-1 opacity-80">
+                                                        {analysisResult.narrative.rationale?.map((r, i) => (
+                                                            <li key={i}>{r}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
                                             </div>
-                                            <h3 className="font-bold text-slate-200 mb-3 flex items-center gap-2">
-                                                <Info size={16} className="text-blue-400" />
-                                                Why This Bet?
-                                            </h3>
-                                            <div className="prose prose-invert prose-sm max-w-none text-slate-300 leading-relaxed font-light">
-                                                <p>{analysisResult.narrative}</p>
+
+                                            <div className="bg-slate-800/80 p-6 rounded-xl border border-slate-700/50">
+                                                <h3 className="font-bold text-slate-200 mb-4 flex items-center gap-2 text-sm uppercase tracking-wider">
+                                                    <ShieldCheck size={16} className="text-green-400" />
+                                                    Torvik View
+                                                </h3>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Score</div>
+                                                        <div className="text-lg font-bold text-white">{analysisResult.torvik_view.projected_score}</div>
+                                                    </div>
+                                                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Margin</div>
+                                                        <div className="text-lg font-bold text-white">{analysisResult.torvik_view.margin > 0 ? '+' : ''}{analysisResult.torvik_view.margin}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-4 text-[10px] text-slate-500 italic">
+                                                    {analysisResult.torvik_view.lean}
+                                                </div>
                                             </div>
                                         </div>
 
@@ -806,7 +687,7 @@ const Research = () => {
                                             <div>
                                                 <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Key Factors</h3>
                                                 <div className="space-y-2">
-                                                    {analysisResult.key_factors.map((factor, i) => (
+                                                    {analysisResult.key_factors?.map((factor, i) => (
                                                         <div key={i} className="flex items-center gap-3 text-sm text-slate-300">
                                                             <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
                                                             {factor}
@@ -821,7 +702,7 @@ const Research = () => {
                                             <div>
                                                 <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Risk Factors</h3>
                                                 <div className="space-y-2">
-                                                    {analysisResult.risks.map((risk, i) => (
+                                                    {analysisResult.risks?.map((risk, i) => (
                                                         <div key={i} className="flex items-center gap-3 text-sm text-slate-300">
                                                             <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
                                                             {risk}

@@ -18,7 +18,7 @@ class TestSettlementHardening(unittest.TestCase):
         # Or just recreate schema manually here for speed/control.
         
         self.conn.executescript("""
-        CREATE TABLE events_v2 (
+        CREATE TABLE events (
             id TEXT PRIMARY KEY,
             league TEXT,
             home_team_id TEXT,
@@ -87,7 +87,7 @@ class TestSettlementHardening(unittest.TestCase):
     def test_idempotency(self):
         # 1. Setup Data
         eid = str(uuid.uuid4())
-        self.conn.execute("INSERT INTO events_v2 (id, league) VALUES (?, ?)", (eid, "NCAAM"))
+        self.conn.execute("INSERT INTO events (id, league) VALUES (?, ?)", (eid, "NCAAM"))
         self.conn.execute("INSERT INTO game_results (event_id, home_score, away_score, final) VALUES (?, 80, 70, 1)", (eid,))
         self.conn.execute("INSERT INTO bets (id, provider) VALUES (1, 'DK')")
         self.conn.execute("""
@@ -121,7 +121,7 @@ class TestSettlementHardening(unittest.TestCase):
     def test_score_change_regrade(self):
         # 1. Setup Data (Same as above)
         eid = str(uuid.uuid4())
-        self.conn.execute("INSERT INTO events_v2 (id, league) VALUES (?, ?)", (eid, "NCAAM"))
+        self.conn.execute("INSERT INTO events (id, league) VALUES (?, ?)", (eid, "NCAAM"))
         # Initial Score: 80-70 (Home Won)
         self.conn.execute("INSERT INTO game_results (event_id, home_score, away_score, final) VALUES (?, 80, 70, 1)", (eid,))
         self.conn.execute("INSERT INTO bets (id, provider) VALUES (1, 'DK')")

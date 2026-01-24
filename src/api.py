@@ -473,10 +473,13 @@ async def get_schedule(sport: str = "all", days: int = 1, user: dict = Depends(g
     Fetch upcoming scheduled games for display WITHOUT running models.
     Returns games from ESPN API.
     """
-    from src.espn_client import EspnClient
+    from src.parsers.espn_client import EspnClient
     from datetime import datetime, timedelta
     
+    from src.services.odds_fetcher_service import OddsFetcherService
+    
     client = EspnClient()
+    odds_service = OddsFetcherService()
     games = []
     
     leagues = ['NFL', 'NCAAM', 'NCAAF', 'EPL'] if sport.lower() == 'all' else [sport.upper()]
@@ -485,27 +488,45 @@ async def get_schedule(sport: str = "all", days: int = 1, user: dict = Depends(g
         for i in range(days):
             target_date = datetime.now() + timedelta(days=i)
             try:
-                events = client.fetch_scoreboard(league, target_date, groups=50 if league == 'NCAAM' else None, limit=1000 if league == 'NCAAM' else None)
+                # Fetch scoreboard for this league/date
+                events = client.fetch_scoreboard(league, target_date.strftime("%Y%m%d"))
+                
+                # Fetch odds for this league/date for matching
+                try:
+                    market_odds_list = odds_service.fetch_odds(league, target_date.strftime("%Y%m%d"))
+                except:
+                    market_odds_list = []
+                
                 for ev in events:
-                    if ev['status'] == 'scheduled':
+                    if ev['status'].startswith('STATUS_SCHEDULED') or ev['status'] == 'scheduled':
+                        # Find matching odds
+                        m_odds = next((o for o in market_odds_list if 
+                            (o['home_team'] == ev['home_team'] or o['away_team'] == ev['away_team'])
+                        ), None)
+                        
                         games.append({
                             'id': ev['id'],
                             'sport': league,
                             'game': f"{ev['away_team']} @ {ev['home_team']}",
                             'home_team': ev['home_team'],
                             'away_team': ev['away_team'],
-                            # Force UTC 'Z' if naive, so frontend parses correctly as UTC
                             'start_time': (ev['start_time'].isoformat() + ('Z' if not ev['start_time'].tzinfo else '')) if ev['start_time'] else None,
                             'status': ev['status'],
-                            # No model data yet
+                            # Match market data
+                            'home_spread': m_odds.get('home_spread') if m_odds else None,
+                            'away_spread': m_odds.get('away_spread') if m_odds else None,
+                            'spread_odds': m_odds.get('home_spread_odds') if m_odds else None,
+                            'total_line': m_odds.get('total_score') if m_odds else None,
+                            'total_odds': m_odds.get('over_odds') if m_odds else None,
+                            # Model placeholders
                             'edge': None,
-                            'market_line': None,
+                            'market_line': m_odds.get('home_spread') if m_odds else None,
                             'fair_line': None,
                             'bet_on': None,
                             'is_actionable': False,
                             'audit_score': None,
                             'audit_class': None,
-                            'audit_reason': 'Model not run',
+                            'audit_reason': 'Model not run (Market Board)',
                             'suggested_stake': None,
                             'bankroll_pct': None
                         })
@@ -754,6 +775,73 @@ async def trigger_torvik_ingestion(request: Request):
             raise HTTPException(status_code=500, detail="Failed to fetch ratings from BartTorvik")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ncaam/board")
+async def get_ncaam_board(date: Optional[str] = None):
+    """
+    Fetch lightweight NCAAM board for on-demand analysis.
+    """
+    from src.database import get_db_connection, _exec
+    
+    # Default to today
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+        
+    query = """
+    SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status, 
+           s.line_value as home_spread, s.price as moneyline_home,
+           t.line_value as total_line, t.price as moneyline_away
+    FROM events e
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots 
+        WHERE market_type = 'SPREAD' AND side = 'HOME'
+        ORDER BY event_id, captured_at DESC
+    ) s ON e.id = s.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots 
+        WHERE market_type = 'TOTAL' AND side = 'OVER'
+        ORDER BY event_id, captured_at DESC
+    ) t ON e.id = t.event_id
+    WHERE e.league = 'NCAAM'
+      AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') = :date
+    ORDER BY e.start_time ASC
+    """
+    with get_db_connection() as conn:
+        rows = _exec(conn, query, {"date": date}).fetchall()
+        return [dict(r) for r in rows]
+
+@app.post("/api/ncaam/analyze")
+async def analyze_ncaam_game(request: Request):
+    """
+    On-demand analysis for an NCAAM game.
+    """
+    try:
+        data = await request.json()
+        event_id = data.get("event_id")
+        if not event_id:
+             raise HTTPException(status_code=400, detail="event_id is required")
+             
+        from src.services.game_analyzer import GameAnalyzer
+        analyzer = GameAnalyzer()
+        
+        # GameAnalyzer will hit NCAAMMarketFirstModelV2.analyze internal
+        # Fetch basic teams for logging if needed
+        # Actually GameAnalyzer fetches context from 'events'.
+        result = analyzer.analyze(event_id, "NCAAM", "Unknown", "Unknown")
+        return result
+    except Exception as e:
+        print(f"[API] Analyze error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ncaam/history")
+async def get_ncaam_history(limit: int = 100):
+    """
+    Fetch NCAAM analysis history.
+    """
+    from src.database import fetch_ncaam_analysis_history
+    return fetch_ncaam_analysis_history(limit=limit)
 
 @app.post("/api/jobs/ingest_results/{league}")
 async def trigger_result_ingestion(league: str, date: Optional[str] = None):

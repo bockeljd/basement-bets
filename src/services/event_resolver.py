@@ -12,7 +12,7 @@ except ImportError:
 
 class EventResolver:
     """
-    Links bet legs to canonical events_v2 using fuzzy matching and constraints.
+    Links bet legs to canonical events using fuzzy matching and constraints.
     """
     
     def __init__(self):
@@ -82,7 +82,7 @@ class EventResolver:
         with get_db_connection() as conn:
             query = """
             SELECT id, start_time, home_team_id, away_team_id, league 
-            FROM events_v2
+            FROM events
             WHERE league = :l
               AND (home_team_id = ANY(:tids) OR away_team_id = ANY(:tids))
               AND start_time >= :start AND start_time <= :end
@@ -94,7 +94,7 @@ class EventResolver:
             for tid in team_ids:
                  q = """
                  SELECT id, start_time, home_team_id, away_team_id, league 
-                 FROM events_v2
+                 FROM events
                  WHERE league = :l
                    AND (home_team_id = :tid OR away_team_id = :tid)
                    AND start_time >= :start AND start_time <= :end

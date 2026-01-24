@@ -50,6 +50,6 @@ Returns stats on:
 | Column | Type | Description |
 |os|---|---|
 | fingerprint | TEXT UNIQUE | Canonical hash for idempotency |
-| event_id | TEXT | FK to events_v2 |
+| event_id | TEXT | FK to events |
 | result | JSON | Snapshot of result used for grading |
 | computed | JSON | Calculated margins/totals |

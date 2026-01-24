@@ -137,7 +137,7 @@ class FootballDataClient:
                          "event_id": canonical_id,
                          "home_score": h_score,
                          "away_score": a_score,
-                         "final_flag": final
+                         "final": final
                      }
                      upsert_game_result(res_rec)
                 

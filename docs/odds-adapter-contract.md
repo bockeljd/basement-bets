@@ -9,7 +9,7 @@ Any provider adapter must produce a list of dictionaries with the following cano
 
 | Field | Type | Description |
 |---|---|---|
-| `event_id` | TEXT | Canonical event UUID from `events_v2` |
+| `event_id` | TEXT | Canonical event UUID from `events` |
 | `book` | TEXT | Key of the sportsbook (e.g., 'draftkings', 'fanduel') |
 | `market_type` | TEXT | Normalized market: `MONEYLINE`, `SPREAD`, `TOTAL` |
 | `side` | TEXT | Normalized side: `HOME`, `AWAY`, `OVER`, `UNDER`, `DRAW` |

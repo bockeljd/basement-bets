@@ -20,11 +20,11 @@ def check_endpoint(name, url):
 def main():
     print("=== Basement Bets Server Verification ===")
     
-    # Check 1: Backend Root
-    backend_ok = check_endpoint("Backend Root", "http://localhost:8000/")
+    # Check 1: Backend Root (Root is 404 by design, so checking /api/health instead)
+    backend_ok = check_endpoint("Backend Health", "http://localhost:8000/api/health")
     
-    # Check 2: API Stats
-    api_ok = check_endpoint("API Stats", "http://localhost:8000/api/stats")
+    # Check 2: API Version (Public)
+    api_ok = check_endpoint("API Version", "http://localhost:8000/api/version")
     
     # Check 3: Frontend (Vite)
     frontend_ok = check_endpoint("Frontend Root", "http://localhost:5173/")
