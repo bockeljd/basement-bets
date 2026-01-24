@@ -2,7 +2,7 @@ import os
 import psycopg2
 import psycopg2.extras
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 
 from src.config import settings
@@ -94,25 +94,14 @@ def get_db_type():
 
 def try_advisory_lock(conn, key_str: str) -> bool:
     """
-    Attempts to acquire a transaction-level advisory lock using a 64-bit integer key derived from the string.
+    Attempts to acquire a session-level advisory lock using a 64-bit integer key derived from the string.
     Returns True if acquired, False if already locked.
+    The lock is released when the connection closes or when release_advisory_lock is called.
     """
     import zlib
-    # Simple consistent hashing: CRC32 is 32-bit, signed.
-    # Postgres pg_try_advisory_lock accepts bigint (64-bit).
-    # We can use CRC32 safely.
     lock_id = zlib.crc32(key_str.encode('utf-8'))
     
     with conn.cursor() as cur:
-        cur.execute("SELECT pg_try_advisory_xact_lock(%s) AS locked", (lock_id,))
-        # Wait, pg_try_advisory_xact_lock automatically releases at end of transaction.
-        # This is safer for serverless if we wrap job in a transaction block.
-        # If we want session level (manual release), use pg_try_advisory_lock.
-        # Given we use context manager `get_db_connection` which closes connection (ending session),
-        # session locks are auto-released on close.
-        # Transaction locks are auto-released on commit/rollback.
-        # Let's use session lock so we can control scope explicitly if needed, but connection close is the safety net.
-        
         cur.execute("SELECT pg_try_advisory_lock(%s) AS locked", (lock_id,))
         res = cur.fetchone()
         return res['locked'] if res else False
@@ -281,17 +270,22 @@ def init_snapshots_db():
         side TEXT,
         line_value REAL,
         price INTEGER,
-        captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        snapshot_key TEXT UNIQUE -- Enforce idempotency
+        captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        snapshot_key TEXT UNIQUE
     );
     CREATE INDEX IF NOT EXISTS idx_snap_event ON odds_snapshots(event_id);
+    CREATE INDEX IF NOT EXISTS idx_snap_captured ON odds_snapshots(captured_at DESC);
     """
     drops = ["DROP TABLE IF EXISTS odds_snapshots CASCADE;"] if _force_reset() else []
     
-    # Non-destructive migration for existing tables
+    # Non-destructive migrations for existing tables
     migrations = [
         "ALTER TABLE odds_snapshots ADD COLUMN IF NOT EXISTS snapshot_key TEXT;",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_odds_snapshots_snapshot_key ON odds_snapshots(snapshot_key);"
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_odds_snapshots_snapshot_key ON odds_snapshots(snapshot_key);",
+        # Migrate captured_at to TIMESTAMPTZ NOT NULL
+        "ALTER TABLE odds_snapshots ALTER COLUMN captured_at TYPE TIMESTAMPTZ USING captured_at AT TIME ZONE 'UTC';",
+        "ALTER TABLE odds_snapshots ALTER COLUMN captured_at SET NOT NULL;",
+        "ALTER TABLE odds_snapshots ALTER COLUMN captured_at SET DEFAULT NOW();",
     ]
     
     with get_admin_db_connection() as conn:
@@ -311,7 +305,8 @@ def init_model_history_db():
     CREATE TABLE IF NOT EXISTS model_predictions (
         id TEXT PRIMARY KEY,
         event_id TEXT NOT NULL,
-        analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT,
+        analyzed_at TIMESTAMPTZ DEFAULT NOW(),
         model_version TEXT,
         market_type TEXT, 
         pick TEXT,        
@@ -343,16 +338,19 @@ def init_model_history_db():
         clv_method TEXT,
         close_captured_at TIMESTAMP,
         
-        prediction_key TEXT UNIQUE, -- Enforce idempotency per run strategy
+        prediction_key TEXT UNIQUE,
         
         FOREIGN KEY(event_id) REFERENCES events(id)
     );
     CREATE INDEX IF NOT EXISTS idx_model_event ON model_predictions(event_id);
+    CREATE INDEX IF NOT EXISTS idx_model_user_time ON model_predictions(user_id, analyzed_at DESC);
     """
     migrations = [
         "ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS model_version TEXT;",
         "ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS prediction_key TEXT;",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_model_predictions_prediction_key ON model_predictions(prediction_key);"
+        "ALTER TABLE model_predictions ADD COLUMN IF NOT EXISTS user_id TEXT;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_model_predictions_prediction_key ON model_predictions(prediction_key);",
+        "CREATE INDEX IF NOT EXISTS idx_model_user_time ON model_predictions(user_id, analyzed_at DESC);"
     ]
     
     with get_admin_db_connection() as conn:
@@ -611,30 +609,46 @@ def insert_event(event_data: dict):
         _exec(conn, query, event_data)
         conn.commit()
 
-def insert_odds_snapshot(snap: dict):
-    # Compute snapshot_key for idempotency
+def insert_odds_snapshot(snap: dict) -> bool:
+    """
+    Insert an odds snapshot with idempotency via snapshot_key.
+    Returns True if inserted, False if skipped (duplicate or error).
+    Raises ValueError if event_id does not exist in events table.
+    """
     import hashlib
-    # Key components: event_id, book, market_type, side, line_value, price, captured_at
-    # Note: If captured_at varies by millisecond, this might be too strict. 
-    # Usually captured_at comes from provider or is set at consistent time.
-    # If snap doesn't have captured_at, we set it now? 
-    # Usually database defaults, but for key gen we need it.
     
-    # Assuming the caller provides meaningful data.
-    # If 'captured_at' is missing, do we generate it? 
-    # If we generate it here, repeated calls generate different times -> different keys -> duplicates.
-    # For true idempotency, 'captured_at' should be provided by the source or we rely on a coarser grain (minute).
-    # MVP: Include it if present, else ignore time in key (risky)? 
-    # Or assume caller is responsible for providing stable 'captured_at' if they retry.
+    event_id = snap.get('event_id')
+    if not event_id:
+        print("[DB] insert_odds_snapshot: Missing event_id")
+        return False
     
+    # Pre-check: Ensure event exists (FK will fail anyway, but this gives clear error)
+    with get_db_connection() as conn:
+        cur = _exec(conn, "SELECT 1 FROM events WHERE id = %s", (event_id,))
+        if not cur.fetchone():
+            raise ValueError(f"Event not found for event_id={event_id} (ingest events first)")
+    
+    # Ensure captured_at is set with timezone-aware UTC
+    if not snap.get('captured_at'):
+        snap['captured_at'] = datetime.now(timezone.utc)
+    
+    # For snapshot_key, use a stable time grain (minute) for retry safety
+    captured_at = snap['captured_at']
+    if hasattr(captured_at, 'replace'):
+        captured_key = captured_at.replace(second=0, microsecond=0).isoformat()
+    else:
+        # String fallback - truncate to minute
+        captured_key = str(captured_at)[:16]
+    
+    # Compute snapshot_key for idempotency
     parts = [
-        str(snap.get('event_id')),
-        str(snap.get('book')),
-        str(snap.get('market_type')),
-        str(snap.get('side')),
-        str(snap.get('line_value')),
-        str(snap.get('price')),
-        str(snap.get('captured_at') or '') # If empty, consistent empty
+        str(event_id),
+        str(snap.get('book') or ''),
+        str(snap.get('market_type') or ''),
+        str(snap.get('side') or ''),
+        str(snap.get('line_value') or ''),
+        str(snap.get('price') or ''),
+        captured_key
     ]
     raw = "|".join(parts)
     snap['snapshot_key'] = hashlib.sha256(raw.encode()).hexdigest()
@@ -644,20 +658,34 @@ def insert_odds_snapshot(snap: dict):
     VALUES (:event_id, :book, :market_type, :side, :line_value, :price, :captured_at, :snapshot_key)
     ON CONFLICT (snapshot_key) DO NOTHING
     """
-    # Ensure captured_at is in snap if it wasn't
-    if 'captured_at' not in snap:
-        # If we didn't use it in key, letting DB default is fine.
-        # But we used it in key (as ''), so passing None lets DB default? 
-        # No, 'VALUES' needs it.
-        # Let's pass None if missing, relying on DB DEFAULT CURRENT_TIMESTAMP? 
-        # But then the inserted row has a timestamp, the key had ''.
-        # If we re-run, we generate '' again, and match key.
-        # So we just need to ensure the DB insert succeeds.
-        snap['captured_at'] = None 
 
     with get_db_connection() as conn:
         _exec(conn, query, snap)
         conn.commit()
+        return True
+
+def store_odds_snapshots(snaps: list) -> int:
+    """
+    Bulk insert odds snapshots. Returns count of successfully inserted snapshots.
+    """
+    if not snaps: return 0
+    count = 0
+    for s in snaps:
+        # map any alternate keys to DB schema
+        if "line" in s and "line_value" not in s:
+            s["line_value"] = s.pop("line")
+        # ensure captured_at exists and is datetime
+        if not s.get("captured_at"):
+            s["captured_at"] = datetime.now(timezone.utc)
+            
+        try:
+            if insert_odds_snapshot(s):
+                count += 1
+        except ValueError as e:
+            print(f"[DB] store_odds_snapshots skipped: {e}")
+        except Exception as e:
+            print(f"[DB] store_odds_snapshots error: {e}")
+    return count
 
 def upsert_game_result(res: dict):
     query = """
@@ -674,32 +702,59 @@ def upsert_game_result(res: dict):
         _exec(conn, query, res)
         conn.commit()
 
-def insert_model_prediction(doc: dict):
+def insert_model_prediction(doc: dict) -> bool:
+    """
+    Insert a model prediction with idempotency via prediction_key.
+    Returns True if inserted/updated, False on error.
+    Raises ValueError if event_id does not exist.
+    """
     import uuid
     import hashlib
-    if not doc.get('id'): doc['id'] = str(uuid.uuid4())
     
-    # Compute prediction_key
-    # (event_id, model_version, analyzed_at)
-    # analyzed_at should be stable if re-running same analysis logic time? 
-    # Actually, usually analysis is "now". Re-running means "new analysis".
-    # But if we want to dedupe "accidental double clicks", we can key by minute?
-    # Or if we want to version by (event, model, date).
-    # Let's use (event_id, model_version, market_type, pick, analyzed_at).
+    event_id = doc.get('event_id')
+    if not event_id:
+        print("[DB] insert_model_prediction: Missing event_id")
+        return False
     
+    # Pre-check: Ensure event exists
+    with get_db_connection() as conn:
+        cur = _exec(conn, "SELECT 1 FROM events WHERE id = %s", (event_id,))
+        if not cur.fetchone():
+            raise ValueError(f"Event not found for event_id={event_id} (ingest events first)")
+    
+    if not doc.get('id'): 
+        doc['id'] = str(uuid.uuid4())
+    
+    # Handle analyzed_at with timezone awareness
     analyzed_at = doc.get('analyzed_at')
     if not analyzed_at:
-        # Default to now if missing, but we need consistency for key?
-        from datetime import datetime
-        analyzed_at = datetime.utcnow().isoformat()
+        analyzed_at = datetime.now(timezone.utc)
         doc['analyzed_at'] = analyzed_at
-        
+    
+    # Convert to datetime if string for bucket calculation
+    if isinstance(analyzed_at, str):
+        try:
+            analyzed_at_dt = datetime.fromisoformat(analyzed_at.replace('Z', '+00:00'))
+        except:
+            analyzed_at_dt = datetime.now(timezone.utc)
+    else:
+        analyzed_at_dt = analyzed_at
+    
+    # Use minute-level bucket for dedupe on double-click
+    analyzed_bucket = analyzed_at_dt.replace(second=0, microsecond=0).isoformat()
+    
+    # Get user_id (important for multi-user isolation)
+    user_id = doc.get('user_id') or ''
+    doc['user_id'] = user_id if user_id else None
+    
+    # Compute prediction_key including user_id for isolation
     parts = [
-        str(doc.get('event_id')),
+        str(user_id),
+        str(event_id),
         str(doc.get('model_version') or 'v1'),
-        str(doc.get('market_type')),
-        str(doc.get('pick')),
-        str(analyzed_at)
+        str(doc.get('market_type') or ''),
+        str(doc.get('pick') or ''),
+        analyzed_bucket
     ]
     raw = "|".join(parts)
     doc['prediction_key'] = hashlib.sha256(raw.encode()).hexdigest()
@@ -712,7 +767,7 @@ def insert_model_prediction(doc: dict):
 
     query = """
     INSERT INTO model_predictions (
-        id, event_id, analyzed_at, model_version, market_type, pick,
+        id, event_id, user_id, analyzed_at, model_version, market_type, pick,
         bet_line, bet_price, book, mu_market, mu_torvik, mu_final,
         sigma, win_prob, ev_per_unit, confidence_0_100, 
         inputs_json, outputs_json, narrative_json,
@@ -720,7 +775,7 @@ def insert_model_prediction(doc: dict):
         close_line, close_price, clv_points, clv_method, close_captured_at,
         prediction_key
     ) VALUES (
-        :id, :event_id, :analyzed_at, :model_version, :market_type, :pick,
+        :id, :event_id, :user_id, :analyzed_at, :model_version, :market_type, :pick,
         :bet_line, :bet_price, :book, :mu_market, :mu_torvik, :mu_final,
         :sigma, :win_prob, :ev_per_unit, :confidence_0_100,
         :inputs_json, :outputs_json, :narrative_json,
@@ -737,6 +792,7 @@ def insert_model_prediction(doc: dict):
     with get_db_connection() as conn:
         _exec(conn, query, doc)
         conn.commit()
+        return True
 
 def update_model_prediction_result(pid: str, outcome: str):
     query = "UPDATE model_predictions SET outcome = :outcome WHERE id = :id"
@@ -744,16 +800,41 @@ def update_model_prediction_result(pid: str, outcome: str):
         _exec(conn, query, {"id": pid, "outcome": outcome})
         conn.commit()
 
-def fetch_model_history(limit=100):
-    query = """
+def fetch_model_history(limit=100, league=None, user_id=None):
+    """
+    Fetch model prediction history with optional filtering.
+    
+    Args:
+        limit: Max rows to return
+        league: Filter by league (e.g., 'NCAAM')
+        user_id: Filter by user_id for multi-user isolation
+    """
+    # Build query dynamically based on filters
+    base_query = """
     SELECT m.*, e.league as sport, e.home_team, e.away_team, e.start_time
     FROM model_predictions m
     JOIN events e ON m.event_id = e.id
-    ORDER BY m.analyzed_at DESC
-    LIMIT %s
     """
+    
+    conditions = []
+    params = []
+    
+    if user_id:
+        conditions.append("m.user_id = %s")
+        params.append(user_id)
+    
+    if league:
+        conditions.append("e.league = %s")
+        params.append(league)
+    
+    if conditions:
+        base_query += " WHERE " + " AND ".join(conditions)
+    
+    base_query += " ORDER BY m.analyzed_at DESC LIMIT %s"
+    params.append(limit)
+    
     with get_db_connection() as conn:
-        cursor = _exec(conn, query, (limit,))
+        cursor = _exec(conn, base_query, tuple(params))
         return [dict(r) for r in cursor.fetchall()]
 
 def upsert_team_metrics(metrics: list):
@@ -783,5 +864,134 @@ def init_linking_queue_db(): pass
 def init_model_health_db(): pass
 def init_model_health_insights_db(): pass
 def init_policy_db(): pass
-def init_ingestion_runs_db(): pass
-def init_smart_curation_db(): init_market_curation_db() 
+def init_ingestion_runs_db():
+    # Deprecated: usage consolidated into job_runs
+    pass
+
+def log_ingestion_run(data: dict):
+    """
+    Logs ingestion execution to job_runs (consolidated logging).
+    """
+    job_name = f"ingest_{data.get('provider', 'unknown')}_{data.get('league', 'unknown')}"
+    
+    # Detail JSON
+    detail = {
+        "items_processed": data.get("items_processed"),
+        "items_changed": data.get("items_changed"),
+        "snapshot_path": data.get("payload_snapshot_path"),
+        "drift": data.get("schema_drift_detected")
+    }
+    
+    query = """
+    INSERT INTO job_runs (job_name, status, detail, finished_at)
+    VALUES (:job_name, :status, :detail, CURRENT_TIMESTAMP)
+    """
+    # Assuming started_at default NOW() is close enough, or we pass it if we want precision.
+    # The ingestion engine passes status 'SUCCESS' etc.
+    
+    params = {
+        "job_name": job_name,
+        "status": data.get("run_status", "COMPLETED"),
+        "detail": psycopg2.extras.Json(detail)
+    }
+    
+    with get_db_connection() as conn:
+        _exec(conn, query, params)
+        conn.commit()
+
+# ----------------------------------------------------------------------------
+# BETS & LEDGER QUERIES (Required by api.py and analytics.py)
+# ----------------------------------------------------------------------------
+
+def fetch_all_bets(user_id=None, limit=None):
+    """
+    Fetches all bets, optionally filtered by user_id.
+    Returns list of dicts with normalized field names.
+    """
+    if user_id:
+        query = """
+        SELECT id, user_id, account_id, provider, date, sport, bet_type,
+               wager, profit, status, description, selection, odds, 
+               closing_odds, is_live, is_bonus, created_at
+        FROM bets
+        WHERE user_id = %s
+        ORDER BY date DESC
+        """
+        params = [user_id]
+        if limit:
+            query += " LIMIT %s"
+            params.append(limit)
+        with get_db_connection() as conn:
+            cursor = _exec(conn, query, tuple(params))
+            return [dict(r) for r in cursor.fetchall()]
+    else:
+        query = """
+        SELECT id, user_id, account_id, provider, date, sport, bet_type,
+               wager, profit, status, description, selection, odds,
+               closing_odds, is_live, is_bonus, created_at
+        FROM bets
+        ORDER BY date DESC
+        """
+        if limit:
+            query += f" LIMIT {int(limit)}"
+        with get_db_connection() as conn:
+            cursor = _exec(conn, query)
+            return [dict(r) for r in cursor.fetchall()]
+
+def fetch_latest_ledger_info():
+    """
+    Fetches the latest balance snapshot by provider from ledger/transactions.
+    Returns dict keyed by provider with balance and date.
+    """
+    # Try to get from transactions - latest entry per provider
+    query = """
+    SELECT DISTINCT ON (provider) 
+           provider, 
+           date,
+           amount as balance
+    FROM transactions
+    WHERE type IN ('Deposit', 'Withdrawal', 'Balance')
+    ORDER BY provider, date DESC
+    """
+    result = {}
+    try:
+        with get_db_connection() as conn:
+            cursor = _exec(conn, query)
+            for row in cursor.fetchall():
+                r = dict(row)
+                result[r['provider']] = {
+                    'balance': float(r.get('balance') or 0),
+                    'date': r.get('date') or ''
+                }
+    except Exception as e:
+        print(f"[DB] fetch_latest_ledger_info error: {e}")
+    return result
+
+def insert_bet(bet_data: dict):
+    """
+    Inserts a single bet into the bets table with idempotency.
+    """
+    query = """
+    INSERT INTO bets (user_id, account_id, provider, date, sport, bet_type,
+                      wager, profit, status, description, selection, odds,
+                      closing_odds, is_live, is_bonus, raw_text)
+    VALUES (:user_id, :account_id, :provider, :date, :sport, :bet_type,
+            :wager, :profit, :status, :description, :selection, :odds,
+            :closing_odds, :is_live, :is_bonus, :raw_text)
+    ON CONFLICT (user_id, provider, description, date, wager) DO UPDATE SET
+        profit = EXCLUDED.profit,
+        status = EXCLUDED.status,
+        closing_odds = EXCLUDED.closing_odds
+    """
+    # Ensure all required fields
+    defaults = {
+        'account_id': None, 'selection': None, 'odds': None, 
+        'closing_odds': None, 'is_live': False, 'is_bonus': False, 'raw_text': None
+    }
+    for k, v in defaults.items():
+        if k not in bet_data:
+            bet_data[k] = v
+    
+    with get_db_connection() as conn:
+        _exec(conn, query, bet_data)
+        conn.commit()

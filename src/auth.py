@@ -22,8 +22,8 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
     token = credentials.credentials
     try:
         if not SUPABASE_JWT_SECRET:
-            # Fallback for dev if secret not provided
-            return {"sub": "dev-user", "email": "dev@example.com"}
+            # Fallback for dev if secret not provided - use consistent zero UUID
+            return {"sub": "00000000-0000-0000-0000-000000000000", "email": "dev@example.com"}
             
         payload = jwt.decode(
             token, 

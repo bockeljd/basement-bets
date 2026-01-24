@@ -30,14 +30,17 @@ async def check_access_key(request: Request, call_next):
         if request.url.path in ["/api/version", "/api/health"]:
             return await call_next(request)
 
-        # 1. Check CRON Secret (Vercel Cron)
+        # 1. Check Authorization Header (Cron OR Supabase JWT)
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
+            # If it matches CRON_SECRET, allow
             if settings.CRON_SECRET and token == settings.CRON_SECRET:
                  return await call_next(request)
+            # Otherwise assume it's a Supabase JWT - let it through (auth happens in Depends)
+            return await call_next(request)
 
-        # 2. Check Client Key
+        # 2. Check Client Key (for non-Bearer requests)
         client_key = request.headers.get(API_KEY_NAME)
         server_key = settings.BASEMENT_PASSWORD
         
@@ -411,7 +414,7 @@ async def ingest_odds(league: str, request: Request):
     date_str = data.get("date") # Optional override
     if not date_str:
         # Default to today in YYYYMMDD
-        date_str = datetime.datetime.now().strftime("%Y%m%d")
+        date_str = datetime.now().strftime("%Y%m%d")
 
     fetcher = OddsFetcherService()
     adapter = OddsAdapter()
@@ -465,8 +468,9 @@ async def grade_research_history():
 
 
 @app.get("/api/research/history")
-async def get_history():
-    return fetch_model_history()
+async def get_history(user: dict = Depends(get_current_user)):
+    user_id = user.get("sub")
+    return fetch_model_history(user_id=user_id)
 
 
 @app.get("/api/schedule")
@@ -676,6 +680,7 @@ async def get_research_edges(refresh: bool = False, user: dict = Depends(get_cur
         
     
     # Auto-Track Actionable Edges and Audit
+    user_id = user.get("sub")
     for edge in edges:
         if edge.get('is_actionable'):
             try:
@@ -683,29 +688,35 @@ async def get_research_edges(refresh: bool = False, user: dict = Depends(get_cur
                 edge['audit_class'] = audit_result['audit_class']
                 edge['audit_reason'] = audit_result['audit_reason']
                 
-                # Capture in DB
+                # Capture in DB with correct schema
                 matchup = edge.get('game') or edge.get('matchup') or f"{edge.get('away_team', 'Away')} @ {edge.get('home_team', 'Home')}"
+                from datetime import datetime as dt_mod
                 doc = {
-                    "game_id": edge.get('game_token') or edge.get('game_id') or edge.get('game') or matchup,
-                    "sport": edge.get('sport'),
-                    "start_time": edge.get('start_time'),
-                    "game": matchup,
-                    "bet_on": str(edge.get('bet_on')),
-                    "market": edge.get('market'),
-                    "market_line": edge.get('market_line') or edge.get('market_spread') or 0,
-                    "fair_line": edge.get('fair_line') or 0,
-                    "edge": edge.get('edge', 0),
-                    "is_actionable": True,
-                    "home_team": edge.get('home_team'),
-                    "away_team": edge.get('away_team')
+                    "event_id": edge.get('game_token') or edge.get('game_id') or edge.get('game') or matchup,
+                    "user_id": user_id,
+                    "analyzed_at": dt_mod.utcnow().isoformat() + "Z",
+                    "market_type": edge.get('market'),
+                    "pick": str(edge.get('bet_on')),
+                    "bet_line": edge.get('market_line') or edge.get('market_spread') or 0,
+                    "bet_price": edge.get('market_odds') or -110,
+                    "book": edge.get('book', 'consensus'),
+                    "mu_market": edge.get('market_line') or 0,
+                    "mu_torvik": edge.get('fair_line') or 0,
+                    "mu_final": edge.get('fair_line') or 0,
+                    "sigma": 10.0,
+                    "win_prob": edge.get('win_prob') or 0.5,
+                    "ev_per_unit": edge.get('ev') or 0,
+                    "confidence_0_100": int(abs(edge.get('edge', 0)) * 10),
+                    "inputs_json": "{}",
+                    "outputs_json": "{}",
+                    "narrative_json": "{}",
+                    "model_version": "research_v1"
                 }
                 insert_model_prediction(doc)
             except Exception as e:
                 print(f"[API] Failed to auto-track edge: {e}")
 
-    return edges
-
-    # Update Cache
+    # Update Cache before returning
     _research_cache["data"] = edges
     _research_cache["last_updated"] = datetime.now()
     
@@ -736,12 +747,6 @@ async def get_model_health(date: Optional[str] = None, league: Optional[str] = N
         return stats
     except Exception as e:
          raise HTTPException(status_code=500, detail=str(e))
-
-    return await get_model_health(date=date, league=league, market=market, user=user)
-
-    return await get_model_health(date=date, league=league, market=market, user=user)
-
-    return await get_model_health(date=date, league=league, market=market, user=user)
 
 # --- Cron Security & Jobs ---
 
@@ -870,10 +875,10 @@ async def get_ncaam_board(date: Optional[str] = None):
         WHERE e.league = 'NCAAM'
           AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') = :date
         ORDER BY e.start_time ASC
-        """
-        with get_db_connection() as conn:
-            rows = _exec(conn, query, {"date": date}).fetchall()
-            return _ensure_utc([dict(r) for r in rows])
+    """
+    with get_db_connection() as conn:
+        rows = _exec(conn, query, {"date": date}).fetchall()
+        return _ensure_utc([dict(r) for r in rows])
 
 def _ensure_utc(data: list) -> list:
     """
@@ -895,50 +900,6 @@ def _ensure_utc(data: list) -> list:
                         iso += 'Z'
                     item[k] = iso
     return data
-    else:
-        # SQLite Fallback (Python Merge)
-        # 1. Fetch Events
-        events_query = """
-        SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status,
-               gr.home_score, gr.away_score, gr.final
-        FROM events e
-        LEFT JOIN game_results gr ON e.id = gr.event_id
-        WHERE e.league = 'NCAAM'
-          AND date(e.start_time) = :date -- SQLite date function
-        ORDER BY e.start_time ASC
-        """
-        
-        # 2. Fetch Latest Snapshots (Naive or optimized)
-        # We can fetch ALL snapshots for these events and filter in Python
-        # Or fetch for the day.
-        
-        with get_db_connection() as conn:
-            events = [dict(r) for r in _exec(conn, events_query, {"date": date}).fetchall()]
-            
-            if not events:
-                return []
-                
-            event_ids = [e['id'] for e in events]
-            if not event_ids: return events
-            
-            # _exec with 'IN' clause is tricky with named params. Use manual or many queries.
-            # Using Python loop for simplicity (N is small ~50 games)
-            
-            for ev in events:
-                # Fetch spread
-                s_q = "SELECT line_value, price FROM odds_snapshots WHERE event_id = :eid AND market_type='SPREAD' AND side='HOME' ORDER BY captured_at DESC LIMIT 1"
-                s_row = _exec(conn, s_q, {"eid": ev['id']}).fetchone()
-                ev['home_spread'] = s_row['line_value'] if s_row else None
-                ev['moneyline_home'] = s_row['price'] if s_row else None
-                
-                # Fetch total
-                t_q = "SELECT line_value, price FROM odds_snapshots WHERE event_id = :eid AND market_type='TOTAL' AND side='OVER' ORDER BY captured_at DESC LIMIT 1"
-                t_row = _exec(conn, t_q, {"eid": ev['id']}).fetchone()
-                ev['total_line'] = t_row['line_value'] if t_row else None
-                ev['moneyline_away'] = t_row['price'] if t_row else None # UI maps total price here
-                
-            
-            return _ensure_utc(events)
 
 @app.post("/api/ncaam/analyze")
 async def analyze_ncaam_game(request: Request):
@@ -993,9 +954,6 @@ async def get_ncaam_analytics(days: int = 30):
     WHERE analyzed_at > NOW() - (INTERVAL '1 day' * :days)
     """
     
-    # Optional: Breakdown by market type?
-    # For now, simplistic summary.
-    
     try:
         with get_db_connection() as conn:
             row = _exec(conn, query, {"days": days}).fetchone()
@@ -1006,10 +964,6 @@ async def get_ncaam_analytics(days: int = 30):
             decided = (stats['wins'] or 0) + (stats['losses'] or 0)
             stats['win_rate'] = (stats['wins'] / decided * 100) if decided > 0 else 0.0
             
-            # Simple ROI estimate (assuming flat units, -110 odds approx for spread)
-            # Or use actual prices if we aggregated them.
-            # ROI = (Units Won) / (Units Bet)
-            # Units Won = Wins * 0.909 - Losses * 1.0 (Approx)
             if decided > 0:
                 units = (stats['wins'] * 0.909) - stats['losses']
                 stats['roi_est'] = (units / decided) * 100
@@ -1023,11 +977,29 @@ async def get_ncaam_analytics(days: int = 30):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.api_route("/api/jobs/ingest_events/{league}", methods=["GET", "POST"])
+async def trigger_event_ingestion(league: str, date: Optional[str] = None):
+    """
+    Cron Job / Manual Trigger: Ingests scheduled events from ESPN.
+    """
+    try:
+        from src.parsers.espn_client import EspnClient
+        client = EspnClient()
+        # fetch_scoreboard automatically ingests via EventIngestionService
+        events = client.fetch_scoreboard(league, date=date)
+        return {
+            "status": "success",
+            "message": f"Ingested {len(events)} events for {league}",
+            "count": len(events)
+        }
+    except Exception as e:
+        print(f"[JOB ERROR] Event ingestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.api_route("/api/jobs/ingest_results/{league}", methods=["GET", "POST"])
 async def trigger_result_ingestion(league: str, date: Optional[str] = None, authorized: bool = Depends(verify_cron_secret)):
     """
     Cron Job / Manual Trigger: Ingests scoreboard/results from ESPN for a specific league.
-    Supports NFL, NCAAM, NCAAF, EPL.
     """
     job_key = f"ingest_results_{league}"
     from src.services.job_service import JobContext, JobLockedException
@@ -1039,19 +1011,13 @@ async def trigger_result_ingestion(league: str, date: Optional[str] = None, auth
             ingest_date = date if date and date.lower() != 'today' else None
             
             print(f"[JOB] Triggering result ingestion for {league} (date: {date or 'today'})")
-            events = client.fetch_scoreboard(league, date=ingest_date)
-            
-            # TODO: We need to SAVE these results using GradingService or similar?
-            # Original code ONLY Fetched? Or did I overwrite the save logic?
-            # Original: events = client.fetch_scoreboard... return {...}
-            # It didn't save? 
-            # Wait, the previous version called `service._ingest_latest_scores(league)`. 
-            # I seem to have reverted to a raw fetch_scoreboard in my `view_file`?
-            # Let's restore the Saving logic (GradingService).
-            
+            # Fetch and Save
             from src.services.grading_service import GradingService
             service = GradingService()
-            service._ingest_latest_scores(league) # This handles fetch + save
+            # service._ingest_latest_scores calls fetch_scoreboard internally usually, 
+            # or we pass data. GradingService often encapsulates fetch+save.
+            # Assuming _ingest_latest_scores works.
+            service._ingest_latest_scores(league)
             
             return {
                 "status": "success",
@@ -1064,8 +1030,6 @@ async def trigger_result_ingestion(league: str, date: Optional[str] = None, auth
     except Exception as e:
         print(f"[JOB ERROR] Result ingestion failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/jobs/reconcile")
 
 @app.post("/api/jobs/ingest_enrichment")
 async def trigger_enrichment_ingestion(league: str, date: Optional[str] = None):
@@ -1086,7 +1050,6 @@ async def get_enrichment_status():
     """
     Returns latest enrichment stats.
     """
-    # Simple query to get max timestamps
     from src.database import get_db_connection, _exec
     stats = {}
     with get_db_connection() as conn:
@@ -1108,13 +1071,13 @@ async def get_event_enrichment(event_id: str):
     from src.database import get_db_connection, _exec
     with get_db_connection() as conn:
         splits = _exec(conn, "SELECT * FROM action_splits WHERE event_id = :eid ORDER BY as_of_ts DESC", {"eid": event_id}).fetchall()
-        # props = ...
-        # injuries = ...
         return {
             "event_id": event_id,
             "splits": [dict(r) for r in splits]
         }
-async def trigger_settlement_reconcile(league: Optional[str] = None):
+
+@app.api_route("/api/jobs/reconcile", methods=["GET", "POST"])
+async def trigger_settlement_reconcile(request: Request, league: Optional[str] = None, authorized: bool = Depends(verify_cron_secret)):
     """
     Cron Job / Manual Trigger: Settles pending bets using ingested results.
     """

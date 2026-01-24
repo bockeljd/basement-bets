@@ -12,7 +12,7 @@
     ],
     "functions": {
         "api/**/*.py": {
-            "excludeFiles": "{tests/**,docs/**,scripts/**,client/**,data/raw/**,data/imports/**,data/bets_db/**,**/*.db,**/*.parquet}",
+            "excludeFiles": "{tests/**,docs/**,scripts/**,client/**,data/**,**/*.db,**/*.parquet,node_modules/**,venv/**,.venv/**}",
             "maxDuration": 60
         }
     },

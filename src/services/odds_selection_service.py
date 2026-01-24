@@ -48,10 +48,7 @@ class OddsSelectionService:
             if snap['market_type'] != market_type:
                 continue
             if side and snap.get('side') != side:
-                if market_type == 'TOTAL': 
-                    # Totals often have same line for Over/Under, but if we need price for specific side...
-                    # If side is specified, we match it.
-                    pass
+                continue
             
             book_name = snap.get('book', 'Unknown')
             # Check priority

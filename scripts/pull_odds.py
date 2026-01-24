@@ -4,8 +4,9 @@ import os
 import sys
 import time
 
-# Ensure we can import utils
+# Ensure we can import utils and src
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from utils import get_todays_games, filter_data_on_change, SPORT_INFO
 
 HEADERS = {

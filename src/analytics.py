@@ -6,6 +6,25 @@ class AnalyticsEngine:
         self.user_id = user_id
         self.bets = fetch_all_bets(user_id=user_id)
         self._normalize_bets()
+        self._add_sortable_dates()
+    
+    def _add_sortable_dates(self):
+        """Adds ISO-formatted sort_date field for proper date sorting."""
+        from dateutil.parser import parse as parse_date
+        
+        for b in self.bets:
+            raw_date = b.get('date', '')
+            try:
+                # Parse the date string
+                dt = parse_date(raw_date, fuzzy=True)
+                # Store ISO format for sorting
+                b['sort_date'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                # Also store a display-friendly format
+                b['display_date'] = dt.strftime('%b %d, %Y')
+            except Exception:
+                # Fallback: use raw date as-is
+                b['sort_date'] = raw_date
+                b['display_date'] = raw_date
 
     def _normalize_bets(self):
         """Standardizes bet types based on user rules."""
@@ -436,55 +455,84 @@ class AnalyticsEngine:
 
     def get_balances(self, user_id=None):
         """
-        Returns balances based on Transaction Ledger (if available) + subsequent Bet Profits.
+        Returns current balances per provider.
+        Prefers explicit 'Balance' transactions if available, otherwise calculates:
+        Balance = Sum(Deposits) + Sum(Bet Profits) - Sum(Withdrawals)
         """
-        from src.database import fetch_latest_ledger_info
-        from datetime import datetime
+        from src.database import get_db_connection
+        from collections import defaultdict
+        from dateutil.parser import parse as parse_date
         
         bets = self.bets
         if user_id and user_id != self.user_id:
              bets = [b for b in self.bets if b.get('user_id') == user_id]
 
-        # 1. Get latest authoritative balances from Ledger
-        ledger_info = fetch_latest_ledger_info()
-        
-        # 2. Iterate bets and add profit if bet date > ledger date
-        balances = defaultdict(float)
-        
-        # Prepare robust result structure
-        final_balances = {}
-        
-        # Initialize with ledger balances
-        for provider, info in ledger_info.items():
-            final_balances[provider] = {
-                'balance': info['balance'], 
-                'last_bet': info.get('date') # Use the date of the ledger record as baseline
-            }
-            
-        # Process bets
+        # 1. Calculate bet profits per provider (for fallback)
+        bet_profits = defaultdict(float)
+        last_bet_dates = {}
         for b in bets:
             provider = b.get('provider', 'Unknown')
-            profit = b['profit']
-            date_str = b.get('date', 'Unknown')
-            
-            # Ensure provider exists in final dict
-            if provider not in final_balances:
-                final_balances[provider] = {'balance': 0.0, 'last_bet': None}
-                
-            # Update balance logic
-            if provider in ledger_info:
-                ledger_date_str = ledger_info[provider]['date']
-                if date_str > ledger_date_str:
-                    final_balances[provider]['balance'] += profit
+            bet_profits[provider] += b['profit']
+            date_str = b.get('date', '')
+            if date_str and (provider not in last_bet_dates or date_str > last_bet_dates[provider]):
+                last_bet_dates[provider] = date_str
+        
+        # 2. Get explicit balance snapshots (preferred) and transaction flows
+        explicit_balances = {}  # provider -> (balance, date)
+        deposits = defaultdict(float)
+        withdrawals = defaultdict(float)
+        
+        query = """
+        SELECT provider, type, amount, balance, date
+        FROM transactions
+        """
+        try:
+            with get_db_connection() as conn:
+                from src.database import _exec
+                cur = _exec(conn, query)
+                for r in cur.fetchall():
+                    provider = r['provider']
+                    tx_type = r['type']
+                    
+                    if tx_type == 'Balance':
+                        # Parse date to find latest
+                        try:
+                            dt = parse_date(r['date'])
+                        except:
+                            dt = None
+                        
+                        if provider not in explicit_balances:
+                            explicit_balances[provider] = (float(r['balance'] or 0), dt, r['date'])
+                        else:
+                            existing_dt = explicit_balances[provider][1]
+                            if dt and existing_dt and dt > existing_dt:
+                                explicit_balances[provider] = (float(r['balance'] or 0), dt, r['date'])
+                            elif dt and not existing_dt:
+                                explicit_balances[provider] = (float(r['balance'] or 0), dt, r['date'])
+                    elif tx_type == 'Deposit':
+                        deposits[provider] += float(r['amount'] or 0)
+                    elif tx_type == 'Withdrawal':
+                        withdrawals[provider] += abs(float(r['amount'] or 0))
+        except Exception as e:
+            print(f"[Analytics] Error fetching transactions: {e}")
+        
+        # 3. Build final balances
+        all_providers = set(bet_profits.keys()) | set(deposits.keys()) | set(withdrawals.keys()) | set(explicit_balances.keys())
+        
+        final_balances = {}
+        for provider in all_providers:
+            # Prefer explicit balance if available
+            if provider in explicit_balances:
+                balance = explicit_balances[provider][0]
             else:
-                final_balances[provider]['balance'] += profit
-                
-            # Update last_bet date if bet is newer
-            if date_str and date_str != 'Unknown':
-               current_last = final_balances[provider]['last_bet']
-               if not current_last or date_str > current_last:
-                   final_balances[provider]['last_bet'] = date_str
-                   
+                # Fallback to calculation
+                balance = deposits[provider] + bet_profits[provider] - withdrawals[provider]
+            
+            final_balances[provider] = {
+                'balance': round(balance, 2),
+                'last_bet': last_bet_dates.get(provider)
+            }
+        
         return final_balances
 
     def get_period_stats(self, days=None, year=None, user_id=None):
@@ -686,11 +734,14 @@ class AnalyticsEngine:
         provider_breakdown = []
         for p, stats in provider_stats.items():
             net = stats['withdrawn'] - stats['deposited']
+            # Get current balance for this provider
+            provider_balance = balances.get(p, {}).get('balance', 0.0)
             provider_breakdown.append({
                 "provider": p,
                 "deposited": stats['deposited'],
                 "withdrawn": stats['withdrawn'],
-                "net_profit": net
+                "net_profit": net,
+                "in_play": provider_balance
             })
 
         provider_breakdown.sort(key=lambda x: x['provider'])
