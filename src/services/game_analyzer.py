@@ -43,7 +43,7 @@ class GameAnalyzer:
                 if sport == "NCAAM":
                     from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
                     model_wrapper = NCAAMMarketFirstModelV2()
-                    result = model_wrapper.analyze(event_id=game_id)
+                    result = model_wrapper.analyze(event_id=game_id, event_context=event)
                 elif sport == "NFL":
                     result = self._analyze_nfl(home_team, away_team)
                 elif sport == "EPL":

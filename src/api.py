@@ -58,12 +58,14 @@ def get_version():
     }
 
 # --- Admin Routes ---
-@app.get("/api/admin/init-db")
-def run_init():
-    # WARNING: Secure this or remove after use
-    # It is protected by the middleware above if /api prefix is hit.
-    init_db() 
-    return {"message": "Database Initialized on Vercel Postgres"}
+@app.post("/api/admin/init-db")
+def trigger_init_db(request: Request):
+    """
+    Initializes database schema (Non-destructive unless BASEMENT_DB_RESET=1).
+    """
+    from src.database import init_db
+    init_db()
+    return {"status": "success", "message": "Database Initialized (Postgres)"}
 
 @app.get("/api/health")
 def health_check():
@@ -468,7 +470,7 @@ async def get_history():
 
 
 @app.get("/api/schedule")
-async def get_schedule(sport: str = "all", days: int = 1, user: dict = Depends(get_current_user)):
+async def get_schedule(sport: str = "all", days: int = 1, date_str: Optional[str] = None, user: dict = Depends(get_current_user)):
     """
     Fetch upcoming scheduled games for display WITHOUT running models.
     Returns games from ESPN API.
@@ -484,9 +486,15 @@ async def get_schedule(sport: str = "all", days: int = 1, user: dict = Depends(g
     
     leagues = ['NFL', 'NCAAM', 'NCAAF', 'EPL'] if sport.lower() == 'all' else [sport.upper()]
     
+    # 1. Parse base date
+    try:
+        start_date_obj = datetime.strptime(date_str, "%Y-%m-%d") if date_str else datetime.now()
+    except:
+        start_date_obj = datetime.now()
+
     for league in leagues:
         for i in range(days):
-            target_date = datetime.now() + timedelta(days=i)
+            target_date = start_date_obj + timedelta(days=i)
             try:
                 # Fetch scoreboard for this league/date
                 events = client.fetch_scoreboard(league, target_date.strftime("%Y%m%d"))
@@ -731,49 +739,94 @@ async def get_model_health(date: Optional[str] = None, league: Optional[str] = N
 
     return await get_model_health(date=date, league=league, market=market, user=user)
 
-@app.post("/api/jobs/policy_refresh")
-async def trigger_policy_refresh(request: Request):
+    return await get_model_health(date=date, league=league, market=market, user=user)
+
+    return await get_model_health(date=date, league=league, market=market, user=user)
+
+# --- Cron Security & Jobs ---
+
+async def verify_cron_secret(request: Request):
     """
-    Cron Job Endpoint: Triggers the Policy Engine to curate weights and allowlists.
-    Protected by CRON_SECRET or API Key.
+    Verifies Authorization header matches CRON_SECRET.
     """
-    # Verify Auth (Simplistic for now, using same middleware)
+    from src.config import settings
+    expected = settings.CRON_SECRET
+    if not expected:
+        # If no secret configured (local dev?), warn or allow? 
+        # For production security, we deny if not set.
+        print("[Auth] CRON_SECRET not set in environment.")
+        raise HTTPException(status_code=500, detail="Server config error: CRON_SECRET missing")
+        
+    auth = request.headers.get("Authorization")
+    if not auth:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+        
+    # Expect "Bearer <token>"
+    parts = auth.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer" or parts[1] != expected:
+        raise HTTPException(status_code=401, detail="Invalid Cron Secret")
+
+@app.api_route("/api/jobs/policy_refresh", methods=["GET", "POST"])
+async def trigger_policy_refresh(request: Request, authorized: bool = Depends(verify_cron_secret)):
+    """
+    Cron Job: Policy Refresh.
+    """
+    job_key = "policy_refresh"
+    from src.services.job_service import JobContext, JobLockedException
+    from src.services.policy_engine import PolicyEngine
+    
     try:
-        from src.services.policy_engine import PolicyEngine
-        engine = PolicyEngine()
-        engine.refresh_policies()
-        return {"status": "success", "message": "Policy Refresh Executed"}
+        with JobContext(job_key) as ctx:
+            # Run Logic
+            engine = PolicyEngine()
+            engine.refresh_policies()
+            return {"status": "success", "message": "Policy Refresh Executed"}
+            
+    except JobLockedException:
+        return {"status": "skipped", "reason": "Job execution overlapping (locked)"}
     except Exception as e:
+        print(f"[Job] Policy Refresh Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/jobs/ingest_torvik")
-async def trigger_torvik_ingestion(request: Request):
+@app.api_route("/api/jobs/ingest_torvik", methods=["GET", "POST"])
+async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(verify_cron_secret)):
     """
-    Cron Job / Manual Trigger: Ingests latest NCAAM team metrics from BartTorvik.
-    Protected by CRON_SECRET or API Key.
+    Cron Job: Torvik Ingestion.
     """
+    job_key = "ingest_torvik"
+    from src.services.job_service import JobContext, JobLockedException
+    # Imports inside to avoid heavy loading on startup if possible
+    from src.database import init_bt_team_metrics_db
+    from src.services.barttorvik import BartTorvikClient
+    
     try:
-        from datetime import datetime
-        from src.database import init_bt_team_metrics_db, upsert_team_metrics
-        from src.selenium_client import SeleniumDriverFactory
-        from src.services.barttorvik import BartTorvikClient
-        
-        # Initialize tables if needed
-        init_bt_team_metrics_db()
-        
-        # Fetch and upsert
-        client = BartTorvikClient()
-        ratings = client.get_efficiency_ratings(year=2026)
-        
-        if ratings:
-            return {
-                "status": "success", 
-                "message": f"Ingested {len(ratings)} teams",
-                "teams_count": len(ratings)
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to fetch ratings from BartTorvik")
+        with JobContext(job_key) as ctx:
+            # Phase 9: Cursor Check (Placeholder for Full vs Incremental)
+            # Torvik ingestion usually is full refresh of metrics, but we can store 'last_run'
+            last_run = ctx.state.get("last_run_date")
+            print(f"[Job] Torvik Ingest. Last Run: {last_run}")
+            
+            init_bt_team_metrics_db()
+            client = BartTorvikClient()
+            ratings = client.get_efficiency_ratings(year=2026)
+            
+            if ratings:
+                # Update State
+                ctx.state["last_run_date"] = datetime.now().strftime("%Y-%m-%d")
+                ctx.state["teams_count"] = len(ratings)
+                
+                return {
+                    "status": "success", 
+                    "message": f"Ingested {len(ratings)} teams",
+                    "teams_count": len(ratings)
+                }
+            else:
+                return {"status": "warning", "message": "No ratings found"}
+                
+    except JobLockedException:
+        return {"status": "skipped", "reason": "Locked"}
     except Exception as e:
+        print(f"[Job] Torvik Ingestion Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ncaam/board")
@@ -781,36 +834,111 @@ async def get_ncaam_board(date: Optional[str] = None):
     """
     Fetch lightweight NCAAM board for on-demand analysis.
     """
-    from src.database import get_db_connection, _exec
+    from src.database import get_db_connection, _exec, get_db_type
     
     # Default to today
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
         
+    # Optimized Postgres Query
     query = """
     SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status, 
-           s.line_value as home_spread, s.price as moneyline_home,
-           t.line_value as total_line, t.price as moneyline_away
-    FROM events e
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, line_value, price
-        FROM odds_snapshots 
-        WHERE market_type = 'SPREAD' AND side = 'HOME'
-        ORDER BY event_id, captured_at DESC
-    ) s ON e.id = s.event_id
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, line_value, price
-        FROM odds_snapshots 
-        WHERE market_type = 'TOTAL' AND side = 'OVER'
-        ORDER BY event_id, captured_at DESC
-    ) t ON e.id = t.event_id
-    WHERE e.league = 'NCAAM'
-      AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') = :date
-    ORDER BY e.start_time ASC
+               s.line_value as home_spread, s.price as spread_home_price, 
+               -- The original query used: s.price as moneyline_home.
+               -- If the snapshot is SPREAD, s.price IS the spread odds (e.g. -110), NOT ML.
+               -- Let's stick to returning them as specific keys or keeping the old alias IF the UI expects it.
+               -- Checking Frontend: uses 'moneyline_home' logic.
+               -- Edge display: `@{edge.moneyline_home || '-'}`
+               -- So yes, it displays the PRICE of the spread.
+               s.price as moneyline_home,
+               t.line_value as total_line, t.price as moneyline_away,
+               gr.home_score, gr.away_score, gr.final
+        FROM events e
+        LEFT JOIN (
+            SELECT DISTINCT ON (event_id) event_id, line_value, price
+            FROM odds_snapshots 
+            WHERE market_type = 'SPREAD' AND side = 'HOME'
+            ORDER BY event_id, captured_at DESC
+        ) s ON e.id = s.event_id
+        LEFT JOIN (
+            SELECT DISTINCT ON (event_id) event_id, line_value, price
+            FROM odds_snapshots 
+            WHERE market_type = 'TOTAL' AND side = 'OVER'
+            ORDER BY event_id, captured_at DESC
+        ) t ON e.id = t.event_id
+        LEFT JOIN game_results gr ON e.id = gr.event_id
+        WHERE e.league = 'NCAAM'
+          AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') = :date
+        ORDER BY e.start_time ASC
+        """
+        with get_db_connection() as conn:
+            rows = _exec(conn, query, {"date": date}).fetchall()
+            return _ensure_utc([dict(r) for r in rows])
+
+def _ensure_utc(data: list) -> list:
     """
-    with get_db_connection() as conn:
-        rows = _exec(conn, query, {"date": date}).fetchall()
-        return [dict(r) for r in rows]
+    Ensures datetime fields have 'Z' suffix if naive, forcing frontend to treat as UTC.
+    """
+    keys = ['start_time', 'analyzed_at', 'last_updated', 'created_at', 'close_captured_at']
+    for item in data:
+        for k in keys:
+            if item.get(k):
+                val = item[k]
+                if isinstance(val, str):
+                    if not val.endswith('Z') and '+' not in val:
+                         item[k] = val + 'Z'
+                elif hasattr(val, 'isoformat'):
+                    # If datetime object is naive, isoformat() gives no offset.
+                    # We assume DB is UTC.
+                    iso = val.isoformat()
+                    if val.tzinfo is None:
+                        iso += 'Z'
+                    item[k] = iso
+    return data
+    else:
+        # SQLite Fallback (Python Merge)
+        # 1. Fetch Events
+        events_query = """
+        SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status,
+               gr.home_score, gr.away_score, gr.final
+        FROM events e
+        LEFT JOIN game_results gr ON e.id = gr.event_id
+        WHERE e.league = 'NCAAM'
+          AND date(e.start_time) = :date -- SQLite date function
+        ORDER BY e.start_time ASC
+        """
+        
+        # 2. Fetch Latest Snapshots (Naive or optimized)
+        # We can fetch ALL snapshots for these events and filter in Python
+        # Or fetch for the day.
+        
+        with get_db_connection() as conn:
+            events = [dict(r) for r in _exec(conn, events_query, {"date": date}).fetchall()]
+            
+            if not events:
+                return []
+                
+            event_ids = [e['id'] for e in events]
+            if not event_ids: return events
+            
+            # _exec with 'IN' clause is tricky with named params. Use manual or many queries.
+            # Using Python loop for simplicity (N is small ~50 games)
+            
+            for ev in events:
+                # Fetch spread
+                s_q = "SELECT line_value, price FROM odds_snapshots WHERE event_id = :eid AND market_type='SPREAD' AND side='HOME' ORDER BY captured_at DESC LIMIT 1"
+                s_row = _exec(conn, s_q, {"eid": ev['id']}).fetchone()
+                ev['home_spread'] = s_row['line_value'] if s_row else None
+                ev['moneyline_home'] = s_row['price'] if s_row else None
+                
+                # Fetch total
+                t_q = "SELECT line_value, price FROM odds_snapshots WHERE event_id = :eid AND market_type='TOTAL' AND side='OVER' ORDER BY captured_at DESC LIMIT 1"
+                t_row = _exec(conn, t_q, {"eid": ev['id']}).fetchone()
+                ev['total_line'] = t_row['line_value'] if t_row else None
+                ev['moneyline_away'] = t_row['price'] if t_row else None # UI maps total price here
+                
+            
+            return _ensure_utc(events)
 
 @app.post("/api/ncaam/analyze")
 async def analyze_ncaam_game(request: Request):
@@ -838,34 +966,101 @@ async def analyze_ncaam_game(request: Request):
 @app.get("/api/ncaam/history")
 async def get_ncaam_history(limit: int = 100):
     """
-    Fetch NCAAM analysis history.
+    Returns past model predictions/analysis.
     """
-    from src.database import fetch_ncaam_analysis_history
-    return fetch_ncaam_analysis_history(limit=limit)
+    from src.database import fetch_model_history
+    data = fetch_model_history(limit=limit)
+    return _ensure_utc(data)
 
-@app.post("/api/jobs/ingest_results/{league}")
-async def trigger_result_ingestion(league: str, date: Optional[str] = None):
+@app.get("/api/ncaam/analytics")
+async def get_ncaam_analytics(days: int = 30):
+    """
+    Returns aggregated performance stats (Win Rate, ROI, Edge, etc.)
+    """
+    from src.database import get_db_connection, _exec
+    
+    query = """
+    SELECT 
+        COUNT(*) as total_bets,
+        COUNT(*) FILTER (WHERE outcome = 'WON') as wins,
+        COUNT(*) FILTER (WHERE outcome = 'LOST') as losses,
+        COUNT(*) FILTER (WHERE outcome = 'PUSH') as pushes,
+        COUNT(*) FILTER (WHERE outcome = 'PENDING' OR outcome IS NULL) as pending,
+        AVG(edge_points) FILTER (WHERE outcome NOT IN ('PENDING', 'VOID')) as avg_edge,
+        AVG(ev_per_unit) FILTER (WHERE outcome NOT IN ('PENDING', 'VOID')) as avg_ev,
+        AVG(clv_points) FILTER (WHERE outcome NOT IN ('PENDING', 'VOID')) as avg_clv
+    FROM model_predictions
+    WHERE analyzed_at > NOW() - (INTERVAL '1 day' * :days)
+    """
+    
+    # Optional: Breakdown by market type?
+    # For now, simplistic summary.
+    
+    try:
+        with get_db_connection() as conn:
+            row = _exec(conn, query, {"days": days}).fetchone()
+            if not row:
+                return {}
+            
+            stats = dict(row)
+            decided = (stats['wins'] or 0) + (stats['losses'] or 0)
+            stats['win_rate'] = (stats['wins'] / decided * 100) if decided > 0 else 0.0
+            
+            # Simple ROI estimate (assuming flat units, -110 odds approx for spread)
+            # Or use actual prices if we aggregated them.
+            # ROI = (Units Won) / (Units Bet)
+            # Units Won = Wins * 0.909 - Losses * 1.0 (Approx)
+            if decided > 0:
+                units = (stats['wins'] * 0.909) - stats['losses']
+                stats['roi_est'] = (units / decided) * 100
+            else:
+                stats['roi_est'] = 0.0
+                
+            return stats
+            
+    except Exception as e:
+        print(f"[Analytics] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/api/jobs/ingest_results/{league}", methods=["GET", "POST"])
+async def trigger_result_ingestion(league: str, date: Optional[str] = None, authorized: bool = Depends(verify_cron_secret)):
     """
     Cron Job / Manual Trigger: Ingests scoreboard/results from ESPN for a specific league.
     Supports NFL, NCAAM, NCAAF, EPL.
     """
+    job_key = f"ingest_results_{league}"
+    from src.services.job_service import JobContext, JobLockedException
+    from src.parsers.espn_client import EspnClient
+    
     try:
-        from src.parsers.espn_client import EspnClient
-        client = EspnClient()
-        
-        # If date is 'today', passing None to fetch_scoreboard works
-        ingest_date = date if date and date.lower() != 'today' else None
-        
-        print(f"[JOB] Triggering result ingestion for {league} (date: {date or 'today'})")
-        events = client.fetch_scoreboard(league, date=ingest_date)
-        
-        return {
-            "status": "success",
-            "message": f"Processed {len(events)} events for {league}",
-            "events_count": len(events),
-            "league": league,
-            "date": date or "today"
-        }
+        with JobContext(job_key) as ctx:
+            client = EspnClient()
+            ingest_date = date if date and date.lower() != 'today' else None
+            
+            print(f"[JOB] Triggering result ingestion for {league} (date: {date or 'today'})")
+            events = client.fetch_scoreboard(league, date=ingest_date)
+            
+            # TODO: We need to SAVE these results using GradingService or similar?
+            # Original code ONLY Fetched? Or did I overwrite the save logic?
+            # Original: events = client.fetch_scoreboard... return {...}
+            # It didn't save? 
+            # Wait, the previous version called `service._ingest_latest_scores(league)`. 
+            # I seem to have reverted to a raw fetch_scoreboard in my `view_file`?
+            # Let's restore the Saving logic (GradingService).
+            
+            from src.services.grading_service import GradingService
+            service = GradingService()
+            service._ingest_latest_scores(league) # This handles fetch + save
+            
+            return {
+                "status": "success",
+                "message": f"Ingested results for {league}",
+                "date": date or "today"
+            }
+            
+    except JobLockedException:
+        return {"status": "skipped", "reason": "Locked"}
     except Exception as e:
         print(f"[JOB ERROR] Result ingestion failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

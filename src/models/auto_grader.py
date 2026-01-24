@@ -1,12 +1,12 @@
 
 import sqlite3
 from typing import List, Dict
-from database import get_db_connection
-from odds_client import OddsClient
+from src.database import get_db_connection, _exec
+from src.models.odds_client import OddsAPIClient
 
 class AutoGrader:
     def __init__(self):
-        self.odds_client = OddsClient()
+        self.odds_client = OddsAPIClient()
         
     def grade_pending_picks(self):
         """
@@ -50,17 +50,17 @@ class AutoGrader:
             r.final
         FROM game_results r
         JOIN events e ON r.event_id = e.id
-        WHERE r.final = 1 OR r.final = 'true'
+        WHERE r.final IS TRUE
         ORDER BY e.start_time DESC
         LIMIT 1000
         """
         with get_db_connection() as conn:
-            return [dict(row) for row in conn.execute(query).fetchall()]
+            return [dict(row) for row in _exec(conn, query).fetchall()]
 
     def _get_pending_picks(self):
         query = "SELECT * FROM model_predictions WHERE outcome IS NULL OR outcome = 'PENDING'"
         with get_db_connection() as conn:
-            return [dict(row) for row in conn.execute(query).fetchall()]
+            return [dict(row) for row in _exec(conn, query).fetchall()]
             
     def _grade_pick(self, pick, scores_data):
         """
@@ -188,5 +188,5 @@ class AutoGrader:
     def _update_db(self, pick_id, outcome):
         query = "UPDATE model_predictions SET outcome = :o WHERE id = :id"
         with get_db_connection() as conn:
-            conn.execute(query, {"o": outcome.upper(), "id": pick_id})
+            _exec(conn, query, {"o": outcome.upper(), "id": pick_id})
             conn.commit()

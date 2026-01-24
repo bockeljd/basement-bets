@@ -1,27 +1,33 @@
 {
+    "$schema": "https://openapi.vercel.sh/vercel.json",
     "rewrites": [
         {
-            "source": "/api/(.*)",
+            "source": "/api/:match*",
             "destination": "/api/index.py"
         },
         {
-            "source": "/assets/(.*)",
-            "destination": "/client/dist/assets/$1"
-        },
-        {
-            "source": "/((?!api/|assets/|favicon.ico).*)",
-            "destination": "/client/dist/index.html"
+            "source": "/(.*)",
+            "destination": "/index.html"
         }
     ],
+    "functions": {
+        "api/**/*.py": {
+            "excludeFiles": "{tests/**,docs/**,scripts/**,client/**,data/raw/**,data/imports/**,data/bets_db/**,**/*.db,**/*.parquet}",
+            "maxDuration": 60
+        }
+    },
     "crons": [
         {
             "path": "/api/jobs/policy_refresh",
-            "schedule": "0 8 * * *"
+            "schedule": "0 6 * * *"
         },
         {
             "path": "/api/jobs/ingest_torvik",
-            "schedule": "0 6 * * *"
+            "schedule": "0 7 * * *"
+        },
+        {
+            "path": "/api/jobs/ingest_results/NCAAM",
+            "schedule": "30 7 * * *"
         }
-    ],
-    "buildCommand": "cd client && npm install && npm run build"
+    ]
 }

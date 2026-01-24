@@ -36,8 +36,9 @@ class TorvikProjectionService:
         if h_proj:
             return {
                 "source": "official",
-                "margin": -h_proj['spread'], # Torvik spread is usually away oriented? Check.
-                "total": h_proj['total'],
+                "margin": -h_proj['spread'], # Torvik spread is usually Home relative (e.g. -5 means Home favored by 5). We want Home Margin > 0.
+                "official_margin": -float(h_proj['spread']),
+                "total": float(h_proj['total']),
                 "projected_score": h_proj['projected_score'],
                 "lean": "Official torvik projection"
             }
@@ -76,6 +77,7 @@ class TorvikProjectionService:
         return {
             "source": "computed",
             "margin": round(margin, 1),
+            "official_margin": round(margin, 1), # Fallback to computed
             "total": round(total, 1),
             "projected_score": f"{round(a_score, 1)}-{round(h_score, 1)}",
             "lean": "Torvik-style computed from efficiencies"

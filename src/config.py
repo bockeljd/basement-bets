@@ -9,7 +9,26 @@ load_dotenv('.env.local')
 class Config:
     def __init__(self):
         self.APP_ENV = os.environ.get("APP_ENV", "local").lower()
-        self.DATABASE_URL = os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL")
+        
+        # 1. Database URL Resolution (Pooled/Runtime)
+        # Priority: DATABASE_URL (Neon/Override) -> POSTGRES_URL -> POSTGRES_PRISMA_URL -> POSTGRES_URL_NON_POOLING
+        self.DATABASE_URL = (
+            os.environ.get("DATABASE_URL") or 
+            os.environ.get("POSTGRES_URL") or 
+            os.environ.get("POSTGRES_PRISMA_URL") or 
+            os.environ.get("POSTGRES_URL_NON_POOLING")
+        )
+        
+        # 2. Database URL Resolution (Unpooled/Migration)
+        # Priority: DATABASE_URL_UNPOOLED (Neon) -> POSTGRES_URL_NON_POOLING -> POSTGRES_URL_UNPOOLED (Backup)
+        self.DATABASE_URL_UNPOOLED = (
+            os.environ.get("DATABASE_URL_UNPOOLED") or 
+            os.environ.get("POSTGRES_URL_NON_POOLING") or
+            os.environ.get("POSTGRES_URL_UNPOOLED")
+        )
+
+        self.REQUIRE_DATABASE = os.environ.get("REQUIRE_DATABASE", "1") != "0"
+        
         self.SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
         self.BASEMENT_PASSWORD = os.environ.get("BASEMENT_PASSWORD")
@@ -26,8 +45,12 @@ class Config:
             self.APP_ENV = "local"
 
         missing = []
-        if not self.DATABASE_URL:
-            missing.append("POSTGRES_URL / DATABASE_URL")
+        
+        # Fail Fast for Missing DB
+        if self.REQUIRE_DATABASE and not self.DATABASE_URL:
+            # If strictly required, raise Error (RuntimeError preferred over simple print for fail-fast)
+            # But adhering to the current pattern of collecting missing keys first:
+            missing.append("DATABASE_URL (or POSTGRES_URL/POSTGRES_PRISMA_URL)")
         
         # In Prod/Preview, we should be noisier about missing keys
         if self.APP_ENV != "local":
@@ -37,7 +60,11 @@ class Config:
                 missing.append("OPENAI_API_KEY")
 
         if missing:
-            print(f"[CRITICAL] Missing required environment variables: {', '.join(missing)}")
+            msg = f"[CRITICAL] Missing required environment variables: {', '.join(missing)}"
+            print(msg)
+            # If critical DB is missing and required, crash.
+            if self.REQUIRE_DATABASE and ("DATABASE_URL" in msg or "POSTGRES_URL" in msg):
+                 raise RuntimeError(msg)
 
     def _apply_guards(self):
         """Enforce strict isolation between environments."""

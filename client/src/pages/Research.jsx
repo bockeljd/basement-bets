@@ -10,6 +10,9 @@ const Research = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [sportFilter, setSportFilter] = useState('All');
+    // Date Filtering
+    const getTodayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time (approx) or use UTC if preferred. en-CA gives YYYY-MM-DD.
+    const [selectedDate, setSelectedDate] = useState(getTodayStr());
 
     // Game Analysis Modal State
     const [selectedGame, setSelectedGame] = useState(null);
@@ -21,7 +24,7 @@ const Research = () => {
 
     useEffect(() => {
         fetchSchedule();
-    }, []);
+    }, [selectedDate]); // Refetch when date changes
 
     const fetchSchedule = async () => {
         try {
@@ -30,7 +33,7 @@ const Research = () => {
 
             // Fetch NCAAM specific board and overall history
             const [boardRes, historyRes] = await Promise.all([
-                api.get('/api/ncaam/board'),
+                api.get('/api/ncaam/board', { params: { date: selectedDate } }),
                 api.get('/api/ncaam/history')
             ]);
 
@@ -64,12 +67,12 @@ const Research = () => {
             const res = await api.post('/api/research/grade');
             const result = res.data;
             alert(`Grading Complete! ${result.graded || 0} bets updated.`);
-            // Fetch layout/refresh data
-            const [scheduleRes, historyRes] = await Promise.all([
-                api.get('/api/schedule?sport=all&days=3'),
-                api.get('/api/research/history')
+            // Fetch layout/refresh data - CONSISTENT ENDPOINTS
+            const [boardRes, historyRes] = await Promise.all([
+                api.get('/api/ncaam/board', { params: { date: selectedDate } }),
+                api.get('/api/ncaam/history')
             ]);
-            setEdges(scheduleRes.data || []);
+            setEdges(boardRes.data || []);
             setHistory(historyRes.data || []);
         } catch (err) {
             console.error(err);
@@ -132,6 +135,15 @@ const Research = () => {
             direction = 'asc';
         }
         setSortConfig({ key, direction });
+    };
+
+    const shiftDate = (days) => {
+        const current = new Date(selectedDate);
+        current.setDate(current.getDate() + days);
+        // Correct timezone offset issue if any, or just use simple string manipulation if date is reliable
+        // To be safe with 'en-CA' (YYYY-MM-DD)
+        const nextDate = current.toLocaleDateString('en-CA');
+        setSelectedDate(nextDate);
     };
 
     const getEdgeColor = (edge, sport) => {
@@ -249,6 +261,25 @@ const Research = () => {
                                     <option value="EPL">EPL</option>
                                 </select>
                             </div>
+
+                            {/* Date Navigation */}
+                            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-1 py-1">
+                                <button onClick={() => shiftDate(-1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
+                                    ←
+                                </button>
+                                <input
+                                    type="date"
+                                    value={selectedDate}
+                                    onChange={(e) => setSelectedDate(e.target.value)}
+                                    className="bg-transparent text-sm font-bold text-center w-32 focus:outline-none text-white appearance-none"
+                                />
+                                <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
+                                    →
+                                </button>
+                                <button onClick={() => setSelectedDate(new Date().toLocaleDateString('en-CA'))} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
+                                    Today
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -330,8 +361,17 @@ const Research = () => {
                                                 return (
                                                     <tr key={idx} className={`group hover:bg-slate-700/30 transition-all border-b border-slate-700/30`}>
                                                         <td className="py-3 px-4 text-slate-400 text-xs whitespace-nowrap">
-                                                            <div className="font-bold text-slate-300">{dateStr}</div>
-                                                            <div>{timeStr}</div>
+                                                            {edge.final ? (
+                                                                <div className="flex flex-col">
+                                                                    <span className="font-bold text-slate-500 uppercase tracking-wider">Final</span>
+                                                                    <span className="text-white font-mono">{edge.home_score}-{edge.away_score}</span>
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <div className="font-bold text-slate-300">{dateStr}</div>
+                                                                    <div>{timeStr}</div>
+                                                                </>
+                                                            )}
                                                         </td>
                                                         <td className="py-3 px-4">
                                                             <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
@@ -494,8 +534,29 @@ const Research = () => {
                                         </thead>
                                         <tbody>
                                             {getSortedHistory().map((item, idx) => {
-                                                const recs = JSON.parse(item.recommendation_json || '[]');
+                                                // Robust Recommendation Parsing
+                                                let recs = [];
+                                                try {
+                                                    if (item.outputs_json) {
+                                                        const out = JSON.parse(item.outputs_json);
+                                                        if (out.recommendations) recs = out.recommendations;
+                                                    }
+                                                    if (recs.length === 0 && item.recommendation_json) {
+                                                        recs = JSON.parse(item.recommendation_json);
+                                                    }
+                                                    // Fallback to legacy fields if needed
+                                                    if (recs.length === 0 && item.pick) {
+                                                        recs = [{ side: item.pick, line: item.bet_line, edge: item.ev_per_unit || item.edge }];
+                                                    }
+                                                } catch (e) {
+                                                    console.warn('Failed to parse history recs', e);
+                                                }
+
                                                 const mainRec = recs[0] || {};
+
+                                                // Result Logic
+                                                const resultStatus = item.graded_result || item.outcome || 'Pending';
+
                                                 return (
                                                     <tr key={idx} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                                                         <td className="py-2 px-4 text-slate-400 text-xs whitespace-nowrap">
@@ -530,15 +591,15 @@ const Research = () => {
                                                         </td>
                                                         <td className="py-2 px-4 text-right sm:text-left">
                                                             <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest
-                                                        ${item.graded_result === 'WON' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
-                                                                    item.graded_result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
-                                                                        item.graded_result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
+                                                        ${resultStatus === 'WON' || resultStatus === 'Win' ? 'bg-green-500/20 text-green-400 border border-green-500/20' :
+                                                                    resultStatus === 'LOST' || resultStatus === 'Loss' ? 'bg-red-500/20 text-red-400 border border-red-500/20' :
+                                                                        resultStatus === 'PUSH' || resultStatus === 'Push' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' :
                                                                             'bg-slate-700/50 text-slate-400 border border-slate-600'}`}>
-                                                                {item.graded_result || 'Analyzed'}
+                                                                {resultStatus === 'PENDING' ? 'Analyzed' : resultStatus}
                                                             </span>
                                                         </td>
                                                         <td className="py-2 px-4 text-slate-300 font-mono text-xs">
-                                                            {item.final_score_home !== null && item.final_score_away !== null ? (
+                                                            {item.final_score_home !== null && item.final_score_home !== undefined ? (
                                                                 <div className="flex flex-col">
                                                                     <span className="text-white font-bold">{item.final_score_home}-{item.final_score_away}</span>
                                                                     <span className="text-[10px] text-slate-500">T: {item.final_score_home + item.final_score_away}</span>

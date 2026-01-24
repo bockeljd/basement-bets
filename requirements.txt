@@ -9,3 +9,4 @@ html5lib
 supabase
 python-jose[cryptography]
 openai
+scipy
