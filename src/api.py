@@ -247,14 +247,20 @@ async def get_financials(user: dict = Depends(get_current_user)):
     engine = get_analytics_engine(user_id=user_id)
     return engine.get_financial_summary(user_id=user_id)
 
+@app.get("/api/financials/reconciliation")
+async def get_reconciliation(user: dict = Depends(get_current_user)):
+    """Returns per-book reconciliation data for validating transaction ingestion."""
+    user_id = user.get("sub")
+    engine = get_analytics_engine(user_id=user_id)
+    return engine.get_reconciliation_view(user_id=user_id)
+
 @app.post("/api/parse-slip")
 async def parse_slip(request: Request, user: dict = Depends(get_current_user)):
     try:
         data = await request.json()
+        from src.utils.normalize import normalize_provider
         raw_text = data.get("raw_text")
-        sportsbook = data.get("sportsbook", "DK")
-        if sportsbook.upper() == "DK": sportsbook = "DraftKings"
-        if sportsbook.upper() in ["FD", "FANDUEL"]: sportsbook = "FanDuel"
+        sportsbook = normalize_provider(data.get("sportsbook", "DK"))
         
         if sportsbook == "DraftKings":
             from src.parsers.draftkings_text import DraftKingsTextParser

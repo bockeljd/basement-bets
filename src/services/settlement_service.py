@@ -244,7 +244,8 @@ class SettlementEngine:
         """
         Returns: (outcome, computed_fields, error_reason_if_any)
         """
-        market = (leg.get("market_type") or "").upper()
+        from src.utils.normalize import normalize_market
+        market = normalize_market(leg.get("market_type"))
         home = float(result["home_score"])
         away = float(result["away_score"])
         total = home + away
@@ -261,7 +262,7 @@ class SettlementEngine:
             
         computed = {"home": home, "away": away, "total": total}
 
-        if 'TOTAL' in market or 'GAME_TOTAL' == market:
+        if market == 'TOTAL':
              # Basic Game Total
             if line is None or selection_side not in ("OVER", "UNDER"):
                 return "UNSETTLED", computed, f"missing_total_fields: line={line}, side={selection_side}"
@@ -284,7 +285,7 @@ class SettlementEngine:
                 if score_to_compare == line_val: return "PUSH", computed, None
                 return "LOST", computed, None
 
-        if market in ("MONEYLINE", "ML", "1X2"):
+        if market == 'MONEYLINE':
             if selection_side not in ("HOME", "AWAY", "DRAW"):
                 # Strict: Do not infer from text.
                 return "UNSETTLED", computed, f"missing_moneyline_side: {selection_side}"
@@ -299,7 +300,7 @@ class SettlementEngine:
             # DRAW
             return ("WON" if margin_home == 0 else "LOST"), computed, None
 
-        if market in ("SPREAD", "ATS", "HANDICAP"):
+        if market == 'SPREAD':
             if line is None or selection_side not in ("HOME", "AWAY"):
                 return "UNSETTLED", computed, f"missing_spread_fields: line={line}, side={selection_side}"
             

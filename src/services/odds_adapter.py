@@ -1,4 +1,9 @@
-from datetime import datetime, timedelta, timezone
+from src.utils.normalize import normalize_market, normalize_side
+
+    # ... (existing imports)
+
+    # In methods, replace self._normalize_market(x) with normalize_market(x)
+
 from typing import List, Dict, Optional
 from src.database import store_odds_snapshots, get_db_connection, _exec
 from src.services.team_identity_service import TeamIdentityService
@@ -120,7 +125,7 @@ class OddsAdapter:
         for bm in bookmakers:
             book_key = bm.get('key')
             for mkt in bm.get('markets', []):
-                mkt_key = self._normalize_market(mkt.get('key'))
+                mkt_key = normalize_market(mkt.get('key'))
                 for out in mkt.get('outcomes', []):
                     # Safety Filter: Price is None
                     if out.get('price') is None: continue
@@ -200,18 +205,6 @@ class OddsAdapter:
     def _detect_side(self, outcome_name, home_team, away_team):
         if home_team and outcome_name == home_team: return "HOME"
         if away_team and outcome_name == away_team: return "AWAY"
-        return self._normalize_side(outcome_name)
+        return normalize_side(outcome_name)
 
-    def _normalize_market(self, m):
-        m = m.lower()
-        if m in ('h2h', 'moneyline', 'ml'): return 'MONEYLINE'
-        if m in ('spreads', 'spread'): return 'SPREAD'
-        if m in ('totals', 'total'): return 'TOTAL'
-        return m.upper()
 
-    def _normalize_side(self, s):
-        s = str(s).upper()
-        if s in ('OVER', 'O'): return 'OVER'
-        if s in ('UNDER', 'U'): return 'UNDER'
-        if s in ('DRAW', 'X'): return 'DRAW'
-        return s

@@ -7,11 +7,11 @@ from src.parsers.transactions import (
     TransactionParser, DraftKingsHTMLTransactionParser, DraftKingsTransactionParser,
     FanDuelTransactionParser, DraftKingsManualFinancialsParser, LegacyFinancialsParser
 )
-from src.database import init_transactions_tab, insert_transaction
+from src.database import init_transactions_db, insert_transaction
 
 def ingest_all():
     # 1. Init DB
-    init_transactions_tab()
+    init_transactions_db()
     
     # 2. Ingest DraftKings (HTML preferred if exists)
     dk_html_path = "data/imports/Account Center _ DraftKings.html"

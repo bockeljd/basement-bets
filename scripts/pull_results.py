@@ -6,7 +6,7 @@ import datetime
 # Ensure root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.espn_client import EspnClient
+from src.parsers.espn_client import EspnClient
 # from src.football_data_client import FootballDataClient # If implemented for EPL
 
 def pull_results():

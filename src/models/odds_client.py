@@ -32,8 +32,6 @@ class OddsAPIClient:
 
     def _init_cache(self):
         """Initialize the cache table if not exists."""
-        # Use generic connection (SQLite or PG)
-        # TEXT/REAL types are compatible.
         query = """
             CREATE TABLE IF NOT EXISTS api_cache (
                 key TEXT PRIMARY KEY,
@@ -63,14 +61,6 @@ class OddsAPIClient:
                 row = cursor.fetchone()
                 
                 if row:
-                    # DictCursor vs Tuple access
-                    # SQLite Row vs PG DictRow. Both support key access?
-                    # Row supports integer index. DictRow supports key.
-                    # Let's verify what _exec returns.
-                    # It returns cursor.
-                    # SQLite row works like tuple too? Yes.
-                    # Postgres DictCursor works like list/tuple? Yes.
-                    
                     response_json = row[0]
                     timestamp = row[1]
                     
@@ -85,18 +75,7 @@ class OddsAPIClient:
         return None
 
     def _save_to_cache(self, key: str, data: Any):
-        """Save response to cache."""
-        # SQLite: INSERT OR REPLACE
-        # Postgres: INSERT ... ON CONFLICT
-        # _exec handles "INSERT OR IGNORE". 
-        # But here we want REPLACE/UPDATE.
-        # "INSERT OR REPLACE" is valid in SQLite.
-        # Postgres uses "INSERT ... ON CONFLICT (key) DO UPDATE SET ..."
-        
-        # Simpler approach: DELETE then INSERT (Atomic enough for cache)
-        # OR handle DB specific syntax here.
-        # Let's rely on DELETE + INSERT for simplicity across both.
-        
+        """Save response to cache using DELETE + INSERT for atomic update."""
         del_query = "DELETE FROM api_cache WHERE key = ?"
         ins_query = "INSERT INTO api_cache (key, response, timestamp) VALUES (?, ?, ?)"
         

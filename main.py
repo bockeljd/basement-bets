@@ -5,7 +5,7 @@ import os
 # Add src to path so imports work
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-from database import init_db, insert_bet, init_player_stats_db
+from database import init_db, insert_bet
 from parsers.draftkings import DraftKingsParser
 from analytics import AnalyticsEngine
 
@@ -77,7 +77,6 @@ def main():
     
     if args.command == "init":
         init_db()
-        init_player_stats_db()
         
     elif args.command == "import":
         import_file(args.file)

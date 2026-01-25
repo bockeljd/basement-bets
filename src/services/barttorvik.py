@@ -1,7 +1,7 @@
 import requests
 import json
 from datetime import datetime
-from src.database import upsert_team_metrics
+from src.database import upsert_bt_team_metrics_daily
 from src.selenium_client import SeleniumDriverFactory
 
 class BartTorvikClient:
@@ -195,7 +195,7 @@ class BartTorvikClient:
             # Persist to DB
             if metrics_payload:
                 try:
-                    upsert_team_metrics(metrics_payload)
+                    upsert_bt_team_metrics_daily(metrics_payload)
                     print(f"  [TORVIK] Persisted {len(metrics_payload)} team metrics to DB.")
                 except Exception as db_e:
                     print(f"  [TORVIK] DB Persist warning: {db_e}")

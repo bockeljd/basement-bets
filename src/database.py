@@ -135,6 +135,7 @@ def init_db():
     
     # Explicitly init bets last as it depends on others conceptually (not foreign key wise mostly)
     init_bets_db() 
+    init_transactions_db() 
 
 def _force_reset() -> bool:
     return os.environ.get("BASEMENT_DB_RESET") == "1"
@@ -856,17 +857,61 @@ def upsert_team_metrics(metrics: list):
             _exec(conn, query, m)
         conn.commit()
 
+def upsert_bt_team_metrics_daily(metrics: list):
+    """
+    Upsert daily team metrics to bt_team_metrics_daily.
+    Expected payload keys: team_text, date, adj_off, adj_def, adj_tempo
+    """
+    query = """
+    INSERT INTO bt_team_metrics_daily (team_text, date, adj_off, adj_def, adj_tempo)
+    VALUES (:team_text, :date, :adj_off, :adj_def, :adj_tempo)
+    ON CONFLICT (team_text, date) DO UPDATE SET
+        adj_off = EXCLUDED.adj_off,
+        adj_def = EXCLUDED.adj_def,
+        adj_tempo = EXCLUDED.adj_tempo
+    """
+    with get_db_connection() as conn:
+        for m in metrics:
+            _exec(conn, query, m)
+        conn.commit()
+
+
 def fetch_model_health_daily(date=None, league=None, market_type=None):
     return []
 
-def init_transactions_tab(): pass # Deprecated?
-def init_linking_queue_db(): pass
-def init_model_health_db(): pass
-def init_model_health_insights_db(): pass
-def init_policy_db(): pass
-def init_ingestion_runs_db():
-    # Deprecated: usage consolidated into job_runs
-    pass
+def init_transactions_db():
+    """
+    Initialize the transactions table for financial flows (deposits, withdrawals, etc.).
+    Columns match existing analytics query expectations.
+    """
+    drops = ["DROP TABLE IF EXISTS transactions CASCADE;"] if _force_reset() else []
+    
+    schema = """
+    CREATE TABLE IF NOT EXISTS transactions (
+        id SERIAL PRIMARY KEY,
+        provider TEXT NOT NULL,
+        txn_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        type TEXT NOT NULL,
+        description TEXT,
+        amount NUMERIC(12,2) NOT NULL,
+        balance NUMERIC(12,2),
+        user_id TEXT NOT NULL,
+        raw_data TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(provider, txn_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_txn_user_date ON transactions(user_id, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_txn_type ON transactions(type);
+    CREATE INDEX IF NOT EXISTS idx_txn_provider ON transactions(provider);
+    """
+    with get_admin_db_connection() as conn:
+        with conn.cursor() as cur:
+            for d in drops: cur.execute(d)
+            cur.execute(schema)
+        conn.commit()
+    print("Transactions table initialized.")
+
 
 def log_ingestion_run(data: dict):
     """
@@ -995,3 +1040,56 @@ def insert_bet(bet_data: dict):
     with get_db_connection() as conn:
         _exec(conn, query, bet_data)
         conn.commit()
+
+def insert_transaction(txn: dict) -> bool:
+    """
+    Insert a single transaction with idempotency via (provider, txn_id).
+    Maps incoming fields from parsers to database schema.
+    Returns True if inserted/updated, False on error.
+    """
+    query = """
+    INSERT INTO transactions (provider, txn_id, date, type, description, 
+                              amount, balance, user_id, raw_data)
+    VALUES (:provider, :txn_id, :date, :type, :description,
+            :amount, :balance, :user_id, :raw_data)
+    ON CONFLICT (provider, txn_id) DO UPDATE SET
+        amount = EXCLUDED.amount,
+        balance = EXCLUDED.balance,
+        type = EXCLUDED.type,
+        description = EXCLUDED.description
+    """
+    # Map incoming fields from parsers to schema
+    doc = {
+        'provider': txn.get('provider') or txn.get('sportsbook'),
+        'txn_id': txn.get('id') or txn.get('txn_id'),
+        'date': txn.get('date') or txn.get('txn_date'),
+        'type': txn.get('type') or txn.get('txn_type'),
+        'description': txn.get('description'),
+        'amount': txn.get('amount'),
+        'balance': txn.get('balance'),
+        'user_id': txn.get('user_id') or '00000000-0000-0000-0000-000000000000',
+        'raw_data': txn.get('raw_data')
+    }
+    
+    try:
+        with get_db_connection() as conn:
+            _exec(conn, query, doc)
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"[DB] insert_transaction error: {e}")
+        return False
+
+def insert_transactions_bulk(txns: list) -> int:
+    """
+    Bulk insert transactions. Returns count of successfully inserted rows.
+    """
+    if not txns: return 0
+    count = 0
+    for txn in txns:
+        try:
+            if insert_transaction(txn):
+                count += 1
+        except Exception as e:
+            print(f"[DB] insert_transactions_bulk error: {e}")
+    return count

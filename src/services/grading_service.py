@@ -74,26 +74,15 @@ class GradingService:
         Use OddsSelectionService to find the Closing Line (last snap <= start_time).
         """
         query = """
-        SELECT m.id, m.event_id, m.market_type, m.pick, m.open_line, m.open_price, e.start_time
-        FROM model_predictions m
-        JOIN events e ON m.event_id = e.id
-        WHERE m.close_line IS NULL 
-          And datetime(e.start_time) < datetime('now') -- SQLite friendly
-        """
-        # Note: Postgres uses NOW()
-        # For compatibility, let's select all NULL close_lines and filter in Python or use compatible syntax if possible
-        # Or check DB type.
-        
-        query_candidates = """
         SELECT m.id, m.event_id, m.market_type, m.pick, m.open_line, m.open_price, e.start_time, e.league
         FROM model_predictions m
         JOIN events e ON m.event_id = e.id
         WHERE m.close_line IS NULL 
-          AND e.start_time < CURRENT_TIMESTAMP -- Postgres
+          AND e.start_time < CURRENT_TIMESTAMP
         """
         
         with get_db_connection() as conn:
-            rows = _exec(conn, query_candidates).fetchall()
+            rows = _exec(conn, query).fetchall()
             
         updates = 0
         now = datetime.now() # naive or tz aware? DB timestamps usually naive UTC or similar in this app
@@ -315,7 +304,8 @@ class GradingService:
         return graded
 
     def _grade_row(self, row):
-        market = row['market_type'] # SPREAD, TOTAL, ML
+        from src.utils.normalize import normalize_market
+        market = normalize_market(row['market_type']) 
         pick = row['pick']
         line = float(row['bet_line']) if row['bet_line'] is not None else 0.0
         
@@ -345,7 +335,7 @@ class GradingService:
             elif pick.upper() == 'UNDER':
                 outcome = 'WON' if total_score < line else 'LOST' if total_score > line else 'PUSH'
                 
-        elif market == 'ML' or market == 'MONEYLINE':
+        elif market == 'MONEYLINE':
             winner = row['home_team'] if h_score > a_score else row['away_team']
             if pick == winner: outcome = 'WON'
             else: outcome = 'LOST'

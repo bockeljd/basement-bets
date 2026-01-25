@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.database import init_db, init_model_history, init_transactions_tab, init_player_stats_db
+from src.database import init_db, init_model_history, init_transactions_db, init_player_stats_db
 
 def migrate():
     # Load environment variables (try .env.development.local first for Vercel pulled vars)
@@ -29,7 +29,7 @@ def migrate():
     # These functions rely on DATABASE_URL being set
     init_db()
     init_model_history()
-    init_transactions_tab()
+    init_transactions_db()
     init_player_stats_db()
     
     # 2. Connect to both

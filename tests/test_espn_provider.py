@@ -8,7 +8,7 @@ from datetime import datetime
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.espn_client import EspnClient
+from src.parsers.espn_client import EspnClient
 
 class TestEspnClient(unittest.TestCase):
 

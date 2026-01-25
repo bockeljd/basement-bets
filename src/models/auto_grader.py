@@ -1,5 +1,4 @@
 
-import sqlite3
 from typing import List, Dict
 from src.database import get_db_connection, _exec
 from src.models.odds_client import OddsAPIClient

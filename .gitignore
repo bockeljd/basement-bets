@@ -1,7 +1,9 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 venv/
 .env
 
@@ -14,11 +16,20 @@ dist/
 *.db
 data/bets.db
 
+# Logs
+*.log
+debug_tail.log
+
+# Debug/Dump artifacts
+*_dump.json
+*_debug.json
+torvik_source.html
+
 # Misc
 .vscode/
 .vercel
 .env*.local
 
-# Raw Data
+# Raw Data (personal exports)
 data/snapshots/
 data/imports/

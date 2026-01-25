@@ -301,23 +301,27 @@ class AnalyticsEngine:
                 monthly_profit[month_key] += b['profit']
             except: continue
 
-        # 2. Process Transactions (Deposits/Withdrawals)
+        # 2. Process Transactions (Deposits/Withdrawals) - graceful degradation if table missing
         query = "SELECT date, type, amount FROM transactions WHERE type IN ('Deposit', 'Withdrawal')"
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query)
-            for r in cur.fetchall():
-                date_str = r['date']
-                if not date_str: continue
-                try:
-                    d_str = date_str.split(' ')[0] if ' ' in date_str else date_str
-                    dt = datetime.strptime(d_str, "%Y-%m-%d")
-                    month_key = dt.strftime("%Y-%m")
-                    if r['type'] == 'Deposit':
-                        monthly_deposits[month_key] += abs(r['amount'])
-                    else:
-                        monthly_withdrawals[month_key] += abs(r['amount'])
-                except: continue
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query)
+                for r in cur.fetchall():
+                    date_str = r['date']
+                    if not date_str: continue
+                    try:
+                        d_str = date_str.split(' ')[0] if ' ' in date_str else date_str
+                        dt = datetime.strptime(d_str, "%Y-%m-%d")
+                        month_key = dt.strftime("%Y-%m")
+                        if r['type'] == 'Deposit':
+                            monthly_deposits[month_key] += abs(r['amount'])
+                        else:
+                            monthly_withdrawals[month_key] += abs(r['amount'])
+                    except: continue
+        except Exception as e:
+            # Transactions table may not exist yet - degrade gracefully
+            print(f"[Analytics] Skipping transactions (table may not exist): {e}")
             
         # Get all month keys
         all_months = set(monthly_profit.keys()) | set(monthly_deposits.keys()) | set(monthly_withdrawals.keys())
@@ -373,20 +377,24 @@ class AnalyticsEngine:
             day_key = date_str.split(' ')[0] if ' ' in date_str else date_str
             daily_profit[day_key] += b['profit']
             
-        # 2. Transactions (Deposits/Withdrawals)
+        # 2. Transactions (Deposits/Withdrawals) - graceful degradation if table missing
         query = "SELECT date, type, amount FROM transactions WHERE type IN ('Deposit', 'Withdrawal')"
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query)
-            for r in cur.fetchall():
-                date_str = r['date']
-                if not date_str: continue
-                day_key = date_str.split(' ')[0] if ' ' in date_str else date_str
-                
-                if r['type'] == 'Deposit':
-                    daily_deposits[day_key] += abs(float(r['amount']))
-                elif r['type'] == 'Withdrawal':
-                    daily_withdrawals[day_key] += abs(float(r['amount']))
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query)
+                for r in cur.fetchall():
+                    date_str = r['date']
+                    if not date_str: continue
+                    day_key = date_str.split(' ')[0] if ' ' in date_str else date_str
+                    
+                    if r['type'] == 'Deposit':
+                        daily_deposits[day_key] += abs(float(r['amount']))
+                    elif r['type'] == 'Withdrawal':
+                        daily_withdrawals[day_key] += abs(float(r['amount']))
+        except Exception as e:
+            # Transactions table may not exist yet - degrade gracefully
+            print(f"[Analytics] Skipping transactions (table may not exist): {e}")
 
         # Merge all dates
         all_dates = set(daily_profit.keys()) | set(daily_deposits.keys()) | set(daily_withdrawals.keys())
@@ -669,33 +677,37 @@ class AnalyticsEngine:
         total_deposits = 0.0
         total_withdrawals = 0.0
         
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query)
-            rows = cur.fetchall()
-            for r in rows:
-                amt = r['amount']
-                typ = r['type']
-                desc = r['description'] or ''
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query)
+                rows = cur.fetchall()
+                for r in rows:
+                    amt = r['amount']
+                    typ = r['type']
+                    desc = r['description'] or ''
 
-                # Exclusion logic removed to show all transactions
-                # if (abs(amt - 1900.0) < 0.01 or "1900" in desc):
-                #     if typ == 'Deposit' or ('Transfer in' in desc and amt > 0):
-                #         continue
+                    # Exclusion logic removed to show all transactions
+                    # if (abs(amt - 1900.0) < 0.01 or "1900" in desc):
+                    #     if typ == 'Deposit' or ('Transfer in' in desc and amt > 0):
+                    #         continue
 
-                if typ == 'Deposit':
-                    total_deposits += amt
-                elif typ == 'Withdrawal':
-                    total_withdrawals += abs(amt)
-                elif typ == 'Other':
-                    # Heuristic: "Wallet transfer - Transfer in/out"
-                    # Capture "Transfer in" as Deposit, "Transfer out" as Withdrawal
-                    # FIX: Exclude these from Global Financial Summary to avoid inflating totals with internal moves.
-                    # if 'Transfer in' in desc and amt > 0:
-                    #     total_deposits += amt
-                    # elif 'Transfer out' in desc and amt < 0:
-                    #     total_withdrawals += abs(amt)
-                    pass
+                    if typ == 'Deposit':
+                        total_deposits += amt
+                    elif typ == 'Withdrawal':
+                        total_withdrawals += abs(amt)
+                    elif typ == 'Other':
+                        # Heuristic: "Wallet transfer - Transfer in/out"
+                        # Capture "Transfer in" as Deposit, "Transfer out" as Withdrawal
+                        # FIX: Exclude these from Global Financial Summary to avoid inflating totals with internal moves.
+                        # if 'Transfer in' in desc and amt > 0:
+                        #     total_deposits += amt
+                        # elif 'Transfer out' in desc and amt < 0:
+                        #     total_withdrawals += abs(amt)
+                        pass
+        except Exception as e:
+            # Transactions table may not exist yet - degrade gracefully
+            print(f"[Analytics] Skipping transactions for financial summary (table may not exist): {e}")
         
         # Calculate "Total In Play" (Current Equity)
         balances = self.get_balances()
@@ -713,23 +725,27 @@ class AnalyticsEngine:
         # Re-query or iterate to group by provider
         provider_stats = defaultdict(lambda: {'deposited': 0.0, 'withdrawn': 0.0})
         query_all = "SELECT provider, type, amount, description FROM transactions"
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query_all)
-            rows = cur.fetchall()
-            for r in rows:
-                p = r['provider']
-                amt = r['amount']
-                typ = r['type']
-                desc = r['description'] or ''
-                
-                # No longer filtering 'Manual' - we want ALL deposit/withdrawal transactions
-                # This includes manual adjustments, imports, and corrections
-                
-                if typ == 'Deposit':
-                    provider_stats[p]['deposited'] += amt
-                elif typ == 'Withdrawal':
-                    provider_stats[p]['withdrawn'] += abs(amt)
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query_all)
+                rows = cur.fetchall()
+                for r in rows:
+                    p = r['provider']
+                    amt = r['amount']
+                    typ = r['type']
+                    desc = r['description'] or ''
+                    
+                    # No longer filtering 'Manual' - we want ALL deposit/withdrawal transactions
+                    # This includes manual adjustments, imports, and corrections
+                    
+                    if typ == 'Deposit':
+                        provider_stats[p]['deposited'] += amt
+                    elif typ == 'Withdrawal':
+                        provider_stats[p]['withdrawn'] += abs(amt)
+        except Exception as e:
+            # Transactions table may not exist yet - degrade gracefully
+            print(f"[Analytics] Skipping provider breakdown (table may not exist): {e}")
 
         provider_breakdown = []
         for p, stats in provider_stats.items():
@@ -755,6 +771,139 @@ class AnalyticsEngine:
             "breakdown": provider_breakdown
         }
 
+    def get_reconciliation_view(self, user_id=None):
+        """
+        Returns per-book reconciliation data for validating transaction ingestion.
+        Helps identify:
+        - Missing transactions
+        - Misclassified bonus/adjustment types
+        - Discrepancies between computed and reported balances
+        """
+        from src.database import get_db_connection
+        from collections import defaultdict
+        
+        bets = self.bets
+        if user_id and user_id != self.user_id:
+             bets = [b for b in self.bets if b.get('user_id') == user_id]
+
+        # 1. Calculate bet profits per provider
+        bet_profits = defaultdict(float)
+        bet_counts = defaultdict(int)
+        for b in bets:
+            provider = b.get('provider', 'Unknown')
+            bet_profits[provider] += b['profit']
+            bet_counts[provider] += 1
+        
+        # 2. Aggregate transactions by provider and type
+        provider_txns = defaultdict(lambda: {
+            'deposits': 0.0,
+            'withdrawals': 0.0,
+            'bonuses': 0.0,
+            'wagers': 0.0,
+            'winnings': 0.0,
+            'other': 0.0,
+            'balance_snapshots': [],
+            'txn_count': 0
+        })
+        
+        try:
+            query = "SELECT provider, type, amount, balance, date FROM transactions"
+            with get_db_connection() as conn:
+                from src.database import _exec
+                cur = _exec(conn, query)
+                for r in cur.fetchall():
+                    provider = r['provider']
+                    tx_type = (r['type'] or '').strip()
+                    amount = float(r['amount'] or 0)
+                    balance = r['balance']
+                    
+                    provider_txns[provider]['txn_count'] += 1
+                    
+                    if tx_type == 'Deposit':
+                        provider_txns[provider]['deposits'] += abs(amount)
+                    elif tx_type == 'Withdrawal':
+                        provider_txns[provider]['withdrawals'] += abs(amount)
+                    elif tx_type in ('Bonus', 'Promo', 'Free Bet', 'Casino Bonus'):
+                        provider_txns[provider]['bonuses'] += amount
+                    elif tx_type == 'Wager':
+                        provider_txns[provider]['wagers'] += amount
+                    elif tx_type in ('Winning', 'Payout'):
+                        provider_txns[provider]['winnings'] += amount
+                    elif tx_type == 'Balance':
+                        # Track balance snapshots for latest reported balance
+                        provider_txns[provider]['balance_snapshots'].append({
+                            'balance': float(balance or 0),
+                            'date': r['date']
+                        })
+                    else:
+                        provider_txns[provider]['other'] += amount
+        except Exception as e:
+            print(f"[Analytics] Error fetching transactions for reconciliation: {e}")
+
+        # 3. Build reconciliation view per provider
+        all_providers = set(bet_profits.keys()) | set(provider_txns.keys())
+        
+        reconciliation = []
+        for provider in sorted(all_providers):
+            txns = provider_txns[provider]
+            bet_profit = bet_profits.get(provider, 0.0)
+            
+            # Computed balance = Deposits + Bonuses + Bet Profit - Withdrawals
+            # Alternative: Deposits + Wagers + Winnings + Bonuses - Withdrawals
+            computed_balance = (
+                txns['deposits'] 
+                + txns['bonuses'] 
+                + bet_profit 
+                - txns['withdrawals']
+            )
+            
+            # Alternative calculation using transaction wagers/winnings
+            txn_based_balance = (
+                txns['deposits']
+                + txns['winnings']
+                + txns['bonuses']
+                + txns['wagers']  # typically negative
+                + txns['other']
+                - txns['withdrawals']
+            )
+            
+            # Get latest reported balance
+            latest_balance = None
+            latest_balance_date = None
+            if txns['balance_snapshots']:
+                sorted_snaps = sorted(txns['balance_snapshots'], key=lambda x: x['date'] or '', reverse=True)
+                latest_balance = sorted_snaps[0]['balance']
+                latest_balance_date = sorted_snaps[0]['date']
+            
+            discrepancy = None
+            if latest_balance is not None:
+                discrepancy = round(latest_balance - computed_balance, 2)
+            
+            reconciliation.append({
+                "provider": provider,
+                "deposits_total": round(txns['deposits'], 2),
+                "withdrawals_total": round(txns['withdrawals'], 2),
+                "bonuses_total": round(txns['bonuses'], 2),
+                "wagers_total": round(txns['wagers'], 2),
+                "winnings_total": round(txns['winnings'], 2),
+                "other_total": round(txns['other'], 2),
+                "bet_profit_total": round(bet_profit, 2),
+                "bet_count": bet_counts.get(provider, 0),
+                "txn_count": txns['txn_count'],
+                "computed_balance": round(computed_balance, 2),
+                "txn_based_balance": round(txn_based_balance, 2),
+                "latest_reported_balance": latest_balance,
+                "latest_balance_date": latest_balance_date,
+                "discrepancy": discrepancy,
+                "status": "OK" if (discrepancy is None or abs(discrepancy) < 1.0) else "MISMATCH"
+            })
+        
+        return {
+            "providers": reconciliation,
+            "total_providers": len(reconciliation),
+            "has_discrepancies": any(r['status'] == 'MISMATCH' for r in reconciliation)
+        }
+
     def get_all_activity(self, user_id=None):
         """
         Merges bets and financial transactions into a single chronological list.
@@ -775,7 +924,7 @@ class AnalyticsEngine:
             item['amount'] = b['wager']
             activity.append(item)
             
-        # Add Financials from DB
+        # Add Financials from DB - graceful degradation if table missing
         # Exclude Wager, Winning, Bonus to prevent duplicates with standard Bets
         # Include Deposit, Withdrawal, and Other (Transfers)
         query = """
@@ -786,38 +935,42 @@ class AnalyticsEngine:
                OR (type = 'Other' AND description LIKE '%Manual%')
             ORDER BY date DESC
         """
-        with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query)
-            rows = cur.fetchall()
-            for r in rows:
-                t = dict(r)
-                amt = t['amount']
-                typ = t['type']
-                desc = t['description'] or ''
+        try:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query)
+                rows = cur.fetchall()
+                for r in rows:
+                    t = dict(r)
+                    amt = t['amount']
+                    typ = t['type']
+                    desc = t['description'] or ''
 
-                # Filter logic: Exclude 'Manual Import' if user wants cleaner view
-                if 'Manual' in desc:
-                    continue
-                
-                # Normalize
-                t['category'] = 'Transaction'
-                t['bet_type'] = typ # e.g. "Deposit", "Withdrawal"
-                t['wager'] = amt # Show amount in wager column
-                
-                # Financial Profit Logic (Realized Profit View)
-                # Deposit = -Amount (Cash Outflow from user perspective, or Liability? No, Realized Profit = Out - In)
-                # So In (Deposit) is Negative impact on Realized Profit.
-                if typ == 'Deposit':
-                    t['profit'] = -abs(amt)
-                elif typ == 'Withdrawal':
-                    t['profit'] = abs(amt)
-                else:
-                    t['profit'] = 0.0
-                t['status'] = 'COMPLETED'
-                t['selection'] = desc
-                t['odds'] = None
-                activity.append(t)
+                    # Filter logic: Exclude 'Manual Import' if user wants cleaner view
+                    if 'Manual' in desc:
+                        continue
+                    
+                    # Normalize
+                    t['category'] = 'Transaction'
+                    t['bet_type'] = typ # e.g. "Deposit", "Withdrawal"
+                    t['wager'] = amt # Show amount in wager column
+                    
+                    # Financial Profit Logic (Realized Profit View)
+                    # Deposit = -Amount (Cash Outflow from user perspective)
+                    # So In (Deposit) is Negative impact on Realized Profit.
+                    if typ == 'Deposit':
+                        t['profit'] = -abs(amt)
+                    elif typ == 'Withdrawal':
+                        t['profit'] = abs(amt)
+                    else:
+                        t['profit'] = 0.0
+                    t['status'] = 'COMPLETED'
+                    t['selection'] = desc
+                    t['odds'] = None
+                    activity.append(t)
+        except Exception as e:
+            # Transactions table may not exist yet - degrade gracefully
+            print(f"[Analytics] Skipping transactions for activity (table may not exist): {e}")
                 
         # Sort by Date Descending
         activity.sort(key=lambda x: x['date'], reverse=True)
