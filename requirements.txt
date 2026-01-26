@@ -9,4 +9,6 @@ html5lib
 supabase
 python-jose[cryptography]
 openai
+selenium
+undetected-chromedriver
 
