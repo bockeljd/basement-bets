@@ -1,0 +1,42 @@
+name: Sync DraftKings Bets
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run every day at 10:00 AM UTC (5:00 AM EST)
+    - cron: '0 10 * * *'
+
+jobs:
+  sync-dk:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Cache Browser Profile
+        uses: actions/cache@v3
+        with:
+          path: chrome_profile
+          key: chrome-profile-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            chrome-profile-${{ runner.os }}-
+            
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements-worker.txt
+          pip install selenium undetected-chromedriver
+
+      - name: Run Sync Script
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BASEMENT_USER_ID: ${{ secrets.BASEMENT_USER_ID }}
+        run: |
+          # Create profile dir if not exists to avoid permission errors
+          mkdir -p chrome_profile
+          python src/scripts/run_dk_sync_ci.py

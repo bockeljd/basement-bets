@@ -9,15 +9,15 @@ class DraftKingsService:
     def __init__(self, profile_path="./chrome_profile"):
         self.profile_path = profile_path
 
-    def scrape_history(self):
+    def scrape_history(self, headless=False):
         """
         Launches Selenium, scrapes 'Settled' bets, and returns parsed bet objects.
         """
-        print("🚀 Launching DraftKings Scraper Service...")
+        print(f"🚀 Launching DraftKings Scraper Service (Headless={headless})...")
         client = None
         try:
             # 1. Launch Browser
-            client = SeleniumClient(headless=False, profile_path=self.profile_path)
+            client = SeleniumClient(headless=headless, profile_path=self.profile_path)
             
             # 2. Scrape HTML
             html = client.scrape_draftkings_bets()

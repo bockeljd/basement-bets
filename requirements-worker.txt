@@ -4,3 +4,4 @@ webdriver-manager>=4.0.0
 requests
 psycopg2-binary
 python-dotenv
+beautifulsoup4
