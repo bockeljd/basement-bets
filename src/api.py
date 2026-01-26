@@ -390,9 +390,18 @@ async def sync_draftkings(request: Request, user: dict = Depends(get_current_use
         print(f"[API] Starting DK Sync for user {user_id}...")
         
         # 1. Run Scraper
-        from src.services.draftkings_service import DraftKingsService
-        service = DraftKingsService() # Uses default ./chrome_profile
-        bets = service.scrape_history()
+        try:
+            from src.services.draftkings_service import DraftKingsService
+            service = DraftKingsService() # Uses default ./chrome_profile
+            bets = service.scrape_history(headless=True)
+        except ImportError as e:
+            print(f"[Sync Fail] Import Error (Likely Vercel): {e}")
+            raise HTTPException(
+                status_code=400, 
+                detail="Cloud Sync is not supported on Vercel. Please run the 'Sync DraftKings Bets' workflow in GitHub Actions."
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to initialize scraper: {e}")
         
         if not bets:
             return {"status": "warning", "message": "Scraper finished but found 0 bets."}
