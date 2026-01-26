@@ -97,6 +97,11 @@ class DraftKingsTextParser:
             wager_idx = -1
             matchup = ""
             matchup_idx = -1
+            paid = 0.0
+            paid_idx = -1
+            wager_idx = -1
+            matchup = ""
+            matchup_idx = -1
             header = ""
             header_idx = -1
             odds = None
@@ -133,6 +138,7 @@ class DraftKingsTextParser:
                 p_match = re.search(r'(?:Paid|Payout):[\s\xa0]*\$([\d\.,]+)', l)
                 if p_match:
                     paid = float(p_match.group(1).replace(',', ''))
+                    paid_idx = i
 
             # Matchup & Team Detection
             teams_found = []
@@ -249,11 +255,18 @@ class DraftKingsTextParser:
                 r'^Includes:',
                 r'^Cash Out:',
                 r'^Potential Payout:',
-                r'^vs$'
+                r'^vs$',
+                r'^Share',
+                r'^DraftKings Brand',
+                r'^Icon representing',
+                r'^\d+ Picks',
+                r'^Information$',
+                r'^Down$',
+                r'^KING OF THE ENDZONE$'
             ]
             
             for i, l in enumerate(lines):
-                if i in [header_idx, status_idx, wager_idx, matchup_idx]: continue
+                if i in [header_idx, status_idx, wager_idx, matchup_idx, paid_idx]: continue
                 
                 # Filter noise
                 is_noise = False
