@@ -464,31 +464,24 @@ class AnalyticsEngine:
     def get_balances(self, user_id=None):
         """
         Returns current balances per provider.
-        Prefers explicit 'Balance' transactions if available, otherwise calculates:
-        Balance = Sum(Deposits) + Sum(Bet Profits) - Sum(Withdrawals)
+        Logic:
+        1. Find latest explicit 'Balance' snapshot from transactions.
+        2. Add any Deposits/Withdrawals occurring AFTER that snapshot.
+        3. Add any Bet Profits occurring AFTER that snapshot.
         """
         from src.database import get_db_connection
         from collections import defaultdict
         from dateutil.parser import parse as parse_date
+        import datetime
         
         bets = self.bets
         if user_id and user_id != self.user_id:
              bets = [b for b in self.bets if b.get('user_id') == user_id]
 
-        # 1. Calculate bet profits per provider (for fallback)
-        bet_profits = defaultdict(float)
-        last_bet_dates = {}
-        for b in bets:
-            provider = b.get('provider', 'Unknown')
-            bet_profits[provider] += b['profit']
-            date_str = b.get('date', '')
-            if date_str and (provider not in last_bet_dates or date_str > last_bet_dates[provider]):
-                last_bet_dates[provider] = date_str
-        
-        # 2. Get explicit balance snapshots (preferred) and transaction flows
-        explicit_balances = {}  # provider -> (balance, date)
-        deposits = defaultdict(float)
-        withdrawals = defaultdict(float)
+        # 1. Get explicit balance snapshots and all transactions
+        explicit_balances = {}  # provider -> (balance, dt_object, original_date_str)
+        deposits = defaultdict(list)     # provider -> list of (amount, dt)
+        withdrawals = defaultdict(list)  # provider -> list of (amount, dt)
         
         query = """
         SELECT provider, type, amount, balance, date
@@ -502,43 +495,121 @@ class AnalyticsEngine:
                     provider = r['provider']
                     tx_type = r['type']
                     
-                    if tx_type == 'Balance':
-                        # Parse date to find latest
-                        try:
-                            dt = parse_date(r['date'])
-                        except:
-                            dt = None
+                    # Parse date
+                    try:
+                        dt = parse_date(r['date'])
+                    except:
+                        dt = None
                         
+                    if tx_type == 'Balance':
+                        current_bal = float(r['balance'] or 0)
+                        # Keep the LATEST snapshot
                         if provider not in explicit_balances:
-                            explicit_balances[provider] = (float(r['balance'] or 0), dt, r['date'])
+                            explicit_balances[provider] = (current_bal, dt, r['date'])
                         else:
                             existing_dt = explicit_balances[provider][1]
+                            # If new is newer, replace
                             if dt and existing_dt and dt > existing_dt:
-                                explicit_balances[provider] = (float(r['balance'] or 0), dt, r['date'])
+                                explicit_balances[provider] = (current_bal, dt, r['date'])
                             elif dt and not existing_dt:
-                                explicit_balances[provider] = (float(r['balance'] or 0), dt, r['date'])
+                                explicit_balances[provider] = (current_bal, dt, r['date'])
+                                
                     elif tx_type == 'Deposit':
-                        deposits[provider] += float(r['amount'] or 0)
+                        deposits[provider].append((float(r['amount'] or 0), dt))
                     elif tx_type == 'Withdrawal':
-                        withdrawals[provider] += abs(float(r['amount'] or 0))
+                        withdrawals[provider].append((abs(float(r['amount'] or 0)), dt))
         except Exception as e:
             print(f"[Analytics] Error fetching transactions: {e}")
         
-        # 3. Build final balances
-        all_providers = set(bet_profits.keys()) | set(deposits.keys()) | set(withdrawals.keys()) | set(explicit_balances.keys())
+        # 2. Iterate Providers and Calculate Final Balance
+        # We need to consider all providers found in bets OR transactions
+        all_providers = set()
+        for b in bets: all_providers.add(b.get('provider', 'Unknown'))
+        for p in explicit_balances: all_providers.add(p)
+        for p in deposits: all_providers.add(p)
         
         final_balances = {}
+        last_bet_dates = {}
+        
         for provider in all_providers:
-            # Prefer explicit balance if available
+            base_balance = 0.0
+            snapshot_dt = None
+            
+            # A. Start with Snapshot if available
             if provider in explicit_balances:
-                balance = explicit_balances[provider][0]
+                base_balance, snapshot_dt, _ = explicit_balances[provider]
             else:
-                # Fallback to calculation
-                balance = deposits[provider] + bet_profits[provider] - withdrawals[provider]
+                # If no snapshot, base is 0.0 and we sum ALL history
+                # (effectively snapshot_dt is 'beginning of time')
+                snapshot_dt = None
+            
+            # B. Add Transactions AFTER snapshot
+            # Deposits
+            for amt, dt in deposits.get(provider, []):
+                # If no snapshot, include all. If snapshot, include only if newer.
+                if not snapshot_dt:
+                    base_balance += amt
+                elif dt and dt > snapshot_dt:
+                    base_balance += amt
+                    
+            # Withdrawals
+            for amt, dt in withdrawals.get(provider, []):
+                if not snapshot_dt:
+                    base_balance -= amt
+                elif dt and dt > snapshot_dt:
+                    base_balance -= amt
+                    
+            # C. Add Bet Profits AFTER snapshot
+            # Filter bets for this provider
+            provider_bets = [b for b in bets if b.get('provider', 'Unknown') == provider]
+            last_date_str = None
+            
+            for b in provider_bets:
+                profit = b['profit']
+                date_str = b.get('date', '')
+                
+                # Update last bet date for UI
+                if date_str:
+                    if not last_date_str or date_str > last_date_str:
+                        last_date_str = date_str
+                
+                # Decide whether to include in balance
+                # Note: b['date'] is usually string "YYYY-MM-DD". Snapshot is full datetime.
+                # We need to parse bet date safely.
+                status = b.get('status', 'PENDING').upper()
+                wager = b.get('wager', 0.0)
+                
+                try:
+                    # Use fuzzy=True just in case, or assume YYYY-MM-DD
+                    bet_dt = parse_date(date_str)
+                    
+                    if not snapshot_dt:
+                        if status == 'PENDING':
+                            base_balance -= wager
+                        else:
+                            base_balance += profit
+                    else:
+                        # Compare logic
+                        b_mz = bet_dt.replace(tzinfo=None)
+                        s_mz = snapshot_dt.replace(tzinfo=None)
+                        
+                        if b_mz > s_mz:
+                            if status == 'PENDING':
+                                base_balance -= wager
+                            else:
+                                base_balance += profit
+                            
+                except:
+                    # If date parse fails, we can't determine order. 
+                    if not snapshot_dt:
+                        if status == 'PENDING':
+                            base_balance -= wager
+                        else:
+                            base_balance += profit
             
             final_balances[provider] = {
-                'balance': round(balance, 2),
-                'last_bet': last_bet_dates.get(provider)
+                'balance': round(base_balance, 2),
+                'last_bet': last_date_str
             }
         
         return final_balances

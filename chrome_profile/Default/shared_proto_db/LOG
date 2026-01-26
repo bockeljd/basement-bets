@@ -1,0 +1,6 @@
+2026/01/26-09:51:43.233 b9cc9a Reusing MANIFEST /Users/jordanbockelman/Basement Bets/bet_tracker/chrome_profile/Default/shared_proto_db/MANIFEST-000001
+2026/01/26-09:51:43.233 b9cc9a Recovering log #3
+2026/01/26-09:51:43.236 b9cc9a Reusing old log /Users/jordanbockelman/Basement Bets/bet_tracker/chrome_profile/Default/shared_proto_db/000003.log 
+2026/01/26-09:51:48.363 b9cc97 Level-0 table #5: started
+2026/01/26-09:51:48.368 b9cc97 Level-0 table #5: 115020 bytes OK
+2026/01/26-09:51:48.386 b9cc97 Delete type=0 #3

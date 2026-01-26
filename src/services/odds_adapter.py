@@ -5,6 +5,7 @@ from src.utils.normalize import normalize_market, normalize_side
     # In methods, replace self._normalize_market(x) with normalize_market(x)
 
 from typing import List, Dict, Optional
+from datetime import datetime, timedelta, timezone
 from src.database import store_odds_snapshots, get_db_connection, _exec
 from src.services.team_identity_service import TeamIdentityService
 
@@ -60,29 +61,49 @@ class OddsAdapter:
         end_window = dt + timedelta(hours=6)
         
         # 3. Query events by text matching
-        query = """
-        SELECT id FROM events
+        # 3. Query events in window and fuzzy match
+        # Fetch candidates
+        query_candidates = """
+        SELECT id, home_team, away_team FROM events
         WHERE league = :l
           AND start_time BETWEEN :start AND :end
-          AND (
-              (home_team ILIKE :h AND away_team ILIKE :a)
-              OR
-              (home_team ILIKE :a AND away_team ILIKE :h)
-          )
-        LIMIT 1
         """
         
+        candidates = []
         with get_db_connection() as conn:
-            row = _exec(conn, query, {
+            rows = _exec(conn, query_candidates, {
                 "l": league,
-                "h": home_canon,
-                "a": away_canon,
                 "start": start_window,
                 "end": end_window
-            }).fetchone()
-            
-            if row:
-                return row[0]
+            }).fetchall()
+            candidates = [dict(r) for r in rows]
+
+        # Fuzzy Matcher Helper
+        def matches(provider_name, event_team_name):
+            if not provider_name or not event_team_name: return False
+            p = provider_name.lower().replace('.', '').strip()
+            e = event_team_name.lower().replace('.', '').strip()
+            # Check containment (e.g. "xavier" in "xavier musketeers")
+            if p in e or e in p:
+                return True
+            # Check team matcher logic if imported, or alias
+            return False
+
+        # Find best match
+        best_match = None
+        for cand in candidates:
+            # Check both home/away (provider might have them flipped or normalized differently)
+            # Direct: Home-Home, Away-Away
+            if matches(home_canon, cand['home_team']) and matches(away_canon, cand['away_team']):
+                best_match = cand['id']
+                break
+            # Swap: Home-Away, Away-Home
+            if matches(home_canon, cand['away_team']) and matches(away_canon, cand['home_team']):
+                best_match = cand['id']
+                break
+        
+        if best_match:
+            return best_match
         
         # Debug Log on failure
         # print(f"[OddsAdapter] Failed to resolve: {league} | {home_team} vs {away_team} | {dt}")

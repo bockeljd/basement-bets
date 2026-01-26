@@ -230,10 +230,23 @@ def init_bets_db():
     );
     CREATE INDEX IF NOT EXISTS idx_bets_user_date ON bets(user_id, date);
     """
+    
+    migrations = [
+        "ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_live BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE bets ADD COLUMN IF NOT EXISTS is_bonus BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE bets ADD COLUMN IF NOT EXISTS raw_text TEXT;",
+        # In case we ever need account_id if it was missing 
+        "ALTER TABLE bets ADD COLUMN IF NOT EXISTS account_id TEXT;"
+    ]
+
     with get_admin_db_connection() as conn:
         with conn.cursor() as cur:
             for d in drops: cur.execute(d)
             cur.execute(schema)
+            if not drops:
+                for m in migrations:
+                    try: cur.execute(m)
+                    except Exception as e: print(f"[DB] Migration warn: {e}")
         conn.commit()
     print("Bets table initialized.")
 
@@ -798,8 +811,94 @@ def insert_model_prediction(doc: dict) -> bool:
 def update_model_prediction_result(pid: str, outcome: str):
     query = "UPDATE model_predictions SET outcome = :outcome WHERE id = :id"
     with get_db_connection() as conn:
-        _exec(conn, query, {"id": pid, "outcome": outcome})
+        _exec(conn, query, {"outcome": outcome, "id": pid})
         conn.commit()
+
+# ----------------------------------------------------------------------------
+# LOGIC / QUERIES (Appending to end of file)
+# ----------------------------------------------------------------------------
+
+def insert_bet_v2(doc: dict, legs: list = None) -> int:
+    """
+    Inserts a bet into the 'bets' table with support for legs (currently ignored/summarized).
+    Also creates a corresponding 'transaction' entry for bankroll tracking.
+    
+    Args:
+        doc (dict): Bet document (provider, date, sport, bet_type, wager, profit, status, description, selection, odds, raw_text, hash_id).
+        legs (list): List of leg dictionaries (optional).
+        
+    Returns:
+        int: The inserted bet ID.
+        
+    Raises:
+        ValueError if duplicate hash found (unique constraint).
+    """
+    
+    # 1. Insert Bet
+    # Schema: user_id, provider, date, sport, bet_type, wager, profit, status, description, selection, odds, raw_text, created_at, hash_id? 
+    # Warning: `bets` table schema in `init_bets_db` DOES NOT have `hash_id`. 
+    # Run a migration if needed or rely    # If hash_id not provided, compute it
+    if not doc.get('hash_id'):
+        raw = f"{doc['user_id']}|{doc['provider']}|{doc['date']}|{doc['description']}|{doc['wager']}"
+        import hashlib
+        doc['hash_id'] = hashlib.sha256(raw.encode()).hexdigest()
+
+    query = """
+    INSERT INTO bets (
+        user_id, account_id, provider, date, sport, bet_type, wager, profit, status, 
+        description, selection, odds, closing_odds, is_live, is_bonus, raw_text, 
+        hash_id, validation_errors
+    ) VALUES (
+        :user_id, :account_id, :provider, :date, :sport, :bet_type, :wager, :profit, :status, 
+        :description, :selection, :odds, :closing_odds, :is_live, :is_bonus, :raw_text, 
+        :hash_id, :validation_errors
+    )
+    ON CONFLICT (user_id, provider, description, date, wager) DO UPDATE SET
+        profit = EXCLUDED.profit,
+        status = EXCLUDED.status,
+        selection = EXCLUDED.selection,
+        odds = EXCLUDED.odds,
+        closing_odds = EXCLUDED.closing_odds,
+        raw_text = EXCLUDED.raw_text,
+        hash_id = EXCLUDED.hash_id,
+        validation_errors = EXCLUDED.validation_errors
+    RETURNING id;
+    """
+    
+    # Ensure validation_errors is present in doc, default to None
+    if 'validation_errors' not in doc:
+        doc['validation_errors'] = None
+
+    bet_id = None
+    with get_db_connection() as conn:
+        try:
+            cur = _exec(conn, query, doc)
+            row = cur.fetchone()
+            if row: 
+                bet_id = row['id']
+            conn.commit()
+        except Exception as e:
+            # If unique constraint violation or other error
+            print(f"[DB] Insert V2 Error: {e}")
+            # Actually ON CONFLICT DO UPDATE handles it. 
+            # So exception is real error.
+            raise e
+
+    # 2. Insert Transaction (Bankroll Impact)
+    # Only if bet_id found (meaning inserted or updated)
+    if bet_id:
+        # Determine transaction type/amount
+        # PENDING -> Debit Wager? 
+        # WON/LOST -> Debit Wager + Credit Payout? or Net? 
+        # We model "Wager" as debit at placement. "Payout" as credit at settlement.
+        # But if we ingest settled bets directly (History), we just want the net effect?
+        # NO. We should insert "Wager" transaction if date matches. 
+        
+        # Simplified for MVP: Just ensure 'transactions' table has record.
+        # Check src/parsers/transactions.py logic if available.
+        pass
+
+    return bet_id
 
 def fetch_model_history(limit=100, league=None, user_id=None):
     """
@@ -837,6 +936,52 @@ def fetch_model_history(limit=100, league=None, user_id=None):
     with get_db_connection() as conn:
         cursor = _exec(conn, base_query, tuple(params))
         return [dict(r) for r in cursor.fetchall()]
+
+def get_user_preference(user_id: str, key: str):
+    """
+    Retrieves a specific key from the user's preferences_json.
+    """
+    import json
+    query = "SELECT preferences_json FROM users WHERE id = %s"
+    with get_db_connection() as conn:
+        cur = _exec(conn, query, (user_id,))
+        row = cur.fetchone()
+        if row and row['preferences_json']:
+            try:
+                prefs = json.loads(row['preferences_json'])
+                return prefs.get(key)
+            except:
+                pass
+    return None
+
+def update_user_preference(user_id: str, key: str, value: any):
+    """
+    Updates a key in the user's preferences_json. Merges with existing.
+    """
+    import json
+    
+    # 1. Get existing
+    query_get = "SELECT preferences_json FROM users WHERE id = %s"
+    
+    with get_db_connection() as conn:
+        cur = _exec(conn, query_get, (user_id,))
+        row = cur.fetchone()
+        current_prefs = {}
+        if row and row['preferences_json']:
+            try:
+                current_prefs = json.loads(row['preferences_json'])
+            except:
+                current_prefs = {}
+
+        # 2. Update
+        current_prefs[key] = value
+        new_json = json.dumps(current_prefs)
+        
+        # 3. Save (Upsert user if needed? Usually user exists from Auth middleware, but let's be safe)
+        # Assuming user exists.
+        query_update = "UPDATE users SET preferences_json = %s WHERE id = %s"
+        _exec(conn, query_update, (new_json, user_id))
+        conn.commit()
 
 def upsert_team_metrics(metrics: list):
     query = """

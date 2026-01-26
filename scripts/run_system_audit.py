@@ -18,7 +18,7 @@ def audit_database():
         # Predictions
         cur.execute("SELECT count(*) FROM model_predictions")
         count_preds = cur.fetchone()[0]
-        cur.execute("SELECT count(*) FROM model_predictions WHERE result='Pending'")
+        cur.execute("SELECT count(*) FROM model_predictions WHERE outcome='Pending'")
         count_pending = cur.fetchone()[0]
         
         print(f"Total Predictions: {count_preds}")

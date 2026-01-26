@@ -46,6 +46,7 @@ async def check_access_key(request: Request, call_next):
         
         # If Password is set on Server, enforce it
         if server_key and client_key != server_key:
+             print(f"[AUTH FAIL] Received: '{client_key}' | Expected: '{server_key}'")
              return JSONResponse(status_code=403, content={"message": "Wrong Password"})
              
     response = await call_next(request)
@@ -253,6 +254,224 @@ async def get_reconciliation(user: dict = Depends(get_current_user)):
     user_id = user.get("sub")
     engine = get_analytics_engine(user_id=user_id)
     return engine.get_reconciliation_view(user_id=user_id)
+
+
+@app.post("/api/sync/fanduel/token")
+async def sync_fanduel_token(request: Request, user: dict = Depends(get_current_user)):
+    """
+    Syncs FanDuel history using a manually provided cURL or Token.
+    """
+    try:
+        user_id = user.get("sub")
+        data = await request.json()
+        raw_input = data.get("curl_or_token", "")
+        
+        if not raw_input:
+            # TRY STORED TOKEN
+            from src.database import get_user_preference
+            token = get_user_preference(str(user_id), "fanduel_token")
+            if not token:
+                raise HTTPException(status_code=400, detail="No stored token found. Please provide cURL.")
+        else:
+            # PARSE & SAVE TOKEN
+            token = raw_input.strip()
+            if "curl " in raw_input or "-H " in raw_input:
+                import re
+                match = re.search(r"x-authentication:\s*([^\s'\"]+)", raw_input, re.IGNORECASE)
+                if match:
+                    token = match.group(1)
+            
+            if not token.startswith("eyJ"):
+                raise HTTPException(status_code=400, detail="Invalid Token format")
+                
+            # Save for future use
+            from src.database import update_user_preference
+            update_user_preference(str(user_id), "fanduel_token", token)
+            
+        from src.api_clients.fanduel_client import FanDuelAPIClient
+        client = FanDuelAPIClient(auth_token=token)
+        
+        # Fetch Bets
+        bets = client.fetch_bets(to_record=50) # Fetch last 50
+        
+        # Ingest into DB (similar to parse_slip but internal object)
+        from src.database import insert_bet_v2
+        from src.services.event_linker import EventLinker
+        linker = EventLinker()
+        
+        user_id = user.get("sub")
+        saved_count = 0
+        
+        for bet in bets:
+            # Check if exists (Idempotency) - FD betId is unique
+            # We use betId as hash_id or part of it?
+            # Schema uses hash_id.
+            
+            # Construct Doc
+            profit = bet.get('profit', 0)
+            status = bet.get('status', 'PENDING')
+            
+            # Map Sport to standard keys if possible
+            sport = bet.get('sport', 'Unknown')
+            
+            doc = {
+                "user_id": user_id,
+                "account_id": f"FD_{user_id}", # Virtual account
+                "provider": "FanDuel",
+                "date": bet['date'],
+                "sport": sport,
+                "bet_type": bet['bet_type'],
+                "wager": bet['wager'],
+                "profit": round(profit, 2),
+                "status": status,
+                "description": bet['description'],
+                "selection": bet['selection'],
+                "odds": bet.get('odds', 0), # American
+                "is_live": bet.get('is_live', False),
+                "is_bonus": bet.get('is_bonus', False),
+                "raw_text": bet.get('raw_text')
+            }
+            
+            # Unique Hash for FD: Provider|BetId ? 
+            # But we don't have BetID in standardised 'bet' object returned by client? 
+            # Client returns dict. Let's ensure Client returns external_id if available.
+            # I need to update Client to pass 'betId' in raw_text or separate field?
+            # It's in raw_text.
+            
+            import hashlib
+            # Use description + date + wager as hash if no ID
+            # Better: Update Client to return 'id'.
+            # For now, legacy hash:
+            raw_string = f"{user_id}|FanDuel|{doc['date']}|{doc['description']}|{doc['wager']}"
+            doc['hash_id'] = hashlib.sha256(raw_string.encode()).hexdigest()
+            doc['is_parlay'] = "parlay" in doc['bet_type'].lower()
+            
+            # Create Leg (Simplified for SGP/Parlay, we just store one summary leg or try to split?)
+            # Parsing "A | B | C" into legs is complex.
+            # Storing as single composite leg for now.
+            leg = {
+                "leg_type": doc['bet_type'], 
+                "selection": doc['selection'],
+                "market_key": doc['bet_type'],
+                "odds_american": doc['odds'],
+                "status": doc['status'],
+                "subject_id": None, 
+                "side": None, 
+                "line_value": None
+            }
+            
+            # Link (Best Effort)
+            link_result = linker.link_leg(leg, doc['sport'], doc['date'], doc['description'])
+            leg['event_id'] = link_result['event_id']
+            leg['link_status'] = link_result['link_status']
+            
+            try:
+                insert_bet_v2(doc, legs=[leg])
+                saved_count += 1
+            except Exception as e:
+                # Log duplicates or failures
+                # If duplicate key, it's fine. If usage error, we need to know.
+                print(f"[Sync] Failed to insert bet: {e}")
+                pass
+                
+        return {"status": "success", "bets_fetched": len(bets), "bets_saved": saved_count}
+
+    except Exception as e:
+        print(f"[FD Sync] Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/sync/draftkings")
+async def sync_draftkings(request: Request, user: dict = Depends(get_current_user)):
+    """
+    Triggers the Selenium Scraper to fetch DraftKings history and store it.
+    """
+    try:
+        user_id = user.get("sub")
+        print(f"[API] Starting DK Sync for user {user_id}...")
+        
+        # 1. Run Scraper
+        from src.services.draftkings_service import DraftKingsService
+        service = DraftKingsService() # Uses default ./chrome_profile
+        bets = service.scrape_history()
+        
+        if not bets:
+            return {"status": "warning", "message": "Scraper finished but found 0 bets."}
+            
+        # 2. Save to DB
+        from src.database import insert_bet_v2
+        from src.services.event_linker import EventLinker
+        linker = EventLinker()
+        
+        saved_count = 0
+        
+        for bet in bets:
+            # Construct Doc (similar to FD Sync)
+            doc = {
+                "user_id": user_id,
+                "account_id": f"DK_{user_id}", 
+                "provider": "DraftKings",
+                "date": bet['date'],
+                "sport": bet['sport'],
+                "bet_type": bet['bet_type'],
+                "wager": bet['wager'],
+                "profit": round(bet['profit'], 2),
+                "status": bet['status'],
+                "description": bet['description'],
+                "selection": bet['selection'],
+                "odds": bet.get('odds', 0),
+                "is_live": bet.get('is_live', False),
+                "is_bonus": bet.get('is_bonus', False),
+                "raw_text": bet.get('raw_text')
+            }
+            
+            # Generate Hash
+            import hashlib
+            # Use same robust hash strategy
+            raw_string = f"{user_id}|DraftKings|{doc['date']}|{doc['description']}|{doc['wager']}"
+            doc['hash_id'] = hashlib.sha256(raw_string.encode()).hexdigest()
+            doc['is_parlay'] = "parlay" in str(doc['bet_type']).lower() or "sgp" in str(doc['bet_type']).lower()
+            
+            # Create Leg (Simplified)
+            leg = {
+                "leg_type": doc['bet_type'], 
+                "selection": doc['selection'],
+                "market_key": doc['bet_type'],
+                "odds_american": doc['odds'],
+                "status": doc['status'],
+                "subject_id": None, 
+                "side": None, 
+                "line_value": None
+            }
+            
+            # Matchup Link
+            link_result = linker.link_leg(leg, doc['sport'], doc['date'], doc['description'])
+            leg['event_id'] = link_result['event_id']
+            leg['link_status'] = link_result['link_status']
+            
+            # Validation Logic
+            errors = []
+            if doc['sport'] == 'Unknown':
+                errors.append("Unknown Sport")
+            if doc['status'] == 'WON' and doc['profit'] <= 0:
+                errors.append("Invalid Profit (WON <= 0)")
+            if doc['odds'] is None:
+                errors.append("Missing Odds")
+            
+            doc['validation_errors'] = ", ".join(errors) if errors else None
+            
+            try:
+                insert_bet_v2(doc, legs=[leg])
+                saved_count += 1
+            except Exception as e:
+                # print(f"Insert skip: {e}")
+                pass
+                
+        return {"status": "success", "bets_found": len(bets), "bets_saved": saved_count}
+
+    except Exception as e:
+        print(f"[DK Sync] Error: {e}")
+        # Return 500 so frontend knows it failed
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/parse-slip")
 async def parse_slip(request: Request, user: dict = Depends(get_current_user)):
@@ -1166,4 +1385,57 @@ async def get_model_health_report(request: Request):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Sync Endpoints ---
+
+@app.post("/api/sync/draftkings")
+def sync_draftkings(payload: dict):
+    """
+    Launches local browser for DraftKings Sync.
+    Payload: {"account_name": "Main"}
+    """
+    from src.scrapers.user_draftkings import DraftKingsScraper
+    from src.parsers.draftkings import DraftKingsParser
+    
+    try:
+        scraper = DraftKingsScraper()
+        raw_text = scraper.scrape()
+        
+        parser = DraftKingsParser()
+        parsed_bets = parser.parse_text_dump(raw_text)
+        
+        return {
+            "source": "DraftKings", 
+            "status": "success", 
+            "count": len(parsed_bets),
+            "bets": parsed_bets,
+            "raw_text_summary": raw_text[:100]
+        }
+    except Exception as e:
+        print(f"Sync failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/sync/fanduel")
+def sync_fanduel(payload: dict):
+    # from src.scrapers.user_fanduel import FanDuelScraper # SELENIUM (Blocked)
+    from src.scrapers.user_fanduel_pw import FanDuelScraperPW # PLAYWRIGHT
+    from src.parsers.fanduel import FanDuelParser
+    
+    try:
+        scraper = FanDuelScraperPW()
+        raw_text = scraper.scrape()
+        
+        parser = FanDuelParser()
+        parsed_bets = parser.parse(raw_text)
+        
+        return {
+            "source": "FanDuel", 
+            "status": "success", 
+            "count": len(parsed_bets),
+            "bets": parsed_bets
+        }
+    except Exception as e:
+        print(f"Sync failed: {e}")
+        return {"status": "error", "message": str(e)}
+
 

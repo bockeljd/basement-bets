@@ -6,9 +6,13 @@ Fetches KenPom efficiency ratings from database and calculates adjustments
 
 from typing import Dict, Optional
 from src.database import get_db_connection, _exec
+from src.utils.team_matcher import TeamMatcher
 
 class KenPomClient:
     """Client for KenPom efficiency data"""
+    
+    def __init__(self):
+        self.matcher = TeamMatcher()
     
     def get_team_rating(self, team_name: str) -> Optional[Dict]:
         """
@@ -20,14 +24,18 @@ class KenPomClient:
         Returns:
             Dict with adj_em, adj_o, adj_d, adj_t or None
         """
+        matched_name = self.matcher.find_source_name(team_name, "kenpom_ratings", "team_name")
+        if not matched_name:
+            return None
+
         with get_db_connection() as conn:
             query = """
             SELECT team_name, rank, adj_em, adj_o, adj_d, adj_t
             FROM kenpom_ratings
-            WHERE LOWER(team_name) LIKE LOWER(%s)
+            WHERE team_name = %s
             LIMIT 1
             """
-            cursor = _exec(conn, query, (f'%{team_name}%',))
+            cursor = _exec(conn, query, (matched_name,))
             row = cursor.fetchone()
             
             if row:

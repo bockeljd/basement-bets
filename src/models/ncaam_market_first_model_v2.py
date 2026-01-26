@@ -6,6 +6,8 @@ from typing import Dict, List, Any, Optional
 
 from src.services.torvik_projection import TorvikProjectionService
 from src.services.odds_selection_service import OddsSelectionService
+from src.services.kenpom_client import KenPomClient
+from src.services.news_service import NewsService
 from src.database import get_db_connection, _exec, insert_model_prediction
 
 class NCAAMMarketFirstModelV2:
@@ -21,6 +23,7 @@ class NCAAMMarketFirstModelV2:
     # Model Weights
     W_BASE = 0.20  # Market-first blend
     W_SCHED = 0.05 # Torvik schedule-lean weight
+    W_KENPOM = 0.05 # KenPom efficiency weight
     
     # Caps (v2 defaults)
     CAP_SPREAD = 2.0
@@ -29,6 +32,8 @@ class NCAAMMarketFirstModelV2:
     def __init__(self):
         self.torvik_service = TorvikProjectionService()
         self.odds_selector = OddsSelectionService()
+        self.kenpom_client = KenPomClient()
+        self.news_service = NewsService()
 
     def analyze(self, event_id: str, market_snapshot: Optional[Dict] = None, event_context: Optional[Dict] = None) -> Dict:
         """
@@ -65,8 +70,10 @@ class NCAAMMarketFirstModelV2:
                 '_raw_total': snap_total
             }
 
-        # 3. Get Torvik Signals
+        # 3. Get Signals
         torvik_view = self.torvik_service.get_projection(event['home_team'], event['away_team'])
+        kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(event['home_team'], event['away_team'])
+        news_context = self.news_service.fetch_game_context(event['home_team'], event['away_team'])
         
         # 4. Market Baselines
         mu_market_spread = market_snapshot.get('spread_home', 0.0)
@@ -75,11 +82,23 @@ class NCAAMMarketFirstModelV2:
         # 5. Blend Math (Strict mu_final)
         mu_torvik_spread = -torvik_view.get('margin', 0.0)
         mu_sched_spread = -torvik_view.get('official_margin', -mu_torvik_spread)
-
+        mu_kenpom_spread = kenpom_adj.get('spread_adj', 0.0) # This is an adjustment, not a raw line.
+        # KenPom spread_adj from client: Home - Away efficiency diff. 
+        # If Home > Away, it returns positive margin. spread is usually negative for home fav.
+        # Wait, calculate_kenpom_adjustment returns spread_adj (points better home is).
+        # So fair spread = -spread_adj.
+        
         diff_torvik = (mu_torvik_spread - mu_market_spread)
         diff_sched = (mu_sched_spread - mu_market_spread)
         
-        mu_spread_final = mu_market_spread + (self.W_BASE * diff_torvik) + (self.W_SCHED * diff_sched)
+        # KenPom Integration: 
+        # kenpom_adj['spread_adj'] is expected Home margin. So spread = -margin.
+        # diff = (-expected_margin) - market_spread
+        kp_margin = kenpom_adj.get('spread_adj', 0.0)
+        mu_kenpom_line = -kp_margin
+        diff_kenpom = (mu_kenpom_line - mu_market_spread)
+
+        mu_spread_final = mu_market_spread + (self.W_BASE * diff_torvik) + (self.W_SCHED * diff_sched) + (self.W_KENPOM * diff_kenpom)
         
         # Apply Caps
         if abs(mu_spread_final - mu_market_spread) > self.CAP_SPREAD:
@@ -87,7 +106,9 @@ class NCAAMMarketFirstModelV2:
 
         # Total
         mu_torvik_total = torvik_view.get('total', 145.0)
-        mu_total_final = mu_market_total + (self.W_BASE * (mu_torvik_total - mu_market_total))
+        mu_kenpom_total = market_snapshot.get('total', 145.0) + kenpom_adj.get('total_adj', 0.0)
+        
+        mu_total_final = mu_market_total + (self.W_BASE * (mu_torvik_total - mu_market_total)) + (self.W_KENPOM * (mu_kenpom_total - mu_market_total))
         
         if abs(mu_total_final - mu_market_total) > self.CAP_TOTAL:
              mu_total_final = mu_market_total + (self.CAP_TOTAL * math.copysign(1, mu_total_final - mu_market_total))
@@ -100,7 +121,7 @@ class NCAAMMarketFirstModelV2:
         recs = self._generate_recommendations(mu_spread_final, sigma_spread, mu_total_final, sigma_total, market_snapshot, event)
         
         # 8. Narrative (UI MATCH)
-        narrative = self._generate_narrative(event, market_snapshot, torvik_view, recs)
+        narrative = self._generate_narrative(event, market_snapshot, torvik_view, kenpom_adj, news_context, recs)
         
         # 9. Result Object
         ui_recs = []
@@ -121,6 +142,8 @@ class NCAAMMarketFirstModelV2:
         res = {
             "id": None, 
             "event_id": event_id,
+            "home_team": event['home_team'],
+            "away_team": event['away_team'],
             "analyzed_at": datetime.now().isoformat(),
             "model_version": self.VERSION,
             "market_type": best_rec['market'] if best_rec else "AUTO",
@@ -135,13 +158,15 @@ class NCAAMMarketFirstModelV2:
             "win_prob": best_rec['prob'] if best_rec else 0.5,
             "ev_per_unit": best_rec['ev'] if best_rec else 0.0,
             "confidence_0_100": best_rec['confidence_idx'] if best_rec else 0,
-            "inputs_json": json.dumps({"market": market_snapshot, "torvik": torvik_view}, default=str),
+            "inputs_json": json.dumps({"market": market_snapshot, "torvik": torvik_view, "kenpom": kenpom_adj, "news": news_context}, default=str),
             "outputs_json": json.dumps({"mu_spread": mu_spread_final, "mu_total": mu_total_final, "recommendations": recs}, default=str),
             "narrative": narrative, 
             "narrative_json": json.dumps(narrative, default=str),
             "recommendations": ui_recs,
             "torvik_view": torvik_view,
-            "key_factors": ["Market Efficiency", "Schedule Adjustment"],
+            "kenpom_data": kenpom_adj,
+            "news_summary": self.news_service.summarize_impact(news_context),
+            "key_factors": ["Market Efficiency", "Schedule Adjustment", "KenPom Efficiency", "Injury News"],
             "risks": narrative['risks'],
             "selection": best_rec['side'] if best_rec else None,
             "price": best_rec['price'] if best_rec else None,
@@ -300,12 +325,18 @@ class NCAAMMarketFirstModelV2:
             multiplier = 100.0 / abs(american_odds)
         return (win_prob * multiplier) - (1 - win_prob)
 
-    def _generate_narrative(self, event, snap, torvik, recs) -> Dict:
+    def _generate_narrative(self, event, snap, torvik, kenpom, news, recs) -> Dict:
         headline = "No Edge Detected"
         rationale = []
         
         rationale.append(f"Market Line: {snap.get('spread_home','N/A')}")
         rationale.append(f"Torvik Proj: {torvik.get('projected_score','N/A')} ({torvik.get('lean','N/A')})")
+        
+        if kenpom.get('spread_adj'):
+             rationale.append(f"KenPom Adj: {kenpom.get('spread_adj'):+.1f} pts ({kenpom.get('summary')})")
+             
+        if news.get('has_injury_news'):
+             rationale.append(f"NEWS ALERT: {news.get('summary')}")
         
         if recs:
             main = recs[0]
@@ -318,6 +349,8 @@ class NCAAMMarketFirstModelV2:
             "recommendation": headline,
             "rationale": rationale,
             "torvik_view": torvik.get('lean', 'Computed projections only'),
+            "kenpom_view": kenpom.get('summary', 'No Data'),
+            "news_view": news.get('summary', 'No News'),
             "risks": ["Line Movement Volatility", "Late Injury Reports"],
             "data_quality": "High" if snap else "Low"
         }

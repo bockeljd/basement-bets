@@ -1,0 +1,34 @@
+2026/01/25-13:29:33.430 9f402a Reusing MANIFEST /Users/jordanbockelman/Basement Bets/bet_tracker/playwright_profile_fd/Default/IndexedDB/https_oh.sportsbook.fanduel.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/01/25-13:29:33.430 9f402a Recovering log #15
+2026/01/25-13:29:33.435 9f402a Reusing old log /Users/jordanbockelman/Basement Bets/bet_tracker/playwright_profile_fd/Default/IndexedDB/https_oh.sportsbook.fanduel.com_0.indexeddb.leveldb/000015.log 
+2026/01/25-13:29:35.640 9f402c Level-0 table #19: started
+2026/01/25-13:29:35.648 9f402c Level-0 table #19: 3869740 bytes OK
+2026/01/25-13:29:35.652 9f402c Delete type=0 #15
+2026/01/25-13:29:37.891 9f403c Level-0 table #21: started
+2026/01/25-13:29:37.905 9f403c Level-0 table #21: 3430528 bytes OK
+2026/01/25-13:29:37.907 9f403c Delete type=0 #18
+2026/01/25-13:29:37.909 9f403d Compacting 4@0 + 1@1 files
+2026/01/25-13:29:37.920 9f403d Generated table #22@0: 2347 keys, 163137 bytes
+2026/01/25-13:29:37.920 9f403d Compacted 4@0 + 1@1 files => 163137 bytes
+2026/01/25-13:29:37.921 9f403d compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/01/25-13:29:37.921 9f403d Delete type=2 #14
+2026/01/25-13:29:37.921 9f403d Delete type=2 #16
+2026/01/25-13:29:37.921 9f403d Delete type=2 #12
+2026/01/25-13:29:37.921 9f403d Delete type=2 #21
+2026/01/25-13:29:37.921 9f403d Delete type=2 #19
+2026/01/25-13:29:38.072 9f402c Level-0 table #24: started
+2026/01/25-13:29:38.082 9f402c Level-0 table #24: 3482321 bytes OK
+2026/01/25-13:29:38.085 9f402c Delete type=0 #20
+2026/01/25-13:29:39.825 9f402c Level-0 table #26: started
+2026/01/25-13:29:39.831 9f402c Level-0 table #26: 3654658 bytes OK
+2026/01/25-13:29:39.835 9f402c Delete type=0 #23
+2026/01/25-13:31:05.170 9f402c Compacting 2@0 + 1@1 files
+2026/01/25-13:31:05.180 9f402c Generated table #27@0: 2408 keys, 216673 bytes
+2026/01/25-13:31:05.180 9f402c Compacted 2@0 + 1@1 files => 216673 bytes
+2026/01/25-13:31:05.182 9f402c compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/01/25-13:31:05.182 9f402c Delete type=2 #22
+2026/01/25-13:31:05.182 9f402c Delete type=2 #26
+2026/01/25-13:31:05.182 9f402c Delete type=2 #24
+2026/01/25-13:31:29.008 9f403c Level-0 table #29: started
+2026/01/25-13:31:29.020 9f403c Level-0 table #29: 3391472 bytes OK
+2026/01/25-13:31:29.024 9f403c Delete type=0 #25

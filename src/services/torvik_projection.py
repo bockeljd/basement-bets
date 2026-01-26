@@ -12,9 +12,21 @@ class TorvikProjectionService:
     
     LEAGUE_AVG_EFF = 106.0  # Approx D1 average efficiency
     
+from src.services.barttorvik import BartTorvikClient
+from src.services.team_identity_service import TeamIdentityService
+from src.utils.team_matcher import TeamMatcher
+
+class TorvikProjectionService:
+    """
+    Computes/Fetches Torvik-style projections for NCAAM games.
+    """
+    
+    LEAGUE_AVG_EFF = 106.0
+    
     def __init__(self):
         self.bt_client = BartTorvikClient()
         self.identity = TeamIdentityService()
+        self.matcher = TeamMatcher()
 
     def get_projection(self, home_team: str, away_team: str, date: str = None) -> Dict:
         """
@@ -28,10 +40,8 @@ class TorvikProjectionService:
         # 1. Official Projection Fetch
         official_projs = self.bt_client.fetch_daily_projections(date)
         # Match by name (Torvik uses specific naming)
-        # Note: we might need a better matcher here for fuzzy names
-        # For now, try direct match or normalized alias
-        h_proj = official_projs.get(home_team)
-        a_proj = official_projs.get(away_team)
+        h_proj = self._find_projection(home_team, official_projs)
+        a_proj = self._find_projection(away_team, official_projs)
         
         if h_proj:
             return {
@@ -45,6 +55,35 @@ class TorvikProjectionService:
 
         # 2. Heuristic Computation (The "Torvik thinks" backup)
         return self.compute_torvik_projection(home_team, away_team)
+
+    def _find_projection(self, team_name: str, projections: Dict) -> Optional[Dict]:
+        """
+        Fuzzy match team_name against projection keys.
+        """
+        if not team_name: return None
+        
+        # 1. Exact Match
+        if team_name in projections:
+            return projections[team_name]
+            
+        # 2. Fuzzy Match (Keys are short names like 'Xavier')
+        # Check if Key is substring of input (e.g. 'Xavier' in 'Xavier Musketeers')
+        norm_input = team_name.lower().replace('.', '').strip()
+        
+        candidates = []
+        for key, data in projections.items():
+            norm_key = key.lower().replace('.', '').strip()
+            # Check length to avoid 'Iowa' matching 'Iowa State' incorrectly?
+            # Torvik name is usually the prefix.
+            if norm_key in norm_input:
+                 candidates.append((key, data))
+        
+        if candidates:
+            # Pick longest key (e.g. 'Southern Miss' over 'Southern')
+            candidates.sort(key=lambda x: len(x[0]), reverse=True)
+            return candidates[0][1]
+            
+        return None
 
     def compute_torvik_projection(self, home_team: str, away_team: str) -> Dict:
         """
@@ -87,6 +126,12 @@ class TorvikProjectionService:
         """
         Fetch latest metrics from bt_team_metrics_daily.
         """
+        # Normalize Name via Matcher
+        matched_name = self.matcher.find_source_name(team_name, "bt_team_metrics_daily", "team_text")
+        if not matched_name:
+            print(f"[Torvik] No match found for '{team_name}'")
+            return None
+
         query = """
         SELECT adj_off, adj_def, adj_tempo 
         FROM bt_team_metrics_daily 
@@ -94,7 +139,7 @@ class TorvikProjectionService:
         ORDER BY date DESC LIMIT 1
         """
         with get_db_connection() as conn:
-            row = _exec(conn, query, {"t": team_name}).fetchone()
+            row = _exec(conn, query, {"t": matched_name}).fetchone()
             if row:
                 return dict(row)
         return None

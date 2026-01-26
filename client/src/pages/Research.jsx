@@ -731,6 +731,12 @@ const Research = () => {
                                                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
                                                         <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Score</div>
                                                         <div className="text-lg font-bold text-white">{analysisResult.torvik_view.projected_score}</div>
+                                                        {analysisResult.away_team && (
+                                                            <div className="flex justify-between text-[10px] text-slate-400 mt-1 px-1">
+                                                                <span className="truncate max-w-[45%]">{analysisResult.away_team}</span>
+                                                                <span className="truncate max-w-[45%] text-right">{analysisResult.home_team}</span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
                                                         <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Margin</div>
@@ -741,6 +747,48 @@ const Research = () => {
                                                     {analysisResult.torvik_view.lean}
                                                 </div>
                                             </div>
+
+                                            {/* KenPom View */}
+                                            {analysisResult.kenpom_data && (
+                                                <div className="bg-slate-800/80 p-6 rounded-xl border border-slate-700/50">
+                                                    <h3 className="font-bold text-slate-200 mb-4 flex items-center gap-2 text-sm uppercase tracking-wider">
+                                                        <Shield size={16} className="text-purple-400" />
+                                                        KenPom View
+                                                    </h3>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Spread Adj</div>
+                                                            <div className="text-lg font-bold text-white">
+                                                                {(analysisResult.kenpom_data.spread_adj || 0) > 0 ? '+' : ''}
+                                                                {Math.round((analysisResult.kenpom_data.spread_adj || 0) * 10) / 10}
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Total Adj</div>
+                                                            <div className="text-lg font-bold text-white">
+                                                                {(analysisResult.kenpom_data.total_adj || 0) > 0 ? '+' : ''}
+                                                                {Math.round((analysisResult.kenpom_data.total_adj || 0) * 10) / 10}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-4 text-[10px] text-slate-500 italic">
+                                                        {analysisResult.kenpom_data.summary || 'No Summary'}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* News View */}
+                                            {analysisResult.news_summary && (
+                                                <div className="bg-slate-800/80 p-6 rounded-xl border border-slate-700/50">
+                                                    <h3 className="font-bold text-slate-200 mb-4 flex items-center gap-2 text-sm uppercase tracking-wider">
+                                                        <AlertCircle size={16} className="text-amber-400" />
+                                                        News / Context
+                                                    </h3>
+                                                    <div className="text-sm text-slate-300 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50 min-h-[80px]">
+                                                        {analysisResult.news_summary}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Key Factors */}

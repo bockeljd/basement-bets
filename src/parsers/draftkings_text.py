@@ -6,13 +6,13 @@ class DraftKingsTextParser:
     def parse(self, content: str) -> List[Dict]:
         """
         Parses raw copy-pasted text from DraftKings 'My Bets' view.
-        Blocks end with a specific Date+ID signature line:
-        'Jan 11, 2026, 9:20:07 PMDK6390...'
+        Blocks end with a 'DK...' transaction ID.
         """
         bets = []
-        # Regex to find the footer line of each bet
-        footer_pattern = re.compile(r'([A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2}:\d{2} [AP]M)(DK\d+)')
-        
+        # Regex to find the Transaction ID line (e.g., DK12345678)
+        id_pattern = re.compile(r'^(DK\d+)')
+        date_pattern = re.compile(r'([A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2}:\d{2} [AP]M)')
+
         lines = content.split('\n')
         buffer = []
         
@@ -20,14 +20,28 @@ class DraftKingsTextParser:
             line = line.strip()
             if not line: continue
             
-            match = footer_pattern.search(line)
-            if match:
-                raw_date = match.group(1)
-                bet_id = match.group(2)
+            # Check for DK ID at start of line
+            id_match = id_pattern.search(line)
+            if id_match:
+                bet_id = id_match.group(1)
                 
-                bet = self._parse_block(buffer, raw_date, bet_id)
-                if bet:
-                    bets.append(bet)
+                # Find date in the buffer (look backwards)
+                raw_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                date_found = False
+                
+                # Check last 5 lines for a date
+                for i in range(1, min(len(buffer)+1, 6)):
+                    d_match = date_pattern.search(buffer[-i])
+                    if d_match:
+                        raw_date = d_match.group(1)
+                        date_found = True
+                        break
+                
+                # If we have a buffer, parse it
+                if buffer:
+                    bet = self._parse_block(buffer, raw_date, bet_id)
+                    if bet:
+                        bets.append(bet)
                 
                 buffer = []
             else:
@@ -229,7 +243,13 @@ class DraftKingsTextParser:
                 r'^Main Bankroll',
                 r'^Paste Slip Text',
                 r'^Review Details',
-                r'^DraftKings$'
+                r'^DraftKings$',
+                r'^Outcome:',
+                r'^My Bets',
+                r'^Includes:',
+                r'^Cash Out:',
+                r'^Potential Payout:',
+                r'^vs$'
             ]
             
             for i, l in enumerate(lines):
@@ -252,6 +272,21 @@ class DraftKingsTextParser:
             if not matchup: matchup = selection or "Unknown Matchup"
             if not selection: selection = matchup
 
+            # Fallback Odds Scan
+            if odds is None:
+                for l in lines:
+                    # Look for standalone odds line like "+150", "-110", or "+ 150"
+                    # Allow optional space between sign and number
+                    odds_scan = re.search(r'^([+-])\s*(\d{3,})$', l.strip())
+                    if odds_scan:
+                        try:
+                             sign = odds_scan.group(1)
+                             num = odds_scan.group(2)
+                             possible_odds = int(f"{sign}{num}")
+                             odds = possible_odds
+                             break
+                        except: pass
+
             # 4. Profit Calculation
             status_up = status.upper()
             if status_up == "WON" or status_up == "CASHED OUT":
@@ -265,7 +300,18 @@ class DraftKingsTextParser:
             else:
                 profit = -wager
             
-            dt = datetime.strptime(date_str, "%b %d, %Y, %I:%M:%S %p")
+            from dateutil.parser import parse as parse_date_util
+            try:
+                # Try explicit format first
+                # Clean header junk from date string in case it leaked
+                date_str_clean = date_str.split('\n')[0].strip()
+                dt = datetime.strptime(date_str_clean, "%b %d, %Y, %I:%M:%S %p")
+            except:
+                try:
+                    dt = parse_date_util(date_str)
+                except:
+                     dt = datetime.now()
+            
             description = matchup
 
             # 5. Sport Inference

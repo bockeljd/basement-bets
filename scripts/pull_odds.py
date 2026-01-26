@@ -56,8 +56,8 @@ def process_sport(sport, dates_or_weeks):
     # But user asked to pull data and save on changes. 
     # If we filter only scheduled, we miss completed game results updates if they matter.
     # However, keeping it consistent with the template:
-    if 'status' in df_new.columns:
-        df_new = df_new.loc[df_new['status'] == 'scheduled']
+    # if 'status' in df_new.columns:
+    #     df_new = df_new.loc[df_new['status'] == 'scheduled']
     
     if df_new.empty:
         print(f"No scheduled games found for {sport}.")
@@ -105,7 +105,9 @@ def process_sport(sport, dates_or_weeks):
         from src.services.odds_adapter import OddsAdapter
         adapter = OddsAdapter()
         # Convert DataFrame to list of dicts
-        raw_data = filtered_df.to_dict('records')
+        # Sanitize NaNs (Postgres rejects NaN)
+        df_clean = filtered_df.where(pd.notnull(filtered_df), None)
+        raw_data = df_clean.to_dict('records')
         
         # Map to canonical league
         league_map = {

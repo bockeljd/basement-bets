@@ -1,0 +1,9 @@
+2026/01/25-11:19:47.140 9d1bd4 Reusing MANIFEST /Users/jordanbockelman/Basement Bets/bet_tracker/playwright_profile_fd/Default/IndexedDB/https_sportsbook.fanduel.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/01/25-11:19:47.140 9d1bd4 Recovering log #4
+2026/01/25-11:19:47.144 9d1bd4 Reusing old log /Users/jordanbockelman/Basement Bets/bet_tracker/playwright_profile_fd/Default/IndexedDB/https_sportsbook.fanduel.com_0.indexeddb.leveldb/000004.log 
+2026/01/25-11:19:49.320 9d1bd6 Level-0 table #8: started
+2026/01/25-11:19:49.328 9d1bd6 Level-0 table #8: 3623211 bytes OK
+2026/01/25-11:19:49.333 9d1bd6 Delete type=0 #4
+2026/01/25-11:19:50.409 9d1be1 Level-0 table #10: started
+2026/01/25-11:19:50.416 9d1be1 Level-0 table #10: 2180271 bytes OK
+2026/01/25-11:19:50.417 9d1be1 Delete type=0 #7

@@ -33,34 +33,35 @@ class BartTorvikClient:
             except:
                 # Fallback: Sometimes it might wrap in HTML or text?
                 print("  [TORVIK] Response was not pure JSON, checking content...")
-                # If invalid, return empty
-                return {}
+                data = None
             
             projections = {}
-            if not data: return {}
-            
-            for item in data:
-                # Structure of JSON items for schedule.php?json=1
-                # typically: {'away': 'Team A', 'home': 'Team B', 't_rank_line': '-5', ...}
-                # Let's handle generic fields based on common Torvik patterns
-                
-                away = item.get('away', item.get('team_away', ''))
-                home = item.get('home', item.get('team_home', ''))
-                line = item.get('line', item.get('t_rank_line', 0))
-                total = item.get('total', 0)
-                
-                if not away or not home: continue
-                
-                proj_data = {
-                    "opponent": home,
-                    "total": float(total) if total else 0.0,
-                    "projected_score": f"{item.get('score_away')}-{item.get('score_home')}", # Post game or proj?
-                    "spread": float(line) if line else 0.0,
-                    "raw_line": str(line)
-                }
-                
-                projections[away] = {**proj_data, "opponent": home, "team": away}
-                projections[home] = {**proj_data, "opponent": away, "team": home}
+            if not data:
+                # Let it fall through to Selenium Logic below
+                pass
+            else:
+                for item in data:
+                    # Structure of JSON items for schedule.php?json=1
+                    # typically: {'away': 'Team A', 'home': 'Team B', 't_rank_line': '-5', ...}
+                    # Let's handle generic fields based on common Torvik patterns
+                    
+                    away = item.get('away', item.get('team_away', ''))
+                    home = item.get('home', item.get('team_home', ''))
+                    line = item.get('line', item.get('t_rank_line', 0))
+                    total = item.get('total', 0)
+                    
+                    if not away or not home: continue
+                    
+                    proj_data = {
+                        "opponent": home,
+                        "total": float(total) if total else 0.0,
+                        "projected_score": f"{item.get('score_away')}-{item.get('score_home')}", # Post game or proj?
+                        "spread": float(line) if line else 0.0,
+                        "raw_line": str(line)
+                    }
+                    
+                    projections[away] = {**proj_data, "opponent": home, "team": away}
+                    projections[home] = {**proj_data, "opponent": away, "team": home}
                 
             if not projections:
                 print("  [TORVIK] Requests failed or blocked. Attempting Selenium Fallback...")

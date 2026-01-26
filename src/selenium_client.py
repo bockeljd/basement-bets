@@ -1,43 +1,111 @@
-try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
-    HAS_SELENIUM = True
-except ImportError:
-    HAS_SELENIUM = False
-    
-import time
-import os
 
-class SeleniumDriverFactory:
-    """
-    Factory to create configured Chrome drivers for scraping.
-    """
-    
-    @staticmethod
-    def create_driver(headless=True):
-        if not HAS_SELENIUM:
-            print("[SELENIUM] Selenium not installed. Skipping driver creation.")
-            return None
-            
-        options = Options()
-        if headless:
-            options.add_argument("--headless=new")
-        
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        
-        # Suppress logging
-        options.add_experimental_option('excludeSwitches', ['enable-logging'])
-        
-        # Try to find chromedriver in env or path
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import undetected_chromedriver as uc
+import os
+import time
+import logging
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+class SeleniumClient:
+    def __init__(self, headless=False, profile_path=None):
+        self.options = uc.ChromeOptions()
+
+        # 1. Force "Allow" for Geolocation
+        prefs = {
+            "profile.default_content_setting_values.geolocation": 1,
+            "profile.default_content_setting_values.notifications": 2,
+            "google.geolocation.access_enabled": True
+        }
+        self.options.add_experimental_option("prefs", prefs)
+
+        # 2. Persistent Profile
+        if profile_path:
+            self.options.add_argument(f"--user-data-dir={os.path.abspath(profile_path)}")
+
+        # 3. Initialize Driver
         try:
-            driver = webdriver.Chrome(options=options)
-            return driver
+            # use_subprocess=True helps avoid some lockfile issues
+            self.driver = uc.Chrome(options=self.options, use_subprocess=True, headless=headless)
         except Exception as e:
-            print(f"[SELENIUM] Failed to init driver: {e}")
+            print(f"Failed to initialize undetected_chromedriver: {e}")
+            raise e
+            
+    def quit(self):
+        if self.driver:
+            self.driver.quit()
+
+    def scrape_draftkings_bets(self):
+        """
+        Navigates to DraftKings Settled Bets.
+        Waits for manual login if needed.
+        """
+        try:
+            target_url = "https://sportsbook.draftkings.com/mybets?category=settled"
+            
+            # 1. Initial Navigation
+            logging.info(f"Navigating to {target_url}...")
+            self.driver.get(target_url)
+            time.sleep(5)
+
+            # 2. Robust Navigation Loop (Login / Download Interstitial Bypass)
+            # We loop until we confirm we are on the actual betting page
+            max_retries = 24 # 2 minutes total wait
+            for attempt in range(max_retries):
+                current_url = self.driver.current_url
+                page_source = self.driver.page_source
+                
+                # Case A: Interstitial (Download App / Geo)
+                if "Download the DraftKings Sportsbook App" in page_source or "Confirm Location" in self.driver.title:
+                    print(f"🔄 [Attempt {attempt+1}] Interstitial Page Detected. Refreshing...")
+                    self.driver.refresh()
+                    time.sleep(5)
+                    continue
+                    
+                # Case B: Login Page
+                if "log-in" in current_url or "client-login" in current_url or "Log In" in page_source:
+                    print(f"🚨 [Attempt {attempt+1}] Login Required. Waiting for user input...")
+                    # Allow user time to log in
+                    time.sleep(5)
+                    continue
+
+                # Case C: Success (My Bets / Settled)
+                if "mybets" in current_url or "My Bets" in page_source or "Settled Date" in page_source:
+                    print("✅ Successfully landed on My Bets page!")
+                    break
+                
+                print(f"⏳ [Attempt {attempt+1}] Waiting for page load... ({current_url})")
+                time.sleep(3)
+            
+            # 3. Pagination (Show More)
+            try:
+                for _ in range(5): 
+                    load_more = self.driver.find_element(By.XPATH, "//div[contains(text(), 'Show More')]")
+                    if load_more and load_more.is_displayed():
+                        self.driver.execute_script("arguments[0].click();", load_more)
+                        time.sleep(3)
+                    else:
+                        break
+            except:
+                pass 
+
+            # 4. Wait for Content
+            print("👀 Waiting for bet cards...")
+            try:
+                WebDriverWait(self.driver, 15).until(
+                    lambda d: "Won" in d.page_source or "Lost" in d.page_source or "bet-card" in d.page_source or "Settled Date" in d.page_source
+                )
+                print("✅ Bet content detected!")
+            except:
+                print("⚠️ Warning: specific bet content (Won/Lost) not detected. Scraping anyway...")
+
+            # 5. Extract
+            return self.driver.page_source
+
+        except Exception as e:
+            logging.error(f"DK Scrape Error: {e}")
             return None
 

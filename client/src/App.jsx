@@ -154,7 +154,9 @@ function App() {
                 // Check for 403 or 500 in results to alert user
                 const failed = results.find(r => r.status === 'rejected');
                 if (failed) {
-                    if (failed.status === 403 || (failed.response && failed.response.status === 403) || (failed.message && failed.message.includes("403"))) {
+                    const reason = failed.reason;
+                    if (reason && ((reason.response && reason.response.status === 403) || (reason.message && reason.message.includes("403")))) {
+                        localStorage.removeItem('basement_password'); // Force clear storage
                         setShowLogin(true);
                     }
                     // Since we catch globally in axios for 403, this is likely 500 or Network
@@ -345,6 +347,27 @@ function App() {
                             >
                                 <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
                                 {isSyncing ? 'Syncing...' : 'Sync Scores'}
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    if (confirm("Launch DraftKings Scraper?\n\nThis will open a Chrome window. Please log in if needed.")) {
+                                        setIsSyncing(true);
+                                        try {
+                                            const res = await api.post('/api/sync/draftkings');
+                                            alert(`Sync Complete!\nFound: ${res.data.bets_found} bets\nNew Saved: ${res.data.bets_saved}`);
+                                            window.location.reload();
+                                        } catch (e) {
+                                            alert("Sync Failed: " + (e.response?.data?.detail || e.message));
+                                        } finally {
+                                            setIsSyncing(false);
+                                        }
+                                    }
+                                }}
+                                disabled={isSyncing}
+                                className={`px-4 py-2 rounded-lg flex items-center gap-2 font-bold transition-all ${isSyncing ? 'bg-slate-800 text-gray-500' : 'bg-orange-600 hover:bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'}`}
+                            >
+                                <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
+                                Sync DK
                             </button>
                             <button
                                 onClick={() => setShowAddBet(true)}

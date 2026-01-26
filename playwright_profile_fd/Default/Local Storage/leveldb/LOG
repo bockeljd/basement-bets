@@ -1,0 +1,19 @@
+2026/01/25-13:29:30.845 9f4078 Reusing MANIFEST /Users/jordanbockelman/Basement Bets/bet_tracker/playwright_profile_fd/Default/Local Storage/leveldb/MANIFEST-000001
+2026/01/25-13:29:30.851 9f4078 Recovering log #12
+2026/01/25-13:29:30.853 9f4078 Level-0 table #15: started
+2026/01/25-13:29:30.855 9f4078 Level-0 table #15: 17042 bytes OK
+2026/01/25-13:29:30.862 9f4078 Delete type=0 #12
+2026/01/25-13:29:30.863 9f407b Compacting 4@0 + 0@1 files
+2026/01/25-13:29:30.866 9f407b Generated table #17@0: 91 keys, 39457 bytes
+2026/01/25-13:29:30.866 9f407b Compacted 4@0 + 0@1 files => 39457 bytes
+2026/01/25-13:29:30.868 9f407b compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/01/25-13:29:30.869 9f407b Delete type=2 #15
+2026/01/25-13:29:30.869 9f407b Delete type=2 #7
+2026/01/25-13:29:30.869 9f407b Delete type=2 #13
+2026/01/25-13:29:30.869 9f407b Delete type=2 #10
+2026/01/25-13:30:30.865 9f407b Level-0 table #19: started
+2026/01/25-13:30:30.872 9f407b Level-0 table #19: 20921 bytes OK
+2026/01/25-13:30:30.876 9f407b Delete type=0 #16
+2026/01/25-13:31:51.427 9f407b Level-0 table #21: started
+2026/01/25-13:31:51.430 9f407b Level-0 table #21: 29954 bytes OK
+2026/01/25-13:31:51.431 9f407b Delete type=0 #18
