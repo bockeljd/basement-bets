@@ -978,33 +978,35 @@ class AnalyticsEngine:
             "has_discrepancies": any(r['status'] == 'MISMATCH' for r in reconciliation)
         }
 
-    def get_all_activity(self, user_id=None):
-        """
-        Merges bets and financial transactions into a single chronological list.
-        """
-        activity = []
-        
+    def get_all_bets(self, user_id=None):
+        """Return bets only (no financial ledger rows)."""
         bets = self.bets
         if user_id and user_id != self.user_id:
-             bets = [b for b in self.bets if b.get('user_id') == user_id]
+            bets = [b for b in self.bets if b.get('user_id') == user_id]
+        return bets
+
+    def get_all_activity(self, user_id=None):
+        """Deprecated: merges bets + some transactions.
+
+Kept for backward compatibility, but UI should prefer bets-only endpoints.
+"""
+        activity = []
+
+        bets = self.get_all_bets(user_id=user_id)
 
         # Add Bets
         for b in bets:
-            # Map bet fields to common schema if needed, or just append
-            # Schema: {date, provider, type, description, amount (wager), profit, status, ...}
             item = b.copy()
-            item['type'] = b['bet_type'] # or 'Bet'
+            item['type'] = b.get('bet_type')
             item['category'] = 'Bet'
-            item['amount'] = b['wager']
+            item['amount'] = b.get('wager')
             activity.append(item)
-            
-        # Add Financials from DB - graceful degradation if table missing
-        # Exclude Wager, Winning, Bonus to prevent duplicates with standard Bets
-        # Include Deposit, Withdrawal, and Other (Transfers)
+
+        # (Transactions merge retained)
         query = """
-            SELECT txn_id, provider, date, type, description, amount 
-            FROM transactions 
-            WHERE type IN ('Deposit', 'Withdrawal') 
+            SELECT txn_id, provider, date, type, description, amount
+            FROM transactions
+            WHERE type IN ('Deposit', 'Withdrawal')
                OR (type = 'Other' AND description LIKE '%Transfer%')
                OR (type = 'Other' AND description LIKE '%Manual%')
             ORDER BY date DESC
@@ -1019,19 +1021,11 @@ class AnalyticsEngine:
                     amt = t['amount']
                     typ = t['type']
                     desc = t['description'] or ''
-
-                    # Filter logic: Exclude 'Manual Import' if user wants cleaner view
                     if 'Manual' in desc:
                         continue
-                    
-                    # Normalize
                     t['category'] = 'Transaction'
-                    t['bet_type'] = typ # e.g. "Deposit", "Withdrawal"
-                    t['wager'] = amt # Show amount in wager column
-                    
-                    # Financial Profit Logic (Realized Profit View)
-                    # Deposit = -Amount (Cash Outflow from user perspective)
-                    # So In (Deposit) is Negative impact on Realized Profit.
+                    t['bet_type'] = typ
+                    t['wager'] = amt
                     if typ == 'Deposit':
                         t['profit'] = -abs(amt)
                     elif typ == 'Withdrawal':
@@ -1043,11 +1037,9 @@ class AnalyticsEngine:
                     t['odds'] = None
                     activity.append(t)
         except Exception as e:
-            # Transactions table may not exist yet - degrade gracefully
             print(f"[Analytics] Skipping transactions for activity (table may not exist): {e}")
-                
-        # Sort by Date Descending
-        activity.sort(key=lambda x: x['date'], reverse=True)
+
+        activity.sort(key=lambda x: x.get('date',''), reverse=True)
         return activity
 
     def _calculate_implied_probability(self, odds: int):

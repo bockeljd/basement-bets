@@ -206,10 +206,24 @@ async def get_breakdown(field: str, user: dict = Depends(get_current_user)):
     return engine.get_breakdown(field, user_id=user_id)
 
 @app.get("/api/bets")
-async def get_bets(user: dict = Depends(get_current_user)): 
+async def get_bets(user: dict = Depends(get_current_user)):
+    """Return settled bets only (UI 'Transactions' tab).
+
+We keep financial ledger data separate under /api/financials/*.
+"""
     user_id = user.get("sub")
     engine = get_analytics_engine(user_id=user_id)
-    return engine.get_all_activity(user_id=user_id)
+    # Settled-only: exclude pending/open bets
+    bets = engine.get_all_bets(user_id=user_id)
+    return [b for b in bets if (b.get('status') or '').upper() not in ('PENDING', 'OPEN')]
+
+@app.get("/api/bets/open")
+async def get_open_bets(user: dict = Depends(get_current_user)):
+    """Return open/unsettled bets for a separate 'Open Bets' section."""
+    user_id = user.get("sub")
+    engine = get_analytics_engine(user_id=user_id)
+    bets = engine.get_all_bets(user_id=user_id)
+    return [b for b in bets if (b.get('status') or '').upper() in ('PENDING', 'OPEN')]
 
 @app.get("/api/odds/{sport}")
 async def get_odds(sport: str):
