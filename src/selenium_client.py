@@ -6,13 +6,41 @@ import undetected_chromedriver as uc
 import os
 import time
 import logging
+import shutil
+from pathlib import Path
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 class SeleniumClient:
-    def __init__(self, headless=False, profile_path=None):
+    def _detect_chrome_binary(self):
+        # Common macOS locations
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+        # Try PATH
+        for exe in ("google-chrome", "chromium", "chromium-browser", "brave", "msedge"):
+            w = shutil.which(exe)
+            if w:
+                return w
+        return None
+
+    def __init__(self, headless=False, profile_path=None, browser_executable_path=None):
         self.options = uc.ChromeOptions()
+
+        # Ensure Chrome binary location is a string (undetected_chromedriver can choke on Path/None)
+        if browser_executable_path is None:
+            browser_executable_path = self._detect_chrome_binary()
+        if browser_executable_path is not None:
+            self.options.binary_location = str(browser_executable_path)
+        self.browser_executable_path = str(browser_executable_path) if browser_executable_path else None
 
         # 1. Force "Allow" for Geolocation
         prefs = {
@@ -29,9 +57,16 @@ class SeleniumClient:
         # 3. Initialize Driver
         try:
             # use_subprocess=True helps avoid some lockfile issues
-            self.driver = uc.Chrome(options=self.options, use_subprocess=True, headless=headless)
+            self.driver = uc.Chrome(
+                options=self.options,
+                use_subprocess=True,
+                headless=headless,
+                browser_executable_path=self.browser_executable_path,
+            )
         except Exception as e:
             print(f"Failed to initialize undetected_chromedriver: {e}")
+            if not self.browser_executable_path:
+                print("[SeleniumClient] No Chrome/Chromium binary detected. Install Google Chrome or Chromium and retry.")
             raise e
             
     def quit(self):

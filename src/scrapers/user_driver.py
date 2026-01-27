@@ -32,7 +32,18 @@ class UserDriver:
             options.add_experimental_option("prefs", prefs)
             
             # Using subprocess=True is safer for UC
-            self.driver = uc.Chrome(options=options, use_subprocess=True)
+            # Pin browser binary if available (avoids "Binary Location Must be a String")
+            browser_bin = None
+            for p in [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            ]:
+                if os.path.exists(p):
+                    browser_bin = p
+                    break
+            self.driver = uc.Chrome(options=options, use_subprocess=True, browser_executable_path=browser_bin)
             self.driver.maximize_window()
             
             return self.driver

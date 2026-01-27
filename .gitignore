@@ -33,3 +33,6 @@ torvik_source.html
 # Raw Data (personal exports)
 data/snapshots/
 data/imports/
+
+# Local venvs
+.venv311/
