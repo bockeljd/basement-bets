@@ -41,17 +41,17 @@ def main() -> int:
     where = "wager = 0 and lower(bet_type) like '%leg%' and raw_text like 'Imported from CSV%'"
 
     with get_db_connection() as conn:
-        cur = _exec(conn, f"select count(*) as n from bets where {where}")
+        cur = _exec(conn, f"select count(*) as n from bets where {where}", ())
         n = cur.fetchone()["n"]
         print(f"Matched rows: {n}")
 
         if args.dry_run:
-            cur = _exec(conn, f"select id, date, provider, bet_type, description from bets where {where} order by date desc limit 20")
+            cur = _exec(conn, f"select id, date, provider, bet_type, description from bets where {where} order by date desc limit 20", ())
             for r in cur.fetchall():
                 print(r["id"], r["date"], r["provider"], r["bet_type"], (r["description"] or "")[:80])
             return 0
 
-        cur = _exec(conn, f"delete from bets where {where}")
+        cur = _exec(conn, f"delete from bets where {where}", ())
         conn.commit()
         print(f"Deleted rows: {cur.rowcount}")
 
