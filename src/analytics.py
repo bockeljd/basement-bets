@@ -501,18 +501,21 @@ class AnalyticsEngine:
                     except:
                         dt = None
                         
-                    if tx_type == 'Balance':
+                    # Treat BalanceSnapshot as highest-priority (explicit source-of-truth for UI).
+                    if tx_type in ('BalanceSnapshot', 'Balance'):
                         current_bal = float(r['balance'] or 0)
-                        # Keep the LATEST snapshot
+                        # Keep the LATEST snapshot; prefer BalanceSnapshot over Balance when timestamps tie/are ambiguous.
                         if provider not in explicit_balances:
-                            explicit_balances[provider] = (current_bal, dt, r['date'])
+                            explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
                         else:
-                            existing_dt = explicit_balances[provider][1]
+                            existing_bal, existing_dt, existing_raw, existing_type = explicit_balances[provider]
                             # If new is newer, replace
                             if dt and existing_dt and dt > existing_dt:
-                                explicit_balances[provider] = (current_bal, dt, r['date'])
+                                explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
                             elif dt and not existing_dt:
-                                explicit_balances[provider] = (current_bal, dt, r['date'])
+                                explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
+                            elif (dt == existing_dt) and (existing_type != 'BalanceSnapshot') and (tx_type == 'BalanceSnapshot'):
+                                explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
                                 
                     elif tx_type == 'Deposit':
                         deposits[provider].append((float(r['amount'] or 0), dt))
@@ -537,7 +540,7 @@ class AnalyticsEngine:
             
             # A. Start with Snapshot if available
             if provider in explicit_balances:
-                base_balance, snapshot_dt, _ = explicit_balances[provider]
+                base_balance, snapshot_dt, _, _snap_type = explicit_balances[provider]
             else:
                 # If no snapshot, base is 0.0 and we sum ALL history
                 # (effectively snapshot_dt is 'beginning of time')
