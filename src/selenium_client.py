@@ -38,9 +38,16 @@ class SeleniumClient:
         # Ensure Chrome binary location is a string (undetected_chromedriver can choke on Path/None)
         if browser_executable_path is None:
             browser_executable_path = self._detect_chrome_binary()
-        if browser_executable_path is not None:
-            self.options.binary_location = str(browser_executable_path)
-        self.browser_executable_path = str(browser_executable_path) if browser_executable_path else None
+        if browser_executable_path is None:
+            # Avoid undetected_chromedriver trying to set a non-string binary_location.
+            raise RuntimeError(
+                "No Chrome/Chromium browser detected. Install Google Chrome (recommended) and retry. "
+                "Expected at /Applications/Google Chrome.app/..."
+            )
+
+        # Ensure it's always a string
+        self.options.binary_location = str(browser_executable_path)
+        self.browser_executable_path = str(browser_executable_path)
 
         # 1. Force "Allow" for Geolocation
         prefs = {
