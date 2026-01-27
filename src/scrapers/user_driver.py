@@ -1,5 +1,6 @@
 
 import time
+import os
 from src.selenium_client import SeleniumDriverFactory
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
