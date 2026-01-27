@@ -12,6 +12,15 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+class SeleniumDriverFactory:
+    """Backwards-compat factory used by scrapers/services."""
+
+    @staticmethod
+    def create_driver(headless: bool = True, profile_path: str | None = None):
+        client = SeleniumClient(headless=headless, profile_path=profile_path)
+        return client.driver
+
+
 class SeleniumClient:
     def _detect_chrome_binary(self):
         # Common macOS locations
