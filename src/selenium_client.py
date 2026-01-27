@@ -102,32 +102,30 @@ class SeleniumClient:
             self.driver.get(target_url)
             time.sleep(5)
 
-            # 2. Robust Navigation Loop (Login / Download Interstitial Bypass)
-            # We loop until we confirm we are on the actual betting page
-            max_retries = 24 # 2 minutes total wait
+            # 2. Robust Navigation Loop (Login / Interstitial Bypass)
+            # For unattended cron runs, fail fast if login is required.
+            max_retries = 8  # ~30–45s total
             for attempt in range(max_retries):
                 current_url = self.driver.current_url
                 page_source = self.driver.page_source
-                
+
                 # Case A: Interstitial (Download App / Geo)
                 if "Download the DraftKings Sportsbook App" in page_source or "Confirm Location" in self.driver.title:
                     print(f"🔄 [Attempt {attempt+1}] Interstitial Page Detected. Refreshing...")
                     self.driver.refresh()
-                    time.sleep(5)
+                    time.sleep(3)
                     continue
-                    
+
                 # Case B: Login Page
                 if "log-in" in current_url or "client-login" in current_url or "Log In" in page_source:
-                    print(f"🚨 [Attempt {attempt+1}] Login Required. Waiting for user input...")
-                    # Allow user time to log in
-                    time.sleep(5)
-                    continue
+                    print(f"🚨 [Attempt {attempt+1}] Login Required. Aborting scrape (cron-safe).")
+                    return None
 
                 # Case C: Success (My Bets / Settled)
                 if "mybets" in current_url or "My Bets" in page_source or "Settled Date" in page_source:
                     print("✅ Successfully landed on My Bets page!")
                     break
-                
+
                 print(f"⏳ [Attempt {attempt+1}] Waiting for page load... ({current_url})")
                 time.sleep(3)
             
