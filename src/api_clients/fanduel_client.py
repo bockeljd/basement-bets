@@ -13,6 +13,14 @@ class FanDuelAPIClient:
     BASE_URL = "https://api.sportsbook.fanduel.com/sbapi/fetch-my-bets"
 
     def __init__(self, auth_token: str, app_version: str = "2.135.2", region: str = "OH"):
+        # Token often gets copied with whitespace/newlines; requests will reject invalid header values.
+        if auth_token is None:
+            auth_token = ""
+        auth_token = str(auth_token).strip()
+        # If someone accidentally pasted multiple tokens/lines, take the first whitespace-delimited chunk.
+        if " " in auth_token or "\n" in auth_token or "\t" in auth_token:
+            auth_token = auth_token.split()[0]
+
         self.auth_token = auth_token
         self.headers = {
             'accept': 'application/json',
