@@ -156,6 +156,26 @@ class FanDuelAPIClient:
                 if not full_desc:
                     full_desc = f"{bet_type} (No legs found)"
 
+                # Odds: prefer structured american odds on the bet; fall back to first part's americanPrice.
+                odds_val = None
+                try:
+                    odds_val = bet.get('odds', {}).get('american')
+                except Exception:
+                    odds_val = None
+                if not odds_val:
+                    try:
+                        # Use first available part price
+                        for leg in legs:
+                            for part in (leg.get('parts', []) or []):
+                                ap = part.get('americanPrice')
+                                if ap is not None:
+                                    odds_val = int(ap)
+                                    raise StopIteration
+                    except StopIteration:
+                        pass
+                    except Exception:
+                        pass
+
                 bet_obj = {
                     "provider": "FanDuel",
                     "date": date_str,
@@ -166,7 +186,7 @@ class FanDuelAPIClient:
                     "status": status,
                     "description": full_desc, # Short summary
                     "selection": full_desc,
-                    "odds": bet.get('odds', {}).get('american', 0), # Might be deeper
+                    "odds": odds_val,
                     "is_live": False, # TODO check flags
                     "is_bonus": bet.get('isBonus', False),
                     "raw_text": str(bet) # Storing full JSON as raw for debug
