@@ -555,6 +555,15 @@ async def save_manual_bet(request: Request, user: dict = Depends(get_current_use
         american_odds = bet_data.get("price", {}).get("american")
         decimal_odds = bet_data.get("price", {}).get("decimal")
         
+        # Enforce: settled bets must include odds
+        if status in ("WON", "LOST", "PUSH"):
+            # accept american odds from either price.american or top-level odds
+            american_check = bet_data.get("price", {}).get("american")
+            if american_check is None and bet_data.get("odds") is not None:
+                american_check = bet_data.get("odds")
+            if american_check is None:
+                raise HTTPException(status_code=400, detail="Odds are required for settled bets (WON/LOST/PUSH).")
+
         # Calculate profit if not provided
         profit = bet_data.get("profit")
         if profit is None:
