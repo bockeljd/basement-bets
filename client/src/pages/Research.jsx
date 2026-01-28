@@ -147,6 +147,14 @@ const Research = () => {
         setSelectedDate(nextDate);
     };
 
+    const fmtSigned = (n, decimals = 0) => {
+        if (n === null || n === undefined || n === '') return '-';
+        const x = Number(n);
+        if (Number.isNaN(x)) return String(n);
+        const s = decimals > 0 ? x.toFixed(decimals) : String(x);
+        return x > 0 ? `+${s}` : s;
+    };
+
     const getEdgeColor = (edge, sport) => {
         if (edge === null || edge === undefined) return 'text-gray-500';
 
@@ -332,10 +340,10 @@ const Research = () => {
                                                 <div className="flex items-center">Matchup <SortIcon column="game" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Spread (Odds)</div>
+                                                <div className="flex items-center">Spread (Home line / odds)</div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Total (Odds)</div>
+                                                <div className="flex items-center">Total (Over line / odds)</div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
                                                 <div className="flex items-center justify-center">Action</div>
@@ -386,27 +394,31 @@ const Research = () => {
                                                         </td>
                                                         <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
                                                         <td className="py-3 px-4">
-                                                            {edge.home_spread !== null ? (
+                                                            {edge.home_spread !== null && edge.home_spread !== undefined ? (
                                                                 <div className="flex flex-col">
                                                                     <span className="text-white font-mono font-bold leading-tight">
-                                                                        {edge.home_spread > 0 ? `+${edge.home_spread}` : edge.home_spread}
+                                                                        {fmtSigned(edge.home_spread, 1)}
                                                                     </span>
-                                                                    <span className="text-[10px] text-slate-500 font-medium">@{edge.moneyline_home || '-'}</span>
+                                                                    <span className="text-[10px] text-slate-500 font-medium">
+                                                                        odds: {fmtSigned(edge.spread_home_odds ?? edge.moneyline_home)}
+                                                                    </span>
                                                                 </div>
                                                             ) : (
-                                                                <span className="text-slate-600 font-mono text-xs">OFF</span>
+                                                                <span className="text-slate-600 font-mono text-xs">No spread</span>
                                                             )}
                                                         </td>
                                                         <td className="py-3 px-4">
-                                                            {edge.total_line !== null ? (
+                                                            {edge.total_line !== null && edge.total_line !== undefined ? (
                                                                 <div className="flex flex-col">
                                                                     <span className="text-white font-mono font-bold leading-tight">
-                                                                        {edge.total_line}
+                                                                        {Number(edge.total_line).toFixed(1)}
                                                                     </span>
-                                                                    <span className="text-[10px] text-slate-500 font-medium">{edge.moneyline_away ? `AWAY ML: ${edge.moneyline_away}` : ''}</span>
+                                                                    <span className="text-[10px] text-slate-500 font-medium">
+                                                                        odds: {fmtSigned(edge.total_over_odds ?? edge.moneyline_away)}
+                                                                    </span>
                                                                 </div>
                                                             ) : (
-                                                                <span className="text-slate-600 font-mono text-xs">OFF</span>
+                                                                <span className="text-slate-600 font-mono text-xs">No total</span>
                                                             )}
                                                         </td>
                                                         <td className="py-3 px-4 text-center">

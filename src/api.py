@@ -1133,15 +1133,15 @@ async def get_ncaam_board(date: Optional[str] = None):
     # Optimized Postgres Query
     query = """
     SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status, 
-               s.line_value as home_spread, s.price as spread_home_price, 
-               -- The original query used: s.price as moneyline_home.
-               -- If the snapshot is SPREAD, s.price IS the spread odds (e.g. -110), NOT ML.
-               -- Let's stick to returning them as specific keys or keeping the old alias IF the UI expects it.
-               -- Checking Frontend: uses 'moneyline_home' logic.
-               -- Edge display: `@{edge.moneyline_home || '-'}`
-               -- So yes, it displays the PRICE of the spread.
+               -- SPREAD (HOME)
+               s.line_value as home_spread, 
+               s.price as spread_home_odds,
+               -- TOTAL (OVER)
+               t.line_value as total_line,
+               t.price as total_over_odds,
+               -- Back-compat aliases (older UI expected these names)
                s.price as moneyline_home,
-               t.line_value as total_line, t.price as moneyline_away,
+               t.price as moneyline_away,
                gr.home_score, gr.away_score, gr.final
         FROM events e
         LEFT JOIN (
