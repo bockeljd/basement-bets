@@ -1532,7 +1532,7 @@ function TransactionView({ bets, financials }) {
                                 const isDeposit = bet.bet_type === 'Deposit' || (bet.bet_type === 'Other' && bet.amount > 0);
                                 return (
                                     <tr key={bet.id || bet.txn_id} className="hover:bg-gray-800/50 transition duration-150">
-                                        <td className="px-6 py-3 text-gray-300 font-mono text-xs">{bet.date}</td>
+                                        <td className="px-6 py-3 text-gray-300 font-mono text-xs" title={bet.sort_date || bet.date}>{bet.display_date || bet.date}</td>
                                         <td className="px-6 py-3">
                                             <span className="px-2 py-1 rounded text-[10px] text-gray-300 border border-gray-700 bg-gray-800 shadow-sm uppercase font-bold tracking-wider">
                                                 {bet.provider}

@@ -19,8 +19,8 @@ class AnalyticsEngine:
                 dt = parse_date(raw_date, fuzzy=True)
                 # Store ISO format for sorting
                 b['sort_date'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                # Also store a display-friendly format
-                b['display_date'] = dt.strftime('%b %d, %Y')
+                # Display format for UI (DD/MM/YYYY)
+                b['display_date'] = dt.strftime('%d/%m/%Y')
             except Exception:
                 # Fallback: use raw date as-is
                 b['sort_date'] = raw_date
