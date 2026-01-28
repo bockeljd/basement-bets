@@ -79,11 +79,15 @@ class AnalyticsEngine:
                 n = int(re.findall(r"\d+", check)[0])
                 norm = f"{n} leg parlay"
 
-            # 7. FanDuel TBL (treat as parlay/teaser bucket for now)
+            # 7. FanDuel DBL (2-leg)
+            elif check == "dbl":
+                norm = "2 leg parlay"
+
+            # 8. FanDuel TBL (treat as parlay/teaser bucket for now)
             elif check == "tbl":
                 norm = "Parlay"
 
-            # 8. Parlays (check last so SGP matches first if labeled SGP)
+            # 9. Parlays (check last so SGP matches first if labeled SGP)
             elif "parlay" in check or "leg" in check or "picks" in check:
                 # Extract leg count
                 match = re.search(r'(\d+)', check)
