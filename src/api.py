@@ -1411,6 +1411,24 @@ async def get_model_health_report(request: Request):
 
 # --- Sync Endpoints ---
 
+@app.post("/api/sync/request")
+async def sync_request(payload: dict, user: dict = Depends(get_current_user)):
+    """Queue a sync job for the local Mac worker.
+
+Payload: {"provider": "draftkings"|"fanduel"}
+"""
+    from src.sync_jobs import create_sync_job
+    user_id = user.get("sub") or '00000000-0000-0000-0000-000000000000'
+    provider = (payload or {}).get("provider")
+    job = create_sync_job(provider=provider, user_id=user_id)
+    return {"status": "queued", "job": job}
+
+@app.get("/api/sync/status")
+async def sync_status(user: dict = Depends(get_current_user)):
+    from src.sync_jobs import get_latest_jobs
+    user_id = user.get("sub") or '00000000-0000-0000-0000-000000000000'
+    return {"jobs": get_latest_jobs(user_id=user_id, limit=5)}
+
 @app.post("/api/sync/draftkings")
 def sync_draftkings(payload: dict):
     """

@@ -6,11 +6,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 class DraftKingsScraper:
-    def __init__(self):
+    def __init__(self, profile_path=None):
         self.driver_helper = UserDriver()
+        self.profile_path = profile_path
 
     def scrape(self):
-        driver = self.driver_helper.launch()
+        driver = self.driver_helper.launch(profile_path=self.profile_path)
         try:
             # 1. Navigate to DK Sportsbook Home
             print("Navigating to DraftKings...")
