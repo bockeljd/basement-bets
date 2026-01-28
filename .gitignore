@@ -34,5 +34,15 @@ torvik_source.html
 data/snapshots/
 data/imports/
 
+# Model artifacts (keep only stable configs in repo)
+data/model_params/edge_engine_*.json
+data/model_params/*_season_*.json
+data/model_params/ncaab_market_first_v2.json
+
 # Local venvs
 .venv311/
+
+# Local browser profiles / automation artifacts (never commit)
+chrome_profile/
+chrome_profile_fd/
+playwright_profile_fd/

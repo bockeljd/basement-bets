@@ -61,6 +61,34 @@ def get_version():
         "env": os.environ.get("VERCEL_ENV", "local")
     }
 
+
+@app.get("/api/edge/ncaab/recommendations")
+def edge_ncaab_recommendations(date: Optional[str] = None, season: int = 2026):
+    """On-demand NCAAB edge-engine recommendations.
+
+    Secured by the same /api auth middleware.
+
+    Query params:
+      - date: YYYY-MM-DD (America/New_York). Defaults to today (ET).
+      - season: season_end_year (default 2026).
+
+    Returns:
+      { generated_at, date, season_end_year, config, picks[] }
+    """
+    from src.services.edge_engine_ncaab import recommend_for_date
+    from src.database import get_db_connection, _exec
+
+    if not date:
+        with get_db_connection() as conn:
+            date = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+
+    try:
+        return recommend_for_date(date_et=date, season_end_year=int(season))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"edge engine failed: {e}")
+
 # --- Admin Routes ---
 @app.post("/api/admin/init-db")
 def trigger_init_db(request: Request):

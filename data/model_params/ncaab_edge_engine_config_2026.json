@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-01-28T15:20:02.988959",
+  "sport": "ncaab",
+  "season_end_year": 2026,
+  "constraints": {
+    "max_units_day": 10,
+    "max_units_game": 5
+  },
+  "guardrails": {
+    "min_bets": 20,
+    "min_active_days": 6,
+    "min_roi_improvement_pp": 2.0
+  },
+  "learned": {
+    "min_ev": 0.02,
+    "roi_pct": 8.85,
+    "total_bets": 33,
+    "active_days": 9
+  },
+  "unsafe_fallback": false,
+  "source_sweep": "edge_engine_sweep_ncaab_2026.json"
+}
