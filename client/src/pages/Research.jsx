@@ -303,8 +303,8 @@ const Research = () => {
                         <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
                             <h2 className="text-lg font-semibold text-slate-200">Market Board</h2>
                             <div className="text-xs text-slate-500 flex items-center">
-                                <AlertCircle size={12} className="mr-1" />
-                                Updated in real-time
+                                <Info size={12} className="mr-1" />
+                                Times shown in ET • lines shown as (team/side, line, odds)
                             </div>
                         </div>
 
@@ -347,10 +347,10 @@ const Research = () => {
                                                 <div className="flex items-center">Matchup <SortIcon column="game" /></div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Spread (Home line / odds)</div>
+                                                <div className="flex items-center">Spread (both sides)</div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Total (Over line / odds)</div>
+                                                <div className="flex items-center">Total (O/U)</div>
                                             </th>
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
                                                 <div className="flex items-center justify-center">Action</div>
@@ -401,14 +401,27 @@ const Research = () => {
                                                         </td>
                                                         <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
                                                         <td className="py-3 px-4">
-                                                            {edge.home_spread !== null && edge.home_spread !== undefined ? (
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-white font-mono font-bold leading-tight">
-                                                                        {fmtSigned(edge.home_spread, 1)}
-                                                                    </span>
-                                                                    <span className="text-[10px] text-slate-500 font-medium">
-                                                                        odds: {fmtSigned(edge.spread_home_odds ?? edge.moneyline_home)}
-                                                                    </span>
+                                                            {(edge.home_spread !== null && edge.home_spread !== undefined) || (edge.away_spread !== null && edge.away_spread !== undefined) ? (
+                                                                <div className="flex flex-col gap-1">
+                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                        <span className="text-slate-400 truncate">{edge.away_team}</span>
+                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">
+                                                                            {fmtSigned(edge.away_spread ?? (edge.home_spread != null ? -Number(edge.home_spread) : null), 1)}
+                                                                        </span>
+                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">
+                                                                            {fmtSigned(edge.spread_away_odds)}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                        <span className="text-slate-400 truncate">{edge.home_team}</span>
+                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">
+                                                                            {fmtSigned(edge.home_spread, 1)}
+                                                                        </span>
+                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">
+                                                                            {fmtSigned(edge.spread_home_odds ?? edge.moneyline_home)}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="text-[10px] text-slate-600">team • line • odds</div>
                                                                 </div>
                                                             ) : (
                                                                 <span className="text-slate-600 font-mono text-xs">No spread</span>
@@ -416,13 +429,18 @@ const Research = () => {
                                                         </td>
                                                         <td className="py-3 px-4">
                                                             {edge.total_line !== null && edge.total_line !== undefined ? (
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-white font-mono font-bold leading-tight">
-                                                                        {Number(edge.total_line).toFixed(1)}
-                                                                    </span>
-                                                                    <span className="text-[10px] text-slate-500 font-medium">
-                                                                        odds: {fmtSigned(edge.total_over_odds ?? edge.moneyline_away)}
-                                                                    </span>
+                                                                <div className="flex flex-col gap-1">
+                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                        <span className="text-slate-400">OVER</span>
+                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds ?? edge.moneyline_away)}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                        <span className="text-slate-400">UNDER</span>
+                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
+                                                                    </div>
+                                                                    <div className="text-[10px] text-slate-600">side • line • odds</div>
                                                                 </div>
                                                             ) : (
                                                                 <span className="text-slate-600 font-mono text-xs">No total</span>
@@ -700,27 +718,45 @@ const Research = () => {
                                             <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Market Lines</div>
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                                                 <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
-                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Spread</div>
-                                                    {selectedGame.home_spread !== null && selectedGame.home_spread !== undefined ? (() => {
-                                                        const hs = Number(selectedGame.home_spread);
-                                                        const homeLine = `${hs > 0 ? '+' : ''}${hs}`;
-                                                        const awayLine = `${(-hs) > 0 ? '+' : ''}${-hs}`;
-                                                        const favored = hs < 0 ? selectedGame.home_team : (hs > 0 ? selectedGame.away_team : 'Pick');
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Spread (team / line / odds)</div>
+                                                    {(selectedGame.home_spread !== null && selectedGame.home_spread !== undefined) || (selectedGame.away_spread !== null && selectedGame.away_spread !== undefined) ? (() => {
+                                                        const hs = selectedGame.home_spread !== null && selectedGame.home_spread !== undefined ? Number(selectedGame.home_spread) : null;
+                                                        const as = selectedGame.away_spread !== null && selectedGame.away_spread !== undefined ? Number(selectedGame.away_spread) : (hs !== null ? -hs : null);
+                                                        const favored = hs !== null ? (hs < 0 ? selectedGame.home_team : (hs > 0 ? selectedGame.away_team : 'Pick')) : '—';
                                                         return (
-                                                            <div className="space-y-1">
-                                                                <div className="text-slate-200 font-bold">{selectedGame.home_team} {homeLine}</div>
-                                                                <div className="text-slate-200 font-bold">{selectedGame.away_team} {awayLine}</div>
-                                                                <div className="text-[10px] text-slate-500">Favored: <span className="text-slate-300 font-bold">{favored}</span></div>
+                                                            <div className="space-y-1 text-xs">
+                                                                <div className="flex justify-between gap-2">
+                                                                    <span className="text-slate-400 truncate">{selectedGame.away_team}</span>
+                                                                    <span className="text-slate-200 font-mono font-bold">{fmtSigned(as, 1)}</span>
+                                                                    <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.spread_away_odds)}</span>
+                                                                </div>
+                                                                <div className="flex justify-between gap-2">
+                                                                    <span className="text-slate-400 truncate">{selectedGame.home_team}</span>
+                                                                    <span className="text-slate-200 font-mono font-bold">{fmtSigned(hs, 1)}</span>
+                                                                    <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.spread_home_odds ?? selectedGame.moneyline_home)}</span>
+                                                                </div>
+                                                                <div className="text-[10px] text-slate-600">Favored: <span className="text-slate-300 font-bold">{favored}</span></div>
                                                             </div>
                                                         );
                                                     })() : <div className="text-slate-500">No spread found</div>}
                                                 </div>
                                                 <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
-                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Total</div>
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Total (side / line / odds)</div>
                                                     {selectedGame.total_line !== null && selectedGame.total_line !== undefined ? (
-                                                        <div className="text-slate-200 font-bold">{selectedGame.total_line}</div>
+                                                        <div className="space-y-1 text-xs">
+                                                            <div className="flex justify-between gap-2">
+                                                                <span className="text-slate-400">OVER</span>
+                                                                <span className="text-slate-200 font-mono font-bold">{Number(selectedGame.total_line).toFixed(1)}</span>
+                                                                <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.total_over_odds ?? selectedGame.moneyline_away)}</span>
+                                                            </div>
+                                                            <div className="flex justify-between gap-2">
+                                                                <span className="text-slate-400">UNDER</span>
+                                                                <span className="text-slate-200 font-mono font-bold">{Number(selectedGame.total_line).toFixed(1)}</span>
+                                                                <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.total_under_odds)}</span>
+                                                            </div>
+                                                        </div>
                                                     ) : <div className="text-slate-500">No total found</div>}
-                                                    <div className="text-[10px] text-slate-500 mt-1">Over/Under line</div>
+                                                    <div className="text-[10px] text-slate-500 mt-1">Market total (O/U)</div>
                                                 </div>
                                                 <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
                                                     <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Model Summary</div>

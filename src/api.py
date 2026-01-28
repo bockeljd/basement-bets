@@ -1147,15 +1147,18 @@ async def get_ncaam_board(date: Optional[str] = None, days: int = 1):
     # Optimized Postgres Query
     query = """
     SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status, 
-               -- SPREAD (HOME)
-               s.line_value as home_spread, 
-               s.price as spread_home_odds,
-               -- TOTAL (OVER)
-               t.line_value as total_line,
-               t.price as total_over_odds,
+               -- SPREAD (HOME/AWAY)
+               s_home.line_value as home_spread, 
+               s_home.price as spread_home_odds,
+               s_away.line_value as away_spread,
+               s_away.price as spread_away_odds,
+               -- TOTAL (OVER/UNDER)
+               t_over.line_value as total_line,
+               t_over.price as total_over_odds,
+               t_under.price as total_under_odds,
                -- Back-compat aliases (older UI expected these names)
-               s.price as moneyline_home,
-               t.price as moneyline_away,
+               s_home.price as moneyline_home,
+               t_over.price as moneyline_away,
                gr.home_score, gr.away_score, gr.final
         FROM events e
         LEFT JOIN (
@@ -1163,13 +1166,25 @@ async def get_ncaam_board(date: Optional[str] = None, days: int = 1):
             FROM odds_snapshots 
             WHERE market_type = 'SPREAD' AND side = 'HOME'
             ORDER BY event_id, captured_at DESC
-        ) s ON e.id = s.event_id
+        ) s_home ON e.id = s_home.event_id
+        LEFT JOIN (
+            SELECT DISTINCT ON (event_id) event_id, line_value, price
+            FROM odds_snapshots 
+            WHERE market_type = 'SPREAD' AND side = 'AWAY'
+            ORDER BY event_id, captured_at DESC
+        ) s_away ON e.id = s_away.event_id
         LEFT JOIN (
             SELECT DISTINCT ON (event_id) event_id, line_value, price
             FROM odds_snapshots 
             WHERE market_type = 'TOTAL' AND side = 'OVER'
             ORDER BY event_id, captured_at DESC
-        ) t ON e.id = t.event_id
+        ) t_over ON e.id = t_over.event_id
+        LEFT JOIN (
+            SELECT DISTINCT ON (event_id) event_id, line_value, price
+            FROM odds_snapshots 
+            WHERE market_type = 'TOTAL' AND side = 'UNDER'
+            ORDER BY event_id, captured_at DESC
+        ) t_under ON e.id = t_under.event_id
         LEFT JOIN game_results gr ON e.id = gr.event_id
         WHERE e.league = 'NCAAM'
           AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') BETWEEN :start_date AND :end_date
