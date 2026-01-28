@@ -11,7 +11,8 @@ const Research = () => {
     const [error, setError] = useState(null);
     const [sportFilter, setSportFilter] = useState('All');
     // Date Filtering
-    const getTodayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time (approx) or use UTC if preferred. en-CA gives YYYY-MM-DD.
+    // Always drive date selection in America/New_York so it matches backend queries.
+    const getTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     const [selectedDate, setSelectedDate] = useState(getTodayStr());
 
     // Game Analysis Modal State
@@ -142,7 +143,7 @@ const Research = () => {
         current.setDate(current.getDate() + days);
         // Correct timezone offset issue if any, or just use simple string manipulation if date is reliable
         // To be safe with 'en-CA' (YYYY-MM-DD)
-        const nextDate = current.toLocaleDateString('en-CA');
+        const nextDate = current.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
         setSelectedDate(nextDate);
     };
 
@@ -276,7 +277,7 @@ const Research = () => {
                                 <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
                                     →
                                 </button>
-                                <button onClick={() => setSelectedDate(new Date().toLocaleDateString('en-CA'))} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
+                                <button onClick={() => setSelectedDate(new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }))} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
                                     Today
                                 </button>
                             </div>
