@@ -23,6 +23,8 @@ const Research = () => {
     // Sorting State
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
 
+    const BOARD_DAYS_DEFAULT = 3;
+
     useEffect(() => {
         fetchSchedule();
     }, [selectedDate]); // Refetch when date changes
@@ -32,9 +34,9 @@ const Research = () => {
             setLoading(true);
             setError(null);
 
-            // Fetch NCAAM specific board and overall history
+            // Fetch NCAAM board (next N days from selected date) and overall history
             const [boardRes, historyRes] = await Promise.all([
-                api.get('/api/ncaam/board', { params: { date: selectedDate } }),
+                api.get('/api/ncaam/board', { params: { date: selectedDate, days: BOARD_DAYS_DEFAULT } }),
                 api.get('/api/ncaam/history')
             ]);
 
@@ -211,9 +213,14 @@ const Research = () => {
     return (
         <div className="p-6 bg-slate-900 min-h-screen text-white">
             <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
-                    Bet Research
-                </h1>
+                <div>
+                    <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
+                        Bet Research
+                    </h1>
+                    <div className="text-xs text-slate-500 mt-1">
+                        Showing NCAAM board for next <span className="text-slate-300 font-bold">3</span> days from selected date.
+                    </div>
+                </div>
                 <div className="flex gap-2">
                     <button
                         onClick={fetchSchedule}

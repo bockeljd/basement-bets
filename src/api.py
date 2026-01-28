@@ -1120,16 +1120,30 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ncaam/board")
-async def get_ncaam_board(date: Optional[str] = None):
+async def get_ncaam_board(date: Optional[str] = None, days: int = 1):
     """
     Fetch lightweight NCAAM board for on-demand analysis.
+
+    Params:
+      - date: YYYY-MM-DD (interpreted in America/New_York)
+      - days: number of days forward from `date` to include (default 1)
     """
-    from src.database import get_db_connection, _exec, get_db_type
-    
-    # Default to today
+    from src.database import get_db_connection, _exec
+
+    # Default to today (NY time) to match frontend expectations.
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
-        
+
+    # Guardrails
+    try:
+        days = int(days)
+    except Exception:
+        days = 1
+    days = max(1, min(days, 14))  # hard cap to keep query cheap
+
+    start_date = datetime.strptime(date, "%Y-%m-%d").date()
+    end_date = (start_date + timedelta(days=days - 1))
+
     # Optimized Postgres Query
     query = """
     SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status, 
@@ -1158,11 +1172,11 @@ async def get_ncaam_board(date: Optional[str] = None):
         ) t ON e.id = t.event_id
         LEFT JOIN game_results gr ON e.id = gr.event_id
         WHERE e.league = 'NCAAM'
-          AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') = :date
+          AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') BETWEEN :start_date AND :end_date
         ORDER BY e.start_time ASC
     """
     with get_db_connection() as conn:
-        rows = _exec(conn, query, {"date": date}).fetchall()
+        rows = _exec(conn, query, {"start_date": str(start_date), "end_date": str(end_date)}).fetchall()
         return _ensure_utc([dict(r) for r in rows])
 
 def _ensure_utc(data: list) -> list:

@@ -242,10 +242,16 @@ class OddsAdapter:
         away_team = event.get('away_team')
         start_time = event.get('start_time')
 
-        event_id = self._resolve_canonical_event_id(league, home_team, away_team, start_time)
-        if not event_id:
-            # Fall back to creating an event from Action Network game_id
+        # Action Network is the canonical board source for NCAAM now.
+        # Use a stable Action-based event_id to avoid expensive fuzzy matching.
+        if (league or '').upper() == 'NCAAM' and event.get('game_id'):
             event_id = self._upsert_action_network_event(league, event, start_time)
+        else:
+            event_id = self._resolve_canonical_event_id(league, home_team, away_team, start_time)
+            if not event_id:
+                # Fall back to creating an event from Action Network game_id
+                event_id = self._upsert_action_network_event(league, event, start_time)
+
         if not event_id:
             return []
 
