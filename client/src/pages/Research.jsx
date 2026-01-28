@@ -676,6 +676,42 @@ const Research = () => {
                                     </div>
                                 ) : analysisResult ? (
                                     <div className="space-y-6">
+                                        {/* Market Lines (clarify who is favored) */}
+                                        <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
+                                            <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Market Lines</div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Spread</div>
+                                                    {selectedGame.home_spread !== null && selectedGame.home_spread !== undefined ? (() => {
+                                                        const hs = Number(selectedGame.home_spread);
+                                                        const homeLine = `${hs > 0 ? '+' : ''}${hs}`;
+                                                        const awayLine = `${(-hs) > 0 ? '+' : ''}${-hs}`;
+                                                        const favored = hs < 0 ? selectedGame.home_team : (hs > 0 ? selectedGame.away_team : 'Pick');
+                                                        return (
+                                                            <div className="space-y-1">
+                                                                <div className="text-slate-200 font-bold">{selectedGame.home_team} {homeLine}</div>
+                                                                <div className="text-slate-200 font-bold">{selectedGame.away_team} {awayLine}</div>
+                                                                <div className="text-[10px] text-slate-500">Favored: <span className="text-slate-300 font-bold">{favored}</span></div>
+                                                            </div>
+                                                        );
+                                                    })() : <div className="text-slate-500">No spread found</div>}
+                                                </div>
+                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Total</div>
+                                                    {selectedGame.total_line !== null && selectedGame.total_line !== undefined ? (
+                                                        <div className="text-slate-200 font-bold">{selectedGame.total_line}</div>
+                                                    ) : <div className="text-slate-500">No total found</div>}
+                                                    <div className="text-[10px] text-slate-500 mt-1">Over/Under line</div>
+                                                </div>
+                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Model Summary</div>
+                                                    <div className="text-slate-300 text-xs leading-snug">
+                                                        {analysisResult.narrative?.market_summary || '—'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         {/* Recommendations */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {analysisResult.recommendations?.map((rec, idx) => (
@@ -695,6 +731,35 @@ const Research = () => {
                                                     <div className="text-xs text-slate-400">
                                                         Edge: <span className="text-green-400 font-bold">+{rec.edge}</span> •
                                                         Fair: {rec.fair_line}
+                                                    </div>
+                                                    <div className="mt-3 text-xs text-slate-300 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">What needs to happen</div>
+                                                        {(() => {
+                                                            try {
+                                                                if (rec.bet_type === 'SPREAD') {
+                                                                    // selection looks like: "TeamName -12.5" or "TeamName 4.5"
+                                                                    const m = String(rec.selection || '').match(/^(.*)\s([-+]?\d+(?:\.\d+)?)$/);
+                                                                    const team = (m?.[1] || rec.selection || '').trim();
+                                                                    const line = m ? Number(m[2]) : null;
+                                                                    if (line === null || Number.isNaN(line)) return 'Team must cover the spread.';
+                                                                    const needed = line < 0 ? `win by ${Math.abs(line) + 0.5}+` : `lose by ${Math.abs(line) - 0.5} or win`;
+                                                                    return `${team} must cover ${line > 0 ? '+' : ''}${line} (i.e., ${needed}).`;
+                                                                }
+                                                                if (rec.bet_type === 'TOTAL') {
+                                                                    // selection looks like: "OVER 151.5" / "UNDER 151.5"
+                                                                    const mm = String(rec.selection || '').match(/^(OVER|UNDER)\s+(\d+(?:\.\d+)?)$/i);
+                                                                    const side = (mm?.[1] || 'TOTAL').toUpperCase();
+                                                                    const line = mm ? Number(mm[2]) : null;
+                                                                    if (line === null || Number.isNaN(line)) return 'Game total must land on the correct side of the total.';
+                                                                    return side === 'OVER'
+                                                                        ? `Combined score must finish OVER ${line}.`
+                                                                        : `Combined score must finish UNDER ${line}.`;
+                                                                }
+                                                                return 'Bet outcome must align with the recommended side.';
+                                                            } catch (e) {
+                                                                return 'Bet outcome must align with the recommended side.';
+                                                            }
+                                                        })()}
                                                     </div>
                                                 </div>
                                             ))}
@@ -730,14 +795,26 @@ const Research = () => {
                                                 </h3>
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Score</div>
-                                                        <div className="text-lg font-bold text-white">{analysisResult.torvik_view.projected_score}</div>
-                                                        {analysisResult.away_team && (
-                                                            <div className="flex justify-between text-[10px] text-slate-400 mt-1 px-1">
-                                                                <span className="truncate max-w-[45%]">{analysisResult.away_team}</span>
-                                                                <span className="truncate max-w-[45%] text-right">{analysisResult.home_team}</span>
-                                                            </div>
-                                                        )}
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Projected Score</div>
+                                                        {(() => {
+                                                            // torvik_view.projected_score is often "AwayScore-HomeScore"; make it explicit.
+                                                            const ps = String(analysisResult.torvik_view?.projected_score || '').trim();
+                                                            const parts = ps.split('-').map(x => x.trim());
+                                                            const awayScore = parts.length === 2 ? parts[0] : ps;
+                                                            const homeScore = parts.length === 2 ? parts[1] : '';
+                                                            return (
+                                                                <div className="space-y-1">
+                                                                    <div className="flex justify-between text-white font-bold">
+                                                                        <span className="truncate pr-2">{analysisResult.away_team || 'Away'}</span>
+                                                                        <span className="font-mono">{awayScore}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between text-white font-bold">
+                                                                        <span className="truncate pr-2">{analysisResult.home_team || 'Home'}</span>
+                                                                        <span className="font-mono">{homeScore}</span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
                                                         <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Margin</div>
