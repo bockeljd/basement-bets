@@ -1418,14 +1418,14 @@ def sync_draftkings(payload: dict):
     Payload: {"account_name": "Main"}
     """
     from src.scrapers.user_draftkings import DraftKingsScraper
-    from src.parsers.draftkings import DraftKingsParser
+    from src.parsers.draftkings_text import DraftKingsTextParser
     
     try:
         scraper = DraftKingsScraper()
         raw_text = scraper.scrape()
         
-        parser = DraftKingsParser()
-        parsed_bets = parser.parse_text_dump(raw_text)
+        parser = DraftKingsTextParser()
+        parsed_bets = parser.parse(raw_text)
         
         return {
             "source": "DraftKings", 

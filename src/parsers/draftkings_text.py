@@ -11,7 +11,8 @@ class DraftKingsTextParser:
         bets = []
         # Regex to find the Transaction ID line (e.g., DK12345678)
         id_pattern = re.compile(r'^(DK\d+)')
-        date_pattern = re.compile(r'([A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2}:\d{2} [AP]M)')
+        # Accept with or without seconds (DK varies)
+        date_pattern = re.compile(r'([A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2}(?::\d{2})? [AP]M)')
 
         lines = content.split('\n')
         buffer = []
@@ -27,14 +28,16 @@ class DraftKingsTextParser:
                 
                 # Find date in the buffer (look backwards)
                 raw_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                date_found = False
-                
-                # Check last 5 lines for a date
-                for i in range(1, min(len(buffer)+1, 6)):
+
+                # Check last 10 lines for a date-like string
+                for i in range(1, min(len(buffer) + 1, 11)):
                     d_match = date_pattern.search(buffer[-i])
                     if d_match:
                         raw_date = d_match.group(1)
-                        date_found = True
+                        break
+                    # Fallback: any line containing "Mon dd, yyyy" can be parsed by dateutil
+                    if re.search(r"[A-Z][a-z]{2} \d{1,2}, \d{4}", buffer[-i]):
+                        raw_date = buffer[-i]
                         break
                 
                 # If we have a buffer, parse it
@@ -300,18 +303,54 @@ class DraftKingsTextParser:
                              break
                         except: pass
 
-            # 4. Profit Calculation
+            # 4. Financial fallbacks (DK body dumps often omit explicit Wager:/Paid: lines)
+            text_all = " ".join(lines)
+
+            if wager == 0.0:
+                m = re.search(r'\$\s*([0-9]+\.[0-9]{2})', text_all)
+                if m:
+                    try:
+                        wager = float(m.group(1))
+                    except Exception:
+                        pass
+
+            profit = None
+            # Look for explicit net result like +$25.40 / -$10.00
+            pm = re.search(r'([+-])\$\s*([0-9]+\.[0-9]{2})', text_all)
+            if pm:
+                try:
+                    sign = 1.0 if pm.group(1) == '+' else -1.0
+                    profit = sign * float(pm.group(2))
+                except Exception:
+                    profit = None
+
+            # If we have Paid/Payout, compute profit
             status_up = status.upper()
-            if status_up == "WON" or status_up == "CASHED OUT":
-                if paid > 0:
-                    profit = paid - wager
-                elif odds:
-                    if odds > 0: profit = wager * (odds / 100)
-                    else: profit = wager * (100 / abs(odds))
+            if profit is None:
+                if status_up in ("WON", "CASHED OUT"):
+                    if paid > 0 and wager > 0:
+                        profit = paid - wager
+                    elif odds and wager > 0:
+                        profit = wager * (odds / 100) if odds > 0 else wager * (100 / abs(odds))
+                    else:
+                        profit = 0.0
+                elif status_up == "LOST":
+                    profit = -wager
                 else:
                     profit = 0.0
+
+            # Description/selection: one-line summary (keep selection details but bounded)
+            # Prefer matchup; then selection; keep it concise.
+            base = matchup or selection or "Unknown"
+            summary = base
+            if odds is not None:
+                summary = f"{bet_type} {odds}: {base}"
             else:
-                profit = -wager
+                summary = f"{bet_type}: {base}"
+
+            # Hard cap to keep UI sane
+            if len(summary) > 140:
+                summary = summary[:137] + "..."
             
             from dateutil.parser import parse as parse_date_util
             try:
@@ -325,7 +364,7 @@ class DraftKingsTextParser:
                 except:
                      dt = datetime.now()
             
-            description = matchup
+            description = summary
 
             # 5. Sport Inference
             sport = "Unknown"
