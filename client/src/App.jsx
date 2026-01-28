@@ -1062,6 +1062,19 @@ function TransactionView({ bets, financials }) {
         status: "All"
     });
 
+    const [showManualAdd, setShowManualAdd] = useState(false);
+    const [manualBet, setManualBet] = useState({
+        sportsbook: "DraftKings",
+        sport: "NFL",
+        market_type: "Straight",
+        event_name: "",
+        selection: "",
+        odds: "",
+        stake: "",
+        status: "LOST",
+        placed_at: new Date().toISOString().slice(0, 10)
+    });
+
     // Extract unique options for dropdowns - keep "All" at top
     const sportsbooks = ["All", ...[...new Set(bets.map(b => b.provider).filter(Boolean))].sort()];
     const sports = ["All", ...[...new Set(bets.map(b => b.sport).filter(Boolean))].sort()];
@@ -1108,6 +1121,46 @@ function TransactionView({ bets, financials }) {
         } catch (err) {
             console.error("Delete Error:", err);
             alert("Failed to delete bet.");
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const submitManualBet = async () => {
+        setIsUpdating(true);
+        try {
+            const american = manualBet.odds ? parseInt(manualBet.odds, 10) : null;
+            const stake = manualBet.stake ? parseFloat(manualBet.stake) : 0;
+
+            await api.post('/api/bets/manual', {
+                sportsbook: manualBet.sportsbook,
+                sport: manualBet.sport,
+                market_type: manualBet.market_type,
+                event_name: manualBet.event_name,
+                selection: manualBet.selection,
+                price: { american },
+                stake,
+                status: manualBet.status,
+                placed_at: manualBet.placed_at,
+                raw_text: 'manual-ui'
+            });
+
+            setShowManualAdd(false);
+            setManualBet({
+                sportsbook: manualBet.sportsbook,
+                sport: manualBet.sport,
+                market_type: manualBet.market_type,
+                event_name: "",
+                selection: "",
+                odds: "",
+                stake: "",
+                status: manualBet.status,
+                placed_at: new Date().toISOString().slice(0, 10)
+            });
+            window.location.reload();
+        } catch (err) {
+            console.error('Manual bet save failed', err);
+            alert('Failed to add bet. Check required fields.');
         } finally {
             setIsUpdating(false);
         }
@@ -1220,12 +1273,20 @@ function TransactionView({ bets, financials }) {
                     <div className="text-gray-400 text-sm">
                         Showing <span className="text-white font-bold">{filtered.length}</span> of {bets.length} transactions
                     </div>
-                    <button
-                        onClick={resetFilters}
-                        className="text-xs text-blue-400 hover:text-blue-300 font-medium px-3 py-1.5 rounded-lg border border-blue-900/30 hover:bg-blue-900/20 transition"
-                    >
-                        Clear Filters
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowManualAdd(true)}
+                            className="text-xs text-green-300 hover:text-green-200 font-medium px-3 py-1.5 rounded-lg border border-green-900/40 hover:bg-green-900/20 transition"
+                        >
+                            + Add Bet
+                        </button>
+                        <button
+                            onClick={resetFilters}
+                            className="text-xs text-blue-400 hover:text-blue-300 font-medium px-3 py-1.5 rounded-lg border border-blue-900/30 hover:bg-blue-900/20 transition"
+                        >
+                            Clear Filters
+                        </button>
+                    </div>
                 </div>
 
                 {/* Grid */}
