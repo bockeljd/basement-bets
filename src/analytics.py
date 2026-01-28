@@ -27,12 +27,30 @@ class AnalyticsEngine:
                 b['display_date'] = raw_date
 
     def _normalize_bets(self):
-        """Standardizes bet types based on user rules."""
+        """Standardizes bet types and adds display helpers for the UI."""
         import re
+
+        def compact_selection(text: str) -> str:
+            if not text:
+                return ""
+            t = str(text).replace("\n", " ").strip()
+            # Split FanDuel/DK multi-leg strings
+            parts = [p.strip() for p in re.split(r"\s*\|\s*", t) if p.strip()]
+            if len(parts) <= 2:
+                out = " | ".join(parts) if parts else t
+            else:
+                out = " | ".join(parts[:2]) + f" | … (+{len(parts)-2} more)"
+            # Hard cap
+            return out[:140] + "..." if len(out) > 140 else out
+
         for b in self.bets:
+            # Normalize odds: treat 0 as missing
+            if b.get('odds') == 0:
+                b['odds'] = None
+
             raw = b.get('bet_type') or ''
             norm = raw.strip()
-            
+
             # Case-insensitive check
             check = norm.lower()
 
@@ -56,7 +74,16 @@ class AnalyticsEngine:
             elif "sgp" in check or "same game" in check:
                 norm = "SGP"
 
-            # 6. Parlays (check last so SGP matches first if labeled SGP)
+            # 6. FanDuel accumulator codes (ACC5, ACC7, etc)
+            elif re.match(r"^acc\d+$", check):
+                n = int(re.findall(r"\d+", check)[0])
+                norm = f"{n} leg parlay"
+
+            # 7. FanDuel TBL (treat as parlay/teaser bucket for now)
+            elif check == "tbl":
+                norm = "Parlay"
+
+            # 8. Parlays (check last so SGP matches first if labeled SGP)
             elif "parlay" in check or "leg" in check or "picks" in check:
                 # Extract leg count
                 match = re.search(r'(\d+)', check)
@@ -79,6 +106,10 @@ class AnalyticsEngine:
                      norm = "2 Leg Parlay"
 
             b['bet_type'] = norm
+
+            # Selection/description display helpers
+            base_text = b.get('selection') or b.get('description') or ''
+            b['display_selection'] = compact_selection(base_text)
 
 
 

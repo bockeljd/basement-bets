@@ -1545,7 +1545,7 @@ function TransactionView({ bets, financials }) {
                                         </td>
                                         <td className="px-6 py-3 text-gray-400 text-xs">{bet.bet_type}</td>
                                         <td className="px-6 py-3 max-w-xs truncate text-gray-300 text-xs" title={bet.selection || bet.description}>
-                                            {bet.selection || bet.description}
+                                            {bet.display_selection || bet.selection || bet.description}
                                             {bet.is_live && <span className="ml-2 text-[9px] bg-red-900/50 text-red-300 px-1 rounded border border-red-800">LIVE</span>}
                                             {bet.is_bonus && <span className="ml-2 text-[9px] bg-yellow-900/50 text-yellow-300 px-1 rounded border border-yellow-800">BONUS</span>}
                                         </td>
