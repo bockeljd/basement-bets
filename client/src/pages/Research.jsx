@@ -346,9 +346,14 @@ const Research = () => {
                                                 <div className="flex items-center">Matchup <SortIcon column="game" /></div>
                                             </th>
                                             {leagueFilter === 'EPL' ? (
-                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                    <div className="flex items-center">Moneyline (1X2)</div>
-                                                </th>
+                                                <>
+                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <div className="flex items-center">Moneyline (1X2)</div>
+                                                    </th>
+                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <div className="flex items-center">Total Goals (O/U)</div>
+                                                    </th>
+                                                </>
                                             ) : (
                                                 <>
                                                     <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
@@ -408,27 +413,48 @@ const Research = () => {
                                                         </td>
                                                         <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
                                                         {leagueFilter === 'EPL' ? (
-                                                            <td className="py-3 px-4">
-                                                                {(edge.ml_home_odds !== null && edge.ml_home_odds !== undefined) || (edge.ml_away_odds !== null && edge.ml_away_odds !== undefined) || (edge.ml_draw_odds !== null && edge.ml_draw_odds !== undefined) ? (
-                                                                    <div className="flex flex-col gap-1">
-                                                                        <div className="flex justify-between gap-2 text-xs">
-                                                                            <span className="text-slate-400 truncate">HOME</span>
-                                                                            <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_home_odds)}</span>
+                                                            <>
+                                                                <td className="py-3 px-4">
+                                                                    {(edge.ml_home_odds !== null && edge.ml_home_odds !== undefined) || (edge.ml_away_odds !== null && edge.ml_away_odds !== undefined) || (edge.ml_draw_odds !== null && edge.ml_draw_odds !== undefined) ? (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">HOME</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_home_odds)}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">DRAW</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_draw_odds)}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">AWAY</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_away_odds)}</span>
+                                                                            </div>
+                                                                            <div className="text-[10px] text-slate-600">1X2 market odds</div>
                                                                         </div>
-                                                                        <div className="flex justify-between gap-2 text-xs">
-                                                                            <span className="text-slate-400 truncate">DRAW</span>
-                                                                            <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_draw_odds)}</span>
+                                                                    ) : (
+                                                                        <span className="text-slate-600 font-mono text-xs">No moneyline</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="py-3 px-4">
+                                                                    {edge.total_line !== null && edge.total_line !== undefined ? (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400">OVER</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds)}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400">UNDER</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
+                                                                            </div>
+                                                                            <div className="text-[10px] text-slate-600">goals total (O/U)</div>
                                                                         </div>
-                                                                        <div className="flex justify-between gap-2 text-xs">
-                                                                            <span className="text-slate-400 truncate">AWAY</span>
-                                                                            <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_away_odds)}</span>
-                                                                        </div>
-                                                                        <div className="text-[10px] text-slate-600">1X2 market odds</div>
-                                                                    </div>
-                                                                ) : (
-                                                                    <span className="text-slate-600 font-mono text-xs">No moneyline</span>
-                                                                )}
-                                                            </td>
+                                                                    ) : (
+                                                                        <span className="text-slate-600 font-mono text-xs">No total</span>
+                                                                    )}
+                                                                </td>
+                                                            </>
                                                         ) : (
                                                             <>
                                                                 <td className="py-3 px-4">
