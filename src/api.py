@@ -1119,80 +1119,119 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
         print(f"[Job] Torvik Ingestion Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/ncaam/board")
-async def get_ncaam_board(date: Optional[str] = None, days: int = 1):
+@app.get("/api/board")
+async def get_board(league: str, date: Optional[str] = None, days: int = 1):
     """
-    Fetch lightweight NCAAM board for on-demand analysis.
+    Generic lightweight board backed by DB odds snapshots.
 
     Params:
+      - league: 'NCAAM' | 'NFL' | 'EPL'
       - date: YYYY-MM-DD (interpreted in America/New_York)
       - days: number of days forward from `date` to include (default 1)
+
+    Returns (when available):
+      - spread (home/away) + odds
+      - total (O/U) + odds
+      - moneyline (home/away/draw) odds
     """
     from src.database import get_db_connection, _exec
 
-    # Default to today (NY time) to match frontend expectations.
+    if not league:
+        raise HTTPException(status_code=400, detail="league is required")
+
+    league = league.upper().strip()
+    if league not in {"NCAAM", "NFL", "EPL"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported league: {league}")
+
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
 
-    # Guardrails
     try:
         days = int(days)
     except Exception:
         days = 1
-    days = max(1, min(days, 14))  # hard cap to keep query cheap
+    days = max(1, min(days, 14))
 
     start_date = datetime.strptime(date, "%Y-%m-%d").date()
     end_date = (start_date + timedelta(days=days - 1))
 
-    # Optimized Postgres Query
     query = """
-    SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status, 
-               -- SPREAD (HOME/AWAY)
-               s_home.line_value as home_spread, 
-               s_home.price as spread_home_odds,
-               s_away.line_value as away_spread,
-               s_away.price as spread_away_odds,
-               -- TOTAL (OVER/UNDER)
-               t_over.line_value as total_line,
-               t_over.price as total_over_odds,
-               t_under.price as total_under_odds,
-               -- Back-compat aliases (older UI expected these names)
-               s_home.price as moneyline_home,
-               t_over.price as moneyline_away,
-               gr.home_score, gr.away_score, gr.final
-        FROM events e
-        LEFT JOIN (
-            SELECT DISTINCT ON (event_id) event_id, line_value, price
-            FROM odds_snapshots 
-            WHERE market_type = 'SPREAD' AND side = 'HOME'
-            ORDER BY event_id, captured_at DESC
-        ) s_home ON e.id = s_home.event_id
-        LEFT JOIN (
-            SELECT DISTINCT ON (event_id) event_id, line_value, price
-            FROM odds_snapshots 
-            WHERE market_type = 'SPREAD' AND side = 'AWAY'
-            ORDER BY event_id, captured_at DESC
-        ) s_away ON e.id = s_away.event_id
-        LEFT JOIN (
-            SELECT DISTINCT ON (event_id) event_id, line_value, price
-            FROM odds_snapshots 
-            WHERE market_type = 'TOTAL' AND side = 'OVER'
-            ORDER BY event_id, captured_at DESC
-        ) t_over ON e.id = t_over.event_id
-        LEFT JOIN (
-            SELECT DISTINCT ON (event_id) event_id, line_value, price
-            FROM odds_snapshots 
-            WHERE market_type = 'TOTAL' AND side = 'UNDER'
-            ORDER BY event_id, captured_at DESC
-        ) t_under ON e.id = t_under.event_id
-        LEFT JOIN game_results gr ON e.id = gr.event_id
-        WHERE e.league = 'NCAAM'
-          AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') BETWEEN :start_date AND :end_date
-        ORDER BY e.start_time ASC
+    SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status,
+           -- SPREAD (HOME/AWAY)
+           s_home.line_value as home_spread,
+           s_home.price as spread_home_odds,
+           s_away.line_value as away_spread,
+           s_away.price as spread_away_odds,
+           -- TOTAL (OVER/UNDER)
+           t_over.line_value as total_line,
+           t_over.price as total_over_odds,
+           t_under.price as total_under_odds,
+           -- MONEYLINE (HOME/AWAY/DRAW)
+           ml_home.price as ml_home_odds,
+           ml_away.price as ml_away_odds,
+           ml_draw.price as ml_draw_odds,
+           -- Back-compat aliases (older UI expected these names)
+           s_home.price as moneyline_home,
+           t_over.price as moneyline_away,
+           gr.home_score, gr.away_score, gr.final
+    FROM events e
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'SPREAD' AND side = 'HOME'
+        ORDER BY event_id, captured_at DESC
+    ) s_home ON e.id = s_home.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'SPREAD' AND side = 'AWAY'
+        ORDER BY event_id, captured_at DESC
+    ) s_away ON e.id = s_away.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'TOTAL' AND side = 'OVER'
+        ORDER BY event_id, captured_at DESC
+    ) t_over ON e.id = t_over.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'TOTAL' AND side = 'UNDER'
+        ORDER BY event_id, captured_at DESC
+    ) t_under ON e.id = t_under.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, price
+        FROM odds_snapshots
+        WHERE market_type = 'MONEYLINE' AND side = 'HOME'
+        ORDER BY event_id, captured_at DESC
+    ) ml_home ON e.id = ml_home.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, price
+        FROM odds_snapshots
+        WHERE market_type = 'MONEYLINE' AND side = 'AWAY'
+        ORDER BY event_id, captured_at DESC
+    ) ml_away ON e.id = ml_away.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, price
+        FROM odds_snapshots
+        WHERE market_type = 'MONEYLINE' AND side = 'DRAW'
+        ORDER BY event_id, captured_at DESC
+    ) ml_draw ON e.id = ml_draw.event_id
+    LEFT JOIN game_results gr ON e.id = gr.event_id
+    WHERE e.league = :league
+      AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') BETWEEN :start_date AND :end_date
+    ORDER BY e.start_time ASC
     """
+
     with get_db_connection() as conn:
-        rows = _exec(conn, query, {"start_date": str(start_date), "end_date": str(end_date)}).fetchall()
+        rows = _exec(conn, query, {"league": league, "start_date": str(start_date), "end_date": str(end_date)}).fetchall()
         return _ensure_utc([dict(r) for r in rows])
+
+
+@app.get("/api/ncaam/board")
+async def get_ncaam_board(date: Optional[str] = None, days: int = 1):
+    """Back-compat wrapper."""
+    return await get_board(league="NCAAM", date=date, days=days)
 
 def _ensure_utc(data: list) -> list:
     """
