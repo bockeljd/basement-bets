@@ -405,7 +405,7 @@ function App() {
                     ) : view === 'performance' ? (
                         <PerformanceView timeSeries={timeSeries} drawdown={drawdown} financials={financials} />
                     ) : (
-                        <Research />
+                        <Research onAddBet={() => setShowAddBet(true)} />
                     )}
                 </div>
             </div>

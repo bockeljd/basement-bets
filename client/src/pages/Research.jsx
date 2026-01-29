@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/axios';
-import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck, PlusCircle } from 'lucide-react';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
 
-const Research = () => {
+const Research = ({ onAddBet }) => {
     const [edges, setEdges] = useState([]);
     const [history, setHistory] = useState([]);
     const [activeTab, setActiveTab] = useState('live');
@@ -229,12 +229,23 @@ const Research = () => {
                         className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                         <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                        Refresh Schedule
+                        Refresh Board
                     </button>
+
+                    <button
+                        onClick={() => onAddBet?.()}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm transition-all flex items-center gap-2"
+                        title="Add a bet manually"
+                    >
+                        <PlusCircle size={14} />
+                        Add Bet
+                    </button>
+
                     <button
                         onClick={runModels}
                         disabled={loading}
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        title="(Legacy) Global model run. NCAAM board is refreshed via Refresh Board."
                     >
                         {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
                         {loading ? 'Running Models...' : 'Run Models'}
