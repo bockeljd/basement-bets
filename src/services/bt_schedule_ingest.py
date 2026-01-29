@@ -74,29 +74,115 @@ def fetch_bt_schedule_json(date_yyyymmdd: str) -> tuple[Optional[Any], Optional[
 
 
 def fetch_bt_schedule_selenium(date_yyyymmdd: str) -> tuple[Optional[Any], Optional[str]]:
-    """Fetch schedule JSON using Selenium/undetected_chromedriver.
+    """Fetch schedule/projections using Selenium.
+
+    Torvik's `json=1` endpoint is frequently blocked or returns HTML.
+    In a real browser session, the schedule page contains the official
+    T-Rank line and projected score in the table. We scrape that.
 
     Intended for trusted local machines only (NOT serverless).
-    Returns (payload, error).
+    Returns (payload, error) where payload is a list[dict].
     """
-    try:
-        from src.selenium_client import SeleniumClient
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
 
-        url = f"https://barttorvik.com/schedule.php?date={date_yyyymmdd}&json=1"
-        client = SeleniumClient(headless=True)
+    import re
+
+    def _clean_team(s: str) -> str:
+        s = (s or "").strip()
+        # strip leading rank like "19 Tennessee"
+        s = re.sub(r"^\d+\s+", "", s)
+        return s.strip()
+
+    try:
+        from bs4 import BeautifulSoup
+        from src.selenium_client import SeleniumClient
+
+        url = f"https://barttorvik.com/schedule.php?date={date_yyyymmdd}"
+
+        # Headful tends to pass bot checks more reliably than headless.
+        client = SeleniumClient(headless=False)
         try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+
             d = client.driver
             d.get(url)
 
-            # If the response is JSON, it often renders in <pre>.
-            # Wait for pre and parse.
-            pre = WebDriverWait(d, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'pre')))
-            txt = pre.text
-            payload = json.loads(txt)
+            # Wait for the schedule table to render
+            try:
+                WebDriverWait(d, 25).until(EC.presence_of_element_located((By.TAG_NAME, 'table')))
+            except Exception:
+                pass
+
+            html = d.page_source or ""
+            if "Verifying Browser" in html or "Verifying your browser" in html:
+                return None, "Selenium saw Torvik bot-check (Verifying Browser)"
+
+            soup = BeautifulSoup(html, "html.parser")
+            table = soup.find("table")
+            if not table:
+                return None, "No schedule table found"
+
+            payload: list[dict] = []
+            for tr in table.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) < 3:
+                    continue
+
+                line_text = tds[2].get_text(" ", strip=True)
+
+                # Prefer <a> anchor texts for team names (avoids TV network suffixes).
+                matchup_links = [a.get_text(" ", strip=True) for a in tds[1].find_all('a') if a.get_text(strip=True)]
+                if len(matchup_links) >= 2:
+                    away = _clean_team(matchup_links[0])
+                    home = _clean_team(matchup_links[1])
+                else:
+                    matchup_text = tds[1].get_text(" ", strip=True)
+                    if " at " not in matchup_text:
+                        continue
+                    away_raw, home_raw = matchup_text.split(" at ", 1)
+                    away = _clean_team(away_raw)
+                    home = _clean_team(re.split(r"\s{2,}", home_raw)[0])
+
+                # Line/projection cell like:
+                # "Auburn -6.5 , 84-78 (72%)" OR "Tennessee -0.9 , 80-79 (53%)"
+                fav_m = re.search(r"^(.+?)\s+([+-]?\d+(?:\.\d+)?)\s*,", line_text)
+                score_m = re.search(r",\s*(\d+)-(\d+)\s*\(", line_text)
+                if not fav_m or not score_m:
+                    continue
+
+                favored_team = _clean_team(fav_m.group(1))
+                spread = float(fav_m.group(2))
+                s1 = float(score_m.group(1))
+                s2 = float(score_m.group(2))
+
+                # Convert to home-relative spread.
+                if favored_team.lower() == home.lower():
+                    home_spread = spread  # negative
+                    home_score, away_score = s1, s2
+                else:
+                    home_spread = abs(spread)  # home is underdog
+                    away_score, home_score = s1, s2
+
+                total = home_score + away_score
+
+                payload.append(
+                    {
+                        "away": away,
+                        "home": home,
+                        "home_spread": home_spread,
+                        "away_score": away_score,
+                        "home_score": home_score,
+                        "total": total,
+                        "line_text": line_text,
+                    }
+                )
+
+            if not payload:
+                return None, "Parsed 0 games from schedule table"
+
             return payload, None
+
         finally:
             try:
                 client.quit()
@@ -110,6 +196,8 @@ def fetch_bt_schedule_selenium(date_yyyymmdd: str) -> tuple[Optional[Any], Optio
 def record_bt_schedule_raw(date_yyyymmdd: str, payload: Any, status: str, error: Optional[str] = None) -> None:
     ensure_bt_schedule_tables()
     fp = _fingerprint(date_yyyymmdd, payload, status)
+    from psycopg2.extras import Json
+
     with get_db_connection() as conn:
         _exec(
             conn,
@@ -118,7 +206,7 @@ def record_bt_schedule_raw(date_yyyymmdd: str, payload: Any, status: str, error:
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (fingerprint) DO NOTHING
             """,
-            (date_yyyymmdd, payload, status, (error or None), fp),
+            (date_yyyymmdd, Json(payload) if payload is not None else None, status, (error or None), fp),
         )
         conn.commit()
 

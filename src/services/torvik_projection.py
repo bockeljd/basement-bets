@@ -72,7 +72,7 @@ class TorvikProjectionService:
                 """, (date_yyyymmdd,)).fetchone()
                 if not row:
                     return None
-                payload = row[0]
+                payload = row.get('payload_json') if isinstance(row, dict) else row[0]
         except Exception:
             return None
 
@@ -82,21 +82,41 @@ class TorvikProjectionService:
         projections = {}
         for item in payload:
             try:
-                away = item.get('away') or item.get('team_away')
-                home = item.get('home') or item.get('team_home')
+                away = item.get('away')
+                home = item.get('home')
                 if not away or not home:
                     continue
-                line = item.get('line', item.get('t_rank_line', 0))
-                total = item.get('total', 0)
-                proj = {
-                    "opponent": home,
+
+                # Our selenium ingest stores home-relative spread as `home_spread`.
+                # Keep the older key name `spread` to align with TorvikProjectionService.
+                home_spread = item.get('home_spread')
+                if home_spread is None:
+                    home_spread = item.get('spread')
+
+                total = item.get('total')
+                if total is None:
+                    # fallback to scores
+                    try:
+                        total = float(item.get('home_score', 0)) + float(item.get('away_score', 0))
+                    except Exception:
+                        total = 0.0
+
+                projected_score = None
+                if item.get('away_score') is not None and item.get('home_score') is not None:
+                    projected_score = f"{item.get('away_score')}-{item.get('home_score')}"
+
+                # Create per-team projection entries. For historical compatibility:
+                # - for the away team entry, store opponent=home
+                # - store `spread` as the home-relative spread
+                proj_base = {
                     "total": float(total) if total else 0.0,
-                    "projected_score": f"{item.get('score_away')}-{item.get('score_home')}",
-                    "spread": float(line) if line else 0.0,
-                    "raw_line": str(line)
+                    "projected_score": projected_score,
+                    "spread": float(home_spread) if home_spread is not None else 0.0,
+                    "raw_line": item.get('line_text') or str(home_spread),
                 }
-                projections[away] = {**proj, "team": away, "opponent": home}
-                projections[home] = {**proj, "team": home, "opponent": away}
+
+                projections[away] = {**proj_base, "team": away, "opponent": home}
+                projections[home] = {**proj_base, "team": home, "opponent": away}
             except Exception:
                 continue
 

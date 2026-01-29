@@ -7,6 +7,8 @@ import os
 import time
 import logging
 import shutil
+import subprocess
+import re
 from pathlib import Path
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -41,6 +43,18 @@ class SeleniumClient:
                 return w
         return None
 
+    def _detect_chrome_major_version(self, browser_executable_path: str) -> int | None:
+        """Best-effort detect Chrome/Chromium major version for driver matching."""
+        try:
+            out = subprocess.check_output([browser_executable_path, "--version"], text=True).strip()
+            # e.g. "Google Chrome 144.0.7559.97" / "Chromium 123.0..."
+            m = re.search(r"(\d+)\.\d+\.\d+\.\d+", out)
+            if m:
+                return int(m.group(1))
+        except Exception:
+            return None
+        return None
+
     def __init__(self, headless=False, profile_path=None, browser_executable_path=None):
         self.options = uc.ChromeOptions()
 
@@ -73,12 +87,19 @@ class SeleniumClient:
         # 3. Initialize Driver
         try:
             # use_subprocess=True helps avoid some lockfile issues
-            self.driver = uc.Chrome(
-                options=self.options,
-                use_subprocess=True,
-                headless=headless,
-                browser_executable_path=self.browser_executable_path,
-            )
+            major = self._detect_chrome_major_version(self.browser_executable_path)
+            # If we can detect the local Chrome major version, pass it to undetected_chromedriver
+            # so it downloads/uses a matching chromedriver.
+            kwargs = {
+                "options": self.options,
+                "use_subprocess": True,
+                "headless": headless,
+                "browser_executable_path": self.browser_executable_path,
+            }
+            if major:
+                kwargs["version_main"] = major
+
+            self.driver = uc.Chrome(**kwargs)
         except Exception as e:
             print(f"Failed to initialize undetected_chromedriver: {e}")
             if not self.browser_executable_path:
