@@ -85,6 +85,28 @@ class TorvikProjectionService:
             
         return None
 
+    def get_matchup_team_stats(self, home_team: str, away_team: str) -> Dict:
+        """Return best-available Torvik team efficiency stats for both teams.
+
+        These are used for UI explanations and basic game-script reasoning.
+        """
+        h = self._get_latest_metrics(home_team)
+        a = self._get_latest_metrics(away_team)
+        if not h or not a:
+            return {
+                "home": h,
+                "away": a,
+                "game_tempo": None,
+                "notes": "Missing team efficiency metrics"
+            }
+        game_tempo = (h.get('adj_tempo', 0) + a.get('adj_tempo', 0)) / 2.0
+        return {
+            "home": h,
+            "away": a,
+            "game_tempo": round(game_tempo, 1),
+            "notes": None
+        }
+
     def compute_torvik_projection(self, home_team: str, away_team: str) -> Dict:
         """
         Compute projection using interaction formula:

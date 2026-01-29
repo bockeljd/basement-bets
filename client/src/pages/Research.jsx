@@ -1111,6 +1111,60 @@ const Research = ({ onAddBet }) => {
                                             )}
                                         </div>
 
+                                        {/* Torvik Team Stats + Game Script */}
+                                        {(analysisResult.torvik_team_stats || analysisResult.game_script) && (
+                                            <div>
+                                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Team Efficiency (Torvik) + Game Script</h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Efficiency snapshot</div>
+                                                        {(() => {
+                                                            const ts = analysisResult.torvik_team_stats || {};
+                                                            const h = ts.home || {};
+                                                            const a = ts.away || {};
+                                                            const tempo = ts.game_tempo;
+                                                            return (
+                                                                <div className="space-y-2 text-xs">
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Pace (est)</span>
+                                                                        <span className="text-slate-200 font-mono font-bold">{tempo ? `${tempo} poss` : '—'}</span>
+                                                                    </div>
+                                                                    <div className="border-t border-slate-700/50 pt-2">
+                                                                        <div className="text-slate-400 font-bold mb-1">{selectedGame?.home_team}</div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjO</span><span className="text-slate-200 font-mono">{h.adj_off?.toFixed ? h.adj_off.toFixed(1) : (h.adj_off ?? '—')}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjD</span><span className="text-slate-200 font-mono">{h.adj_def?.toFixed ? h.adj_def.toFixed(1) : (h.adj_def ?? '—')}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjT</span><span className="text-slate-200 font-mono">{h.adj_tempo?.toFixed ? h.adj_tempo.toFixed(1) : (h.adj_tempo ?? '—')}</span></div>
+                                                                    </div>
+                                                                    <div className="border-t border-slate-700/50 pt-2">
+                                                                        <div className="text-slate-400 font-bold mb-1">{selectedGame?.away_team}</div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjO</span><span className="text-slate-200 font-mono">{a.adj_off?.toFixed ? a.adj_off.toFixed(1) : (a.adj_off ?? '—')}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjD</span><span className="text-slate-200 font-mono">{a.adj_def?.toFixed ? a.adj_def.toFixed(1) : (a.adj_def ?? '—')}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjT</span><span className="text-slate-200 font-mono">{a.adj_tempo?.toFixed ? a.adj_tempo.toFixed(1) : (a.adj_tempo ?? '—')}</span></div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
+
+                                                    <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Game script (model view)</div>
+                                                        <div className="space-y-2">
+                                                            {(analysisResult.game_script || []).length ? (
+                                                                (analysisResult.game_script || []).slice(0, 5).map((x, i) => (
+                                                                    <div key={i} className="flex items-start gap-3 text-sm text-slate-300">
+                                                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-2"></div>
+                                                                        <div>{x}</div>
+                                                                    </div>
+                                                                ))
+                                                            ) : (
+                                                                <div className="text-slate-500 text-sm">No game script available yet.</div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Key Factors */}
                                         {analysisResult.key_factors && (
                                             <div>

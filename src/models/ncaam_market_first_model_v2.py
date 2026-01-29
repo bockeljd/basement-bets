@@ -72,6 +72,7 @@ class NCAAMMarketFirstModelV2:
 
         # 3. Get Signals
         torvik_view = self.torvik_service.get_projection(event['home_team'], event['away_team'])
+        torvik_team_stats = self.torvik_service.get_matchup_team_stats(event['home_team'], event['away_team'])
         kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(event['home_team'], event['away_team'])
         news_context = self.news_service.fetch_game_context(event['home_team'], event['away_team'])
         
@@ -127,6 +128,29 @@ class NCAAMMarketFirstModelV2:
         # 9. Result Object
         ui_recs = []
         best_rec = None
+
+        # Basic game script (team-efficiency driven; Torvik)
+        game_script = []
+        try:
+            h = (torvik_team_stats or {}).get('home') or {}
+            a = (torvik_team_stats or {}).get('away') or {}
+            tempo = (torvik_team_stats or {}).get('game_tempo')
+            if tempo is not None:
+                pace_label = 'fast' if tempo >= 71 else 'average' if tempo >= 67 else 'slow'
+                game_script.append(f"Expected pace: {pace_label} (~{tempo} possessions).")
+
+            # Mismatch style explanations (adj_off vs opp adj_def)
+            # Note: adj_def is points allowed per 100 (lower is better).
+            if h.get('adj_off') is not None and a.get('adj_def') is not None:
+                game_script.append(f"Home offense ({h['adj_off']:.1f} AdjO) vs away defense ({a['adj_def']:.1f} AdjD) drives home scoring projection.")
+            if a.get('adj_off') is not None and h.get('adj_def') is not None:
+                game_script.append(f"Away offense ({a['adj_off']:.1f} AdjO) vs home defense ({h['adj_def']:.1f} AdjD) drives away scoring projection.")
+
+            # Late-game / variance callouts
+            game_script.append("Spread outcomes are most sensitive to turnover margin and late free throws (end-game fouling).")
+        except Exception:
+            game_script = []
+
         
         for r in recs:
             ui_recs.append({
@@ -165,6 +189,8 @@ class NCAAMMarketFirstModelV2:
             "narrative_json": json.dumps(narrative, default=str),
             "recommendations": ui_recs,
             "torvik_view": torvik_view,
+            "torvik_team_stats": torvik_team_stats,
+            "game_script": game_script,
             "kenpom_data": kenpom_adj,
             "news_summary": self.news_service.summarize_impact(news_context),
             "key_factors": narrative.get('key_factors') or [],
