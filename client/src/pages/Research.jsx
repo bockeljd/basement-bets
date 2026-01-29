@@ -855,7 +855,17 @@ const Research = ({ onAddBet }) => {
                                                 <div key={idx} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                                                     <div className="flex justify-between items-start mb-2">
                                                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                                                            {rec.bet_type} Recommendation
+                                                            {rec.bet_type} — {(() => {
+                                                                try {
+                                                                    if (rec.bet_type === 'SPREAD' && rec.edge_points !== null && rec.edge_points !== undefined) {
+                                                                        return `Line value ${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts`;
+                                                                    }
+                                                                    if (rec.bet_type === 'TOTAL' && rec.edge_points !== null && rec.edge_points !== undefined) {
+                                                                        return `Line value ${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts`;
+                                                                    }
+                                                                } catch (e) {}
+                                                                return 'Recommendation';
+                                                            })()}
                                                         </span>
                                                         <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${rec.confidence === 'High' ? 'bg-green-500/20 text-green-400' :
                                                             rec.confidence === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
