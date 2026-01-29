@@ -901,7 +901,7 @@ const Research = ({ onAddBet }) => {
                                                         ) : null}
                                                     </div>
                                                     <div className="mt-3 text-xs text-slate-300 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">What needs to happen</div>
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Win condition</div>
                                                         {(() => {
                                                             try {
                                                                 if (rec.bet_type === 'SPREAD') {
@@ -943,49 +943,16 @@ const Research = ({ onAddBet }) => {
                                             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700/50 relative overflow-hidden">
                                                 <h3 className="font-bold text-slate-200 mb-3 flex items-center gap-2 text-sm uppercase tracking-wider">
                                                     <Info size={16} className="text-blue-400" />
-                                                    Summary (what needs to happen)
+                                                    Why the model likes it
                                                 </h3>
 
                                                 {(() => {
                                                     const rec = (analysisResult.recommendations || [])[0] || null;
                                                     if (!rec) return <div className="text-slate-500 text-sm">No recommendation summary available.</div>;
 
-                                                    const betType = String(rec.bet_type || '').toUpperCase();
-                                                    const selection = String(rec.selection || '').trim();
-                                                    let what = '';
-
-                                                    try {
-                                                        if (betType === 'SPREAD') {
-                                                            const m = selection.match(/^(.*)\s([-+]?\d+(?:\.\d+)?)$/);
-                                                            const team = (m?.[1] || selection).trim();
-                                                            const line = m ? Number(m[2]) : null;
-                                                            if (line !== null && !Number.isNaN(line)) {
-                                                                what = line < 0
-                                                                    ? `${team} must win by ${Math.abs(line) + 0.5}+.`
-                                                                    : `${team} must lose by ${Math.abs(line) - 0.5} or win.`;
-                                                            } else {
-                                                                what = `${team} must cover the spread.`;
-                                                            }
-                                                        } else if (betType === 'TOTAL') {
-                                                            const mm = selection.match(/^(OVER|UNDER)\s+(\d+(?:\.\d+)?)$/i);
-                                                            const side = (mm?.[1] || '').toUpperCase();
-                                                            const line = mm ? Number(mm[2]) : null;
-                                                            if (side && line !== null && !Number.isNaN(line)) {
-                                                                what = side === 'OVER'
-                                                                    ? `Combined score must finish OVER ${line}.`
-                                                                    : `Combined score must finish UNDER ${line}.`;
-                                                            } else {
-                                                                what = 'Game total must land on the correct side of the total.';
-                                                            }
-                                                        } else {
-                                                            what = 'Bet outcome must align with the recommended side.';
-                                                        }
-                                                    } catch (e) {
-                                                        what = 'Bet outcome must align with the recommended side.';
-                                                    }
-
                                                     const marketSummary = analysisResult.narrative?.market_summary || '';
-                                                    const rationale = analysisResult.narrative?.rationale || [];
+                                                    const kf = analysisResult.key_factors || [];
+                                                    const gs = analysisResult.game_script || [];
 
                                                     return (
                                                         <div className="text-slate-300 text-sm leading-relaxed space-y-3">
@@ -993,15 +960,9 @@ const Research = ({ onAddBet }) => {
                                                                 <div className="text-blue-300 font-semibold">{marketSummary}</div>
                                                             ) : null}
 
-                                                            {/* Win condition (what must happen on the scoreboard) */}
                                                             <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Win condition</div>
-                                                                <div className="text-slate-100 font-bold">{what}</div>
-                                                            </div>
+                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Reasoning (matchup-specific)</div>
 
-                                                            {/* Reasoning (why the model likes it) */}
-                                                            <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Why this bet</div>
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                                                                     <div className="flex justify-between">
                                                                         <span className="text-slate-500">Market line</span>
@@ -1016,12 +977,12 @@ const Research = ({ onAddBet }) => {
                                                                         <span className={`${(rec.edge_points ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'} font-mono font-bold`}>{rec.edge_points !== null && rec.edge_points !== undefined ? `${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts` : '—'}</span>
                                                                     </div>
                                                                     <div className="flex justify-between">
-                                                                        <span className="text-slate-500">EV</span>
-                                                                        <span className="text-green-400 font-mono font-bold">+{rec.edge ?? '—'}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between">
                                                                         <span className="text-slate-500">Win prob</span>
                                                                         <span className="text-slate-200 font-mono font-bold">{rec.win_prob !== null && rec.win_prob !== undefined ? `${Math.round(rec.win_prob * 100)}%` : '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">EV</span>
+                                                                        <span className="text-green-400 font-mono font-bold">+{rec.edge ?? '—'}</span>
                                                                     </div>
                                                                     <div className="flex justify-between">
                                                                         <span className="text-slate-500">Confidence</span>
@@ -1029,24 +990,19 @@ const Research = ({ onAddBet }) => {
                                                                     </div>
                                                                 </div>
 
-                                                                {/* Use provided narrative bullets when available */}
-                                                                {rationale?.length ? (
-                                                                    <ul className="mt-2 list-disc list-inside space-y-1 opacity-90 text-xs">
-                                                                        {rationale.slice(0, 4).map((r, i) => (
-                                                                            <li key={i}>{r}</li>
-                                                                        ))}
+                                                                {(kf.length || gs.length) ? (
+                                                                    <ul className="mt-3 list-disc list-inside space-y-1 opacity-90 text-xs">
+                                                                        {kf.slice(0, 3).map((x, i) => <li key={`kf-${i}`}>{x}</li>)}
+                                                                        {gs.slice(0, 2).map((x, i) => <li key={`gs-${i}`}>{x}</li>)}
                                                                     </ul>
-                                                                ) : analysisResult.narrative?.recommendation ? (
-                                                                    <div className="mt-2 opacity-90 text-xs">{analysisResult.narrative.recommendation}</div>
                                                                 ) : (
-                                                                    <div className="mt-2 text-slate-500 text-xs">No model reasoning available yet for this recommendation.</div>
+                                                                    <div className="mt-3 text-slate-500 text-xs">No matchup-specific factors available yet.</div>
                                                                 )}
-                                                            </div>
 
-                                                            {/* Optional: keep extra narrative text if it exists */}
-                                                            {analysisResult.narrative?.recommendation && rationale?.length ? (
-                                                                <div className="opacity-70 text-xs">{analysisResult.narrative.recommendation}</div>
-                                                            ) : null}
+                                                                {analysisResult.risks?.length ? (
+                                                                    <div className="mt-3 text-[10px] text-slate-500">Risks: {analysisResult.risks.slice(0, 2).join(' • ')}</div>
+                                                                ) : null}
+                                                            </div>
                                                         </div>
                                                     );
                                                 })()}
