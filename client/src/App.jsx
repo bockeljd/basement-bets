@@ -144,7 +144,7 @@ function App() {
                     api.get('/api/breakdown/player'),
                     api.get('/api/breakdown/monthly'),
                     api.get('/api/breakdown/bet_type'),
-                    api.get('/api/balances'),
+                    api.get('/api/balances/snapshots/latest'),
                     api.get('/api/financials'),
                     api.get('/api/analytics/series'),
                     api.get('/api/analytics/drawdown'),
@@ -237,7 +237,20 @@ function App() {
                     setBetTypeBreakdown(apiBetBreakdown);
                 }
 
-                setBalances(getVal(results[6], {}));
+                // Balances now come from explicit balance snapshots (source-of-truth)
+                const rawSnaps = getVal(results[6], {});
+                const mapped = {};
+                try {
+                    Object.entries(rawSnaps || {}).forEach(([provider, snap]) => {
+                        if (!provider) return;
+                        mapped[provider] = {
+                            balance: snap?.balance ?? 0,
+                            captured_at: snap?.captured_at || snap?.capturedAt || null,
+                            source: snap?.source || 'manual'
+                        };
+                    });
+                } catch (e) {}
+                setBalances(mapped);
                 setFinancials(getVal(results[7], { total_in_play: 0, total_deposited: 0, total_withdrawn: 0, realized_profit: 0 }));
                 setTimeSeries(getVal(results[8], []));
                 setDrawdown(getVal(results[9], { max_drawdown: 0.0, current_drawdown: 0.0, peak_profit: 0.0 }));
@@ -571,14 +584,14 @@ const BankrollCard = ({ provider, data }) => (
     <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between min-w-[220px]">
         <div>
             <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-0.5">{provider}</div>
-            <div className={`text-xl font-bold ${data.balance >= 0 ? 'text-white' : 'text-red-400'}`}>
-                {formatCurrency(data.balance)}
+            <div className={`text-xl font-bold ${Number(data.balance) >= 0 ? 'text-white' : 'text-red-400'}`}>
+                {formatCurrency(Number(data.balance || 0))}
             </div>
-            {data.last_bet && (
-                <div className="text-[10px] text-gray-600 mt-1 font-mono">
-                    Last: {data.last_bet}
-                </div>
-            )}
+
+            <div className="text-[10px] text-gray-600 mt-1 font-mono">
+                Source: {data.source || 'manual'}
+                {data.captured_at ? ` • ${new Date(data.captured_at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
+            </div>
         </div>
         <div className={`p-2 rounded-full ${provider === 'DraftKings' ? 'bg-orange-900/20 text-orange-400' : 'bg-blue-900/20 text-blue-400'}`}>
             <DollarSign size={20} />
