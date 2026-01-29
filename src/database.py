@@ -132,10 +132,11 @@ def init_db():
     init_enrichment_db()
     init_jobs_db()
     init_performance_objects() # Phase 14/15
-    
+
     # Explicitly init bets last as it depends on others conceptually (not foreign key wise mostly)
-    init_bets_db() 
-    init_transactions_db() 
+    init_bets_db()
+    init_transactions_db()
+    init_balance_snapshots_db()
 
 def _force_reset() -> bool:
     return os.environ.get("BASEMENT_DB_RESET") == "1"
@@ -1058,6 +1059,41 @@ def init_transactions_db():
     print("Transactions table initialized.")
 
 
+def init_balance_snapshots_db():
+    """Dedicated balance snapshots table (UI source-of-truth).
+
+    Motivation: `transactions.type IN ('Balance', ...)` gets polluted by recovery rows
+    and inconsistent timestamps. This table stays clean and explicit.
+    """
+    drops = ["DROP TABLE IF EXISTS balance_snapshots CASCADE;"] if _force_reset() else []
+
+    schema = """
+    CREATE TABLE IF NOT EXISTS balance_snapshots (
+        id BIGSERIAL PRIMARY KEY,
+        provider TEXT NOT NULL,
+        balance NUMERIC(12,2) NOT NULL,
+        captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        source TEXT NOT NULL DEFAULT 'manual',  -- manual|csv|api|scrape
+        user_id TEXT,
+        note TEXT,
+        raw_data JSONB
+    );
+    CREATE INDEX IF NOT EXISTS idx_balance_snaps_provider_time ON balance_snapshots(provider, captured_at DESC);
+    """
+
+    with get_admin_db_connection() as conn:
+        with conn.cursor() as cur:
+            for d in drops:
+                try:
+                    cur.execute(d)
+                except Exception:
+                    pass
+            cur.execute(schema)
+        conn.commit()
+
+    print("Balance snapshots table initialized.")
+
+
 def log_ingestion_run(data: dict):
     """
     Logs ingestion execution to job_runs (consolidated logging).
@@ -1128,12 +1164,72 @@ def fetch_all_bets(user_id=None, limit=None):
             cursor = _exec(conn, query)
             return [dict(r) for r in cursor.fetchall()]
 
-def fetch_latest_ledger_info():
+def fetch_latest_balance_snapshots(user_id: str | None = None):
+    """Fetch latest balance snapshot per provider from balance_snapshots."""
+    q = """
+    SELECT DISTINCT ON (provider)
+           provider,
+           balance,
+           captured_at,
+           source
+    FROM balance_snapshots
+    WHERE (:user_id IS NULL OR user_id = :user_id)
+    ORDER BY provider, captured_at DESC
     """
-    Fetches the latest balance snapshot by provider from ledger/transactions.
-    Returns dict keyed by provider with balance and date.
+    out = {}
+    try:
+        with get_db_connection() as conn:
+            rows = _exec(conn, q, {"user_id": user_id}).fetchall()
+            for r in rows:
+                d = dict(r)
+                out[d['provider']] = {
+                    "balance": float(d.get('balance') or 0),
+                    "captured_at": d.get('captured_at'),
+                    "source": d.get('source')
+                }
+    except Exception as e:
+        # Table might not exist yet in some envs
+        print(f"[DB] fetch_latest_balance_snapshots error: {e}")
+    return out
+
+
+def insert_balance_snapshot(snapshot: dict) -> bool:
+    """Insert a balance snapshot row."""
+    q = """
+    INSERT INTO balance_snapshots (provider, balance, captured_at, source, user_id, note, raw_data)
+    VALUES (:provider, :balance, COALESCE(:captured_at, NOW()), COALESCE(:source, 'manual'), :user_id, :note, :raw_data)
     """
-    # Try to get from transactions - latest entry per provider
+    doc = {
+        "provider": snapshot.get("provider"),
+        "balance": snapshot.get("balance"),
+        "captured_at": snapshot.get("captured_at"),
+        "source": snapshot.get("source") or 'manual',
+        "user_id": snapshot.get("user_id"),
+        "note": snapshot.get("note"),
+        "raw_data": psycopg2.extras.Json(snapshot.get("raw_data")) if snapshot.get("raw_data") is not None else None,
+    }
+    try:
+        with get_db_connection() as conn:
+            _exec(conn, q, doc)
+            conn.commit()
+        return True
+    except Exception as e:
+        print(f"[DB] insert_balance_snapshot error: {e}")
+        return False
+
+
+def fetch_latest_ledger_info(user_id: str | None = None):
+    """Fetch latest balance per provider.
+
+    Priority:
+      1) Dedicated balance_snapshots table (clean source-of-truth)
+      2) Fallback to legacy transactions Balance rows
+    """
+    snaps = fetch_latest_balance_snapshots(user_id=user_id)
+    if snaps:
+        return {k: {"balance": v.get("balance"), "date": str(v.get("captured_at") or ''), "source": v.get("source")} for k, v in snaps.items()}
+
+    # Legacy fallback (transactions table)
     query = """
     SELECT DISTINCT ON (provider) 
            provider, 

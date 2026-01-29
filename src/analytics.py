@@ -513,8 +513,22 @@ class AnalyticsEngine:
         if user_id and user_id != self.user_id:
              bets = [b for b in self.bets if b.get('user_id') == user_id]
 
-        # 1. Get explicit balance snapshots and all transactions
-        explicit_balances = {}  # provider -> (balance, dt_object, original_date_str)
+        # 1. Get explicit balance snapshots (source-of-truth) and all transactions
+        explicit_balances = {}  # provider -> (balance, dt_object, original_date_str, source_type)
+
+        # Prefer dedicated balance_snapshots table
+        try:
+            from src.database import fetch_latest_balance_snapshots
+            latest_snaps = fetch_latest_balance_snapshots(user_id=user_id)
+            for provider, snap in (latest_snaps or {}).items():
+                # snap['captured_at'] may be str or datetime
+                try:
+                    dt = parse_date(str(snap.get('captured_at'))) if snap.get('captured_at') else None
+                except Exception:
+                    dt = None
+                explicit_balances[provider] = (float(snap.get('balance') or 0), dt, str(snap.get('captured_at') or ''), 'BalanceSnapshot')
+        except Exception as e:
+            print(f"[Analytics] balance_snapshots lookup failed: {e}")
         deposits = defaultdict(list)     # provider -> list of (amount, dt)
         withdrawals = defaultdict(list)  # provider -> list of (amount, dt)
         

@@ -278,6 +278,18 @@ async def get_balances(user: dict = Depends(get_current_user)):
     engine = get_analytics_engine(user_id=user_id)
     return engine.get_balances(user_id=user_id)
 
+
+@app.get("/api/balances/snapshots/latest")
+async def get_latest_balance_snapshots(user: dict = Depends(get_current_user)):
+    """Return latest balance snapshots per provider.
+
+    This is the UI source-of-truth for sportsbook balances.
+    """
+    from src.database import fetch_latest_balance_snapshots
+
+    user_id = user.get("sub")
+    return fetch_latest_balance_snapshots(user_id=str(user_id))
+
 @app.get("/api/stats/period")
 async def get_period_stats(days: Optional[int] = None, year: Optional[int] = None, user: dict = Depends(get_current_user)):
     user_id = user.get("sub")
