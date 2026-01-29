@@ -153,11 +153,46 @@ class NCAAMMarketFirstModelV2:
 
         
         for r in recs:
+            # Provide side-relative market + fair lines so UI can explain meaning.
+            market_line_side = None
+            fair_line_side = None
+            edge_points_side = None
+            win_prob = r.get('prob')
+
+            if r['market'] == 'SPREAD':
+                market_home = market_snapshot.get('spread_home')
+                fair_home = mu_spread_final
+
+                # Convert to the side being bet (home vs away)
+                if r['side'] == event['home_team']:
+                    market_line_side = market_home
+                    fair_line_side = fair_home
+                else:
+                    market_line_side = (-market_home) if market_home is not None else None
+                    fair_line_side = (-fair_home) if fair_home is not None else None
+
+                if (market_line_side is not None) and (fair_line_side is not None):
+                    # Points you are getting vs model fair (positive = better for bettor)
+                    edge_points_side = round(float(market_line_side) - float(fair_line_side), 1)
+
+            elif r['market'] == 'TOTAL':
+                market_total = market_snapshot.get('total')
+                fair_total = mu_total_final
+                market_line_side = market_total
+                fair_line_side = fair_total
+                if (market_line_side is not None) and (fair_line_side is not None):
+                    # For totals, interpret edge points as difference in line (direction depends on OVER/UNDER)
+                    edge_points_side = round(float(fair_line_side) - float(market_line_side), 1)
+
             ui_recs.append({
                 "bet_type": r['market'],
-                "selection": r['side'] + (f" {r['line']}" if r['line'] else ""),
+                "selection": r['side'] + (f" {r['line']}" if r['line'] is not None else ""),
+                # Keep legacy key name for UI, but this is EV% not points.
                 "edge": f"{(r['ev']*100):.2f}%",
-                "fair_line": str(round(mu_spread_final if r['market']=='SPREAD' else mu_total_final, 1)),
+                "win_prob": round(float(win_prob), 3) if win_prob is not None else None,
+                "market_line": (round(float(market_line_side), 1) if market_line_side is not None else None),
+                "fair_line": (round(float(fair_line_side), 1) if fair_line_side is not None else None),
+                "edge_points": edge_points_side,
                 "confidence": "High" if r['confidence_idx'] > 80 else "Medium" if r['confidence_idx'] > 50 else "Low",
                 "book": r['book']
             })

@@ -881,8 +881,14 @@ const Research = ({ onAddBet }) => {
                                                         })()}
                                                     </div>
                                                     <div className="text-xs text-slate-400">
-                                                        Edge: <span className="text-green-400 font-bold">+{rec.edge}</span> •
-                                                        Fair: {rec.fair_line}
+                                                        EV: <span className="text-green-400 font-bold">+{rec.edge}</span> •
+                                                        Fair: <span className="text-slate-200 font-mono font-bold">{rec.fair_line ?? '—'}</span>
+                                                        {rec.market_line !== null && rec.market_line !== undefined ? (
+                                                            <span> • Market: <span className="text-slate-300 font-mono">{rec.market_line}</span></span>
+                                                        ) : null}
+                                                        {rec.edge_points !== null && rec.edge_points !== undefined ? (
+                                                            <span> • Line value: <span className={`${rec.edge_points >= 0 ? 'text-green-400' : 'text-red-400'} font-mono font-bold`}>{rec.edge_points >= 0 ? '+' : ''}{rec.edge_points} pts</span></span>
+                                                        ) : null}
                                                     </div>
                                                     <div className="mt-3 text-xs text-slate-300 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
                                                         <div className="text-[10px] text-slate-500 uppercase font-black mb-1">What needs to happen</div>
@@ -996,8 +1002,16 @@ const Research = ({ onAddBet }) => {
                                                                         <span className="text-slate-200 font-mono font-bold">{rec.fair_line ?? '—'}</span>
                                                                     </div>
                                                                     <div className="flex justify-between">
-                                                                        <span className="text-slate-500">Edge</span>
+                                                                        <span className="text-slate-500">Line value</span>
+                                                                        <span className={`${(rec.edge_points ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'} font-mono font-bold`}>{rec.edge_points !== null && rec.edge_points !== undefined ? `${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts` : '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">EV</span>
                                                                         <span className="text-green-400 font-mono font-bold">+{rec.edge ?? '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Win prob</span>
+                                                                        <span className="text-slate-200 font-mono font-bold">{rec.win_prob !== null && rec.win_prob !== undefined ? `${Math.round(rec.win_prob * 100)}%` : '—'}</span>
                                                                     </div>
                                                                     <div className="flex justify-between">
                                                                         <span className="text-slate-500">Confidence</span>
