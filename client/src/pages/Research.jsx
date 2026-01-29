@@ -9,6 +9,10 @@ const Research = ({ onAddBet }) => {
     const [activeTab, setActiveTab] = useState('live');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    // Balance snapshots (UI source-of-truth)
+    const [balanceSnaps, setBalanceSnaps] = useState([]);
+    const [balanceError, setBalanceError] = useState(null);
     // Research tab focuses on board-backed leagues
     const [leagueFilter, setLeagueFilter] = useState('NCAAM');
     // Date Filtering
@@ -34,15 +38,22 @@ const Research = ({ onAddBet }) => {
         try {
             setLoading(true);
             setError(null);
+            setBalanceError(null);
 
-            // Fetch NCAAM board (next N days from selected date) and overall history
-            const [boardRes, historyRes] = await Promise.all([
+            // Fetch NCAAM board (next N days from selected date), overall history, and balance snapshots
+            const [boardRes, historyRes, balancesRes] = await Promise.all([
                 api.get('/api/board', { params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT } }),
-                api.get('/api/ncaam/history')
+                api.get('/api/ncaam/history'),
+                api.get('/api/balances/snapshots/latest').catch((e) => {
+                    // Don't fail the entire page if balances error out
+                    setBalanceError(e);
+                    return { data: [] };
+                })
             ]);
 
             setEdges(boardRes.data || []);
             setHistory(historyRes.data || []);
+            setBalanceSnaps(balancesRes.data || []);
 
         } catch (err) {
             console.error(err);
@@ -236,6 +247,31 @@ const Research = ({ onAddBet }) => {
         return sortConfig.direction === 'asc' ? <ChevronUp size={12} className="ml-1 text-blue-400" /> : <ChevronDown size={12} className="ml-1 text-blue-400" />;
     };
 
+    const getSnap = (providerKey) => {
+        const key = String(providerKey || '').toLowerCase();
+        return (balanceSnaps || []).find(s => String(s.provider || '').toLowerCase() === key);
+    };
+
+    const fmtMoney = (v) => {
+        if (v === null || v === undefined || v === '') return '—';
+        const x = Number(v);
+        if (Number.isNaN(x)) return String(v);
+        return x.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    };
+
+    const fmtTs = (ts) => {
+        if (!ts) return '';
+        try {
+            const d = new Date(ts);
+            return d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+        } catch {
+            return String(ts);
+        }
+    };
+
+    const dk = getSnap('draftkings') || getSnap('dk');
+    const fd = getSnap('fanduel') || getSnap('fd');
+
     return (
         <div className="p-6 bg-slate-900 min-h-screen text-white">
             <div className="flex justify-between items-center mb-6">
@@ -245,6 +281,24 @@ const Research = ({ onAddBet }) => {
                     </h1>
                     <div className="text-xs text-slate-500 mt-1">
                         Showing NCAAM board for next <span className="text-slate-300 font-bold">3</span> days from selected date.
+                    </div>
+
+                    <div className="mt-2 text-xs text-slate-300 flex flex-wrap gap-3 items-center">
+                        <div className="px-2 py-1 rounded bg-slate-800/60 border border-slate-700">
+                            <span className="text-slate-400">DraftKings:</span>{' '}
+                            <span className="font-bold text-white">{fmtMoney(dk?.balance)}</span>
+                            {dk?.captured_at ? <span className="text-slate-500"> · {fmtTs(dk.captured_at)}</span> : null}
+                        </div>
+                        <div className="px-2 py-1 rounded bg-slate-800/60 border border-slate-700">
+                            <span className="text-slate-400">FanDuel:</span>{' '}
+                            <span className="font-bold text-white">{fmtMoney(fd?.balance)}</span>
+                            {fd?.captured_at ? <span className="text-slate-500"> · {fmtTs(fd.captured_at)}</span> : null}
+                        </div>
+                        {balanceError ? (
+                            <div className="text-xs text-amber-300">
+                                Balances unavailable (snapshots endpoint).
+                            </div>
+                        ) : null}
                     </div>
                 </div>
                 <div className="flex gap-2">
