@@ -16,29 +16,42 @@ except ImportError:
     from database import get_db_connection, _exec, log_ingestion_run
 
 class IngestionEngine:
-    
-    def __init__(self, storage_path: str = "data/snapshots"):
-        self.storage_path = storage_path
-        os.makedirs(self.storage_path, exist_ok=True)
 
-    def _save_snapshot(self, provider: str, league: str, data: Any) -> str:
+    def __init__(self, storage_path: str = "data/snapshots"):
+        """Raw payload snapshot storage.
+
+        NOTE: On serverless platforms (e.g., Vercel) the filesystem is read-only
+        except for /tmp. We fall back automatically.
         """
-        Save raw payload to gzip JSON.
-        Returns absolute path.
+        self.storage_path = storage_path
+        try:
+            os.makedirs(self.storage_path, exist_ok=True)
+        except OSError:
+            # Serverless/read-only FS fallback
+            self.storage_path = "/tmp/snapshots"
+            os.makedirs(self.storage_path, exist_ok=True)
+
+    def _save_snapshot(self, provider: str, league: str, data: Any) -> str | None:
+        """Save raw payload to gzip JSON.
+
+        Returns absolute path if saved, else None (e.g., read-only FS).
         """
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
         run_id = str(uuid.uuid4())
-        
+
         dir_path = os.path.join(self.storage_path, provider, league, date_str)
-        os.makedirs(dir_path, exist_ok=True)
-        
         filename = f"{run_id}.json.gz"
-        full_path = os.path.abspath(os.path.join(dir_path, filename))
-        
-        with gzip.open(full_path, 'wt', encoding='utf-8') as f:
-            json.dump(data, f)
-            
-        return full_path
+
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+            full_path = os.path.abspath(os.path.join(dir_path, filename))
+            with gzip.open(full_path, 'wt', encoding='utf-8') as f:
+                json.dump(data, f)
+            return full_path
+        except OSError as e:
+            # Read-only FS or other write error: skip snapshot
+            print(f"[Ingestion] Snapshot write failed ({e}); continuing without snapshot.")
+            return None
 
     def _detect_drift(self, data: Any, expected_keys: set) -> bool:
         """
@@ -68,7 +81,7 @@ class IngestionEngine:
         start_time = datetime.datetime.now()
         run_id = str(uuid.uuid4())
         
-        # 1. Snapshot
+        # 1. Snapshot (best-effort; may be disabled in read-only environments)
         snapshot_path = self._save_snapshot(provider, league, data)
         
         # 2. Drift
