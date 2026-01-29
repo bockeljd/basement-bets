@@ -977,21 +977,51 @@ const Research = ({ onAddBet }) => {
                                                                 <div className="text-blue-300 font-semibold">{marketSummary}</div>
                                                             ) : null}
 
+                                                            {/* Win condition (what must happen on the scoreboard) */}
                                                             <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Primary condition</div>
+                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Win condition</div>
                                                                 <div className="text-slate-100 font-bold">{what}</div>
                                                             </div>
 
-                                                            {analysisResult.narrative?.recommendation ? (
-                                                                <div className="opacity-90">{analysisResult.narrative.recommendation}</div>
-                                                            ) : null}
+                                                            {/* Reasoning (why the model likes it) */}
+                                                            <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
+                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Why this bet</div>
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Market line</span>
+                                                                        <span className="text-slate-200 font-mono font-bold">{rec.market_line ?? '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Model fair</span>
+                                                                        <span className="text-slate-200 font-mono font-bold">{rec.fair_line ?? '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Edge</span>
+                                                                        <span className="text-green-400 font-mono font-bold">+{rec.edge ?? '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Confidence</span>
+                                                                        <span className="text-slate-200 font-bold">{rec.confidence ?? '—'}</span>
+                                                                    </div>
+                                                                </div>
 
-                                                            {rationale?.length ? (
-                                                                <ul className="list-disc list-inside space-y-1 opacity-80">
-                                                                    {rationale.map((r, i) => (
-                                                                        <li key={i}>{r}</li>
-                                                                    ))}
-                                                                </ul>
+                                                                {/* Use provided narrative bullets when available */}
+                                                                {rationale?.length ? (
+                                                                    <ul className="mt-2 list-disc list-inside space-y-1 opacity-90 text-xs">
+                                                                        {rationale.slice(0, 4).map((r, i) => (
+                                                                            <li key={i}>{r}</li>
+                                                                        ))}
+                                                                    </ul>
+                                                                ) : analysisResult.narrative?.recommendation ? (
+                                                                    <div className="mt-2 opacity-90 text-xs">{analysisResult.narrative.recommendation}</div>
+                                                                ) : (
+                                                                    <div className="mt-2 text-slate-500 text-xs">No model reasoning available yet for this recommendation.</div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Optional: keep extra narrative text if it exists */}
+                                                            {analysisResult.narrative?.recommendation && rationale?.length ? (
+                                                                <div className="opacity-70 text-xs">{analysisResult.narrative.recommendation}</div>
                                                             ) : null}
                                                         </div>
                                                     );
