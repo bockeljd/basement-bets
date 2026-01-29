@@ -842,7 +842,22 @@ const Research = () => {
                                                             {rec.confidence} Confidence
                                                         </span>
                                                     </div>
-                                                    <div className="text-2xl font-bold text-white mb-1">{rec.selection}</div>
+                                                    <div className="text-2xl font-bold text-white mb-1">
+                                                        {(() => {
+                                                            // Ensure spread picks display with a + when appropriate (avoid ambiguity)
+                                                            try {
+                                                                if (rec.bet_type === 'SPREAD') {
+                                                                    const m = String(rec.selection || '').match(/^(.*)\s([-+]?\d+(?:\.\d+)?)$/);
+                                                                    if (!m) return rec.selection;
+                                                                    const team = m[1].trim();
+                                                                    const line = Number(m[2]);
+                                                                    if (Number.isNaN(line)) return rec.selection;
+                                                                    return `${team} ${fmtSigned(line, 1)}`;
+                                                                }
+                                                            } catch (e) {}
+                                                            return rec.selection;
+                                                        })()}
+                                                    </div>
                                                     <div className="text-xs text-slate-400">
                                                         Edge: <span className="text-green-400 font-bold">+{rec.edge}</span> •
                                                         Fair: {rec.fair_line}
@@ -890,17 +905,75 @@ const Research = () => {
                                             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700/50 relative overflow-hidden">
                                                 <h3 className="font-bold text-slate-200 mb-3 flex items-center gap-2 text-sm uppercase tracking-wider">
                                                     <Info size={16} className="text-blue-400" />
-                                                    Model Narrative
+                                                    Summary (what needs to happen)
                                                 </h3>
-                                                <div className="text-slate-300 text-sm leading-relaxed space-y-3">
-                                                    <p className="font-semibold text-blue-300">{analysisResult.narrative.market_summary}</p>
-                                                    <p>{analysisResult.narrative.recommendation}</p>
-                                                    <ul className="list-disc list-inside space-y-1 opacity-80">
-                                                        {analysisResult.narrative.rationale?.map((r, i) => (
-                                                            <li key={i}>{r}</li>
-                                                        ))}
-                                                    </ul>
-                                                </div>
+
+                                                {(() => {
+                                                    const rec = (analysisResult.recommendations || [])[0] || null;
+                                                    if (!rec) return <div className="text-slate-500 text-sm">No recommendation summary available.</div>;
+
+                                                    const betType = String(rec.bet_type || '').toUpperCase();
+                                                    const selection = String(rec.selection || '').trim();
+                                                    let what = '';
+
+                                                    try {
+                                                        if (betType === 'SPREAD') {
+                                                            const m = selection.match(/^(.*)\s([-+]?\d+(?:\.\d+)?)$/);
+                                                            const team = (m?.[1] || selection).trim();
+                                                            const line = m ? Number(m[2]) : null;
+                                                            if (line !== null && !Number.isNaN(line)) {
+                                                                what = line < 0
+                                                                    ? `${team} must win by ${Math.abs(line) + 0.5}+.`
+                                                                    : `${team} must lose by ${Math.abs(line) - 0.5} or win.`;
+                                                            } else {
+                                                                what = `${team} must cover the spread.`;
+                                                            }
+                                                        } else if (betType === 'TOTAL') {
+                                                            const mm = selection.match(/^(OVER|UNDER)\s+(\d+(?:\.\d+)?)$/i);
+                                                            const side = (mm?.[1] || '').toUpperCase();
+                                                            const line = mm ? Number(mm[2]) : null;
+                                                            if (side && line !== null && !Number.isNaN(line)) {
+                                                                what = side === 'OVER'
+                                                                    ? `Combined score must finish OVER ${line}.`
+                                                                    : `Combined score must finish UNDER ${line}.`;
+                                                            } else {
+                                                                what = 'Game total must land on the correct side of the total.';
+                                                            }
+                                                        } else {
+                                                            what = 'Bet outcome must align with the recommended side.';
+                                                        }
+                                                    } catch (e) {
+                                                        what = 'Bet outcome must align with the recommended side.';
+                                                    }
+
+                                                    const marketSummary = analysisResult.narrative?.market_summary || '';
+                                                    const rationale = analysisResult.narrative?.rationale || [];
+
+                                                    return (
+                                                        <div className="text-slate-300 text-sm leading-relaxed space-y-3">
+                                                            {marketSummary ? (
+                                                                <div className="text-blue-300 font-semibold">{marketSummary}</div>
+                                                            ) : null}
+
+                                                            <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
+                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Primary condition</div>
+                                                                <div className="text-slate-100 font-bold">{what}</div>
+                                                            </div>
+
+                                                            {analysisResult.narrative?.recommendation ? (
+                                                                <div className="opacity-90">{analysisResult.narrative.recommendation}</div>
+                                                            ) : null}
+
+                                                            {rationale?.length ? (
+                                                                <ul className="list-disc list-inside space-y-1 opacity-80">
+                                                                    {rationale.map((r, i) => (
+                                                                        <li key={i}>{r}</li>
+                                                                    ))}
+                                                                </ul>
+                                                            ) : null}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
 
                                             <div className="bg-slate-800/80 p-6 rounded-xl border border-slate-700/50">
@@ -914,17 +987,19 @@ const Research = () => {
                                                         {(() => {
                                                             // torvik_view.projected_score is often "AwayScore-HomeScore"; make it explicit.
                                                             const ps = String(analysisResult.torvik_view?.projected_score || '').trim();
-                                                            const parts = ps.split('-').map(x => x.trim());
-                                                            const awayScore = parts.length === 2 ? parts[0] : ps;
-                                                            const homeScore = parts.length === 2 ? parts[1] : '';
+                                                            const parts = ps ? ps.split('-').map(x => x.trim()) : [];
+                                                            const awayScore = parts.length === 2 ? parts[0] : (ps || '—');
+                                                            const homeScore = parts.length === 2 ? parts[1] : (parts.length === 1 ? '—' : '');
+                                                            const awayName = selectedGame?.away_team || analysisResult.away_team || 'Away';
+                                                            const homeName = selectedGame?.home_team || analysisResult.home_team || 'Home';
                                                             return (
                                                                 <div className="space-y-1">
                                                                     <div className="flex justify-between text-white font-bold">
-                                                                        <span className="truncate pr-2">{analysisResult.away_team || 'Away'}</span>
+                                                                        <span className="truncate pr-2">{awayName}</span>
                                                                         <span className="font-mono">{awayScore}</span>
                                                                     </div>
                                                                     <div className="flex justify-between text-white font-bold">
-                                                                        <span className="truncate pr-2">{analysisResult.home_team || 'Home'}</span>
+                                                                        <span className="truncate pr-2">{homeName}</span>
                                                                         <span className="font-mono">{homeScore}</span>
                                                                     </div>
                                                                 </div>
