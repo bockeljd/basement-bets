@@ -1258,21 +1258,37 @@ def _ensure_utc(data: list) -> list:
 async def analyze_ncaam_game(request: Request):
     """
     On-demand analysis for an NCAAM game.
+
+    IMPORTANT: We must NOT pass "Unknown" teams into the analyzer.
+    GameAnalyzer enriches/persists and the UI expects team labels.
     """
     try:
         data = await request.json()
         event_id = data.get("event_id")
         if not event_id:
-             raise HTTPException(status_code=400, detail="event_id is required")
-             
+            raise HTTPException(status_code=400, detail="event_id is required")
+
+        from src.database import get_db_connection, _exec
         from src.services.game_analyzer import GameAnalyzer
+
+        # Pull canonical event row (teams, start_time, etc.)
+        with get_db_connection() as conn:
+            row = _exec(conn, "SELECT id, league, home_team, away_team FROM events WHERE id = :id", {"id": event_id}).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Event not found: {event_id}")
+
+        ev = dict(row)
         analyzer = GameAnalyzer()
-        
-        # GameAnalyzer will hit NCAAMMarketFirstModelV2.analyze internal
-        # Fetch basic teams for logging if needed
-        # Actually GameAnalyzer fetches context from 'events'.
-        result = analyzer.analyze(event_id, "NCAAM", "Unknown", "Unknown")
+        result = analyzer.analyze(event_id, "NCAAM", ev.get("home_team"), ev.get("away_team"))
+
+        # Ensure teams are included even if model wrapper doesn't add them
+        result.setdefault("home_team", ev.get("home_team"))
+        result.setdefault("away_team", ev.get("away_team"))
+
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[API] Analyze error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
