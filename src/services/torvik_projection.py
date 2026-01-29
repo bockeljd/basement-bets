@@ -37,26 +37,74 @@ class TorvikProjectionService:
         if not date:
             date = datetime.now().strftime("%Y%m%d")
             
-        # 1. Official Projection Fetch
-        official_projs = self.bt_client.fetch_daily_projections(date)
+        # 1. Official Projection Fetch (prefer cached DB ingest)
+        official_projs = self._fetch_official_from_db(date) or self.bt_client.fetch_daily_projections(date)
         # Match by name (Torvik uses specific naming)
         h_proj = self._find_projection(home_team, official_projs)
         a_proj = self._find_projection(away_team, official_projs)
-        
+
         if h_proj:
             return {
                 "source": "official",
-                "margin": -h_proj['spread'], # Torvik spread is usually Home relative (e.g. -5 means Home favored by 5). We want Home Margin > 0.
+                "margin": -float(h_proj['spread']),
                 "official_margin": -float(h_proj['spread']),
                 "total": float(h_proj['total']),
-                "projected_score": h_proj['projected_score'],
-                "lean": "Official torvik projection"
+                "projected_score": h_proj.get('projected_score') or None,
+                "lean": "Official Torvik projection (cached)" if self._fetch_official_from_db(date) else "Official Torvik projection"
             }
 
         # 2. Heuristic Computation (The "Torvik thinks" backup)
         return self.compute_torvik_projection(home_team, away_team)
 
+    def _fetch_official_from_db(self, date_yyyymmdd: str) -> Optional[Dict]:
+        """Load official Torvik schedule JSON from DB if present.
+
+        Returns a projections dict keyed by team name (like BartTorvikClient.fetch_daily_projections).
+        """
+        try:
+            with get_db_connection() as conn:
+                row = _exec(conn, """
+                    SELECT payload_json
+                    FROM bt_daily_schedule_raw
+                    WHERE date = %s AND status = 'OK' AND payload_json IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (date_yyyymmdd,)).fetchone()
+                if not row:
+                    return None
+                payload = row[0]
+        except Exception:
+            return None
+
+        if not payload or not isinstance(payload, list):
+            return None
+
+        projections = {}
+        for item in payload:
+            try:
+                away = item.get('away') or item.get('team_away')
+                home = item.get('home') or item.get('team_home')
+                if not away or not home:
+                    continue
+                line = item.get('line', item.get('t_rank_line', 0))
+                total = item.get('total', 0)
+                proj = {
+                    "opponent": home,
+                    "total": float(total) if total else 0.0,
+                    "projected_score": f"{item.get('score_away')}-{item.get('score_home')}",
+                    "spread": float(line) if line else 0.0,
+                    "raw_line": str(line)
+                }
+                projections[away] = {**proj, "team": away, "opponent": home}
+                projections[home] = {**proj, "team": home, "opponent": away}
+            except Exception:
+                continue
+
+        return projections or None
+
+
     def _find_projection(self, team_name: str, projections: Dict) -> Optional[Dict]:
+
         """
         Fuzzy match team_name against projection keys.
         """
