@@ -121,7 +121,8 @@ class NCAAMMarketFirstModelV2:
         recs = self._generate_recommendations(mu_spread_final, sigma_spread, mu_total_final, sigma_total, market_snapshot, event)
         
         # 8. Narrative (UI MATCH)
-        narrative = self._generate_narrative(event, market_snapshot, torvik_view, kenpom_adj, news_context, recs)
+        # Pass raw odds so we can generate matchup-specific key factors (e.g., line movement)
+        narrative = self._generate_narrative(event, market_snapshot, torvik_view, kenpom_adj, news_context, recs, raw_snaps=raw_snaps)
         
         # 9. Result Object
         ui_recs = []
@@ -166,8 +167,8 @@ class NCAAMMarketFirstModelV2:
             "torvik_view": torvik_view,
             "kenpom_data": kenpom_adj,
             "news_summary": self.news_service.summarize_impact(news_context),
-            "key_factors": ["Market Efficiency", "Schedule Adjustment", "KenPom Efficiency", "Injury News"],
-            "risks": narrative['risks'],
+            "key_factors": narrative.get('key_factors') or [],
+            "risks": narrative.get('risks') or [],
             "selection": best_rec['side'] if best_rec else None,
             "price": best_rec['price'] if best_rec else None,
             "fair_line": mu_spread_final if (best_rec and best_rec['market'] == 'SPREAD') else mu_total_final,
@@ -325,33 +326,108 @@ class NCAAMMarketFirstModelV2:
             multiplier = 100.0 / abs(american_odds)
         return (win_prob * multiplier) - (1 - win_prob)
 
-    def _generate_narrative(self, event, snap, torvik, kenpom, news, recs) -> Dict:
+    def _generate_narrative(self, event, snap, torvik, kenpom, news, recs, raw_snaps: Optional[List[Dict]] = None) -> Dict:
+        """Generate matchup-specific narrative + factors.
+
+        IMPORTANT: key_factors/risks must be specific to this matchup, not generic labels.
+        """
         headline = "No Edge Detected"
-        rationale = []
-        
-        rationale.append(f"Market Line: {snap.get('spread_home','N/A')}")
-        rationale.append(f"Torvik Proj: {torvik.get('projected_score','N/A')} ({torvik.get('lean','N/A')})")
-        
-        if kenpom.get('spread_adj'):
-             rationale.append(f"KenPom Adj: {kenpom.get('spread_adj'):+.1f} pts ({kenpom.get('summary')})")
-             
-        if news.get('has_injury_news'):
-             rationale.append(f"NEWS ALERT: {news.get('summary')}")
-        
+        rationale: List[str] = []
+        key_factors: List[str] = []
+        risks: List[str] = []
+
+        spread_mkt = snap.get('spread_home', None)
+        total_mkt = snap.get('total', None)
+
+        # --- Line movement (best effort) ---
+        line_move = None
+        try:
+            if raw_snaps:
+                home_spreads = [s for s in raw_snaps if s.get('market_type') == 'SPREAD' and s.get('side') == 'HOME' and s.get('line_value') is not None]
+                if home_spreads:
+                    latest = home_spreads[0].get('line_value')
+                    earliest = home_spreads[-1].get('line_value')
+                    if latest is not None and earliest is not None:
+                        line_move = float(latest) - float(earliest)
+        except Exception:
+            line_move = None
+
+        # --- Core rationale strings (still specific) ---
+        if spread_mkt is not None:
+            rationale.append(f"Market spread (home): {spread_mkt:+.1f}")
+        if total_mkt is not None:
+            rationale.append(f"Market total: {float(total_mkt):.1f}")
+
+        # Torvik
+        if torvik:
+            try:
+                margin = float(torvik.get('margin', 0.0))
+                # torvik margin is (home - away). fair spread is -margin.
+                fair_spread_torvik = -margin
+                if spread_mkt is not None:
+                    delta = fair_spread_torvik - float(spread_mkt)
+                    key_factors.append(f"Torvik margin {margin:+.1f} → fair spread {fair_spread_torvik:+.1f} (Δ vs market {delta:+.1f})")
+            except Exception:
+                pass
+            if torvik.get('projected_score'):
+                rationale.append(f"Torvik projected score: {torvik.get('projected_score')}")
+            if torvik.get('lean'):
+                rationale.append(f"Torvik lean: {torvik.get('lean')}")
+
+        # KenPom
+        try:
+            kp_margin = kenpom.get('spread_adj', None)
+            if kp_margin is not None:
+                kp_margin = float(kp_margin)
+                fair_spread_kp = -kp_margin
+                if spread_mkt is not None:
+                    delta = fair_spread_kp - float(spread_mkt)
+                    key_factors.append(f"KenPom expected margin {kp_margin:+.1f} → fair spread {fair_spread_kp:+.1f} (Δ vs market {delta:+.1f})")
+            if kenpom.get('total_adj') is not None and total_mkt is not None:
+                key_factors.append(f"KenPom total adj {float(kenpom.get('total_adj')):+.1f} (market {float(total_mkt):.1f})")
+        except Exception:
+            pass
+
+        # News
+        if news:
+            if news.get('has_injury_news'):
+                key_factors.append(f"Injury/news: {news.get('summary')}")
+            else:
+                # Still matchup-specific: we looked and found none
+                risks.append("No meaningful injury/rotation news detected (risk: late scratches)")
+
+        # Market movement risk (if any)
+        if line_move is not None and abs(line_move) >= 1.0:
+            risks.append(f"Line moved {line_move:+.1f} pts recently (market disagreement / timing risk)")
+
+        # Recommendation framing
         if recs:
             main = recs[0]
-            headline = f"Bet: {main['side']} {main['line'] or ''}"
-            rationale.append(f"Model sees {main['ev']:.1f}% EV vs market consensus.")
-            
+            headline = f"Bet: {main['side']} {main['line'] or ''}".strip()
+            try:
+                ev_pct = float(main.get('ev', 0.0)) * 100.0
+                rationale.append(f"Model EV vs price: {ev_pct:+.1f}%")
+            except Exception:
+                pass
+
+        # Data quality risk
+        if not snap:
+            risks.append("Missing market snapshot for this matchup (defaults used)")
+
+        # If still empty, make it explicit but not generic
+        if not key_factors:
+            key_factors.append("No strong model-vs-market discrepancies detected for this matchup")
+
         return {
             "headline": headline,
             "market_summary": f"Line: {snap.get('spread_home','N/A')}  •  Total: {snap.get('total','N/A')}",
             "recommendation": headline,
             "rationale": rationale,
-            "torvik_view": torvik.get('lean', 'Computed projections only'),
-            "kenpom_view": kenpom.get('summary', 'No Data'),
-            "news_view": news.get('summary', 'No News'),
-            "risks": ["Line Movement Volatility", "Late Injury Reports"],
+            "key_factors": key_factors,
+            "risks": risks,
+            "torvik_view": torvik.get('lean', 'Computed projections only') if torvik else 'Computed projections only',
+            "kenpom_view": kenpom.get('summary', 'No Data') if kenpom else 'No Data',
+            "news_view": news.get('summary', 'No News') if news else 'No News',
             "data_quality": "High" if snap else "Low"
         }
 
