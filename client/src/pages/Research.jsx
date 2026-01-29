@@ -158,6 +158,31 @@ const Research = ({ onAddBet }) => {
         return x > 0 ? `+${s}` : s;
     };
 
+    // Simple context labels (Torvik-style). League avg AdjO/AdjD ~106.
+    const EFF_AVG = 106.0;
+    const labelOffense = (adjO) => {
+        const x = Number(adjO);
+        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
+        if (x >= EFF_AVG + 6) return { label: 'Strong', cls: 'text-green-400' };
+        if (x <= EFF_AVG - 6) return { label: 'Weak', cls: 'text-red-400' };
+        return { label: 'Average', cls: 'text-slate-200' };
+    };
+    const labelDefense = (adjD) => {
+        const x = Number(adjD);
+        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
+        // Lower AdjD is better
+        if (x <= EFF_AVG - 6) return { label: 'Strong', cls: 'text-green-400' };
+        if (x >= EFF_AVG + 6) return { label: 'Weak', cls: 'text-red-400' };
+        return { label: 'Average', cls: 'text-slate-200' };
+    };
+    const labelPace = (tempo) => {
+        const x = Number(tempo);
+        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
+        if (x >= 71) return { label: 'Fast', cls: 'text-amber-300' };
+        if (x <= 65) return { label: 'Slow', cls: 'text-blue-300' };
+        return { label: 'Average', cls: 'text-slate-200' };
+    };
+
     const getEdgeColor = (edge, sport) => {
         if (edge === null || edge === undefined) return 'text-gray-500';
 
@@ -1103,23 +1128,31 @@ const Research = ({ onAddBet }) => {
                                                             const h = ts.home || {};
                                                             const a = ts.away || {};
                                                             const tempo = ts.game_tempo;
+                                                            const paceLbl = labelPace(tempo);
+                                                            const hOff = labelOffense(h.adj_off);
+                                                            const hDef = labelDefense(h.adj_def);
+                                                            const aOff = labelOffense(a.adj_off);
+                                                            const aDef = labelDefense(a.adj_def);
                                                             return (
                                                                 <div className="space-y-2 text-xs">
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-slate-500">Pace (est)</span>
-                                                                        <span className="text-slate-200 font-mono font-bold">{tempo ? `${tempo} poss` : '—'}</span>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <span className="text-slate-500">Pace</span>
+                                                                        <span className={`${paceLbl.cls} font-bold`}>{paceLbl.label}</span>
                                                                     </div>
+                                                                    <div className="text-[10px] text-slate-500">Est: {tempo ? `${tempo} possessions` : '—'}</div>
+
                                                                     <div className="border-t border-slate-700/50 pt-2">
-                                                                        <div className="text-slate-400 font-bold mb-1">{selectedGame?.home_team}</div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjO</span><span className="text-slate-200 font-mono">{h.adj_off?.toFixed ? h.adj_off.toFixed(1) : (h.adj_off ?? '—')}</span></div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjD</span><span className="text-slate-200 font-mono">{h.adj_def?.toFixed ? h.adj_def.toFixed(1) : (h.adj_def ?? '—')}</span></div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjT</span><span className="text-slate-200 font-mono">{h.adj_tempo?.toFixed ? h.adj_tempo.toFixed(1) : (h.adj_tempo ?? '—')}</span></div>
+                                                                        <div className="text-slate-300 font-bold mb-1">{selectedGame?.home_team}</div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Offense</span><span className={`${hOff.cls} font-bold`}>{hOff.label}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Defense</span><span className={`${hDef.cls} font-bold`}>{hDef.label}</span></div>
+                                                                        <div className="text-[10px] text-slate-500 mt-1">AdjO {h.adj_off?.toFixed ? h.adj_off.toFixed(1) : (h.adj_off ?? '—')} • AdjD {h.adj_def?.toFixed ? h.adj_def.toFixed(1) : (h.adj_def ?? '—')} • AdjT {h.adj_tempo?.toFixed ? h.adj_tempo.toFixed(1) : (h.adj_tempo ?? '—')}</div>
                                                                     </div>
+
                                                                     <div className="border-t border-slate-700/50 pt-2">
-                                                                        <div className="text-slate-400 font-bold mb-1">{selectedGame?.away_team}</div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjO</span><span className="text-slate-200 font-mono">{a.adj_off?.toFixed ? a.adj_off.toFixed(1) : (a.adj_off ?? '—')}</span></div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjD</span><span className="text-slate-200 font-mono">{a.adj_def?.toFixed ? a.adj_def.toFixed(1) : (a.adj_def ?? '—')}</span></div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">AdjT</span><span className="text-slate-200 font-mono">{a.adj_tempo?.toFixed ? a.adj_tempo.toFixed(1) : (a.adj_tempo ?? '—')}</span></div>
+                                                                        <div className="text-slate-300 font-bold mb-1">{selectedGame?.away_team}</div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Offense</span><span className={`${aOff.cls} font-bold`}>{aOff.label}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Defense</span><span className={`${aDef.cls} font-bold`}>{aDef.label}</span></div>
+                                                                        <div className="text-[10px] text-slate-500 mt-1">AdjO {a.adj_off?.toFixed ? a.adj_off.toFixed(1) : (a.adj_off ?? '—')} • AdjD {a.adj_def?.toFixed ? a.adj_def.toFixed(1) : (a.adj_def ?? '—')} • AdjT {a.adj_tempo?.toFixed ? a.adj_tempo.toFixed(1) : (a.adj_tempo ?? '—')}</div>
                                                                     </div>
                                                                 </div>
                                                             );
