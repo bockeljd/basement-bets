@@ -53,7 +53,10 @@ const Research = ({ onAddBet }) => {
 
             setEdges(boardRes.data || []);
             setHistory(historyRes.data || []);
-            setBalanceSnaps(balancesRes.data || []);
+            // balances endpoint may return either an array or an object keyed by provider
+            const rawSnaps = balancesRes.data || [];
+            const snapsArr = Array.isArray(rawSnaps) ? rawSnaps : Object.values(rawSnaps || {});
+            setBalanceSnaps(snapsArr);
 
         } catch (err) {
             console.error(err);
@@ -249,7 +252,8 @@ const Research = ({ onAddBet }) => {
 
     const getSnap = (providerKey) => {
         const key = String(providerKey || '').toLowerCase();
-        return (balanceSnaps || []).find(s => String(s.provider || '').toLowerCase() === key);
+        const snaps = Array.isArray(balanceSnaps) ? balanceSnaps : Object.values(balanceSnaps || {});
+        return (snaps || []).find(s => String(s?.provider || '').toLowerCase() === key);
     };
 
     const fmtMoney = (v) => {
