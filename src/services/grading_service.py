@@ -50,13 +50,35 @@ class GradingService:
         """
         print(f"[GRADING] Fetching scores for {league}...")
 
+        # Backfill window: history tab can include older games; keep this reasonably small
+        # to avoid heavy API usage.
+        backfill_days = int(os.getenv('GRADING_FINALS_BACKFILL_DAYS', '10'))
         dates = [
-            (datetime.now() - timedelta(days=1)).strftime("%Y%m%d"),
-            datetime.now().strftime("%Y%m%d"),
+            (datetime.now() - timedelta(days=d)).strftime("%Y%m%d")
+            for d in range(0, backfill_days + 1)
         ]
 
         # 1) Action Network primary (NCAAM)
         if league == 'NCAAM':
+            # Cache the set of known event ids so we don't violate FK constraints in game_results.
+            known_event_ids = set()
+            try:
+                with get_db_connection() as conn:
+                    rows = _exec(
+                        conn,
+                        """
+                        SELECT id
+                        FROM events
+                        WHERE league = 'NCAAM'
+                          AND id LIKE 'action:ncaam:%%'
+                          AND start_time >= (NOW() - (%(days)s || ' days')::interval)
+                        """,
+                        {"days": backfill_days + 2},
+                    ).fetchall()
+                    known_event_ids = {r['id'] for r in rows}
+            except Exception as e:
+                print(f"[GRADING] Warning: could not prefetch known NCAAM Action event ids: {e}")
+
             count = 0
             for date_str in dates:
                 try:
@@ -70,6 +92,8 @@ class GradingService:
 
                         # Our internal event ids are namespaced.
                         event_id = f"action:ncaam:{game_id}"
+                        if known_event_ids and event_id not in known_event_ids:
+                            continue
 
                         home_score = None
                         away_score = None
@@ -101,9 +125,7 @@ class GradingService:
                 except Exception as e:
                     print(f"[GRADING] Action Network error fetching NCAAM {date_str}: {e}")
 
-            # If Action Network worked, we're done.
-            if count > 0:
-                return
+            # Note: we also run ESPN fallback below to support legacy espn:ncaam:* event ids.
 
         # 2) ESPN fallback (all leagues, incl NCAAM if Action returned 0)
         count = 0
