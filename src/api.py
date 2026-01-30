@@ -42,21 +42,15 @@ async def check_access_key(request: Request, call_next):
 
         # 2. Check Client Key (for non-Bearer requests)
         client_key = request.headers.get(API_KEY_NAME)
+        if client_key:
+            client_key = client_key.strip()
+            
         server_key = settings.BASEMENT_PASSWORD
         
         # If Password is set on Server, enforce it
         if server_key and client_key != server_key:
              print(f"[AUTH FAIL] Received: '{client_key}' | Expected: '{server_key}'")
-             return JSONResponse(status_code=403, content={
-                 "message": "Wrong Password",
-                 "debug": {
-                     "received_len": len(client_key) if client_key else 0,
-                     "expected_len": len(server_key),
-                     "received_val_masked": f"{client_key[0]}...{client_key[-1]}" if client_key and len(client_key) > 1 else "???",
-                     "expected_val_masked": f"{server_key[0]}...{server_key[-1]}" if server_key and len(server_key) > 1 else "???",
-                     "received_headers_keys": list(request.headers.keys())
-                 }
-             })
+             return JSONResponse(status_code=403, content={"message": "Wrong Password"})
              
     response = await call_next(request)
     return response
