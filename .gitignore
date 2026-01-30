@@ -33,3 +33,9 @@ torvik_source.html
 # Raw Data (personal exports)
 data/snapshots/
 data/imports/
+
+# Browser Profiles
+chrome_profile/
+chrome_profile_fd/
+playwright_profile_fd/
+test_profile/
