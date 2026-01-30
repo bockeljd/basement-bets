@@ -93,10 +93,57 @@ class OddsSelectionService:
         res['selection_method'] = 'priority_recency'
         return res
 
-    def get_consensus_line(self, snapshots: List[Dict], market_type: str) -> Optional[float]:
+    def get_consensus_line(self, snapshots: List[Dict], market_type: str, side: str = None) -> Optional[float]:
         """
-        Compute value-weighted or simple median line.
+        Compute median line value from all books.
         """
-        lines = [s['line_value'] for s in snapshots if s['line_value'] is not None]
+        filtered = [s for s in snapshots if s.get('market_type') == market_type]
+        if side:
+            filtered = [s for s in filtered if s.get('side') == side]
+        lines = [s['line_value'] for s in filtered if s.get('line_value') is not None]
         if not lines: return None
         return statistics.median(lines)
+
+    def get_consensus_snapshot(self, snapshots: List[Dict], market_type: str, side: str = None) -> Optional[Dict]:
+        """
+        Get a "consensus" snapshot with median line and median price.
+        This represents what the "market average" thinks.
+        """
+        filtered = [s for s in snapshots if s.get('market_type') == market_type]
+        if side:
+            filtered = [s for s in filtered if s.get('side') == side]
+        
+        lines = [s['line_value'] for s in filtered if s.get('line_value') is not None]
+        prices = [s['price'] for s in filtered if s.get('price') is not None]
+        
+        if not lines:
+            return None
+        
+        median_line = statistics.median(lines)
+        median_price = statistics.median(prices) if prices else -110
+        
+        return {
+            'market_type': market_type,
+            'side': side,
+            'line_value': median_line,
+            'price': int(median_price),
+            'book': 'Consensus',
+            'selection_method': 'median_consensus'
+        }
+
+    def get_best_price_for_side(self, snapshots: List[Dict], market_type: str, side: str) -> Optional[Dict]:
+        """
+        Find the best available price for a specific side (HOME/AWAY or OVER/UNDER).
+        Used AFTER identifying an edge to find the optimal book to bet.
+        """
+        filtered = [s for s in snapshots if s.get('market_type') == market_type and s.get('side') == side]
+        if not filtered:
+            return None
+        
+        # Best price = highest American odds (e.g., -105 > -110 > -115)
+        # For positive odds, also higher is better (+120 > +110)
+        filtered.sort(key=lambda x: x.get('price', -999), reverse=True)
+        
+        best = filtered[0].copy()
+        best['selection_method'] = 'best_price'
+        return best
