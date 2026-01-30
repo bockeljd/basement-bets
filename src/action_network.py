@@ -1,6 +1,11 @@
 import requests
-import pandas as pd
 import datetime
+
+# pandas is optional (used only for some local scripts / helpers)
+try:
+    import pandas as pd  # type: ignore
+except Exception:  # pragma: no cover
+    pd = None
 
 SPORT_INFO = {
     'nba': 'nba',

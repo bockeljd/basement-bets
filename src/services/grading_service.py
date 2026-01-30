@@ -9,6 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 from database import get_db_connection, _exec, update_model_prediction_result, upsert_game_result
 from parsers.espn_client import EspnClient
 from services.odds_selection_service import OddsSelectionService
+from src.action_network import get_todays_games
 
 # Load env variables if not already loaded
 from dotenv import load_dotenv
@@ -40,33 +41,112 @@ class GradingService:
         return {"status": "Success", "graded": graded_count, "clv_updates": clv_count}
 
     def _ingest_latest_scores(self, league):
-        """
-        Fetch scores from ESPN and upsert to game_results table.
+        """Fetch scores and upsert to game_results.
+
+        Primary goal: keep grading unblocked.
+
+        - For NCAAM: prefer Action Network (our events are action:ncaam:* so matching is clean).
+        - For other leagues: keep ESPN for now.
         """
         print(f"[GRADING] Fetching scores for {league}...")
+
+        # Backfill window: history tab can include older games; keep this reasonably small
+        # to avoid heavy API usage.
+        backfill_days = int(os.getenv('GRADING_FINALS_BACKFILL_DAYS', '10'))
         dates = [
-            (datetime.now() - timedelta(days=1)).strftime("%Y%m%d"),
-            datetime.now().strftime("%Y%m%d")
+            (datetime.now() - timedelta(days=d)).strftime("%Y%m%d")
+            for d in range(0, backfill_days + 1)
         ]
-        
+
+        # 1) Action Network primary (NCAAM)
+        if league == 'NCAAM':
+            # Cache the set of known event ids so we don't violate FK constraints in game_results.
+            known_event_ids = set()
+            try:
+                with get_db_connection() as conn:
+                    rows = _exec(
+                        conn,
+                        """
+                        SELECT id
+                        FROM events
+                        WHERE league = 'NCAAM'
+                          AND id LIKE 'action:ncaam:%%'
+                          AND start_time >= (NOW() - (%(days)s || ' days')::interval)
+                        """,
+                        {"days": backfill_days + 2},
+                    ).fetchall()
+                    known_event_ids = {r['id'] for r in rows}
+            except Exception as e:
+                print(f"[GRADING] Warning: could not prefetch known NCAAM Action event ids: {e}")
+
+            count = 0
+            for date_str in dates:
+                try:
+                    games = get_todays_games('ncaab', [date_str])
+                    for g in games:
+                        if not g.get('completed'):
+                            continue
+                        game_id = g.get('id') or g.get('game_id')
+                        if not game_id:
+                            continue
+
+                        # Our internal event ids are namespaced.
+                        event_id = f"action:ncaam:{game_id}"
+                        if known_event_ids and event_id not in known_event_ids:
+                            continue
+
+                        home_score = None
+                        away_score = None
+                        # The helper tries to include scores when available
+                        scores = g.get('scores') or []
+                        if len(scores) >= 2:
+                            # scores are [{name, score}, {name, score}]
+                            # Determine which is home/away using team names
+                            home_team = g.get('home_team')
+                            away_team = g.get('away_team')
+                            for s in scores:
+                                if s.get('name') == home_team:
+                                    home_score = s.get('score')
+                                if s.get('name') == away_team:
+                                    away_score = s.get('score')
+
+                        if home_score is None or away_score is None:
+                            continue
+
+                        res_data = {
+                            "event_id": event_id,
+                            "home_score": int(home_score),
+                            "away_score": int(away_score),
+                            "final": True,
+                            "period": "FINAL",
+                        }
+                        upsert_game_result(res_data)
+                        count += 1
+                except Exception as e:
+                    print(f"[GRADING] Action Network error fetching NCAAM {date_str}: {e}")
+
+            # Note: we also run ESPN fallback below to support legacy espn:ncaam:* event ids.
+
+        # 2) ESPN fallback (all leagues, incl NCAAM if Action returned 0)
         count = 0
         for date_str in dates:
             try:
                 events = self.espn_client.fetch_scoreboard(league, date_str)
                 for ev in events:
-                    if ev['status'] in ['STATUS_FINAL', 'final', 'complete', 'completed']:
+                    if ev.get('status') in ['STATUS_FINAL', 'final', 'complete', 'completed']:
                         res_data = {
                             "event_id": ev['id'],
                             "home_score": int(ev['home_score']) if ev.get('home_score') is not None else 0,
                             "away_score": int(ev['away_score']) if ev.get('away_score') is not None else 0,
                             "final": True,
-                            "period": "FINAL"
+                            "period": "FINAL",
                         }
                         upsert_game_result(res_data)
                         count += 1
             except Exception as e:
-                print(f"[GRADING] Error fetching {league} {date_str}: {e}")
-        # print(f"[GRADING] Updated {count} finals for {league}.")
+                print(f"[GRADING] ESPN error fetching {league} {date_str}: {e}")
+
+        return
 
     def _compute_clv_for_started_games(self):
         """
@@ -305,9 +385,15 @@ class GradingService:
 
     def _grade_row(self, row):
         from src.utils.normalize import normalize_market
-        market = normalize_market(row['market_type']) 
+        market = normalize_market(row['market_type'])
         pick = row['pick']
         line = float(row['bet_line']) if row['bet_line'] is not None else 0.0
+
+        # Guardrails: ignore placeholder/auto predictions so they don't clog Pending.
+        if not pick or str(pick).upper() == 'NONE':
+            return 'VOID'
+        if market not in ('SPREAD', 'TOTAL', 'MONEYLINE'):
+            return 'VOID'
         
         h_score = row['home_score']
         a_score = row['away_score']

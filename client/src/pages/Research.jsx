@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/axios';
-import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck, PlusCircle } from 'lucide-react';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
 
-const Research = () => {
+const Research = ({ onAddBet }) => {
     const [edges, setEdges] = useState([]);
     const [history, setHistory] = useState([]);
     const [activeTab, setActiveTab] = useState('live');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [sportFilter, setSportFilter] = useState('All');
+
+    // Balance snapshots (UI source-of-truth)
+    const [balanceSnaps, setBalanceSnaps] = useState([]);
+    const [balanceError, setBalanceError] = useState(null);
+    // Research tab focuses on board-backed leagues
+    const [leagueFilter, setLeagueFilter] = useState('NCAAM');
     // Date Filtering
-    const getTodayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time (approx) or use UTC if preferred. en-CA gives YYYY-MM-DD.
+    // Always drive date selection in America/New_York so it matches backend queries.
+    const getTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     const [selectedDate, setSelectedDate] = useState(getTodayStr());
 
     // Game Analysis Modal State
@@ -22,23 +28,35 @@ const Research = () => {
     // Sorting State
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
 
+    const BOARD_DAYS_DEFAULT = 3;
+
     useEffect(() => {
         fetchSchedule();
-    }, [selectedDate]); // Refetch when date changes
+    }, [selectedDate, leagueFilter]); // Refetch when date/league changes
 
     const fetchSchedule = async () => {
         try {
             setLoading(true);
             setError(null);
+            setBalanceError(null);
 
-            // Fetch NCAAM specific board and overall history
-            const [boardRes, historyRes] = await Promise.all([
-                api.get('/api/ncaam/board', { params: { date: selectedDate } }),
-                api.get('/api/ncaam/history')
+            // Fetch NCAAM board (next N days from selected date), overall history, and balance snapshots
+            const [boardRes, historyRes, balancesRes] = await Promise.all([
+                api.get('/api/board', { params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT } }),
+                api.get('/api/ncaam/history'),
+                api.get('/api/balances/snapshots/latest').catch((e) => {
+                    // Don't fail the entire page if balances error out
+                    setBalanceError(e);
+                    return { data: [] };
+                })
             ]);
 
             setEdges(boardRes.data || []);
             setHistory(historyRes.data || []);
+            // balances endpoint may return either an array or an object keyed by provider
+            const rawSnaps = balancesRes.data || [];
+            const snapsArr = Array.isArray(rawSnaps) ? rawSnaps : Object.values(rawSnaps || {});
+            setBalanceSnaps(snapsArr);
 
         } catch (err) {
             console.error(err);
@@ -142,8 +160,41 @@ const Research = () => {
         current.setDate(current.getDate() + days);
         // Correct timezone offset issue if any, or just use simple string manipulation if date is reliable
         // To be safe with 'en-CA' (YYYY-MM-DD)
-        const nextDate = current.toLocaleDateString('en-CA');
+        const nextDate = current.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
         setSelectedDate(nextDate);
+    };
+
+    const fmtSigned = (n, decimals = 0) => {
+        if (n === null || n === undefined || n === '') return '-';
+        const x = Number(n);
+        if (Number.isNaN(x)) return String(n);
+        const s = decimals > 0 ? x.toFixed(decimals) : String(x);
+        return x > 0 ? `+${s}` : s;
+    };
+
+    // Simple context labels (Torvik-style). League avg AdjO/AdjD ~106.
+    const EFF_AVG = 106.0;
+    const labelOffense = (adjO) => {
+        const x = Number(adjO);
+        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
+        if (x >= EFF_AVG + 6) return { label: 'Strong', cls: 'text-green-400' };
+        if (x <= EFF_AVG - 6) return { label: 'Weak', cls: 'text-red-400' };
+        return { label: 'Average', cls: 'text-slate-200' };
+    };
+    const labelDefense = (adjD) => {
+        const x = Number(adjD);
+        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
+        // Lower AdjD is better
+        if (x <= EFF_AVG - 6) return { label: 'Strong', cls: 'text-green-400' };
+        if (x >= EFF_AVG + 6) return { label: 'Weak', cls: 'text-red-400' };
+        return { label: 'Average', cls: 'text-slate-200' };
+    };
+    const labelPace = (tempo) => {
+        const x = Number(tempo);
+        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
+        if (x >= 71) return { label: 'Fast', cls: 'text-amber-300' };
+        if (x <= 65) return { label: 'Slow', cls: 'text-blue-300' };
+        return { label: 'Average', cls: 'text-slate-200' };
     };
 
     const getEdgeColor = (edge, sport) => {
@@ -167,7 +218,7 @@ const Research = () => {
 
     const getProcessedEdges = () => {
         let filtered = edges.filter(e => {
-            if (sportFilter !== 'All' && e.sport !== sportFilter) return false;
+            if (leagueFilter && e.sport !== leagueFilter) return false;
             return true;
         });
 
@@ -199,12 +250,61 @@ const Research = () => {
         return sortConfig.direction === 'asc' ? <ChevronUp size={12} className="ml-1 text-blue-400" /> : <ChevronDown size={12} className="ml-1 text-blue-400" />;
     };
 
+    const getSnap = (providerKey) => {
+        const key = String(providerKey || '').toLowerCase();
+        const snaps = Array.isArray(balanceSnaps) ? balanceSnaps : Object.values(balanceSnaps || {});
+        return (snaps || []).find(s => String(s?.provider || '').toLowerCase() === key);
+    };
+
+    const fmtMoney = (v) => {
+        if (v === null || v === undefined || v === '') return '—';
+        const x = Number(v);
+        if (Number.isNaN(x)) return String(v);
+        return x.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    };
+
+    const fmtTs = (ts) => {
+        if (!ts) return '';
+        try {
+            const d = new Date(ts);
+            return d.toLocaleString('en-US', { timeZone: 'America/New_York' });
+        } catch {
+            return String(ts);
+        }
+    };
+
+    const dk = getSnap('draftkings') || getSnap('dk');
+    const fd = getSnap('fanduel') || getSnap('fd');
+
     return (
         <div className="p-6 bg-slate-900 min-h-screen text-white">
             <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
-                    Bet Research
-                </h1>
+                <div>
+                    <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
+                        Bet Research
+                    </h1>
+                    <div className="text-xs text-slate-500 mt-1">
+                        Showing NCAAM board for next <span className="text-slate-300 font-bold">3</span> days from selected date.
+                    </div>
+
+                    <div className="mt-2 text-xs text-slate-300 flex flex-wrap gap-3 items-center">
+                        <div className="px-2 py-1 rounded bg-slate-800/60 border border-slate-700">
+                            <span className="text-slate-400">DraftKings:</span>{' '}
+                            <span className="font-bold text-white">{fmtMoney(dk?.balance)}</span>
+                            {dk?.captured_at ? <span className="text-slate-500"> · {fmtTs(dk.captured_at)}</span> : null}
+                        </div>
+                        <div className="px-2 py-1 rounded bg-slate-800/60 border border-slate-700">
+                            <span className="text-slate-400">FanDuel:</span>{' '}
+                            <span className="font-bold text-white">{fmtMoney(fd?.balance)}</span>
+                            {fd?.captured_at ? <span className="text-slate-500"> · {fmtTs(fd.captured_at)}</span> : null}
+                        </div>
+                        {balanceError ? (
+                            <div className="text-xs text-amber-300">
+                                Balances unavailable (snapshots endpoint).
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
                 <div className="flex gap-2">
                     <button
                         onClick={fetchSchedule}
@@ -212,12 +312,23 @@ const Research = () => {
                         className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                         <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                        Refresh Schedule
+                        Refresh Board
                     </button>
+
+                    <button
+                        onClick={() => onAddBet?.()}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm transition-all flex items-center gap-2"
+                        title="Add a bet manually"
+                    >
+                        <PlusCircle size={14} />
+                        Add Bet
+                    </button>
+
                     <button
                         onClick={runModels}
                         disabled={loading}
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        title="(Legacy) Global model run. NCAAM board is refreshed via Refresh Board."
                     >
                         {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
                         {loading ? 'Running Models...' : 'Run Models'}
@@ -246,18 +357,16 @@ const Research = () => {
                 <>
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center space-x-4">
-                            {/* Sport Filter */}
+                            {/* League Filter */}
                             <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 focus-within:border-blue-500/50 transition-all">
                                 <Filter size={14} className="text-slate-500 mr-2" />
                                 <select
-                                    value={sportFilter}
-                                    onChange={(e) => setSportFilter(e.target.value)}
+                                    value={leagueFilter}
+                                    onChange={(e) => setLeagueFilter(e.target.value)}
                                     className="bg-transparent text-sm font-medium focus:outline-none cursor-pointer"
                                 >
-                                    <option value="All">All Sports</option>
-                                    <option value="NFL">NFL</option>
                                     <option value="NCAAM">NCAAM</option>
-                                    <option value="NCAAF">NCAAF</option>
+                                    <option value="NFL">NFL</option>
                                     <option value="EPL">EPL</option>
                                 </select>
                             </div>
@@ -276,7 +385,7 @@ const Research = () => {
                                 <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
                                     →
                                 </button>
-                                <button onClick={() => setSelectedDate(new Date().toLocaleDateString('en-CA'))} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
+                                <button onClick={() => setSelectedDate(new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }))} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
                                     Today
                                 </button>
                             </div>
@@ -287,8 +396,8 @@ const Research = () => {
                         <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
                             <h2 className="text-lg font-semibold text-slate-200">Market Board</h2>
                             <div className="text-xs text-slate-500 flex items-center">
-                                <AlertCircle size={12} className="mr-1" />
-                                Updated in real-time
+                                <Info size={12} className="mr-1" />
+                                Times shown in ET • lines shown as (team/side, line, odds)
                             </div>
                         </div>
 
@@ -330,12 +439,25 @@ const Research = () => {
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
                                                 <div className="flex items-center">Matchup <SortIcon column="game" /></div>
                                             </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Spread (Odds)</div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                <div className="flex items-center">Total (Odds)</div>
-                                            </th>
+                                            {leagueFilter === 'EPL' ? (
+                                                <>
+                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <div className="flex items-center">Moneyline (1X2)</div>
+                                                    </th>
+                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <div className="flex items-center">Total Goals (O/U)</div>
+                                                    </th>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <div className="flex items-center">Spread (both sides)</div>
+                                                    </th>
+                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <div className="flex items-center">Total (O/U)</div>
+                                                    </th>
+                                                </>
+                                            )}
                                             <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
                                                 <div className="flex items-center justify-center">Action</div>
                                             </th>
@@ -347,7 +469,7 @@ const Research = () => {
                                                 <td colSpan="9" className="py-12 text-center text-slate-500">
                                                     <div className="flex flex-col items-center justify-center">
                                                         <Filter size={32} className="mb-3 opacity-20" />
-                                                        <p className="text-lg font-medium text-slate-400">No games found for this sport.</p>
+                                                        <p className="text-lg font-medium text-slate-400">No games found for this league/date range.</p>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -384,39 +506,109 @@ const Research = () => {
                                                             </span>
                                                         </td>
                                                         <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
-                                                        <td className="py-3 px-4">
-                                                            {edge.home_spread !== null ? (
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-white font-mono font-bold leading-tight">
-                                                                        {edge.home_spread > 0 ? `+${edge.home_spread}` : edge.home_spread}
-                                                                    </span>
-                                                                    <span className="text-[10px] text-slate-500 font-medium">@{edge.moneyline_home || '-'}</span>
-                                                                </div>
-                                                            ) : (
-                                                                <span className="text-slate-600 font-mono text-xs">OFF</span>
-                                                            )}
-                                                        </td>
-                                                        <td className="py-3 px-4">
-                                                            {edge.total_line !== null ? (
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-white font-mono font-bold leading-tight">
-                                                                        {edge.total_line}
-                                                                    </span>
-                                                                    <span className="text-[10px] text-slate-500 font-medium">{edge.moneyline_away ? `AWAY ML: ${edge.moneyline_away}` : ''}</span>
-                                                                </div>
-                                                            ) : (
-                                                                <span className="text-slate-600 font-mono text-xs">OFF</span>
-                                                            )}
-                                                        </td>
+                                                        {leagueFilter === 'EPL' ? (
+                                                            <>
+                                                                <td className="py-3 px-4">
+                                                                    {(edge.ml_home_odds !== null && edge.ml_home_odds !== undefined) || (edge.ml_away_odds !== null && edge.ml_away_odds !== undefined) || (edge.ml_draw_odds !== null && edge.ml_draw_odds !== undefined) ? (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">HOME</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_home_odds)}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">DRAW</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_draw_odds)}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">AWAY</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_away_odds)}</span>
+                                                                            </div>
+                                                                            <div className="text-[10px] text-slate-600">1X2 market odds</div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-slate-600 font-mono text-xs">No moneyline</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="py-3 px-4">
+                                                                    {edge.total_line !== null && edge.total_line !== undefined ? (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400">OVER</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds)}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400">UNDER</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
+                                                                            </div>
+                                                                            <div className="text-[10px] text-slate-600">goals total (O/U)</div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-slate-600 font-mono text-xs">No total</span>
+                                                                    )}
+                                                                </td>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <td className="py-3 px-4">
+                                                                    {(edge.home_spread !== null && edge.home_spread !== undefined) || (edge.away_spread !== null && edge.away_spread !== undefined) ? (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">{edge.away_team}</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">
+                                                                                    {fmtSigned(edge.away_spread ?? (edge.home_spread != null ? -Number(edge.home_spread) : null), 1)}
+                                                                                </span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">
+                                                                                    {fmtSigned(edge.spread_away_odds)}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400 truncate">{edge.home_team}</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">
+                                                                                    {fmtSigned(edge.home_spread, 1)}
+                                                                                </span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">
+                                                                                    {fmtSigned(edge.spread_home_odds ?? edge.moneyline_home)}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="text-[10px] text-slate-600">team • line • odds</div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-slate-600 font-mono text-xs">No spread</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="py-3 px-4">
+                                                                    {edge.total_line !== null && edge.total_line !== undefined ? (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400">OVER</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds ?? edge.moneyline_away)}</span>
+                                                                            </div>
+                                                                            <div className="flex justify-between gap-2 text-xs">
+                                                                                <span className="text-slate-400">UNDER</span>
+                                                                                <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
+                                                                            </div>
+                                                                            <div className="text-[10px] text-slate-600">side • line • odds</div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-slate-600 font-mono text-xs">No total</span>
+                                                                    )}
+                                                                </td>
+                                                            </>
+                                                        )}
                                                         <td className="py-3 px-4 text-center">
                                                             <button
                                                                 onClick={() => analyzeGame(edge)}
-                                                                disabled={isAnalyzing && selectedGame?.id === edge.id}
+                                                                disabled={leagueFilter !== 'NCAAM' || (isAnalyzing && selectedGame?.id === edge.id)}
+                                                                title={leagueFilter !== 'NCAAM' ? 'Analysis currently supported for NCAAM only' : ''}
                                                                 className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs font-bold transition-all shadow-lg ring-1 ring-white/10 flex items-center justify-center mx-auto"
                                                             >
-                                                                {isAnalyzing && selectedGame?.id === edge.id ? (
+                                                                {leagueFilter !== 'NCAAM' ? 'N/A' : (isAnalyzing && selectedGame?.id === edge.id ? (
                                                                     <RefreshCw className="animate-spin" size={14} />
-                                                                ) : 'Analyze'}
+                                                                ) : 'Analyze')}
                                                             </button>
                                                         </td>
                                                     </tr>
@@ -451,41 +643,52 @@ const Research = () => {
 
                         {/* Model Performance Summary */}
                         <div className="px-6 py-6 bg-slate-800/30 border-b border-slate-700 grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            {[
-                                {
-                                    label: 'Graded Bets',
-                                    value: history.filter(h => h.result && h.result !== 'Pending').length,
-                                    icon: <CheckCircle size={14} className="text-blue-400" />
-                                },
-                                {
-                                    label: 'Record',
-                                    value: (() => {
-                                        const w = history.filter(x => x.result === 'Win').length;
-                                        const l = history.filter(x => x.result === 'Loss').length;
-                                        const p = history.filter(x => x.result === 'Push').length;
-                                        return `${w}-${l}${p > 0 ? `-${p}` : ''}`;
-                                    })(),
-                                    icon: <ArrowUpDown size={14} className="text-green-400" />
-                                },
-                                {
-                                    label: 'Win Rate',
-                                    value: (() => {
-                                        const h = history.filter(x => x.result && x.result !== 'Pending');
-                                        const w = h.filter(x => x.result === 'Win').length;
-                                        return h.length > 0 ? `${((w / h.length) * 100).toFixed(1)}%` : '0.0%';
-                                    })(),
-                                    icon: <CheckCircle size={14} className="text-purple-400" />
-                                },
-                                {
-                                    label: 'Est. Return ($10/bet)',
-                                    value: `$${history.reduce((acc, h) => {
-                                        if (h.result === 'Win') return acc + 9.09;
-                                        if (h.result === 'Loss') return acc - 10.0;
-                                        return acc;
-                                    }, 0).toFixed(2)}`,
-                                    icon: <RefreshCw size={14} className="text-emerald-400" />
-                                }
-                            ].map((stat, i) => (
+                            {(() => {
+                                const normOutcome = (x) => {
+                                    const o = (x?.graded_result || x?.outcome || x?.result || 'Pending');
+                                    const s = String(o).toUpperCase();
+                                    if (s === 'WON' || s === 'WIN') return 'WON';
+                                    if (s === 'LOST' || s === 'LOSS') return 'LOST';
+                                    if (s === 'PUSH') return 'PUSH';
+                                    if (s === 'PENDING' || s === 'ANALYZED') return 'PENDING';
+                                    return s;
+                                };
+
+                                const graded = history.filter(h => ['WON', 'LOST', 'PUSH'].includes(normOutcome(h)));
+                                const w = graded.filter(x => normOutcome(x) === 'WON').length;
+                                const l = graded.filter(x => normOutcome(x) === 'LOST').length;
+                                const p = graded.filter(x => normOutcome(x) === 'PUSH').length;
+
+                                const stats = [
+                                    {
+                                        label: 'Graded Bets',
+                                        value: graded.length,
+                                        icon: <CheckCircle size={14} className="text-blue-400" />
+                                    },
+                                    {
+                                        label: 'Record',
+                                        value: `${w}-${l}${p > 0 ? `-${p}` : ''}`,
+                                        icon: <ArrowUpDown size={14} className="text-green-400" />
+                                    },
+                                    {
+                                        label: 'Win Rate',
+                                        value: graded.length > 0 ? `${((w / graded.length) * 100).toFixed(1)}%` : '0.0%',
+                                        icon: <CheckCircle size={14} className="text-purple-400" />
+                                    },
+                                    {
+                                        label: 'Est. Return ($10/bet)',
+                                        value: `$${graded.reduce((acc, h) => {
+                                            const o = normOutcome(h);
+                                            if (o === 'WON') return acc + 9.09;
+                                            if (o === 'LOST') return acc - 10.0;
+                                            return acc;
+                                        }, 0).toFixed(2)}`,
+                                        icon: <RefreshCw size={14} className="text-emerald-400" />
+                                    }
+                                ];
+
+                                return stats;
+                            })().map((stat, i) => (
                                 <div key={i} className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 shadow-sm relative overflow-hidden group">
                                     <div className="absolute top-0 right-0 p-2 opacity-20 group-hover:opacity-100 transition-opacity">
                                         {stat.icon}
@@ -675,13 +878,77 @@ const Research = () => {
                                     </div>
                                 ) : analysisResult ? (
                                     <div className="space-y-6">
+                                        {/* Market Lines (clarify who is favored) */}
+                                        <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
+                                            <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Market Lines</div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Spread (team / line / odds)</div>
+                                                    {(selectedGame.home_spread !== null && selectedGame.home_spread !== undefined) || (selectedGame.away_spread !== null && selectedGame.away_spread !== undefined) ? (() => {
+                                                        const hs = selectedGame.home_spread !== null && selectedGame.home_spread !== undefined ? Number(selectedGame.home_spread) : null;
+                                                        const as = selectedGame.away_spread !== null && selectedGame.away_spread !== undefined ? Number(selectedGame.away_spread) : (hs !== null ? -hs : null);
+                                                        const favored = hs !== null ? (hs < 0 ? selectedGame.home_team : (hs > 0 ? selectedGame.away_team : 'Pick')) : '—';
+                                                        return (
+                                                            <div className="space-y-1 text-xs">
+                                                                <div className="flex justify-between gap-2">
+                                                                    <span className="text-slate-400 truncate">{selectedGame.away_team}</span>
+                                                                    <span className="text-slate-200 font-mono font-bold">{fmtSigned(as, 1)}</span>
+                                                                    <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.spread_away_odds)}</span>
+                                                                </div>
+                                                                <div className="flex justify-between gap-2">
+                                                                    <span className="text-slate-400 truncate">{selectedGame.home_team}</span>
+                                                                    <span className="text-slate-200 font-mono font-bold">{fmtSigned(hs, 1)}</span>
+                                                                    <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.spread_home_odds ?? selectedGame.moneyline_home)}</span>
+                                                                </div>
+                                                                <div className="text-[10px] text-slate-600">Favored: <span className="text-slate-300 font-bold">{favored}</span></div>
+                                                            </div>
+                                                        );
+                                                    })() : <div className="text-slate-500">No spread found</div>}
+                                                </div>
+                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Total (side / line / odds)</div>
+                                                    {selectedGame.total_line !== null && selectedGame.total_line !== undefined ? (
+                                                        <div className="space-y-1 text-xs">
+                                                            <div className="flex justify-between gap-2">
+                                                                <span className="text-slate-400">OVER</span>
+                                                                <span className="text-slate-200 font-mono font-bold">{Number(selectedGame.total_line).toFixed(1)}</span>
+                                                                <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.total_over_odds ?? selectedGame.moneyline_away)}</span>
+                                                            </div>
+                                                            <div className="flex justify-between gap-2">
+                                                                <span className="text-slate-400">UNDER</span>
+                                                                <span className="text-slate-200 font-mono font-bold">{Number(selectedGame.total_line).toFixed(1)}</span>
+                                                                <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.total_under_odds)}</span>
+                                                            </div>
+                                                        </div>
+                                                    ) : <div className="text-slate-500">No total found</div>}
+                                                    <div className="text-[10px] text-slate-500 mt-1">Market total (O/U)</div>
+                                                </div>
+                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
+                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Model Summary</div>
+                                                    <div className="text-slate-300 text-xs leading-snug">
+                                                        {analysisResult.narrative?.market_summary || '—'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         {/* Recommendations */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {analysisResult.recommendations?.map((rec, idx) => (
                                                 <div key={idx} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                                                     <div className="flex justify-between items-start mb-2">
                                                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                                                            {rec.bet_type} Recommendation
+                                                            {rec.bet_type} — {(() => {
+                                                                try {
+                                                                    if (rec.bet_type === 'SPREAD' && rec.edge_points !== null && rec.edge_points !== undefined) {
+                                                                        return `Line value ${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts`;
+                                                                    }
+                                                                    if (rec.bet_type === 'TOTAL' && rec.edge_points !== null && rec.edge_points !== undefined) {
+                                                                        return `Line value ${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts`;
+                                                                    }
+                                                                } catch (e) {}
+                                                                return 'Recommendation';
+                                                            })()}
                                                         </span>
                                                         <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${rec.confidence === 'High' ? 'bg-green-500/20 text-green-400' :
                                                             rec.confidence === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
@@ -690,10 +957,60 @@ const Research = () => {
                                                             {rec.confidence} Confidence
                                                         </span>
                                                     </div>
-                                                    <div className="text-2xl font-bold text-white mb-1">{rec.selection}</div>
+                                                    <div className="text-2xl font-bold text-white mb-1">
+                                                        {(() => {
+                                                            // Ensure spread picks display with a + when appropriate (avoid ambiguity)
+                                                            try {
+                                                                if (rec.bet_type === 'SPREAD') {
+                                                                    const m = String(rec.selection || '').match(/^(.*)\s([-+]?\d+(?:\.\d+)?)$/);
+                                                                    if (!m) return rec.selection;
+                                                                    const team = m[1].trim();
+                                                                    const line = Number(m[2]);
+                                                                    if (Number.isNaN(line)) return rec.selection;
+                                                                    return `${team} ${fmtSigned(line, 1)}`;
+                                                                }
+                                                            } catch (e) {}
+                                                            return rec.selection;
+                                                        })()}
+                                                    </div>
                                                     <div className="text-xs text-slate-400">
-                                                        Edge: <span className="text-green-400 font-bold">+{rec.edge}</span> •
-                                                        Fair: {rec.fair_line}
+                                                        EV: <span className="text-green-400 font-bold">+{rec.edge}</span> •
+                                                        Fair: <span className="text-slate-200 font-mono font-bold">{rec.fair_line ?? '—'}</span>
+                                                        {rec.market_line !== null && rec.market_line !== undefined ? (
+                                                            <span> • Market: <span className="text-slate-300 font-mono">{rec.market_line}</span></span>
+                                                        ) : null}
+                                                        {rec.edge_points !== null && rec.edge_points !== undefined ? (
+                                                            <span> • Line value: <span className={`${rec.edge_points >= 0 ? 'text-green-400' : 'text-red-400'} font-mono font-bold`}>{rec.edge_points >= 0 ? '+' : ''}{rec.edge_points} pts</span></span>
+                                                        ) : null}
+                                                    </div>
+                                                    <div className="mt-3 text-xs text-slate-300 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Win condition</div>
+                                                        {(() => {
+                                                            try {
+                                                                if (rec.bet_type === 'SPREAD') {
+                                                                    // selection looks like: "TeamName -12.5" or "TeamName 4.5"
+                                                                    const m = String(rec.selection || '').match(/^(.*)\s([-+]?\d+(?:\.\d+)?)$/);
+                                                                    const team = (m?.[1] || rec.selection || '').trim();
+                                                                    const line = m ? Number(m[2]) : null;
+                                                                    if (line === null || Number.isNaN(line)) return 'Team must cover the spread.';
+                                                                    const needed = line < 0 ? `win by ${Math.abs(line) + 0.5}+` : `lose by ${Math.abs(line) - 0.5} or win`;
+                                                                    return `${team} must cover ${line > 0 ? '+' : ''}${line} (i.e., ${needed}).`;
+                                                                }
+                                                                if (rec.bet_type === 'TOTAL') {
+                                                                    // selection looks like: "OVER 151.5" / "UNDER 151.5"
+                                                                    const mm = String(rec.selection || '').match(/^(OVER|UNDER)\s+(\d+(?:\.\d+)?)$/i);
+                                                                    const side = (mm?.[1] || 'TOTAL').toUpperCase();
+                                                                    const line = mm ? Number(mm[2]) : null;
+                                                                    if (line === null || Number.isNaN(line)) return 'Game total must land on the correct side of the total.';
+                                                                    return side === 'OVER'
+                                                                        ? `Combined score must finish OVER ${line}.`
+                                                                        : `Combined score must finish UNDER ${line}.`;
+                                                                }
+                                                                return 'Bet outcome must align with the recommended side.';
+                                                            } catch (e) {
+                                                                return 'Bet outcome must align with the recommended side.';
+                                                            }
+                                                        })()}
                                                     </div>
                                                 </div>
                                             ))}
@@ -709,17 +1026,69 @@ const Research = () => {
                                             <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700/50 relative overflow-hidden">
                                                 <h3 className="font-bold text-slate-200 mb-3 flex items-center gap-2 text-sm uppercase tracking-wider">
                                                     <Info size={16} className="text-blue-400" />
-                                                    Model Narrative
+                                                    Why the model likes it
                                                 </h3>
-                                                <div className="text-slate-300 text-sm leading-relaxed space-y-3">
-                                                    <p className="font-semibold text-blue-300">{analysisResult.narrative.market_summary}</p>
-                                                    <p>{analysisResult.narrative.recommendation}</p>
-                                                    <ul className="list-disc list-inside space-y-1 opacity-80">
-                                                        {analysisResult.narrative.rationale?.map((r, i) => (
-                                                            <li key={i}>{r}</li>
-                                                        ))}
-                                                    </ul>
-                                                </div>
+
+                                                {(() => {
+                                                    const rec = (analysisResult.recommendations || [])[0] || null;
+                                                    if (!rec) return <div className="text-slate-500 text-sm">No recommendation summary available.</div>;
+
+                                                    const marketSummary = analysisResult.narrative?.market_summary || '';
+                                                    const kf = analysisResult.key_factors || [];
+                                                    const gs = analysisResult.game_script || [];
+
+                                                    return (
+                                                        <div className="text-slate-300 text-sm leading-relaxed space-y-3">
+                                                            {marketSummary ? (
+                                                                <div className="text-blue-300 font-semibold">{marketSummary}</div>
+                                                            ) : null}
+
+                                                            <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
+                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Reasoning (matchup-specific)</div>
+
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Market line</span>
+                                                                        <span className="text-slate-200 font-mono font-bold">{rec.market_line ?? '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Model fair</span>
+                                                                        <span className="text-slate-200 font-mono font-bold">{rec.fair_line ?? '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Line value</span>
+                                                                        <span className={`${(rec.edge_points ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'} font-mono font-bold`}>{rec.edge_points !== null && rec.edge_points !== undefined ? `${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts` : '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Win prob</span>
+                                                                        <span className="text-slate-200 font-mono font-bold">{rec.win_prob !== null && rec.win_prob !== undefined ? `${Math.round(rec.win_prob * 100)}%` : '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">EV</span>
+                                                                        <span className="text-green-400 font-mono font-bold">+{rec.edge ?? '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between">
+                                                                        <span className="text-slate-500">Confidence</span>
+                                                                        <span className="text-slate-200 font-bold">{rec.confidence ?? '—'}</span>
+                                                                    </div>
+                                                                </div>
+
+                                                                {(kf.length || gs.length) ? (
+                                                                    <ul className="mt-3 list-disc list-inside space-y-1 opacity-90 text-xs">
+                                                                        {kf.slice(0, 3).map((x, i) => <li key={`kf-${i}`}>{x}</li>)}
+                                                                        {gs.slice(0, 2).map((x, i) => <li key={`gs-${i}`}>{x}</li>)}
+                                                                    </ul>
+                                                                ) : (
+                                                                    <div className="mt-3 text-slate-500 text-xs">No matchup-specific factors available yet.</div>
+                                                                )}
+
+                                                                {analysisResult.risks?.length ? (
+                                                                    <div className="mt-3 text-[10px] text-slate-500">Risks: {analysisResult.risks.slice(0, 2).join(' • ')}</div>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
 
                                             <div className="bg-slate-800/80 p-6 rounded-xl border border-slate-700/50">
@@ -729,14 +1098,28 @@ const Research = () => {
                                                 </h3>
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Score</div>
-                                                        <div className="text-lg font-bold text-white">{analysisResult.torvik_view.projected_score}</div>
-                                                        {analysisResult.away_team && (
-                                                            <div className="flex justify-between text-[10px] text-slate-400 mt-1 px-1">
-                                                                <span className="truncate max-w-[45%]">{analysisResult.away_team}</span>
-                                                                <span className="truncate max-w-[45%] text-right">{analysisResult.home_team}</span>
-                                                            </div>
-                                                        )}
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Projected Score</div>
+                                                        {(() => {
+                                                            // torvik_view.projected_score is often "AwayScore-HomeScore"; make it explicit.
+                                                            const ps = String(analysisResult.torvik_view?.projected_score || '').trim();
+                                                            const parts = ps ? ps.split('-').map(x => x.trim()) : [];
+                                                            const awayScore = parts.length === 2 ? parts[0] : (ps || '—');
+                                                            const homeScore = parts.length === 2 ? parts[1] : (parts.length === 1 ? '—' : '');
+                                                            const awayName = selectedGame?.away_team || analysisResult.away_team || 'Away';
+                                                            const homeName = selectedGame?.home_team || analysisResult.home_team || 'Home';
+                                                            return (
+                                                                <div className="space-y-1">
+                                                                    <div className="flex justify-between text-white font-bold">
+                                                                        <span className="truncate pr-2">{awayName}</span>
+                                                                        <span className="font-mono">{awayScore}</span>
+                                                                    </div>
+                                                                    <div className="flex justify-between text-white font-bold">
+                                                                        <span className="truncate pr-2">{homeName}</span>
+                                                                        <span className="font-mono">{homeScore}</span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
                                                         <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Margin</div>
@@ -790,6 +1173,68 @@ const Research = () => {
                                                 </div>
                                             )}
                                         </div>
+
+                                        {/* Torvik Team Stats + Game Script */}
+                                        {(analysisResult.torvik_team_stats || analysisResult.game_script) && (
+                                            <div>
+                                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Team Efficiency (Torvik) + Game Script</h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Efficiency snapshot</div>
+                                                        {(() => {
+                                                            const ts = analysisResult.torvik_team_stats || {};
+                                                            const h = ts.home || {};
+                                                            const a = ts.away || {};
+                                                            const tempo = ts.game_tempo;
+                                                            const paceLbl = labelPace(tempo);
+                                                            const hOff = labelOffense(h.adj_off);
+                                                            const hDef = labelDefense(h.adj_def);
+                                                            const aOff = labelOffense(a.adj_off);
+                                                            const aDef = labelDefense(a.adj_def);
+                                                            return (
+                                                                <div className="space-y-2 text-xs">
+                                                                    <div className="flex justify-between items-center">
+                                                                        <span className="text-slate-500">Pace</span>
+                                                                        <span className={`${paceLbl.cls} font-bold`}>{paceLbl.label}</span>
+                                                                    </div>
+                                                                    <div className="text-[10px] text-slate-500">Est: {tempo ? `${tempo} possessions` : '—'}</div>
+
+                                                                    <div className="border-t border-slate-700/50 pt-2">
+                                                                        <div className="text-slate-300 font-bold mb-1">{selectedGame?.home_team}</div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Offense</span><span className={`${hOff.cls} font-bold`}>{hOff.label}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Defense</span><span className={`${hDef.cls} font-bold`}>{hDef.label}</span></div>
+                                                                        <div className="text-[10px] text-slate-500 mt-1">AdjO {h.adj_off?.toFixed ? h.adj_off.toFixed(1) : (h.adj_off ?? '—')} • AdjD {h.adj_def?.toFixed ? h.adj_def.toFixed(1) : (h.adj_def ?? '—')} • AdjT {h.adj_tempo?.toFixed ? h.adj_tempo.toFixed(1) : (h.adj_tempo ?? '—')}</div>
+                                                                    </div>
+
+                                                                    <div className="border-t border-slate-700/50 pt-2">
+                                                                        <div className="text-slate-300 font-bold mb-1">{selectedGame?.away_team}</div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Offense</span><span className={`${aOff.cls} font-bold`}>{aOff.label}</span></div>
+                                                                        <div className="flex justify-between"><span className="text-slate-500">Defense</span><span className={`${aDef.cls} font-bold`}>{aDef.label}</span></div>
+                                                                        <div className="text-[10px] text-slate-500 mt-1">AdjO {a.adj_off?.toFixed ? a.adj_off.toFixed(1) : (a.adj_off ?? '—')} • AdjD {a.adj_def?.toFixed ? a.adj_def.toFixed(1) : (a.adj_def ?? '—')} • AdjT {a.adj_tempo?.toFixed ? a.adj_tempo.toFixed(1) : (a.adj_tempo ?? '—')}</div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
+
+                                                    <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Game script (model view)</div>
+                                                        <div className="space-y-2">
+                                                            {(analysisResult.game_script || []).length ? (
+                                                                (analysisResult.game_script || []).slice(0, 5).map((x, i) => (
+                                                                    <div key={i} className="flex items-start gap-3 text-sm text-slate-300">
+                                                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-2"></div>
+                                                                        <div>{x}</div>
+                                                                    </div>
+                                                                ))
+                                                            ) : (
+                                                                <div className="text-slate-500 text-sm">No game script available yet.</div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
 
                                         {/* Key Factors */}
                                         {analysisResult.key_factors && (

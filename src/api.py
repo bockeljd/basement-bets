@@ -61,6 +61,34 @@ def get_version():
         "env": os.environ.get("VERCEL_ENV", "local")
     }
 
+
+@app.get("/api/edge/ncaab/recommendations")
+def edge_ncaab_recommendations(date: Optional[str] = None, season: int = 2026):
+    """On-demand NCAAB edge-engine recommendations.
+
+    Secured by the same /api auth middleware.
+
+    Query params:
+      - date: YYYY-MM-DD (America/New_York). Defaults to today (ET).
+      - season: season_end_year (default 2026).
+
+    Returns:
+      { generated_at, date, season_end_year, config, picks[] }
+    """
+    from src.services.edge_engine_ncaab import recommend_for_date
+    from src.database import get_db_connection, _exec
+
+    if not date:
+        with get_db_connection() as conn:
+            date = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+
+    try:
+        return recommend_for_date(date_et=date, season_end_year=int(season))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"edge engine failed: {e}")
+
 # --- Admin Routes ---
 @app.post("/api/admin/init-db")
 def trigger_init_db(request: Request):
@@ -206,10 +234,24 @@ async def get_breakdown(field: str, user: dict = Depends(get_current_user)):
     return engine.get_breakdown(field, user_id=user_id)
 
 @app.get("/api/bets")
-async def get_bets(user: dict = Depends(get_current_user)): 
+async def get_bets(user: dict = Depends(get_current_user)):
+    """Return settled bets only (UI 'Transactions' tab).
+
+We keep financial ledger data separate under /api/financials/*.
+"""
     user_id = user.get("sub")
     engine = get_analytics_engine(user_id=user_id)
-    return engine.get_all_activity(user_id=user_id)
+    # Settled-only: exclude pending/open bets
+    bets = engine.get_all_bets(user_id=user_id)
+    return [b for b in bets if (b.get('status') or '').upper() not in ('PENDING', 'OPEN')]
+
+@app.get("/api/bets/open")
+async def get_open_bets(user: dict = Depends(get_current_user)):
+    """Return open/unsettled bets for a separate 'Open Bets' section."""
+    user_id = user.get("sub")
+    engine = get_analytics_engine(user_id=user_id)
+    bets = engine.get_all_bets(user_id=user_id)
+    return [b for b in bets if (b.get('status') or '').upper() in ('PENDING', 'OPEN')]
 
 @app.get("/api/odds/{sport}")
 async def get_odds(sport: str):
@@ -235,6 +277,18 @@ async def get_balances(user: dict = Depends(get_current_user)):
     user_id = user.get("sub")
     engine = get_analytics_engine(user_id=user_id)
     return engine.get_balances(user_id=user_id)
+
+
+@app.get("/api/balances/snapshots/latest")
+async def get_latest_balance_snapshots(user: dict = Depends(get_current_user)):
+    """Return latest balance snapshots per provider.
+
+    This is the UI source-of-truth for sportsbook balances.
+    """
+    from src.database import fetch_latest_balance_snapshots
+
+    user_id = user.get("sub")
+    return fetch_latest_balance_snapshots(user_id=str(user_id))
 
 @app.get("/api/stats/period")
 async def get_period_stats(days: Optional[int] = None, year: Optional[int] = None, user: dict = Depends(get_current_user)):
@@ -541,6 +595,15 @@ async def save_manual_bet(request: Request, user: dict = Depends(get_current_use
         american_odds = bet_data.get("price", {}).get("american")
         decimal_odds = bet_data.get("price", {}).get("decimal")
         
+        # Enforce: settled bets must include odds
+        if status in ("WON", "LOST", "PUSH"):
+            # accept american odds from either price.american or top-level odds
+            american_check = bet_data.get("price", {}).get("american")
+            if american_check is None and bet_data.get("odds") is not None:
+                american_check = bet_data.get("odds")
+            if american_check is None:
+                raise HTTPException(status_code=400, detail="Odds are required for settled bets (WON/LOST/PUSH).")
+
         # Calculate profit if not provided
         profit = bet_data.get("profit")
         if profit is None:
@@ -1068,51 +1131,119 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
         print(f"[Job] Torvik Ingestion Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/ncaam/board")
-async def get_ncaam_board(date: Optional[str] = None):
+@app.get("/api/board")
+async def get_board(league: str, date: Optional[str] = None, days: int = 1):
     """
-    Fetch lightweight NCAAM board for on-demand analysis.
+    Generic lightweight board backed by DB odds snapshots.
+
+    Params:
+      - league: 'NCAAM' | 'NFL' | 'EPL'
+      - date: YYYY-MM-DD (interpreted in America/New_York)
+      - days: number of days forward from `date` to include (default 1)
+
+    Returns (when available):
+      - spread (home/away) + odds
+      - total (O/U) + odds
+      - moneyline (home/away/draw) odds
     """
-    from src.database import get_db_connection, _exec, get_db_type
-    
-    # Default to today
+    from src.database import get_db_connection, _exec
+
+    if not league:
+        raise HTTPException(status_code=400, detail="league is required")
+
+    league = league.upper().strip()
+    if league not in {"NCAAM", "NFL", "EPL"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported league: {league}")
+
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
-        
-    # Optimized Postgres Query
+
+    try:
+        days = int(days)
+    except Exception:
+        days = 1
+    days = max(1, min(days, 14))
+
+    start_date = datetime.strptime(date, "%Y-%m-%d").date()
+    end_date = (start_date + timedelta(days=days - 1))
+
     query = """
-    SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status, 
-               s.line_value as home_spread, s.price as spread_home_price, 
-               -- The original query used: s.price as moneyline_home.
-               -- If the snapshot is SPREAD, s.price IS the spread odds (e.g. -110), NOT ML.
-               -- Let's stick to returning them as specific keys or keeping the old alias IF the UI expects it.
-               -- Checking Frontend: uses 'moneyline_home' logic.
-               -- Edge display: `@{edge.moneyline_home || '-'}`
-               -- So yes, it displays the PRICE of the spread.
-               s.price as moneyline_home,
-               t.line_value as total_line, t.price as moneyline_away,
-               gr.home_score, gr.away_score, gr.final
-        FROM events e
-        LEFT JOIN (
-            SELECT DISTINCT ON (event_id) event_id, line_value, price
-            FROM odds_snapshots 
-            WHERE market_type = 'SPREAD' AND side = 'HOME'
-            ORDER BY event_id, captured_at DESC
-        ) s ON e.id = s.event_id
-        LEFT JOIN (
-            SELECT DISTINCT ON (event_id) event_id, line_value, price
-            FROM odds_snapshots 
-            WHERE market_type = 'TOTAL' AND side = 'OVER'
-            ORDER BY event_id, captured_at DESC
-        ) t ON e.id = t.event_id
-        LEFT JOIN game_results gr ON e.id = gr.event_id
-        WHERE e.league = 'NCAAM'
-          AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') = :date
-        ORDER BY e.start_time ASC
+    SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status,
+           -- SPREAD (HOME/AWAY)
+           s_home.line_value as home_spread,
+           s_home.price as spread_home_odds,
+           s_away.line_value as away_spread,
+           s_away.price as spread_away_odds,
+           -- TOTAL (OVER/UNDER)
+           t_over.line_value as total_line,
+           t_over.price as total_over_odds,
+           t_under.price as total_under_odds,
+           -- MONEYLINE (HOME/AWAY/DRAW)
+           ml_home.price as ml_home_odds,
+           ml_away.price as ml_away_odds,
+           ml_draw.price as ml_draw_odds,
+           -- Back-compat aliases (older UI expected these names)
+           s_home.price as moneyline_home,
+           t_over.price as moneyline_away,
+           gr.home_score, gr.away_score, gr.final
+    FROM events e
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'SPREAD' AND side = 'HOME'
+        ORDER BY event_id, captured_at DESC
+    ) s_home ON e.id = s_home.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'SPREAD' AND side = 'AWAY'
+        ORDER BY event_id, captured_at DESC
+    ) s_away ON e.id = s_away.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'TOTAL' AND side = 'OVER'
+        ORDER BY event_id, captured_at DESC
+    ) t_over ON e.id = t_over.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, line_value, price
+        FROM odds_snapshots
+        WHERE market_type = 'TOTAL' AND side = 'UNDER'
+        ORDER BY event_id, captured_at DESC
+    ) t_under ON e.id = t_under.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, price
+        FROM odds_snapshots
+        WHERE market_type = 'MONEYLINE' AND side = 'HOME'
+        ORDER BY event_id, captured_at DESC
+    ) ml_home ON e.id = ml_home.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, price
+        FROM odds_snapshots
+        WHERE market_type = 'MONEYLINE' AND side = 'AWAY'
+        ORDER BY event_id, captured_at DESC
+    ) ml_away ON e.id = ml_away.event_id
+    LEFT JOIN (
+        SELECT DISTINCT ON (event_id) event_id, price
+        FROM odds_snapshots
+        WHERE market_type = 'MONEYLINE' AND side = 'DRAW'
+        ORDER BY event_id, captured_at DESC
+    ) ml_draw ON e.id = ml_draw.event_id
+    LEFT JOIN game_results gr ON e.id = gr.event_id
+    WHERE e.league = :league
+      AND DATE(e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') BETWEEN :start_date AND :end_date
+    ORDER BY e.start_time ASC
     """
+
     with get_db_connection() as conn:
-        rows = _exec(conn, query, {"date": date}).fetchall()
+        rows = _exec(conn, query, {"league": league, "start_date": str(start_date), "end_date": str(end_date)}).fetchall()
         return _ensure_utc([dict(r) for r in rows])
+
+
+@app.get("/api/ncaam/board")
+async def get_ncaam_board(date: Optional[str] = None, days: int = 1):
+    """Back-compat wrapper."""
+    return await get_board(league="NCAAM", date=date, days=days)
 
 def _ensure_utc(data: list) -> list:
     """
@@ -1139,21 +1270,37 @@ def _ensure_utc(data: list) -> list:
 async def analyze_ncaam_game(request: Request):
     """
     On-demand analysis for an NCAAM game.
+
+    IMPORTANT: We must NOT pass "Unknown" teams into the analyzer.
+    GameAnalyzer enriches/persists and the UI expects team labels.
     """
     try:
         data = await request.json()
         event_id = data.get("event_id")
         if not event_id:
-             raise HTTPException(status_code=400, detail="event_id is required")
-             
+            raise HTTPException(status_code=400, detail="event_id is required")
+
+        from src.database import get_db_connection, _exec
         from src.services.game_analyzer import GameAnalyzer
+
+        # Pull canonical event row (teams, start_time, etc.)
+        with get_db_connection() as conn:
+            row = _exec(conn, "SELECT id, league, home_team, away_team FROM events WHERE id = :id", {"id": event_id}).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Event not found: {event_id}")
+
+        ev = dict(row)
         analyzer = GameAnalyzer()
-        
-        # GameAnalyzer will hit NCAAMMarketFirstModelV2.analyze internal
-        # Fetch basic teams for logging if needed
-        # Actually GameAnalyzer fetches context from 'events'.
-        result = analyzer.analyze(event_id, "NCAAM", "Unknown", "Unknown")
+        result = analyzer.analyze(event_id, "NCAAM", ev.get("home_team"), ev.get("away_team"))
+
+        # Ensure teams are included even if model wrapper doesn't add them
+        result.setdefault("home_team", ev.get("home_team"))
+        result.setdefault("away_team", ev.get("away_team"))
+
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[API] Analyze error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1397,6 +1544,24 @@ async def get_model_health_report(request: Request):
 
 # --- Sync Endpoints ---
 
+@app.post("/api/sync/request")
+async def sync_request(payload: dict, user: dict = Depends(get_current_user)):
+    """Queue a sync job for the local Mac worker.
+
+Payload: {"provider": "draftkings"|"fanduel"}
+"""
+    from src.sync_jobs import create_sync_job
+    user_id = user.get("sub") or '00000000-0000-0000-0000-000000000000'
+    provider = (payload or {}).get("provider")
+    job = create_sync_job(provider=provider, user_id=user_id)
+    return {"status": "queued", "job": job}
+
+@app.get("/api/sync/status")
+async def sync_status(user: dict = Depends(get_current_user)):
+    from src.sync_jobs import get_latest_jobs
+    user_id = user.get("sub") or '00000000-0000-0000-0000-000000000000'
+    return {"jobs": get_latest_jobs(user_id=user_id, limit=5)}
+
 @app.post("/api/sync/draftkings")
 def sync_draftkings(payload: dict):
     """
@@ -1404,14 +1569,14 @@ def sync_draftkings(payload: dict):
     Payload: {"account_name": "Main"}
     """
     from src.scrapers.user_draftkings import DraftKingsScraper
-    from src.parsers.draftkings import DraftKingsParser
+    from src.parsers.draftkings_text import DraftKingsTextParser
     
     try:
         scraper = DraftKingsScraper()
         raw_text = scraper.scrape()
         
-        parser = DraftKingsParser()
-        parsed_bets = parser.parse_text_dump(raw_text)
+        parser = DraftKingsTextParser()
+        parsed_bets = parser.parse(raw_text)
         
         return {
             "source": "DraftKings", 

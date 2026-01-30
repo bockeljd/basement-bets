@@ -144,7 +144,7 @@ function App() {
                     api.get('/api/breakdown/player'),
                     api.get('/api/breakdown/monthly'),
                     api.get('/api/breakdown/bet_type'),
-                    api.get('/api/balances'),
+                    api.get('/api/balances/snapshots/latest'),
                     api.get('/api/financials'),
                     api.get('/api/analytics/series'),
                     api.get('/api/analytics/drawdown'),
@@ -237,7 +237,20 @@ function App() {
                     setBetTypeBreakdown(apiBetBreakdown);
                 }
 
-                setBalances(getVal(results[6], {}));
+                // Balances now come from explicit balance snapshots (source-of-truth)
+                const rawSnaps = getVal(results[6], {});
+                const mapped = {};
+                try {
+                    Object.entries(rawSnaps || {}).forEach(([provider, snap]) => {
+                        if (!provider) return;
+                        mapped[provider] = {
+                            balance: snap?.balance ?? 0,
+                            captured_at: snap?.captured_at || snap?.capturedAt || null,
+                            source: snap?.source || 'manual'
+                        };
+                    });
+                } catch (e) {}
+                setBalances(mapped);
                 setFinancials(getVal(results[7], { total_in_play: 0, total_deposited: 0, total_withdrawn: 0, realized_profit: 0 }));
                 setTimeSeries(getVal(results[8], []));
                 setDrawdown(getVal(results[9], { max_drawdown: 0.0, current_drawdown: 0.0, peak_profit: 0.0 }));
@@ -348,27 +361,7 @@ function App() {
                                 <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
                                 {isSyncing ? 'Syncing...' : 'Sync Scores'}
                             </button>
-                            <button
-                                onClick={async () => {
-                                    if (confirm("Launch DraftKings Scraper?\n\nThis will open a Chrome window. Please log in if needed.")) {
-                                        setIsSyncing(true);
-                                        try {
-                                            const res = await api.post('/api/sync/draftkings');
-                                            alert(`Sync Complete!\nFound: ${res.data.bets_found} bets\nNew Saved: ${res.data.bets_saved}`);
-                                            window.location.reload();
-                                        } catch (e) {
-                                            alert("Sync Failed: " + (e.response?.data?.detail || e.message));
-                                        } finally {
-                                            setIsSyncing(false);
-                                        }
-                                    }
-                                }}
-                                disabled={isSyncing}
-                                className={`px-4 py-2 rounded-lg flex items-center gap-2 font-bold transition-all ${isSyncing ? 'bg-slate-800 text-gray-500' : 'bg-orange-600 hover:bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]'}`}
-                            >
-                                <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
-                                Sync DK
-                            </button>
+                            {/* Sync DK temporarily removed (rate limits / unreliable) */}
                             <button
                                 onClick={() => setShowAddBet(true)}
                                 className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg flex items-center gap-2 font-bold transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)]"
@@ -412,7 +405,7 @@ function App() {
                     ) : view === 'performance' ? (
                         <PerformanceView timeSeries={timeSeries} drawdown={drawdown} financials={financials} />
                     ) : (
-                        <Research />
+                        <Research onAddBet={() => setShowAddBet(true)} />
                     )}
                 </div>
             </div>
@@ -591,14 +584,14 @@ const BankrollCard = ({ provider, data }) => (
     <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between min-w-[220px]">
         <div>
             <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-0.5">{provider}</div>
-            <div className={`text-xl font-bold ${data.balance >= 0 ? 'text-white' : 'text-red-400'}`}>
-                {formatCurrency(data.balance)}
+            <div className={`text-xl font-bold ${Number(data.balance) >= 0 ? 'text-white' : 'text-red-400'}`}>
+                {formatCurrency(Number(data.balance || 0))}
             </div>
-            {data.last_bet && (
-                <div className="text-[10px] text-gray-600 mt-1 font-mono">
-                    Last: {data.last_bet}
-                </div>
-            )}
+
+            <div className="text-[10px] text-gray-600 mt-1 font-mono">
+                Source: {data.source || 'manual'}
+                {data.captured_at ? ` • ${new Date(data.captured_at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
+            </div>
         </div>
         <div className={`p-2 rounded-full ${provider === 'DraftKings' ? 'bg-orange-900/20 text-orange-400' : 'bg-blue-900/20 text-blue-400'}`}>
             <DollarSign size={20} />
@@ -1062,6 +1055,19 @@ function TransactionView({ bets, financials }) {
         status: "All"
     });
 
+    const [showManualAdd, setShowManualAdd] = useState(false);
+    const [manualBet, setManualBet] = useState({
+        sportsbook: "DraftKings",
+        sport: "NFL",
+        market_type: "Straight",
+        event_name: "",
+        selection: "",
+        odds: "",
+        stake: "",
+        status: "LOST",
+        placed_at: new Date().toISOString().slice(0, 10)
+    });
+
     // Extract unique options for dropdowns - keep "All" at top
     const sportsbooks = ["All", ...[...new Set(bets.map(b => b.provider).filter(Boolean))].sort()];
     const sports = ["All", ...[...new Set(bets.map(b => b.sport).filter(Boolean))].sort()];
@@ -1108,6 +1114,46 @@ function TransactionView({ bets, financials }) {
         } catch (err) {
             console.error("Delete Error:", err);
             alert("Failed to delete bet.");
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
+    const submitManualBet = async () => {
+        setIsUpdating(true);
+        try {
+            const american = manualBet.odds ? parseInt(manualBet.odds, 10) : null;
+            const stake = manualBet.stake ? parseFloat(manualBet.stake) : 0;
+
+            await api.post('/api/bets/manual', {
+                sportsbook: manualBet.sportsbook,
+                sport: manualBet.sport,
+                market_type: manualBet.market_type,
+                event_name: manualBet.event_name,
+                selection: manualBet.selection,
+                price: { american },
+                stake,
+                status: manualBet.status,
+                placed_at: manualBet.placed_at,
+                raw_text: 'manual-ui'
+            });
+
+            setShowManualAdd(false);
+            setManualBet({
+                sportsbook: manualBet.sportsbook,
+                sport: manualBet.sport,
+                market_type: manualBet.market_type,
+                event_name: "",
+                selection: "",
+                odds: "",
+                stake: "",
+                status: manualBet.status,
+                placed_at: new Date().toISOString().slice(0, 10)
+            });
+            window.location.reload();
+        } catch (err) {
+            console.error('Manual bet save failed', err);
+            alert('Failed to add bet. Check required fields.');
         } finally {
             setIsUpdating(false);
         }
@@ -1170,6 +1216,117 @@ function TransactionView({ bets, financials }) {
 
     return (
         <div className="space-y-8">
+            {showManualAdd && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                    <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="text-white font-bold">Add Bet (Manual)</div>
+                            <button type="button" className="text-gray-400 hover:text-white" onClick={() => setShowManualAdd(false)}>✕</button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label className="text-xs text-gray-400">Sportsbook</label>
+                                <select className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    value={manualBet.sportsbook}
+                                    onChange={e => setManualBet({ ...manualBet, sportsbook: e.target.value })}
+                                >
+                                    <option>DraftKings</option>
+                                    <option>FanDuel</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Date (YYYY-MM-DD)</label>
+                                <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    value={manualBet.placed_at}
+                                    onChange={e => setManualBet({ ...manualBet, placed_at: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Sport</label>
+                                <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    placeholder="NFL, NBA, NCAAM..."
+                                    value={manualBet.sport}
+                                    onChange={e => setManualBet({ ...manualBet, sport: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Type</label>
+                                <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    placeholder="Straight, SGP, Parlay..."
+                                    value={manualBet.market_type}
+                                    onChange={e => setManualBet({ ...manualBet, market_type: e.target.value })}
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="text-xs text-gray-400">Event / Game</label>
+                                <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    placeholder="e.g., Patriots vs Broncos"
+                                    value={manualBet.event_name}
+                                    onChange={e => setManualBet({ ...manualBet, event_name: e.target.value })}
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="text-xs text-gray-400">Selection</label>
+                                <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    placeholder="e.g., Under 28.5"
+                                    value={manualBet.selection}
+                                    onChange={e => setManualBet({ ...manualBet, selection: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Odds (American)</label>
+                                <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    placeholder="e.g., -110 or 254"
+                                    value={manualBet.odds}
+                                    onChange={e => setManualBet({ ...manualBet, odds: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Wager ($)</label>
+                                <input className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    placeholder="e.g., 10"
+                                    value={manualBet.stake}
+                                    onChange={e => setManualBet({ ...manualBet, stake: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Status</label>
+                                <select className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
+                                    value={manualBet.status}
+                                    onChange={e => setManualBet({ ...manualBet, status: e.target.value })}
+                                >
+                                    <option value="WON">WON</option>
+                                    <option value="LOST">LOST</option>
+                                    <option value="PENDING">PENDING</option>
+                                    <option value="PUSH">PUSH</option>
+                                </select>
+                            </div>
+                            <div className="md:col-span-1 flex items-end justify-end gap-2">
+                                <button
+                                    type="button"
+                                    className="px-3 py-2 rounded-lg border border-slate-700 text-gray-200 hover:bg-slate-800"
+                                    onClick={() => setShowManualAdd(false)}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-bold"
+                                    onClick={submitManualBet}
+                                    disabled={isUpdating}
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mt-3 text-[11px] text-gray-500">
+                            This creates a bet row directly in your Transactions table (manual tracking).
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Sportsbook Balance Summary Tiles */}
             {financials?.breakdown && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1220,12 +1377,20 @@ function TransactionView({ bets, financials }) {
                     <div className="text-gray-400 text-sm">
                         Showing <span className="text-white font-bold">{filtered.length}</span> of {bets.length} transactions
                     </div>
-                    <button
-                        onClick={resetFilters}
-                        className="text-xs text-blue-400 hover:text-blue-300 font-medium px-3 py-1.5 rounded-lg border border-blue-900/30 hover:bg-blue-900/20 transition"
-                    >
-                        Clear Filters
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowManualAdd(true)}
+                            className="text-xs text-green-300 hover:text-green-200 font-medium px-3 py-1.5 rounded-lg border border-green-900/40 hover:bg-green-900/20 transition"
+                        >
+                            + Add Bet
+                        </button>
+                        <button
+                            onClick={resetFilters}
+                            className="text-xs text-blue-400 hover:text-blue-300 font-medium px-3 py-1.5 rounded-lg border border-blue-900/30 hover:bg-blue-900/20 transition"
+                        >
+                            Clear Filters
+                        </button>
+                    </div>
                 </div>
 
                 {/* Grid */}
@@ -1360,7 +1525,7 @@ function TransactionView({ bets, financials }) {
                                 const isDeposit = bet.bet_type === 'Deposit' || (bet.bet_type === 'Other' && bet.amount > 0);
                                 return (
                                     <tr key={bet.id || bet.txn_id} className="hover:bg-gray-800/50 transition duration-150">
-                                        <td className="px-6 py-3 text-gray-300 font-mono text-xs">{bet.date}</td>
+                                        <td className="px-6 py-3 text-gray-300 font-mono text-xs" title={bet.sort_date || bet.date}>{bet.display_date || bet.date}</td>
                                         <td className="px-6 py-3">
                                             <span className="px-2 py-1 rounded text-[10px] text-gray-300 border border-gray-700 bg-gray-800 shadow-sm uppercase font-bold tracking-wider">
                                                 {bet.provider}
@@ -1373,7 +1538,7 @@ function TransactionView({ bets, financials }) {
                                         </td>
                                         <td className="px-6 py-3 text-gray-400 text-xs">{bet.bet_type}</td>
                                         <td className="px-6 py-3 max-w-xs truncate text-gray-300 text-xs" title={bet.selection || bet.description}>
-                                            {bet.selection || bet.description}
+                                            {bet.display_selection || bet.selection || bet.description}
                                             {bet.is_live && <span className="ml-2 text-[9px] bg-red-900/50 text-red-300 px-1 rounded border border-red-800">LIVE</span>}
                                             {bet.is_bonus && <span className="ml-2 text-[9px] bg-yellow-900/50 text-yellow-300 px-1 rounded border border-yellow-800">BONUS</span>}
                                         </td>

@@ -6,11 +6,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 class DraftKingsScraper:
-    def __init__(self):
+    def __init__(self, profile_path=None):
         self.driver_helper = UserDriver()
+        self.profile_path = profile_path
 
     def scrape(self):
-        driver = self.driver_helper.launch()
+        driver = self.driver_helper.launch(profile_path=self.profile_path)
         try:
             # 1. Navigate to DK Sportsbook Home
             print("Navigating to DraftKings...")
@@ -129,9 +130,34 @@ class DraftKingsScraper:
                     break
                 last_height = new_height
             
-            # 6. Scrape the page
+            # 6. Scrape: prefer bet cards (avoid pulling entire site nav/footer text)
+            bet_texts = []
+            selectors = [
+                "[data-testid*='bet']",
+                "[data-test-id*='bet']",
+                "[class*='bet-card']",
+                "[class*='BetCard']",
+            ]
+            for sel in selectors:
+                try:
+                    for el in driver.find_elements(By.CSS_SELECTOR, sel):
+                        try:
+                            t = (el.text or '').strip()
+                            if t and len(t) > 40:
+                                bet_texts.append(t)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            if bet_texts:
+                body_text = "\n\n".join(bet_texts)
+                print(f"Scraped {len(bet_texts)} bet elements; {len(body_text)} chars.")
+                return body_text
+
+            # Fallback: whole page
             body_text = driver.find_element(By.TAG_NAME, "body").text
-            print(f"Scraped {len(body_text)} chars.")
+            print(f"Scraped {len(body_text)} chars (fallback: body text).")
             return body_text
 
         finally:

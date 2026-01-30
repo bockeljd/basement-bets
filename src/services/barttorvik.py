@@ -2,7 +2,10 @@ import requests
 import json
 from datetime import datetime
 from src.database import upsert_bt_team_metrics_daily
-from src.selenium_client import SeleniumDriverFactory
+
+# NOTE: Do NOT import selenium / undetected_chromedriver at import-time.
+# Vercel/serverless Python often lacks distutils/Chrome and will crash.
+# If we ever need a selenium fallback, we import it lazily inside the fallback block.
 
 class BartTorvikClient:
     """
@@ -64,47 +67,10 @@ class BartTorvikClient:
                     projections[home] = {**proj_data, "opponent": away, "team": home}
                 
             if not projections:
-                print("  [TORVIK] Requests failed or blocked. Attempting Selenium Fallback...")
-                try:
-                    driver = SeleniumDriverFactory.create_driver(headless=True)
-                    if driver:
-                        driver.get(url)
-                        import time
-                        time.sleep(3) # Wait for JS challenge
-                        
-                        content = driver.find_element("tag name", "body").text
-                        try:
-                            # Parse JSON content...
-                            projections_list = json.loads(content)
-                            # Logic to process list repeated or shared?
-                            # For simplicity, duplicate mapping logic here or refactor.
-                            # Torvik request mode returns list.
-                            
-                            for item in projections_list:
-                                 away = item.get('away', item.get('team_away', ''))
-                                 home = item.get('home', item.get('team_home', ''))
-                                 line = item.get('line', item.get('t_rank_line', 0))
-                                 total = item.get('total', 0)
-                                 if not away or not home: continue
-                                 
-                                 proj_data = {
-                                    "opponent": home,
-                                    "total": float(total) if total else 0.0,
-                                    "projected_score": f"{item.get('score_away')}-{item.get('score_home')}",
-                                    "spread": float(line) if line else 0.0,
-                                    "raw_line": str(line)
-                                 }
-                                 projections[away] = {**proj_data, "opponent": home, "team": away}
-                                 projections[home] = {**proj_data, "opponent": away, "team": home}
-                                 
-                            print(f"  [TORVIK] Selenium successfully fetched {len(projections)} projections.")
-                        except Exception as json_e:
-                            print(f"  [TORVIK] Selenium content was not JSON: {content[:100]} | Err: {json_e}")
-                        
-                        driver.quit()
-                except Exception as e:
-                    print(f"  [TORVIK] Selenium fallback failed: {e}")
-                
+                # Serverless-safe: do NOT attempt selenium fallback by default.
+                # BartTorvik frequently blocks automation; on Vercel we prefer to fail fast.
+                print("  [TORVIK] Requests failed or blocked. No Selenium fallback in serverless.")
+                return {}
             return projections
 
         except Exception as e:

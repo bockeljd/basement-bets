@@ -6,13 +6,71 @@ import undetected_chromedriver as uc
 import os
 import time
 import logging
+import shutil
+import subprocess
+import re
+from pathlib import Path
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+class SeleniumDriverFactory:
+    """Backwards-compat factory used by scrapers/services."""
+
+    @staticmethod
+    def create_driver(headless: bool = True, profile_path: str | None = None):
+        client = SeleniumClient(headless=headless, profile_path=profile_path)
+        return client.driver
+
+
 class SeleniumClient:
-    def __init__(self, headless=False, profile_path=None):
+    def _detect_chrome_binary(self):
+        # Common macOS locations
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+        # Try PATH
+        for exe in ("google-chrome", "chromium", "chromium-browser", "brave", "msedge"):
+            w = shutil.which(exe)
+            if w:
+                return w
+        return None
+
+    def _detect_chrome_major_version(self, browser_executable_path: str) -> int | None:
+        """Best-effort detect Chrome/Chromium major version for driver matching."""
+        try:
+            out = subprocess.check_output([browser_executable_path, "--version"], text=True).strip()
+            # e.g. "Google Chrome 144.0.7559.97" / "Chromium 123.0..."
+            m = re.search(r"(\d+)\.\d+\.\d+\.\d+", out)
+            if m:
+                return int(m.group(1))
+        except Exception:
+            return None
+        return None
+
+    def __init__(self, headless=False, profile_path=None, browser_executable_path=None):
         self.options = uc.ChromeOptions()
+
+        # Ensure Chrome binary location is a string (undetected_chromedriver can choke on Path/None)
+        if browser_executable_path is None:
+            browser_executable_path = self._detect_chrome_binary()
+        if browser_executable_path is None:
+            # Avoid undetected_chromedriver trying to set a non-string binary_location.
+            raise RuntimeError(
+                "No Chrome/Chromium browser detected. Install Google Chrome (recommended) and retry. "
+                "Expected at /Applications/Google Chrome.app/..."
+            )
+
+        # Ensure it's always a string
+        self.options.binary_location = str(browser_executable_path)
+        self.browser_executable_path = str(browser_executable_path)
 
         # 1. Force "Allow" for Geolocation
         prefs = {
@@ -29,9 +87,23 @@ class SeleniumClient:
         # 3. Initialize Driver
         try:
             # use_subprocess=True helps avoid some lockfile issues
-            self.driver = uc.Chrome(options=self.options, use_subprocess=True, headless=headless)
+            major = self._detect_chrome_major_version(self.browser_executable_path)
+            # If we can detect the local Chrome major version, pass it to undetected_chromedriver
+            # so it downloads/uses a matching chromedriver.
+            kwargs = {
+                "options": self.options,
+                "use_subprocess": True,
+                "headless": headless,
+                "browser_executable_path": self.browser_executable_path,
+            }
+            if major:
+                kwargs["version_main"] = major
+
+            self.driver = uc.Chrome(**kwargs)
         except Exception as e:
             print(f"Failed to initialize undetected_chromedriver: {e}")
+            if not self.browser_executable_path:
+                print("[SeleniumClient] No Chrome/Chromium binary detected. Install Google Chrome or Chromium and retry.")
             raise e
             
     def quit(self):
@@ -51,32 +123,30 @@ class SeleniumClient:
             self.driver.get(target_url)
             time.sleep(5)
 
-            # 2. Robust Navigation Loop (Login / Download Interstitial Bypass)
-            # We loop until we confirm we are on the actual betting page
-            max_retries = 24 # 2 minutes total wait
+            # 2. Robust Navigation Loop (Login / Interstitial Bypass)
+            # For unattended cron runs, fail fast if login is required.
+            max_retries = 8  # ~30–45s total
             for attempt in range(max_retries):
                 current_url = self.driver.current_url
                 page_source = self.driver.page_source
-                
+
                 # Case A: Interstitial (Download App / Geo)
                 if "Download the DraftKings Sportsbook App" in page_source or "Confirm Location" in self.driver.title:
                     print(f"🔄 [Attempt {attempt+1}] Interstitial Page Detected. Refreshing...")
                     self.driver.refresh()
-                    time.sleep(5)
+                    time.sleep(3)
                     continue
-                    
+
                 # Case B: Login Page
                 if "log-in" in current_url or "client-login" in current_url or "Log In" in page_source:
-                    print(f"🚨 [Attempt {attempt+1}] Login Required. Waiting for user input...")
-                    # Allow user time to log in
-                    time.sleep(5)
-                    continue
+                    print(f"🚨 [Attempt {attempt+1}] Login Required. Aborting scrape (cron-safe).")
+                    return None
 
                 # Case C: Success (My Bets / Settled)
                 if "mybets" in current_url or "My Bets" in page_source or "Settled Date" in page_source:
                     print("✅ Successfully landed on My Bets page!")
                     break
-                
+
                 print(f"⏳ [Attempt {attempt+1}] Waiting for page load... ({current_url})")
                 time.sleep(3)
             

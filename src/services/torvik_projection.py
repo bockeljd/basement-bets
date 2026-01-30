@@ -37,26 +37,94 @@ class TorvikProjectionService:
         if not date:
             date = datetime.now().strftime("%Y%m%d")
             
-        # 1. Official Projection Fetch
-        official_projs = self.bt_client.fetch_daily_projections(date)
+        # 1. Official Projection Fetch (prefer cached DB ingest)
+        official_projs = self._fetch_official_from_db(date) or self.bt_client.fetch_daily_projections(date)
         # Match by name (Torvik uses specific naming)
         h_proj = self._find_projection(home_team, official_projs)
         a_proj = self._find_projection(away_team, official_projs)
-        
+
         if h_proj:
             return {
                 "source": "official",
-                "margin": -h_proj['spread'], # Torvik spread is usually Home relative (e.g. -5 means Home favored by 5). We want Home Margin > 0.
+                "margin": -float(h_proj['spread']),
                 "official_margin": -float(h_proj['spread']),
                 "total": float(h_proj['total']),
-                "projected_score": h_proj['projected_score'],
-                "lean": "Official torvik projection"
+                "projected_score": h_proj.get('projected_score') or None,
+                "lean": "Official Torvik projection (cached)" if self._fetch_official_from_db(date) else "Official Torvik projection"
             }
 
         # 2. Heuristic Computation (The "Torvik thinks" backup)
         return self.compute_torvik_projection(home_team, away_team)
 
+    def _fetch_official_from_db(self, date_yyyymmdd: str) -> Optional[Dict]:
+        """Load official Torvik schedule JSON from DB if present.
+
+        Returns a projections dict keyed by team name (like BartTorvikClient.fetch_daily_projections).
+        """
+        try:
+            with get_db_connection() as conn:
+                row = _exec(conn, """
+                    SELECT payload_json
+                    FROM bt_daily_schedule_raw
+                    WHERE date = %s AND status = 'OK' AND payload_json IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (date_yyyymmdd,)).fetchone()
+                if not row:
+                    return None
+                payload = row.get('payload_json') if isinstance(row, dict) else row[0]
+        except Exception:
+            return None
+
+        if not payload or not isinstance(payload, list):
+            return None
+
+        projections = {}
+        for item in payload:
+            try:
+                away = item.get('away')
+                home = item.get('home')
+                if not away or not home:
+                    continue
+
+                # Our selenium ingest stores home-relative spread as `home_spread`.
+                # Keep the older key name `spread` to align with TorvikProjectionService.
+                home_spread = item.get('home_spread')
+                if home_spread is None:
+                    home_spread = item.get('spread')
+
+                total = item.get('total')
+                if total is None:
+                    # fallback to scores
+                    try:
+                        total = float(item.get('home_score', 0)) + float(item.get('away_score', 0))
+                    except Exception:
+                        total = 0.0
+
+                projected_score = None
+                if item.get('away_score') is not None and item.get('home_score') is not None:
+                    projected_score = f"{item.get('away_score')}-{item.get('home_score')}"
+
+                # Create per-team projection entries. For historical compatibility:
+                # - for the away team entry, store opponent=home
+                # - store `spread` as the home-relative spread
+                proj_base = {
+                    "total": float(total) if total else 0.0,
+                    "projected_score": projected_score,
+                    "spread": float(home_spread) if home_spread is not None else 0.0,
+                    "raw_line": item.get('line_text') or str(home_spread),
+                }
+
+                projections[away] = {**proj_base, "team": away, "opponent": home}
+                projections[home] = {**proj_base, "team": home, "opponent": away}
+            except Exception:
+                continue
+
+        return projections or None
+
+
     def _find_projection(self, team_name: str, projections: Dict) -> Optional[Dict]:
+
         """
         Fuzzy match team_name against projection keys.
         """
@@ -84,6 +152,28 @@ class TorvikProjectionService:
             return candidates[0][1]
             
         return None
+
+    def get_matchup_team_stats(self, home_team: str, away_team: str) -> Dict:
+        """Return best-available Torvik team efficiency stats for both teams.
+
+        These are used for UI explanations and basic game-script reasoning.
+        """
+        h = self._get_latest_metrics(home_team)
+        a = self._get_latest_metrics(away_team)
+        if not h or not a:
+            return {
+                "home": h,
+                "away": a,
+                "game_tempo": None,
+                "notes": "Missing team efficiency metrics"
+            }
+        game_tempo = (h.get('adj_tempo', 0) + a.get('adj_tempo', 0)) / 2.0
+        return {
+            "home": h,
+            "away": a,
+            "game_tempo": round(game_tempo, 1),
+            "notes": None
+        }
 
     def compute_torvik_projection(self, home_team: str, away_team: str) -> Dict:
         """

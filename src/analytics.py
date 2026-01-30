@@ -19,20 +19,38 @@ class AnalyticsEngine:
                 dt = parse_date(raw_date, fuzzy=True)
                 # Store ISO format for sorting
                 b['sort_date'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                # Also store a display-friendly format
-                b['display_date'] = dt.strftime('%b %d, %Y')
+                # Display format for UI (DD/MM/YYYY)
+                b['display_date'] = dt.strftime('%d/%m/%Y')
             except Exception:
                 # Fallback: use raw date as-is
                 b['sort_date'] = raw_date
                 b['display_date'] = raw_date
 
     def _normalize_bets(self):
-        """Standardizes bet types based on user rules."""
+        """Standardizes bet types and adds display helpers for the UI."""
         import re
+
+        def compact_selection(text: str) -> str:
+            if not text:
+                return ""
+            t = str(text).replace("\n", " ").strip()
+            # Split FanDuel/DK multi-leg strings
+            parts = [p.strip() for p in re.split(r"\s*\|\s*", t) if p.strip()]
+            if len(parts) <= 2:
+                out = " | ".join(parts) if parts else t
+            else:
+                out = " | ".join(parts[:2]) + f" | … (+{len(parts)-2} more)"
+            # Hard cap
+            return out[:140] + "..." if len(out) > 140 else out
+
         for b in self.bets:
+            # Normalize odds: treat 0 as missing
+            if b.get('odds') == 0:
+                b['odds'] = None
+
             raw = b.get('bet_type') or ''
             norm = raw.strip()
-            
+
             # Case-insensitive check
             check = norm.lower()
 
@@ -56,7 +74,20 @@ class AnalyticsEngine:
             elif "sgp" in check or "same game" in check:
                 norm = "SGP"
 
-            # 6. Parlays (check last so SGP matches first if labeled SGP)
+            # 6. FanDuel accumulator codes (ACC5, ACC7, etc)
+            elif re.match(r"^acc\d+$", check):
+                n = int(re.findall(r"\d+", check)[0])
+                norm = f"{n} leg parlay"
+
+            # 7. FanDuel DBL (2-leg)
+            elif check == "dbl":
+                norm = "2 leg parlay"
+
+            # 8. FanDuel TBL (treat as parlay/teaser bucket for now)
+            elif check == "tbl":
+                norm = "Parlay"
+
+            # 9. Parlays (check last so SGP matches first if labeled SGP)
             elif "parlay" in check or "leg" in check or "picks" in check:
                 # Extract leg count
                 match = re.search(r'(\d+)', check)
@@ -79,6 +110,10 @@ class AnalyticsEngine:
                      norm = "2 Leg Parlay"
 
             b['bet_type'] = norm
+
+            # Selection/description display helpers
+            base_text = b.get('selection') or b.get('description') or ''
+            b['display_selection'] = compact_selection(base_text)
 
 
 
@@ -478,8 +513,22 @@ class AnalyticsEngine:
         if user_id and user_id != self.user_id:
              bets = [b for b in self.bets if b.get('user_id') == user_id]
 
-        # 1. Get explicit balance snapshots and all transactions
-        explicit_balances = {}  # provider -> (balance, dt_object, original_date_str)
+        # 1. Get explicit balance snapshots (source-of-truth) and all transactions
+        explicit_balances = {}  # provider -> (balance, dt_object, original_date_str, source_type)
+
+        # Prefer dedicated balance_snapshots table
+        try:
+            from src.database import fetch_latest_balance_snapshots
+            latest_snaps = fetch_latest_balance_snapshots(user_id=user_id)
+            for provider, snap in (latest_snaps or {}).items():
+                # snap['captured_at'] may be str or datetime
+                try:
+                    dt = parse_date(str(snap.get('captured_at'))) if snap.get('captured_at') else None
+                except Exception:
+                    dt = None
+                explicit_balances[provider] = (float(snap.get('balance') or 0), dt, str(snap.get('captured_at') or ''), 'BalanceSnapshot')
+        except Exception as e:
+            print(f"[Analytics] balance_snapshots lookup failed: {e}")
         deposits = defaultdict(list)     # provider -> list of (amount, dt)
         withdrawals = defaultdict(list)  # provider -> list of (amount, dt)
         
@@ -501,18 +550,21 @@ class AnalyticsEngine:
                     except:
                         dt = None
                         
-                    if tx_type == 'Balance':
+                    # Treat BalanceSnapshot as highest-priority (explicit source-of-truth for UI).
+                    if tx_type in ('BalanceSnapshot', 'Balance'):
                         current_bal = float(r['balance'] or 0)
-                        # Keep the LATEST snapshot
+                        # Keep the LATEST snapshot; prefer BalanceSnapshot over Balance when timestamps tie/are ambiguous.
                         if provider not in explicit_balances:
-                            explicit_balances[provider] = (current_bal, dt, r['date'])
+                            explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
                         else:
-                            existing_dt = explicit_balances[provider][1]
+                            existing_bal, existing_dt, existing_raw, existing_type = explicit_balances[provider]
                             # If new is newer, replace
                             if dt and existing_dt and dt > existing_dt:
-                                explicit_balances[provider] = (current_bal, dt, r['date'])
+                                explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
                             elif dt and not existing_dt:
-                                explicit_balances[provider] = (current_bal, dt, r['date'])
+                                explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
+                            elif (dt == existing_dt) and (existing_type != 'BalanceSnapshot') and (tx_type == 'BalanceSnapshot'):
+                                explicit_balances[provider] = (current_bal, dt, r['date'], tx_type)
                                 
                     elif tx_type == 'Deposit':
                         deposits[provider].append((float(r['amount'] or 0), dt))
@@ -537,7 +589,7 @@ class AnalyticsEngine:
             
             # A. Start with Snapshot if available
             if provider in explicit_balances:
-                base_balance, snapshot_dt, _ = explicit_balances[provider]
+                base_balance, snapshot_dt, _, _snap_type = explicit_balances[provider]
             else:
                 # If no snapshot, base is 0.0 and we sum ALL history
                 # (effectively snapshot_dt is 'beginning of time')
@@ -975,33 +1027,35 @@ class AnalyticsEngine:
             "has_discrepancies": any(r['status'] == 'MISMATCH' for r in reconciliation)
         }
 
-    def get_all_activity(self, user_id=None):
-        """
-        Merges bets and financial transactions into a single chronological list.
-        """
-        activity = []
-        
+    def get_all_bets(self, user_id=None):
+        """Return bets only (no financial ledger rows)."""
         bets = self.bets
         if user_id and user_id != self.user_id:
-             bets = [b for b in self.bets if b.get('user_id') == user_id]
+            bets = [b for b in self.bets if b.get('user_id') == user_id]
+        return bets
+
+    def get_all_activity(self, user_id=None):
+        """Deprecated: merges bets + some transactions.
+
+Kept for backward compatibility, but UI should prefer bets-only endpoints.
+"""
+        activity = []
+
+        bets = self.get_all_bets(user_id=user_id)
 
         # Add Bets
         for b in bets:
-            # Map bet fields to common schema if needed, or just append
-            # Schema: {date, provider, type, description, amount (wager), profit, status, ...}
             item = b.copy()
-            item['type'] = b['bet_type'] # or 'Bet'
+            item['type'] = b.get('bet_type')
             item['category'] = 'Bet'
-            item['amount'] = b['wager']
+            item['amount'] = b.get('wager')
             activity.append(item)
-            
-        # Add Financials from DB - graceful degradation if table missing
-        # Exclude Wager, Winning, Bonus to prevent duplicates with standard Bets
-        # Include Deposit, Withdrawal, and Other (Transfers)
+
+        # (Transactions merge retained)
         query = """
-            SELECT txn_id, provider, date, type, description, amount 
-            FROM transactions 
-            WHERE type IN ('Deposit', 'Withdrawal') 
+            SELECT txn_id, provider, date, type, description, amount
+            FROM transactions
+            WHERE type IN ('Deposit', 'Withdrawal')
                OR (type = 'Other' AND description LIKE '%Transfer%')
                OR (type = 'Other' AND description LIKE '%Manual%')
             ORDER BY date DESC
@@ -1016,19 +1070,11 @@ class AnalyticsEngine:
                     amt = t['amount']
                     typ = t['type']
                     desc = t['description'] or ''
-
-                    # Filter logic: Exclude 'Manual Import' if user wants cleaner view
                     if 'Manual' in desc:
                         continue
-                    
-                    # Normalize
                     t['category'] = 'Transaction'
-                    t['bet_type'] = typ # e.g. "Deposit", "Withdrawal"
-                    t['wager'] = amt # Show amount in wager column
-                    
-                    # Financial Profit Logic (Realized Profit View)
-                    # Deposit = -Amount (Cash Outflow from user perspective)
-                    # So In (Deposit) is Negative impact on Realized Profit.
+                    t['bet_type'] = typ
+                    t['wager'] = amt
                     if typ == 'Deposit':
                         t['profit'] = -abs(amt)
                     elif typ == 'Withdrawal':
@@ -1040,11 +1086,9 @@ class AnalyticsEngine:
                     t['odds'] = None
                     activity.append(t)
         except Exception as e:
-            # Transactions table may not exist yet - degrade gracefully
             print(f"[Analytics] Skipping transactions for activity (table may not exist): {e}")
-                
-        # Sort by Date Descending
-        activity.sort(key=lambda x: x['date'], reverse=True)
+
+        activity.sort(key=lambda x: x.get('date',''), reverse=True)
         return activity
 
     def _calculate_implied_probability(self, odds: int):

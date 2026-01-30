@@ -172,13 +172,88 @@ class OddsAdapter:
                     final_snaps.append(snap)
         return final_snaps
 
+    def _upsert_action_network_event(self, league: str, event: Dict, start_time) -> Optional[str]:
+        """Create/Upsert a canonical event when ESPN schedule is missing.
+
+        This is critical for NCAAM where ESPN scoreboard may return only a subset.
+
+        We generate a stable id based on Action Network game_id so odds_snapshots can FK it.
+        """
+        gid = event.get('game_id')
+        if not gid:
+            return None
+
+        event_id = f"action:{(league or '').lower()}:{gid}"
+
+        # Parse start_time
+        dt = None
+        if isinstance(start_time, str):
+            try:
+                dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            except Exception:
+                dt = None
+        elif isinstance(start_time, datetime):
+            dt = start_time
+        elif isinstance(start_time, (int, float)):
+            try:
+                # seconds vs ms
+                if start_time > 20000000000:
+                    dt = datetime.fromtimestamp(start_time / 1000.0, timezone.utc)
+                else:
+                    dt = datetime.fromtimestamp(start_time, timezone.utc)
+            except Exception:
+                dt = None
+
+        # Fallback
+        if dt is None:
+            dt = datetime.now(timezone.utc)
+
+        home_team = event.get('home_team')
+        away_team = event.get('away_team')
+        status = event.get('status')
+
+        q = """
+        INSERT INTO events (id, league, home_team, away_team, start_time, status)
+        VALUES (:id, :league, :home, :away, :start_time, :status)
+        ON CONFLICT (id) DO UPDATE SET
+          league=EXCLUDED.league,
+          home_team=EXCLUDED.home_team,
+          away_team=EXCLUDED.away_team,
+          start_time=EXCLUDED.start_time,
+          status=EXCLUDED.status,
+          updated_at=CURRENT_TIMESTAMP
+        """
+
+        with get_db_connection() as conn:
+            _exec(conn, q, {
+                "id": event_id,
+                "league": league,
+                "home": home_team,
+                "away": away_team,
+                "start_time": dt,
+                "status": status,
+            })
+            conn.commit()
+
+        return event_id
+
     def _from_action_network(self, event, league, captured_at):
         home_team = event.get('home_team')
         away_team = event.get('away_team')
         start_time = event.get('start_time')
 
-        event_id = self._resolve_canonical_event_id(league, home_team, away_team, start_time)
-        if not event_id: return []
+        # Action Network is the canonical board source for NCAAM now.
+        # Use a stable Action-based event_id to avoid expensive fuzzy matching.
+        if (league or '').upper() == 'NCAAM' and event.get('game_id'):
+            event_id = self._upsert_action_network_event(league, event, start_time)
+        else:
+            event_id = self._resolve_canonical_event_id(league, home_team, away_team, start_time)
+            if not event_id:
+                # Fall back to creating an event from Action Network game_id
+                event_id = self._upsert_action_network_event(league, event, start_time)
+
+        if not event_id:
+            return []
 
         snaps = []
         # Spread
