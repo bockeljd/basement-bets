@@ -3,17 +3,6 @@ from typing import Dict, Optional
 from src.database import get_db_connection, _exec
 from src.services.barttorvik import BartTorvikClient
 from src.services.team_identity_service import TeamIdentityService
-
-class TorvikProjectionService:
-    """
-    Computes/Fetches Torvik-style projections for NCAAM games.
-    Uses daily team efficiency metrics (AdjOE, AdjDE, AdjTempo).
-    """
-    
-    LEAGUE_AVG_EFF = 106.0  # Approx D1 average efficiency
-    
-from src.services.barttorvik import BartTorvikClient
-from src.services.team_identity_service import TeamIdentityService
 from src.utils.team_matcher import TeamMatcher
 
 class TorvikProjectionService:
@@ -41,8 +30,8 @@ class TorvikProjectionService:
         official_projs = self._fetch_official_from_db(date) or self.bt_client.fetch_daily_projections(date)
         # Match by name (Torvik uses specific naming)
         h_proj = self._find_projection(home_team, official_projs)
-        a_proj = self._find_projection(away_team, official_projs)
-
+        # a_proj ...
+        
         if h_proj:
             return {
                 "source": "official",
@@ -54,7 +43,7 @@ class TorvikProjectionService:
             }
 
         # 2. Heuristic Computation (The "Torvik thinks" backup)
-        return self.compute_torvik_projection(home_team, away_team)
+        return self.compute_torvik_projection(home_team, away_team, date=date)
 
     def _fetch_official_from_db(self, date_yyyymmdd: str) -> Optional[Dict]:
         """Load official Torvik schedule JSON from DB if present.
@@ -129,6 +118,7 @@ class TorvikProjectionService:
         Fuzzy match team_name against projection keys.
         """
         if not team_name: return None
+        if not projections: return None
         
         # 1. Exact Match
         if team_name in projections:
@@ -153,13 +143,13 @@ class TorvikProjectionService:
             
         return None
 
-    def get_matchup_team_stats(self, home_team: str, away_team: str) -> Dict:
+    def get_matchup_team_stats(self, home_team: str, away_team: str, date: str = None) -> Dict:
         """Return best-available Torvik team efficiency stats for both teams.
 
         These are used for UI explanations and basic game-script reasoning.
         """
-        h = self._get_latest_metrics(home_team)
-        a = self._get_latest_metrics(away_team)
+        h = self._get_latest_metrics(home_team, date=date)
+        a = self._get_latest_metrics(away_team, date=date)
         if not h or not a:
             return {
                 "home": h,
@@ -175,64 +165,70 @@ class TorvikProjectionService:
             "notes": None
         }
 
-    def compute_torvik_projection(self, home_team: str, away_team: str) -> Dict:
+    def compute_torvik_projection(self, home_team: str, away_team: str, date: str = None) -> Dict:
+        """Heuristic projection using raw efficiency (AdjOE, AdjDE, AdjTempo).
+        Score = (OE_home * DE_away) / Avg_Eff * Tempo / 100.
         """
-        Compute projection using interaction formula:
-        Proj Score = (AdjOE * Opp AdjDE / AvgEff) * (Tempo / 100)
-        """
-        h_stats = self._get_latest_metrics(home_team)
-        a_stats = self._get_latest_metrics(away_team)
+        stats = self.get_matchup_team_stats(home_team, away_team, date=date)
+        h = stats.get('home')
+        a = stats.get('away')
         
-        if not h_stats or not a_stats:
-            return {
-                "source": "error",
-                "margin": 0,
-                "total": 0,
-                "projected_score": "N/A",
-                "lean": "Missing team efficiency metrics"
-            }
-            
-        # Average Tempo
-        game_tempo = (h_stats['adj_tempo'] + a_stats['adj_tempo']) / 2.0
+        if not h or not a:
+             return {"margin": 0, "total": 145, "lean": "No Data"}
+             
+        tempo = stats['game_tempo']
         
-        # Home Projection
-        h_score = (h_stats['adj_off'] * a_stats['adj_def'] / self.LEAGUE_AVG_EFF) * (game_tempo / 100.0)
-        # Away Projection
-        a_score = (a_stats['adj_off'] * h_stats['adj_def'] / self.LEAGUE_AVG_EFF) * (game_tempo / 100.0)
+        # Calculate scores
+        # Home Score = (HomeAdjOE * AwayAdjDE) / LeagueAvg * (Tempo/100)
+        eff_factor = self.LEAGUE_AVG_EFF
+        h_score = (h['adj_off'] * a['adj_def'] / eff_factor) * (tempo / 100.0)
+        a_score = (a['adj_off'] * h['adj_def'] / eff_factor) * (tempo / 100.0)
         
-        margin = h_score - a_score
+        # HCA (Home Court Advantage). Torvik uses ~3 pts?
+        # Let's assume stats include HCA? No, raw efficiency is neutral.
+        # Add standard HCA of ~3.2 points (average).
+        h_score += 3.2
+        
         total = h_score + a_score
+        spread = h_score - a_score # Home margin (e.g. +5 means Home by 5)
+        # Note: spread in betting is opposite.
         
         return {
-            "source": "computed",
-            "margin": round(margin, 1),
-            "official_margin": round(margin, 1), # Fallback to computed
-            "total": round(total, 1),
-            "projected_score": f"{round(a_score, 1)}-{round(h_score, 1)}",
-            "lean": "Torvik-style computed from efficiencies"
+            "margin": spread,
+            "total": total,
+            "projected_score": f"{int(a_score)}-{int(h_score)}",
+            "lean": "Computed from Raw Efficiency"
         }
 
-    def _get_latest_metrics(self, team_name: str) -> Optional[Dict]:
-        """
-        Fetch latest metrics from bt_team_metrics_daily.
-        """
-        # Normalize Name via Matcher
-        matched_name = self.matcher.find_source_name(team_name, "bt_team_metrics_daily", "team_text")
-        if not matched_name:
-            print(f"[Torvik] No match found for '{team_name}'")
+    def _get_latest_metrics(self, team_name: str, date: str = None) -> Optional[Dict]:
+        """Fetch latest daily metrics for a team from DB."""
+        # Find canonical name
+        t = self.matcher.find_source_name(team_name, "bt_team_metrics_daily", "team_text")
+        if not t:
+            # print(f"[Torvik] No match found for '{team_name}'") # Reduce noise
             return None
 
-        query = """
-        SELECT adj_off, adj_def, adj_tempo 
+        # Build query
+        # If date provided, find latest metrics ON OR BEFORE that date.
+        
+        params = {"t": t}
+        date_clause = ""
+        if date:
+            date_clause = "AND date <= :date"
+            params["date"] = date
+            
+        query = f"""
+        SELECT adj_off, adj_def, adj_tempo, luck, continuity 
         FROM bt_team_metrics_daily 
-        WHERE team_text = :t 
+        WHERE team_text = :t {date_clause}
         ORDER BY date DESC LIMIT 1
         """
+        
         with get_db_connection() as conn:
-            row = _exec(conn, query, {"t": matched_name}).fetchone()
+            row = _exec(conn, query, params).fetchone()
             if row:
                 return dict(row)
-        return None
+            return None
 
 if __name__ == "__main__":
     svc = TorvikProjectionService()

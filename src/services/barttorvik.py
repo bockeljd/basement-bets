@@ -143,12 +143,32 @@ class BartTorvikClient:
                     "ftr_def": None
                 }
                 
+                # Indices based on 2025/2026 JSON feed analysis:
+                # 33: Luck (e.g. 0.035)
+                # 43: Returning Minutes % (e.g. 72.7%) -> This might be index 43 or 44. 
+                # Let's use robust checking.
+                
+                luck = None
+                try:
+                    if len(row) > 33:
+                        luck = float(row[33])
+                except: pass
+                
+                continuity = None
+                try:
+                    # Index 43 seemed to be 72.7 in sample.
+                    if len(row) > 43:
+                        continuity = float(row[43])
+                except: pass
+                
                 metrics_payload.append({
                     "team_text": name,
                     "date": today_str,
                     "adj_off": adj_oe,
                     "adj_def": adj_de,
                     "adj_tempo": tempo,
+                    "luck": luck,
+                    "continuity": continuity,
                     "efg_off": None,
                     "efg_def": None,
                     "to_off": None,

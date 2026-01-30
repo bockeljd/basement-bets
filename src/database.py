@@ -917,7 +917,53 @@ def fetch_model_history(limit=100, league=None, user_id=None):
     JOIN events e ON m.event_id = e.id
     """
     
-    conditions = []
+    
+    if conditions:
+        base_query += " WHERE " + " AND ".join(conditions)
+        
+    base_query += " ORDER BY m.created_at DESC LIMIT %s"
+    
+    with get_db_connection() as conn:
+        rows = _exec(conn, base_query, params + [limit]).fetchall()
+        return [dict(r) for r in rows]
+
+def get_clv_report(limit=50):
+    """
+    Compare Model Prediction vs Closing Line.
+    
+    Logic:
+    - Join model_predictions (p) with odds_snapshots (o)
+    - Filter for 'Closing' lines (latest snapshot before start_time)
+    """
+    query = """
+    WITH closing_lines AS (
+        SELECT DISTINCT ON (event_id, market_type) 
+            event_id, 
+            market_type, 
+            line_value, 
+            captured_at
+        FROM odds_snapshots
+        ORDER BY event_id, market_type, captured_at DESC
+    )
+    SELECT 
+        p.event_id,
+        p.pick,
+        p.bet_line as model_line,
+        cl.line_value as closing_line,
+        (p.bet_line - cl.line_value) as clv_diff,
+        e.start_time,
+        e.home_team,
+        e.away_team
+    FROM model_predictions p
+    JOIN events e ON p.event_id = e.id
+    LEFT JOIN closing_lines cl ON p.event_id = cl.event_id AND cl.market_type = 'SPREAD' -- Assuming spread for now
+    ORDER BY e.start_time DESC
+    LIMIT %s
+    """
+    with get_db_connection() as conn:
+        rows = _exec(conn, query, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
     params = []
     
     if user_id:
