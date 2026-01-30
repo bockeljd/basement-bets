@@ -113,9 +113,13 @@ const Research = ({ onAddBet }) => {
                 event_id: game.id
             });
             setAnalysisResult(response.data);
-            // Refresh history in background
-            const histRes = await api.get('/api/ncaam/history');
-            setHistory(histRes.data || []);
+            // Refresh history in background - isolated so it doesn't block analysis
+            try {
+                const histRes = await api.get('/api/ncaam/history');
+                setHistory(histRes.data || []);
+            } catch (histErr) {
+                console.warn('History refresh failed (non-blocking):', histErr);
+            }
         } catch (err) {
             console.error('Analysis error:', err);
             setAnalysisResult({ error: err.response?.data?.detail || 'Analysis failed' });
