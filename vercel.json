@@ -12,7 +12,7 @@
     ],
     "functions": {
         "api/**/*.py": {
-            "excludeFiles": "{tests/**,docs/**,scripts/**,client/**,data/**,**/*.db,**/*.parquet,node_modules/**,venv/**,.venv/**,chrome_profile/**,chrome_profile_fd/**,playwright_profile_fd/**,test_profile/**}",
+            "excludeFiles": "{tests/**,docs/**,scripts/**,client/**,data/imports/**,**/*.db,**/*.parquet,node_modules/**,venv/**,.venv/**,chrome_profile/**,chrome_profile_fd/**,playwright_profile_fd/**,test_profile/**}",
             "maxDuration": 60
         }
     },
