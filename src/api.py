@@ -58,7 +58,9 @@ def get_version():
     return {
         "version": "1.2.1",
         "build_time": "2026-01-19T18:15:00Z",
-        "env": os.environ.get("VERCEL_ENV", "local")
+        "env": os.environ.get("VERCEL_ENV", "local"),
+        "debug_password_len": len(settings.BASEMENT_PASSWORD) if settings.BASEMENT_PASSWORD else 0,
+        "debug_password_start": settings.BASEMENT_PASSWORD[0] if settings.BASEMENT_PASSWORD else "N/A"
     }
 
 
