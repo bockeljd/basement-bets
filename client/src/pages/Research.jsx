@@ -43,7 +43,10 @@ const Research = ({ onAddBet }) => {
             // Fetch NCAAM board (next N days from selected date), overall history, and balance snapshots
             const [boardRes, historyRes, balancesRes] = await Promise.all([
                 api.get('/api/board', { params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT } }),
-                api.get('/api/ncaam/history'),
+                api.get('/api/ncaam/history').catch((e) => {
+                    console.warn("History fetch failed:", e);
+                    return { data: [] };
+                }),
                 api.get('/api/balances/snapshots/latest').catch((e) => {
                     // Don't fail the entire page if balances error out
                     setBalanceError(e);
@@ -946,7 +949,7 @@ const Research = ({ onAddBet }) => {
                                                                     if (rec.bet_type === 'TOTAL' && rec.edge_points !== null && rec.edge_points !== undefined) {
                                                                         return `Line value ${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts`;
                                                                     }
-                                                                } catch (e) {}
+                                                                } catch (e) { }
                                                                 return 'Recommendation';
                                                             })()}
                                                         </span>
@@ -969,7 +972,7 @@ const Research = ({ onAddBet }) => {
                                                                     if (Number.isNaN(line)) return rec.selection;
                                                                     return `${team} ${fmtSigned(line, 1)}`;
                                                                 }
-                                                            } catch (e) {}
+                                                            } catch (e) { }
                                                             return rec.selection;
                                                         })()}
                                                     </div>
