@@ -455,7 +455,10 @@ class NCAAMMarketFirstModelV2:
         
         if line_s is not None:
             # Calculate Home Side
-            prob_home_raw = 1.0 - self._normal_cdf(-line_s, mu_s, sig_s)
+            # "Option B": P(Actual Result <= Market Line)
+            # If Market is -10 and Fair is -12, P(X <= -10 | mu=-12) > 50%. Correct.
+            prob_home_raw = self._normal_cdf(line_s, mu_s, sig_s)
+            
             push_prob = get_push_prob(line_s, sig_s)
             # Adjust: subtract half of push probability
             prob_home = prob_home_raw - (push_prob / 2)
@@ -465,8 +468,7 @@ class NCAAMMarketFirstModelV2:
             kelly_home = self._calculate_kelly(prob_home, price_home)
             
             # Away side
-            prob_away_raw = 1.0 - prob_home_raw
-            prob_away = prob_away_raw - (push_prob / 2)
+            prob_away = (1.0 - prob_home_raw) - (push_prob / 2)
             ev_away = self._calculate_ev(prob_away, price_away)
             kelly_away = self._calculate_kelly(prob_away, price_away)
             

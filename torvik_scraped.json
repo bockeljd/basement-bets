@@ -1,0 +1,58 @@
+[
+    {
+        "time": "08:00 PM",
+        "away": "Michigan",
+        "home": "Michigan St.",
+        "line": "Michigan -1.9 73-71 (58%)",
+        "ttq": "102"
+    },
+    {
+        "time": "09:00 PM",
+        "away": "Boise St.",
+        "home": "Grand Canyon",
+        "line": "Grand Canyon -3.9 69-65 (66%)",
+        "ttq": "67"
+    },
+    {
+        "time": "07:00 PM",
+        "away": "Providence",
+        "home": "Villanova",
+        "line": "Villanova -10.7 85-74 (82%)",
+        "ttq": "61"
+    },
+    {
+        "time": "08:00 PM",
+        "away": "Dayton",
+        "home": "Saint Louis",
+        "line": "Saint Louis -13.8 82-68 (89%)",
+        "ttq": "60"
+    },
+    {
+        "time": "07:00 PM",
+        "away": "Northern Kentucky",
+        "home": "Detroit Mercy",
+        "line": "Northern Kentucky -0.3 81-80 (51%)",
+        "ttq": "58"
+    },
+    {
+        "time": "06:00 PM",
+        "away": "Kent St.",
+        "home": "Akron",
+        "line": "Akron -13.6 94-81 (85%)",
+        "ttq": "54"
+    },
+    {
+        "time": "10:00 PM",
+        "away": "UNLV",
+        "home": "Nevada",
+        "line": "Nevada -11.0 81-70 (84%)",
+        "ttq": "51"
+    },
+    {
+        "time": "07:00 PM",
+        "away": "Penn",
+        "home": "Columbia",
+        "line": "Columbia -4.5 78-74 (66%)",
+        "ttq": "50"
+    }
+]

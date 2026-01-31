@@ -124,21 +124,34 @@ class TorvikProjectionService:
         if team_name in projections:
             return projections[team_name]
             
-        # 2. Fuzzy Match (Keys are short names like 'Xavier')
-        # Check if Key is substring of input (e.g. 'Xavier' in 'Xavier Musketeers')
-        norm_input = team_name.lower().replace('.', '').strip()
+        # 2. Fuzzy Match (Keys are short names like 'Xavier' or 'Michigan St.')
+        # Normalize: 'St.' -> 'State', remove dots, lower
+        
+        def normalize(s):
+            s = s.lower().replace('.', '')
+            # Replace " st" at end of string with " state"
+            if s.endswith(' st'): 
+                s = s[:-3] + ' state'
+            return s.strip()
+
+        norm_input = normalize(team_name)
         
         candidates = []
         for key, data in projections.items():
-            norm_key = key.lower().replace('.', '').strip()
-            # Check length to avoid 'Iowa' matching 'Iowa State' incorrectly?
-            # Torvik name is usually the prefix.
+            norm_key = normalize(key)
+            
+            # Check containment in either direction
+            # "Michigan St." (norm: michigan state) in "Michigan State Spartans" (norm: michigan state spartans) -> YES
+            # "Xavier" in "Xavier Musketeers" -> YES
+            
             if norm_key in norm_input:
-                 candidates.append((key, data))
-        
+                 candidates.append((key, data, len(norm_key)))
+            elif norm_input in norm_key: # Rare, but possible if Torvik has longer name
+                 candidates.append((key, data, len(norm_input)))
+
         if candidates:
-            # Pick longest key (e.g. 'Southern Miss' over 'Southern')
-            candidates.sort(key=lambda x: len(x[0]), reverse=True)
+            # Pick longest MATCH LENGTH (closest fit)
+            candidates.sort(key=lambda x: x[2], reverse=True)
             return candidates[0][1]
             
         return None

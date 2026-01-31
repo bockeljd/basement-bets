@@ -1,527 +1,149 @@
-Loading .env file...
-Starting FastAPI Backend...
-Starting React Frontend...
 INFO:     Will watch for changes in these directories: ['/Users/jordanbockelman/Basement Bets/bet_tracker']
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [55143] using WatchFiles
-
-> bet-tracker-client@0.0.0 dev
-> vite
-
-INFO:     Started server process [55146]
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [73489] using WatchFiles
+INFO:     Started server process [73492]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-Port 5173 is in use, trying another one...
-Port 5174 is in use, trying another one...
-Port 5175 is in use, trying another one...
-Port 5176 is in use, trying another one...
-Port 5177 is in use, trying another one...
-
-  VITE v5.4.21  ready in 330 ms
-
-  ➜  Local:   http://localhost:5178/
-  ➜  Network: use --host to expose
+INFO:     127.0.0.1:58756 - "GET /api/health HTTP/1.1" 200 OK
+[AUTH FAIL] Received: 'None' | Expected: 'Xavier'
+INFO:     127.0.0.1:58759 - "GET /api/bets?limit=1 HTTP/1.1" 403 Forbidden
 /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/dateutil/parser/_parser.py:1207: UnknownTimezoneWarning: tzname ET identified but not understood.  Pass `tzinfos` argument in order to correctly return a timezone-aware datetime.  In a future version, this will raise an exception.
   warnings.warn("tzname {tzname} identified but not understood.  "
 [API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:56533 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56534 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56535 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56536 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56537 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56538 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56547 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56549 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56550 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56551 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56552 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56554 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56557 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56566 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56567 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56571 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56573 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56575 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56578 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56580 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56581 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56585 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56588 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56593 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56597 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56599 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56602 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56604 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56605 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56607 - "GET /api/stats/period HTTP/1.1" 200 OK
-[OddsAPI] Cache Read Error: connection to server at "ep-raspy-salad-ahxxh82e-pooler.c-3.us-east-1.aws.neon.tech" (18.215.6.120), port 5432 failed: server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1111s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:56609 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1112s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:56621 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:56653 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56657 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56658 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56659 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56660 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56661 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56665 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56667 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56670 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56674 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56675 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56676 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56682 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56686 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56688 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56692 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56694 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56696 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56699 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56700 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56703 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56705 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56709 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56710 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56717 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56718 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56721 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56723 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56726 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56727 - "GET /api/stats/period HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1205s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:56729 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1206s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:56734 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-[API] Starting DK Sync for user 00000000-0000-0000-0000-000000000000...
-🚀 Launching DraftKings Scraper Service...
-🚨 [Attempt 1] Login Required. Waiting for user input...
-🚨 [Attempt 2] Login Required. Waiting for user input...
-🚨 [Attempt 3] Login Required. Waiting for user input...
-🚨 [Attempt 4] Login Required. Waiting for user input...
-🚨 [Attempt 5] Login Required. Waiting for user input...
-🚨 [Attempt 6] Login Required. Waiting for user input...
-🚨 [Attempt 7] Login Required. Waiting for user input...
-🚨 [Attempt 8] Login Required. Waiting for user input...
-🚨 [Attempt 9] Login Required. Waiting for user input...
-🚨 [Attempt 10] Login Required. Waiting for user input...
-🚨 [Attempt 11] Login Required. Waiting for user input...
-🚨 [Attempt 12] Login Required. Waiting for user input...
-🚨 [Attempt 13] Login Required. Waiting for user input...
-🚨 [Attempt 14] Login Required. Waiting for user input...
-🚨 [Attempt 15] Login Required. Waiting for user input...
-🚨 [Attempt 16] Login Required. Waiting for user input...
-🚨 [Attempt 17] Login Required. Waiting for user input...
-🚨 [Attempt 18] Login Required. Waiting for user input...
-🚨 [Attempt 19] Login Required. Waiting for user input...
-🚨 [Attempt 20] Login Required. Waiting for user input...
-🚨 [Attempt 21] Login Required. Waiting for user input...
-🚨 [Attempt 22] Login Required. Waiting for user input...
-🚨 [Attempt 23] Login Required. Waiting for user input...
-🚨 [Attempt 24] Login Required. Waiting for user input...
-👀 Waiting for bet cards...
-✅ Bet content detected!
-✅ HTML Retrieved. Parsing...
-💰 Parsed 0 bets.
-🛑 Closing Browser...
-INFO:     127.0.0.1:56739 - "POST /api/sync/draftkings HTTP/1.1" 200 OK
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:62248 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62249 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62250 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62251 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62252 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62253 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62262 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62263 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62264 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62265 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62266 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62275 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62276 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62274 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62273 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62278 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62277 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62287 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62289 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62288 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62290 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62291 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62292 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62304 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62310 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62311 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62312 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62313 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62315 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62318 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62327 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62331 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62332 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62333 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62334 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62335 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62337 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62342 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62344 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62351 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62352 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62353 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62357 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62359 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62362 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62363 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62365 - "GET /api/stats/period HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [FALLBACK SUCCESS] Retrieved 1 events from Action Network.
-  [CACHE SAVED] Response stored.
-INFO:     127.0.0.1:62367 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:62375 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-WARNING:  WatchFiles detected changes in 'test_db_update.py'. Reloading...
+INFO:     127.0.0.1:61191 - "GET /api/bets?limit=1 HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [55146]
-INFO:     Started server process [61245]
+INFO:     Finished server process [73492]
+INFO:     Started server process [4673]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-WARNING:  WatchFiles detected changes in 'test_db_update.py'. Reloading...
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [61245]
-INFO:     Started server process [61329]
+INFO:     Finished server process [4673]
+INFO:     Started server process [5179]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/dateutil/parser/_parser.py:1207: UnknownTimezoneWarning: tzname ET identified but not understood.  Pass `tzinfos` argument in order to correctly return a timezone-aware datetime.  In a future version, this will raise an exception.
-  warnings.warn("tzname {tzname} identified but not understood.  "
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:62550 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62551 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62552 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62553 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62554 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62555 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62565 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62568 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62569 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62571 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62570 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62574 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62576 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62590 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62593 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62594 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62595 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62596 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62598 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62606 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62607 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62608 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62609 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62610 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62613 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62619 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62622 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62623 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62625 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62627 - "GET /api/stats/period HTTP/1.1" 200 OK
-[OddsAPI] Cache Read Error: connection to server at "ep-raspy-salad-ahxxh82e-pooler.c-3.us-east-1.aws.neon.tech" (18.215.6.120), port 5432 failed: server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1389s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:62629 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1390s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:62642 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:63228 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63229 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63230 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63231 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63232 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63233 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63242 - "GET /api/balances HTTP/1.1" 200 OK
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:63244 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63246 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63248 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63249 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63250 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63253 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63287 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63289 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63290 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63291 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63295 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63297 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63299 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63304 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63305 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63306 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63315 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63316 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63317 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63320 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63323 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63325 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63326 - "GET /api/stats/period HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE STALE] Data is 5546s old
-  [FALLBACK SUCCESS] Retrieved 1 events from Action Network.
-  [CACHE SAVED] Response stored.
-INFO:     127.0.0.1:63328 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (-51s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:63335 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/dateutil/parser/_parser.py:1207: UnknownTimezoneWarning: tzname ET identified but not understood.  Pass `tzinfos` argument in order to correctly return a timezone-aware datetime.  In a future version, this will raise an exception.
-  warnings.warn("tzname {tzname} identified but not understood.  "
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:63561 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63562 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63563 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63564 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63565 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63566 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63576 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63578 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63579 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63580 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63581 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63583 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63593 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63595 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63600 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63602 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63604 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63603 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63605 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63608 - "GET /api/analytics/series HTTP/1.1" 200 OK
-[Analytics] Skipping transactions (table may not exist): connection to server at "ep-raspy-salad-ahxxh82e-pooler.c-3.us-east-1.aws.neon.tech" (18.215.6.120), port 5432 failed: server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-server closed the connection unexpectedly
-	This probably means the server terminated abnormally
-	before or while processing the request.
-
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:63618 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63620 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63621 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63622 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63623 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63627 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63642 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63643 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63644 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1450s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:63645 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63647 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (1451s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:63653 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:63800 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63801 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63802 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63803 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63804 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63805 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63811 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63815 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63816 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63817 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63818 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63820 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63823 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63835 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63839 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63841 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63840 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63838 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63844 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63848 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63852 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63854 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63855 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63856 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63859 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63861 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63868 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63869 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63872 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63873 - "GET /api/stats/period HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (3198s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:63875 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (3199s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:63880 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-[API] Starting DK Sync for user 00000000-0000-0000-0000-000000000000...
-🚀 Launching DraftKings Scraper Service...
-🚨 [Attempt 1] Login Required. Waiting for user input...
-🚨 [Attempt 2] Login Required. Waiting for user input...
-🚨 [Attempt 3] Login Required. Waiting for user input...
-🚨 [Attempt 4] Login Required. Waiting for user input...
-🚨 [Attempt 5] Login Required. Waiting for user input...
-🚨 [Attempt 6] Login Required. Waiting for user input...
-🚨 [Attempt 7] Login Required. Waiting for user input...
-🚨 [Attempt 8] Login Required. Waiting for user input...
-🚨 [Attempt 9] Login Required. Waiting for user input...
-🚨 [Attempt 10] Login Required. Waiting for user input...
-🚨 [Attempt 11] Login Required. Waiting for user input...
-🚨 [Attempt 12] Login Required. Waiting for user input...
-🚨 [Attempt 13] Login Required. Waiting for user input...
-🚨 [Attempt 14] Login Required. Waiting for user input...
-🚨 [Attempt 15] Login Required. Waiting for user input...
-🚨 [Attempt 16] Login Required. Waiting for user input...
-🚨 [Attempt 17] Login Required. Waiting for user input...
-🚨 [Attempt 18] Login Required. Waiting for user input...
-🚨 [Attempt 19] Login Required. Waiting for user input...
-🚨 [Attempt 20] Login Required. Waiting for user input...
-🚨 [Attempt 21] Login Required. Waiting for user input...
-🚨 [Attempt 22] Login Required. Waiting for user input...
-🚨 [Attempt 23] Login Required. Waiting for user input...
-🚨 [Attempt 24] Login Required. Waiting for user input...
-👀 Waiting for bet cards...
-✅ Bet content detected!
-✅ HTML Retrieved. Parsing...
-💰 Parsed 25 bets.
-🛑 Closing Browser...
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-[DB] Insert V2 Error: 'closing_odds'
-INFO:     127.0.0.1:63885 - "POST /api/sync/draftkings HTTP/1.1" 200 OK
-[API] Refreshing Analytics Engine for user: 00000000-0000-0000-0000-000000000000...
-INFO:     127.0.0.1:64246 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64249 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64251 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64252 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64253 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64254 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64259 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64260 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64262 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64267 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64268 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64269 - "GET /api/stats HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64277 - "GET /api/breakdown/sport HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64279 - "GET /api/bets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64280 - "GET /api/breakdown/player HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64284 - "GET /api/breakdown/monthly HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64286 - "GET /api/breakdown/bet_type HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64287 - "GET /api/balances HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64290 - "GET /api/financials HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64292 - "GET /api/analytics/series HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64294 - "GET /api/analytics/drawdown HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64298 - "GET /api/breakdown/edge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64305 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64306 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64307 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64311 - "GET /api/stats/period HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64313 - "GET /api/stats/period?days=7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64316 - "GET /api/stats/period?days=30 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64317 - "GET /api/stats/period?year=2026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64319 - "GET /api/stats/period HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (3363s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:64321 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-  [API FETCH] Requesting https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds...
-  [API ERROR] 401 Client Error: Unauthorized for url: https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds?regions=us&markets=h2h%2Cspreads%2Ctotals&oddsFormat=american&apiKey=bca3b754df7c1390a364dc2b616927e0
-  [FALLBACK] Odds API failed. Engaging Action Network (API) for americanfootball_nfl...
-  [CACHE HIT] Using cached data (3364s old)
-  [CACHE HIT] Using cached Action Network data.
-INFO:     127.0.0.1:64326 - "GET /api/odds/NFL HTTP/1.1" 200 OK
-WARNING:  WatchFiles detected changes in 'test_db_update.py', 'verify_auth_reset.py', 'check_bets_schema.py', 'test_parser.py', 'verify_flags.py', 'inspect_bet_4531.py'. Reloading...
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [61329]
-INFO:     Started server process [3253]
+INFO:     Finished server process [5179]
+INFO:     Started server process [6191]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6191]
+INFO:     Started server process [6922]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6922]
+INFO:     Started server process [12054]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/database.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [12054]
+INFO:     Started server process [31260]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'scripts/ingest_torvik_schedule.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [31260]
+INFO:     Started server process [31304]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'scripts/ingest_torvik_schedule.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [31304]
+INFO:     Started server process [31402]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'scripts/process_scraped_torvik.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [31402]
+INFO:     Started server process [32309]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/database.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [32309]
+INFO:     Started server process [32363]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/database.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [32363]
+INFO:     Started server process [32457]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'scripts/process_scraped_torvik.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [32457]
+INFO:     Started server process [32606]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/models/ncaam_market_first_model_v2.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [32606]
+INFO:     Started server process [84957]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/services/torvik_projection.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [84957]
+INFO:     Started server process [85132]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'scripts/verify_model_batch.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [85132]
+INFO:     Started server process [90983]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'scripts/verify_model_batch.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [90983]
+INFO:     Started server process [91577]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [91577]
+INFO:     Started server process [95656]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.

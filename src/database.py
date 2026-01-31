@@ -819,6 +819,19 @@ def update_model_prediction_result(pid: str, outcome: str):
 # LOGIC / QUERIES (Appending to end of file)
 # ----------------------------------------------------------------------------
 
+def upsert_bt_daily_schedule(payload: list, date_yyyymmdd: str):
+    """
+    Persist the raw JSON schedule from BartTorvik for a given date.
+    """
+    import json
+    with get_db_connection() as conn:
+        _exec(conn, """
+            DELETE FROM bt_daily_schedule_raw WHERE date = :date;
+            INSERT INTO bt_daily_schedule_raw (date, payload_json, status, created_at)
+            VALUES (:date, :json, 'OK', CURRENT_TIMESTAMP);
+        """, {"date": date_yyyymmdd, "json": json.dumps(payload)})
+        conn.commit()
+
 def insert_bet_v2(doc: dict, legs: list = None) -> int:
     """
     Inserts a bet into the 'bets' table with support for legs (currently ignored/summarized).

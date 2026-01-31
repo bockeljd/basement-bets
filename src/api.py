@@ -59,8 +59,8 @@ async def check_access_key(request: Request, call_next):
 def get_version():
     """Public endpoint to check the current deployed version and build time."""
     return {
-        "version": "1.2.2",
-        "build_time": "2026-01-30T20:00:00Z",
+        "version": "1.2.3",
+        "build_time": "2026-01-30T21:05:00Z",
         "env": os.environ.get("VERCEL_ENV", "local"),
         "debug_password_len": len(settings.BASEMENT_PASSWORD) if settings.BASEMENT_PASSWORD else 0,
         "debug_password_start": settings.BASEMENT_PASSWORD[0] if settings.BASEMENT_PASSWORD else "N/A"
