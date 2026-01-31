@@ -147,3 +147,11 @@ INFO:     Finished server process [91577]
 INFO:     Started server process [95656]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'src/models/ncaam_market_first_model_v2.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [95656]
+INFO:     Started server process [7061]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.

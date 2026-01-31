@@ -455,9 +455,13 @@ class NCAAMMarketFirstModelV2:
         
         if line_s is not None:
             # Calculate Home Side
-            # "Option B": P(Actual Result <= Market Line)
-            # If Market is -10 and Fair is -12, P(X <= -10 | mu=-12) > 50%. Correct.
-            prob_home_raw = self._normal_cdf(line_s, mu_s, sig_s)
+            # Correct formula: P(Home Covers) = P(Margin > -Spread)
+            # Margin = Home Score - Away Score (positive = home wins)
+            # Spread = Home's spread (negative = favorite, positive = underdog)
+            # Home at -3.5 covers if Margin > 3.5 = P(X > -(-3.5)) = P(X > 3.5)
+            # Home at +10.5 covers if Margin > -10.5 = P(X > -(10.5)) = P(X > -10.5)
+            # General: P(Margin > -Spread) = 1 - CDF(-Spread, mean_margin, sigma)
+            prob_home_raw = 1.0 - self._normal_cdf(-line_s, mu_s, sig_s)
             
             push_prob = get_push_prob(line_s, sig_s)
             # Adjust: subtract half of push probability
