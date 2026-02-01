@@ -885,6 +885,51 @@ const Research = ({ onAddBet }) => {
                                     </div>
                                 ) : analysisResult ? (
                                     <div className="space-y-6">
+                                        {/* Final Score Banner (for completed games) */}
+                                        {selectedGame?.final && (
+                                            <div className="bg-slate-800/80 p-4 rounded-xl border border-green-500/30">
+                                                <div className="flex justify-between items-center">
+                                                    <div>
+                                                        <div className="text-[10px] text-green-400 uppercase font-black tracking-widest mb-1">Game Complete</div>
+                                                        <div className="text-xl font-bold text-white">
+                                                            {selectedGame.away_team} <span className="font-mono">{selectedGame.away_score}</span> @ {selectedGame.home_team} <span className="font-mono">{selectedGame.home_score}</span>
+                                                        </div>
+                                                        <div className="text-xs text-slate-400 mt-1">
+                                                            Final Margin: <span className="font-mono font-bold text-white">{Number(selectedGame.home_score) - Number(selectedGame.away_score) > 0 ? '+' : ''}{Number(selectedGame.home_score) - Number(selectedGame.away_score)}</span> (Home perspective)
+                                                        </div>
+                                                    </div>
+                                                    {analysisResult.recommendations?.[0] && (() => {
+                                                        // Determine if model was correct
+                                                        const rec = analysisResult.recommendations[0];
+                                                        const homeMargin = Number(selectedGame.home_score) - Number(selectedGame.away_score);
+                                                        const selection = String(rec.selection || '');
+                                                        const lineMatch = selection.match(/[-+]?\d+(\.\d+)?$/);
+                                                        const line = lineMatch ? Number(lineMatch[0]) : 0;
+                                                        const isHome = selection.includes(selectedGame.home_team);
+
+                                                        let result = 'PENDING';
+                                                        if (rec.bet_type === 'SPREAD') {
+                                                            const effectiveMargin = isHome ? homeMargin : -homeMargin;
+                                                            const spread = isHome ? line : -line;
+                                                            if (effectiveMargin + spread > 0) result = 'WON';
+                                                            else if (effectiveMargin + spread < 0) result = 'LOST';
+                                                            else result = 'PUSH';
+                                                        }
+
+                                                        return (
+                                                            <div className={`px-4 py-2 rounded-lg text-lg font-black ${result === 'WON' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                                                                    result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                                                        result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                                                            'bg-slate-700 text-slate-400'
+                                                                }`}>
+                                                                {result}
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Market Lines (clarify who is favored) */}
                                         <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
                                             <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Market Lines</div>
@@ -1130,7 +1175,7 @@ const Research = ({ onAddBet }) => {
                                                     </div>
                                                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
                                                         <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Proj Margin</div>
-                                                        <div className="text-lg font-bold text-white">{analysisResult.torvik_view.margin > 0 ? '+' : ''}{analysisResult.torvik_view.margin}</div>
+                                                        <div className="text-lg font-bold text-white">{Number(analysisResult.torvik_view.margin) > 0 ? '+' : ''}{Number(analysisResult.torvik_view.margin).toFixed(1)}</div>
                                                     </div>
                                                 </div>
                                                 <div className="mt-4 text-[10px] text-slate-500 italic">
