@@ -195,7 +195,7 @@ class NCAAMModel(BaseModel):
             conf_signals_agg = 1.0 # No signals = No uncertainty penalty from signals
         
         # 7. Blending (Weights)
-        w_margin = 0.20
+        w_margin = 0.25 # Increased from 0.20 (Opt Plan 2026-02-01)
         w_total = 0.25
         
         mu_final_margin = mu_market_margin + (w_margin * delta_margin) + signal_adj_margin
@@ -582,22 +582,22 @@ class NCAAMModel(BaseModel):
                 except Exception as e:
                     print(f"[INJURY] Error: {e}")
             
-            # 2. Season stats adjustments (10% weight)
-            try:
-                from src.services.season_stats_client import SeasonStatsClient
-                season_client = SeasonStatsClient()
-                season_adj = season_client.calculate_season_adjustment(home_team, away_team)
+            # 2. Season stats adjustments (Disabled - Noise/Naive win%)
+            # try:
+            #     from src.services.season_stats_client import SeasonStatsClient
+            #     season_client = SeasonStatsClient()
+            #     season_adj = season_client.calculate_season_adjustment(home_team, away_team)
                 
-                if season_adj['spread_adj'] != 0.0:
-                    snapshot.prediction.mu_final_margin += season_adj['spread_adj']
-                    ensemble_adj['spread_adj'] += season_adj['spread_adj']
-                    print(f"[SEASON] {home_team} vs {away_team}: {season_adj['summary']}, Spread adj {season_adj['spread_adj']:+.1f} pts")
+            #     if season_adj['spread_adj'] != 0.0:
+            #         snapshot.prediction.mu_final_margin += season_adj['spread_adj']
+            #         ensemble_adj['spread_adj'] += season_adj['spread_adj']
+            #         print(f"[SEASON] {home_team} vs {away_team}: {season_adj['summary']}, Spread adj {season_adj['spread_adj']:+.1f} pts")
                 
-                if season_adj['total_adj'] != 0.0:
-                    snapshot.prediction.mu_final_total += season_adj['total_adj']
-                    ensemble_adj['total_adj'] += season_adj['total_adj']
-            except Exception as e:
-                print(f"[SEASON] Error: {e}")
+            #     if season_adj['total_adj'] != 0.0:
+            #         snapshot.prediction.mu_final_total += season_adj['total_adj']
+            #         ensemble_adj['total_adj'] += season_adj['total_adj']
+            # except Exception as e:
+            #     print(f"[SEASON] Error: {e}")
             
             # 3. KenPom adjustments (5% weight)
             try:
@@ -671,8 +671,10 @@ class NCAAMModel(BaseModel):
             ev_pct = (prob_cover_target * (dec - 1)) - ((1 - prob_cover_target) * 1)
             
             # Always show spread edge
-            status = allowlist.get(("basketball_ncaab", "Spread"), "SHADOW")
-            is_live = (status == "ENABLED")
+            # Strict Filtering (Sniper Mode)
+            # Only bet if Edge >= 2.5
+            calc_edge = abs(model_spread - target_spread['point'])
+            is_live = (status == "ENABLED" and calc_edge >= 2.5)
             
             edges.append({
                "game_id": game_id,
@@ -734,9 +736,9 @@ class NCAAMModel(BaseModel):
                 ev_pct_total = (model_prob * (dec_t - 1)) - ((1 - model_prob) * 1)
                 
             # Always show total edge
-            # Check Allowlist
-            status_total = allowlist.get(("basketball_ncaab", "Total"), "SHADOW")
-            is_live_total = (status_total == "ENABLED")
+            # Disable Totals (37.5% win rate - drag on ROI)
+            # status_total = allowlist.get(("basketball_ncaab", "Total"), "SHADOW")
+            is_live_total = False # Force disabled for now
             
             edges.append({
                 "game_id": game_id,
