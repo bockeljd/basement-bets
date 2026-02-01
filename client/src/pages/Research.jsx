@@ -322,24 +322,7 @@ const Research = ({ onAddBet }) => {
                         Refresh Board
                     </button>
 
-                    <button
-                        onClick={() => onAddBet?.()}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm transition-all flex items-center gap-2"
-                        title="Add a bet manually"
-                    >
-                        <PlusCircle size={14} />
-                        Add Bet
-                    </button>
 
-                    <button
-                        onClick={runModels}
-                        disabled={loading}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        title="(Legacy) Global model run. NCAAM board is refreshed via Refresh Board."
-                    >
-                        {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
-                        {loading ? 'Running Models...' : 'Run Models'}
-                    </button>
                 </div>
             </div>
 
@@ -637,14 +620,6 @@ const Research = ({ onAddBet }) => {
                         <div className="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
                             <h2 className="text-lg font-semibold text-slate-200">Model History (Auto-Tracked)</h2>
                             <div className="flex items-center gap-6">
-                                <button
-                                    onClick={gradeResults}
-                                    disabled={loading}
-                                    className="px-4 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/20 disabled:opacity-50 rounded-lg text-xs font-bold transition-all flex items-center"
-                                >
-                                    {loading ? <RefreshCw className="animate-spin mr-2" size={12} /> : null}
-                                    Grade Results
-                                </button>
                             </div>
                         </div>
 
@@ -873,7 +848,7 @@ const Research = ({ onAddBet }) => {
                                 {isAnalyzing && !analysisResult ? (
                                     <div className="py-20 flex flex-col items-center justify-center text-slate-400">
                                         <RefreshCw className="animate-spin w-12 h-12 text-blue-500 mb-4" />
-                                        <p className="font-medium">Cruching numbers...</p>
+                                        <p className="font-medium">Crunching numbers...</p>
                                         <p className="text-sm opacity-60 mt-2">Checking efficiency metrics & generating narrative</p>
                                     </div>
                                 ) : analysisResult?.error ? (
@@ -906,7 +881,7 @@ const Research = ({ onAddBet }) => {
                                                             return (
                                                                 <div className="text-right">
                                                                     <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Model Pick</div>
-                                                                    <div className="px-4 py-2 rounded-lg text-lg font-black bg-slate-700/50 text-slate-400 border border-slate-600/30">
+                                                                    <div className="px-3 py-1 rounded-lg text-sm font-black inline-block bg-slate-700/50 text-slate-400 border border-slate-600/30">
                                                                         NO BET
                                                                     </div>
                                                                 </div>
