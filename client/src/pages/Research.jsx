@@ -43,7 +43,7 @@ const Research = ({ onAddBet }) => {
             // Fetch NCAAM board (next N days from selected date), overall history, and balance snapshots
             const [boardRes, historyRes, balancesRes] = await Promise.all([
                 api.get('/api/board', { params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT } }),
-                api.get('/api/ncaam/history').catch((e) => {
+                api.get('/api/ncaam/history', { params: { limit: 500 } }).catch((e) => {
                     console.warn("History fetch failed:", e);
                     return { data: [] };
                 }),
@@ -91,7 +91,7 @@ const Research = ({ onAddBet }) => {
             // Fetch layout/refresh data - CONSISTENT ENDPOINTS
             const [boardRes, historyRes] = await Promise.all([
                 api.get('/api/ncaam/board', { params: { date: selectedDate } }),
-                api.get('/api/ncaam/history')
+                api.get('/api/ncaam/history', { params: { limit: 500 } })
             ]);
             setEdges(boardRes.data || []);
             setHistory(historyRes.data || []);
@@ -115,7 +115,7 @@ const Research = ({ onAddBet }) => {
             setAnalysisResult(response.data);
             // Refresh history in background - isolated so it doesn't block analysis
             try {
-                const histRes = await api.get('/api/ncaam/history');
+                const histRes = await api.get('/api/ncaam/history', { params: { limit: 500 } });
                 setHistory(histRes.data || []);
             } catch (histErr) {
                 console.warn('History refresh failed (non-blocking):', histErr);
