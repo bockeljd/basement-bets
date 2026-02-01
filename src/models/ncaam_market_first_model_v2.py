@@ -444,23 +444,14 @@ class NCAAMMarketFirstModelV2:
         # --- Spread ---
         line_s = snap.get('spread_home')
         
-        # Get best prices: use actual from snapshot if available, else consensus
-        best_home = snap.get('_best_spread_home')
-        best_away = snap.get('_best_spread_away')
-        
-        price_home = best_home['price'] if best_home else snap.get('spread_price_home', -110)
-        price_away = best_away['price'] if best_away else -110
-        book_home = best_home['book'] if best_home else snap.get('book_spread', 'Consensus')
-        book_away = best_away['book'] if best_away else snap.get('book_spread', 'Consensus')
+        # Use CONSENSUS line for all recommendations (user prefers single line display)
+        price_home = snap.get('spread_price_home', -110)
+        price_away = -110  # Standard vig assumption
+        book_consensus = snap.get('book_spread', 'Consensus')
         
         if line_s is not None:
             # Calculate Home Side
             # Correct formula: P(Home Covers) = P(Margin > -Spread)
-            # Margin = Home Score - Away Score (positive = home wins)
-            # Spread = Home's spread (negative = favorite, positive = underdog)
-            # Home at -3.5 covers if Margin > 3.5 = P(X > -(-3.5)) = P(X > 3.5)
-            # Home at +10.5 covers if Margin > -10.5 = P(X > -(10.5)) = P(X > -10.5)
-            # General: P(Margin > -Spread) = 1 - CDF(-Spread, mean_margin, sigma)
             # mu_s is Expected SPREAD (e.g. -5). Expected Margin is -mu_s (e.g. +5).
             prob_home_raw = 1.0 - self._normal_cdf(-line_s, -mu_s, sig_s)
             
@@ -468,11 +459,11 @@ class NCAAMMarketFirstModelV2:
             # Adjust: subtract half of push probability
             prob_home = prob_home_raw - (push_prob / 2)
             
-            # EV for Home (using best available price)
+            # EV for Home
             ev_home = self._calculate_ev(prob_home, price_home)
             kelly_home = self._calculate_kelly(prob_home, price_home)
             
-            # Away side
+            # Away side (mirrored consensus line)
             prob_away = (1.0 - prob_home_raw) - (push_prob / 2)
             ev_away = self._calculate_ev(prob_away, price_away)
             kelly_away = self._calculate_kelly(prob_away, price_away)
@@ -480,30 +471,30 @@ class NCAAMMarketFirstModelV2:
             threshold = 0.01
             
             if ev_home > threshold:
-                # Home Bet
+                # Home Bet - use consensus line
                 recs.append({
                     "market": "SPREAD",
                     "side": event['home_team'],
-                    "line": best_home['line_value'] if best_home else line_s,
+                    "line": round(float(line_s), 1),  # Consensus line, 1 decimal
                     "price": price_home,
-                    "prob": round(prob_home, 3), # implied prob inverse? No, this is Model Win Prob.
+                    "prob": round(prob_home, 3),
                     "win_prob": round(prob_home, 3),
                     "ev": round(ev_home, 3),
                     "kelly": round(kelly_home, 3),
-                    "book": book_home
+                    "book": book_consensus
                 })
             elif ev_away > threshold:
-                # Away Bet
+                # Away Bet - use mirrored consensus line
                 recs.append({
                     "market": "SPREAD",
                     "side": event['away_team'],
-                    "line": best_away['line_value'] if best_away else -line_s,
+                    "line": round(float(-line_s), 1),  # Mirrored consensus, 1 decimal
                     "price": price_away,
                     "prob": round(prob_away, 3),
                     "win_prob": round(prob_away, 3),
                     "ev": round(ev_away, 3),
                     "kelly": round(kelly_away, 3),
-                    "book": book_away
+                    "book": book_consensus
                 })
 
         # --- Total ---
