@@ -923,16 +923,22 @@ const Research = ({ onAddBet }) => {
                                                         let betDisplay = '';
                                                         if (rec.bet_type === 'SPREAD') {
                                                             const teamName = isHome ? selectedGame.home_team : selectedGame.away_team;
-                                                            const spreadLine = isHome ? rec.line : -rec.line;
-                                                            betDisplay = `${teamName} ${spreadLine > 0 ? '+' : ''}${Number(spreadLine).toFixed(1)}`;
+                                                            const rawLine = rec.line;
+                                                            if (rawLine != null && !isNaN(Number(rawLine))) {
+                                                                const spreadLine = isHome ? Number(rawLine) : -Number(rawLine);
+                                                                betDisplay = `${teamName} ${spreadLine > 0 ? '+' : ''}${spreadLine.toFixed(1)}`;
+                                                            } else {
+                                                                betDisplay = `${teamName} (Spread)`;
+                                                            }
                                                         } else if (rec.bet_type === 'MONEYLINE') {
                                                             const teamName = isHome ? selectedGame.home_team : selectedGame.away_team;
                                                             betDisplay = `${teamName} ML`;
                                                         } else if (rec.bet_type === 'TOTAL') {
                                                             const isOver = selection.toLowerCase().includes('over');
-                                                            betDisplay = `${isOver ? 'Over' : 'Under'} ${rec.line}`;
+                                                            const totalLine = rec.line != null && !isNaN(Number(rec.line)) ? Number(rec.line).toFixed(1) : 'N/A';
+                                                            betDisplay = `${isOver ? 'Over' : 'Under'} ${totalLine}`;
                                                         } else {
-                                                            betDisplay = selection;
+                                                            betDisplay = selection || rec.bet_type || 'Unknown';
                                                         }
 
                                                         let result = 'PENDING';
