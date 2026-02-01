@@ -898,9 +898,18 @@ const Research = ({ onAddBet }) => {
                                                             Final Margin: <span className="font-mono font-bold text-white">{Number(selectedGame.home_score) - Number(selectedGame.away_score) > 0 ? '+' : ''}{Number(selectedGame.home_score) - Number(selectedGame.away_score)}</span> (Home perspective)
                                                         </div>
                                                     </div>
-                                                    {analysisResult.recommendations?.[0] && (() => {
-                                                        // Determine if model was correct
-                                                        const rec = analysisResult.recommendations[0];
+                                                    {(() => {
+                                                        // Determine outcome: WON/LOST/PUSH/NO BET
+                                                        const rec = analysisResult.recommendations?.[0];
+
+                                                        if (!rec) {
+                                                            return (
+                                                                <div className="px-4 py-2 rounded-lg text-lg font-black bg-slate-700/50 text-slate-400 border border-slate-600/30">
+                                                                    NO BET
+                                                                </div>
+                                                            );
+                                                        }
+
                                                         const homeMargin = Number(selectedGame.home_score) - Number(selectedGame.away_score);
                                                         const selection = String(rec.selection || '');
                                                         const lineMatch = selection.match(/[-+]?\d+(\.\d+)?$/);
@@ -914,13 +923,29 @@ const Research = ({ onAddBet }) => {
                                                             if (effectiveMargin + spread > 0) result = 'WON';
                                                             else if (effectiveMargin + spread < 0) result = 'LOST';
                                                             else result = 'PUSH';
+                                                        } else if (rec.bet_type === 'MONEYLINE') {
+                                                            // Moneyline: did selected team win?
+                                                            if (isHome) {
+                                                                result = homeMargin > 0 ? 'WON' : homeMargin < 0 ? 'LOST' : 'PUSH';
+                                                            } else {
+                                                                result = homeMargin < 0 ? 'WON' : homeMargin > 0 ? 'LOST' : 'PUSH';
+                                                            }
+                                                        } else if (rec.bet_type === 'TOTAL') {
+                                                            const totalScore = Number(selectedGame.home_score) + Number(selectedGame.away_score);
+                                                            const totalLine = Number(rec.line || 0);
+                                                            const isOver = selection.toLowerCase().includes('over');
+                                                            if (isOver) {
+                                                                result = totalScore > totalLine ? 'WON' : totalScore < totalLine ? 'LOST' : 'PUSH';
+                                                            } else {
+                                                                result = totalScore < totalLine ? 'WON' : totalScore > totalLine ? 'LOST' : 'PUSH';
+                                                            }
                                                         }
 
                                                         return (
                                                             <div className={`px-4 py-2 rounded-lg text-lg font-black ${result === 'WON' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                                    result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                                                                        result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                                                                            'bg-slate-700 text-slate-400'
+                                                                result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                                                    result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                                                        'bg-slate-700 text-slate-400'
                                                                 }`}>
                                                                 {result}
                                                             </div>
