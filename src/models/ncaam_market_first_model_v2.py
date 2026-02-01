@@ -461,7 +461,8 @@ class NCAAMMarketFirstModelV2:
             # Home at -3.5 covers if Margin > 3.5 = P(X > -(-3.5)) = P(X > 3.5)
             # Home at +10.5 covers if Margin > -10.5 = P(X > -(10.5)) = P(X > -10.5)
             # General: P(Margin > -Spread) = 1 - CDF(-Spread, mean_margin, sigma)
-            prob_home_raw = 1.0 - self._normal_cdf(-line_s, mu_s, sig_s)
+            # mu_s is Expected SPREAD (e.g. -5). Expected Margin is -mu_s (e.g. +5).
+            prob_home_raw = 1.0 - self._normal_cdf(-line_s, -mu_s, sig_s)
             
             push_prob = get_push_prob(line_s, sig_s)
             # Adjust: subtract half of push probability
