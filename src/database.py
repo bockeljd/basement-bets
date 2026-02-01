@@ -930,15 +930,27 @@ def fetch_model_history(limit=100, league=None, user_id=None):
     JOIN events e ON m.event_id = e.id
     """
     
+    conditions = []
+    params = []
+    
+    if user_id:
+        conditions.append("m.user_id = %s")
+        params.append(user_id)
+    
+    if league:
+        conditions.append("e.league = %s")
+        params.append(league)
     
     if conditions:
         base_query += " WHERE " + " AND ".join(conditions)
         
-    base_query += " ORDER BY m.created_at DESC LIMIT %s"
+    base_query += " ORDER BY m.analyzed_at DESC LIMIT %s"
+    params.append(limit)
     
     with get_db_connection() as conn:
-        rows = _exec(conn, base_query, params + [limit]).fetchall()
-        return [dict(r) for r in rows]
+        cursor = _exec(conn, base_query, tuple(params))
+        return [dict(r) for r in cursor.fetchall()]
+
 
 def get_clv_report(limit=50):
     """
@@ -976,26 +988,6 @@ def get_clv_report(limit=50):
     with get_db_connection() as conn:
         rows = _exec(conn, query, (limit,)).fetchall()
         return [dict(r) for r in rows]
-
-    params = []
-    
-    if user_id:
-        conditions.append("m.user_id = %s")
-        params.append(user_id)
-    
-    if league:
-        conditions.append("e.league = %s")
-        params.append(league)
-    
-    if conditions:
-        base_query += " WHERE " + " AND ".join(conditions)
-    
-    base_query += " ORDER BY m.analyzed_at DESC LIMIT %s"
-    params.append(limit)
-    
-    with get_db_connection() as conn:
-        cursor = _exec(conn, base_query, tuple(params))
-        return [dict(r) for r in cursor.fetchall()]
 
 def get_user_preference(user_id: str, key: str):
     """
