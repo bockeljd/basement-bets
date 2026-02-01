@@ -904,8 +904,11 @@ const Research = ({ onAddBet }) => {
 
                                                         if (!rec) {
                                                             return (
-                                                                <div className="px-4 py-2 rounded-lg text-lg font-black bg-slate-700/50 text-slate-400 border border-slate-600/30">
-                                                                    NO BET
+                                                                <div className="text-right">
+                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Model Pick</div>
+                                                                    <div className="px-4 py-2 rounded-lg text-lg font-black bg-slate-700/50 text-slate-400 border border-slate-600/30">
+                                                                        NO BET
+                                                                    </div>
                                                                 </div>
                                                             );
                                                         }
@@ -916,6 +919,22 @@ const Research = ({ onAddBet }) => {
                                                         const line = lineMatch ? Number(lineMatch[0]) : 0;
                                                         const isHome = selection.includes(selectedGame.home_team);
 
+                                                        // Build display string for the bet
+                                                        let betDisplay = '';
+                                                        if (rec.bet_type === 'SPREAD') {
+                                                            const teamName = isHome ? selectedGame.home_team : selectedGame.away_team;
+                                                            const spreadLine = isHome ? rec.line : -rec.line;
+                                                            betDisplay = `${teamName} ${spreadLine > 0 ? '+' : ''}${Number(spreadLine).toFixed(1)}`;
+                                                        } else if (rec.bet_type === 'MONEYLINE') {
+                                                            const teamName = isHome ? selectedGame.home_team : selectedGame.away_team;
+                                                            betDisplay = `${teamName} ML`;
+                                                        } else if (rec.bet_type === 'TOTAL') {
+                                                            const isOver = selection.toLowerCase().includes('over');
+                                                            betDisplay = `${isOver ? 'Over' : 'Under'} ${rec.line}`;
+                                                        } else {
+                                                            betDisplay = selection;
+                                                        }
+
                                                         let result = 'PENDING';
                                                         if (rec.bet_type === 'SPREAD') {
                                                             const effectiveMargin = isHome ? homeMargin : -homeMargin;
@@ -924,7 +943,6 @@ const Research = ({ onAddBet }) => {
                                                             else if (effectiveMargin + spread < 0) result = 'LOST';
                                                             else result = 'PUSH';
                                                         } else if (rec.bet_type === 'MONEYLINE') {
-                                                            // Moneyline: did selected team win?
                                                             if (isHome) {
                                                                 result = homeMargin > 0 ? 'WON' : homeMargin < 0 ? 'LOST' : 'PUSH';
                                                             } else {
@@ -942,12 +960,16 @@ const Research = ({ onAddBet }) => {
                                                         }
 
                                                         return (
-                                                            <div className={`px-4 py-2 rounded-lg text-lg font-black ${result === 'WON' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                                result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                                                                    result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                                                                        'bg-slate-700 text-slate-400'
-                                                                }`}>
-                                                                {result}
+                                                            <div className="text-right">
+                                                                <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Model Pick</div>
+                                                                <div className="text-sm font-bold text-white mb-1">{betDisplay}</div>
+                                                                <div className={`px-3 py-1 rounded-lg text-sm font-black inline-block ${result === 'WON' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                                                                    result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                                                        result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                                                            'bg-slate-700 text-slate-400'
+                                                                    }`}>
+                                                                    {result}
+                                                                </div>
                                                             </div>
                                                         );
                                                     })()}
