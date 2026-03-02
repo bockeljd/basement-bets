@@ -301,13 +301,15 @@ class DraftKingsTextParser:
                     explicit_bet_type = 'ML'
 
             # If DK paste is the newline format but lacks the word "Spread"/"Total" in the header,
-            # infer market type from the first line shape.
-            first_line = (lines[0] if lines else '').strip()
+            # infer market type from the first *selection-like* line shape.
+            # Important: DK pastes often start with financial lines like "Wager: $50".
+            candidate_lines = [ln.strip() for ln in lines if ln and not re.search(r'^(Wager:|Paid:|Payout:)', ln, re.IGNORECASE)]
+            first_line = (candidate_lines[0] if candidate_lines else '').strip()
             if not explicit_bet_type and first_line:
                 # Total like: OVER 165.5-115+113
                 if re.match(r'^(OVER|UNDER)\s+\d+(?:\.\d+)?', first_line, re.IGNORECASE):
                     explicit_bet_type = 'Over/Under'
-                # Spread like: MICHIGAN STATE +9.5-110+118
+                # Spread like: KANSAS -4.5 (-110)
                 elif re.match(r'^.+\s+[+-]\d+(?:\.\d+)?', first_line):
                     explicit_bet_type = 'Spread'
                 # Moneyline like: XAVIER+114 or MICHIGAN+200+260
@@ -478,7 +480,9 @@ class DraftKingsTextParser:
             #   UNDER 165.5-110
             #   MICHIGAN STATE +9.5-110+118
             #   XAVIER+114
-            fl = (lines[0] if lines else '').strip()
+            # Prefer first selection-like line (skip financial lines like 'Wager: $50')
+            sel_lines = [ln.strip() for ln in lines if ln and not re.search(r'^(Wager:|Paid:|Payout:)', ln, re.IGNORECASE)]
+            fl = (sel_lines[0] if sel_lines else '').strip()
             if fl:
                 # Total like: UNDER 165.5-115+113
                 m = re.match(r'^(OVER|UNDER)\s+(\d+(?:\.\d+)?)', fl, re.IGNORECASE)
