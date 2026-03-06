@@ -3138,9 +3138,12 @@ async def get_tournament_teams(request: Request, limit: int = 68):
     """Return the top N teams by KenPom rank for bracket research profiles.
     
     Includes their Torvik metrics if available.
-    Returns: { teams: [ { team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t, updated_at, torvik: {...} } ] }
+    Returns: { teams: [ { team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t, updated_at, torvik: {...}, profile: {...} } ] }
     """
     from src.database import get_db_connection, _exec
+    from src.services.profile_generator import ProfileGeneratorService
+
+    profiler = ProfileGeneratorService()
 
     try:
         with get_db_connection() as conn:
@@ -3176,6 +3179,15 @@ async def get_tournament_teams(request: Request, limit: int = 68):
                 if hasattr(t.get('updated_at'), 'isoformat'):
                     t['updated_at'] = str(t['updated_at'])
                 t['torvik'] = torvik_map.get(t['team_name'], {})
+                
+                # Fetch cached LLM deep dive profile (or None if not seeded)
+                # To prevent timeout on serverless, we only generate live if specifically explicitly needed,
+                # but currently we just return empty if cache is missing to keep UI fast.
+                cached_profile = profiler.get_cached_profile(t['team_name'])
+                if cached_profile:
+                    t['profile'] = cached_profile
+                else:
+                    t['profile'] = None
 
         return { 'teams': teams }
     except Exception as e:
