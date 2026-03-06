@@ -39,15 +39,24 @@ const MarchMadness = () => {
     // Mock narrative data strictly for the Template
     const narrative = {
         summary: "The defending back-to-back national champions operate with ruthless, machine-like efficiency. Dan Hurley's offense is a maze of baseline screens, dribble-handoffs, and pinpoint cutting that routinely shatters opposing defensive rules. They don't just beat teams; they break their will through relentless execution.",
-        strengths: ["Elite Half-Court Execution", "Suffocating Rim Protection", "Tremendous Rebounding Margin"],
-        weaknesses: ["Occasional 3PT Shooting Lulls", "Lower Turnover Forced Rate"],
+        offense: ["Elite Half-Court Execution (constant ball movement and screening)", "Tremendous Offensive Rebounding Margin (Clingan/Johnson)", "Masterful usage of the slip screen to punish over-rotations"],
+        defense: ["Suffocating Drop Coverage (Clingan anchoring the rim)", "Switchable 1-through-4 personnel", "Elite at running shooters off the 3PT line"],
         upsetFlags: "A team that can switch 1-through-5 defensively to neutralize the DHOs, combined with elite shot-making gravity to pull Clingan away from the rim."
     };
 
+    const resume = {
+        net: 3,
+        records: { overall: "31-3", home: "16-0", away: "8-3", neutral: "7-0" },
+        quads: { q1: "12-3", q2: "8-0", q3: "5-0", q4: "6-0" }
+    };
+
     const players = [
-        { name: "Alex Karaban", pos: "F", role: "Elite stretch forward and offensive fulcrum. Master of the slip screen.", stats: "14.2 PPG | 5.1 RPG | 40% 3PT" },
-        { name: "Tristen Newton", pos: "G", role: "Primary initiator and late-clock bail out artist. Rebounds exceptionally for a guard.", stats: "15.0 PPG | 6.8 APG | 7.1 RPG" },
-        { name: "Donovan Clingan", pos: "C", role: "Generational drop-coverage anchor. Alters every shot in the restricted area.", stats: "12.5 PPG | 7.2 RPG | 2.5 BPG" }
+        { name: "Tristen Newton", pos: "G", role: "Primary initiator and late-clock bail out artist. Rebounds exceptionally for a guard.", stats: "15.0 PPG | 6.8 APG", adv: { ortg: 114.2, usg: 24.5, min: 82.1, efg: 52.3 } },
+        { name: "Alex Karaban", pos: "F", role: "Elite stretch forward and offensive fulcrum. Master of the slip screen.", stats: "14.2 PPG | 5.1 RPG", adv: { ortg: 125.6, usg: 18.2, min: 80.5, efg: 61.0 } },
+        { name: "Donovan Clingan", pos: "C", role: "Generational drop-coverage anchor. Alters every shot in the restricted area.", stats: "12.5 PPG | 7.2 RPG", adv: { ortg: 118.9, usg: 22.1, min: 55.4, efg: 64.2 } },
+        { name: "Cam Spencer", pos: "G", role: "Lethal movement shooter and fiery competitor. Never forces bad shots.", stats: "14.5 PPG | 4.8 RPG", adv: { ortg: 131.2, usg: 19.5, min: 78.0, efg: 60.5 } },
+        { name: "Stephon Castle", pos: "G", role: "Physical wing defender and highly capable slasher. Bigs guard him lightly.", stats: "10.8 PPG | 4.5 RPG", adv: { ortg: 108.4, usg: 20.1, min: 65.2, efg: 51.8 } },
+        { name: "Hassan Diarra", pos: "G", role: "Pest point-of-attack defender. Changes the defensive tempo perfectly.", stats: "6.1 PPG | 2.4 APG", adv: { ortg: 105.1, usg: 16.4, min: 45.3, efg: 48.9 } }
     ];
 
     const torvik = teamData.torvik || {};
@@ -108,10 +117,20 @@ const MarchMadness = () => {
                         <h1 className="text-4xl md:text-6xl font-black text-white mb-2 tracking-tight">
                             {teamData.team_name}
                         </h1>
-                        <div className="text-lg md:text-xl font-mono text-slate-400 mb-6 flex items-center justify-center md:justify-start gap-3">
-                            <span>{teamData.record || '31-3'}</span>
+                        <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mb-6">
+                            {/* Record Pills */}
+                            <div className="flex bg-slate-800/80 rounded-lg border border-slate-700/50 p-1 text-sm font-mono text-slate-300">
+                                <span className="px-3 bg-slate-900 rounded font-bold text-white shadow-sm border border-slate-700/50">{resume.records.overall} OVR</span>
+                                <span className="px-3 border-r border-slate-700/50">{resume.records.home} Home</span>
+                                <span className="px-3 border-r border-slate-700/50">{resume.records.away} Away</span>
+                                <span className="px-3">{resume.records.neutral} N</span>
+                            </div>
                             <span className="text-slate-600">•</span>
-                            <span>PROJ. 1 SEED</span>
+                            <div className="flex items-center gap-3 text-sm font-bold tracking-wider uppercase">
+                                <span className="text-slate-400">NET <span className="text-blue-400 ml-1">#{resume.net}</span></span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-slate-400">Torvik Barthag <span className="font-mono text-white ml-1">{torvik.barthag ? (torvik.barthag * 100).toFixed(1) : '95.6'}%</span></span>
+                            </div>
                         </div>
                         <p className="text-slate-300 leading-relaxed max-w-3xl text-sm md:text-base border-l-2 border-blue-500 pl-4 italic">
                             {narrative.summary}
@@ -121,6 +140,34 @@ const MarchMadness = () => {
             </div>
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-8">
+
+                {/* RESUME QUADRANTS */}
+                <div className="grid grid-cols-4 md:grid-cols-8 gap-2 mb-2">
+                    <div className="col-span-4 md:col-span-8 mb-1 flex items-center justify-between">
+                        <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Team Sheet / Resume</span>
+                        <span className="text-[10px] text-slate-500 font-mono uppercase">Bracketology Profile</span>
+                    </div>
+                    {/* Q1 */}
+                    <div className="col-span-2 md:col-span-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex flex-col items-center justify-center">
+                        <span className="text-[10px] font-bold text-emerald-500/70 uppercase">Quadrant 1</span>
+                        <span className="text-xl font-black text-emerald-400 font-mono">{resume.quads.q1}</span>
+                    </div>
+                    {/* Q2 */}
+                    <div className="col-span-2 md:col-span-2 bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3 flex flex-col items-center justify-center">
+                        <span className="text-[10px] font-bold text-emerald-500/70 uppercase">Quadrant 2</span>
+                        <span className="text-xl font-black text-emerald-400/80 font-mono">{resume.quads.q2}</span>
+                    </div>
+                    {/* Q3 */}
+                    <div className="col-span-2 md:col-span-2 bg-slate-800/50 border border-slate-700/50 rounded-xl p-3 flex flex-col items-center justify-center">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Quadrant 3</span>
+                        <span className="text-xl font-black text-slate-300 font-mono">{resume.quads.q3}</span>
+                    </div>
+                    {/* Q4 */}
+                    <div className="col-span-2 md:col-span-2 bg-slate-800/30 border border-slate-800/50 rounded-xl p-3 flex flex-col items-center justify-center">
+                        <span className="text-[10px] font-bold text-slate-600 uppercase">Quadrant 4</span>
+                        <span className="text-xl font-black text-slate-400 font-mono">{resume.quads.q4}</span>
+                    </div>
+                </div>
 
                 {/* METRICS ROW */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -171,31 +218,31 @@ const MarchMadness = () => {
                         {/* Scouting Report */}
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
                             <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                                <FileTextIcon className="text-blue-400" /> Betting Scouting Report
+                                <FileTextIcon className="text-blue-400" /> Style of Play & Matchup Notes
                             </h2>
 
-                            <div className="space-y-6">
+                            <div className="space-y-8">
                                 <div>
-                                    <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                        <CheckCircleIcon /> Key Strengths
+                                    <h3 className="text-sm font-bold text-blue-400 uppercase tracking-widest mb-3 flex items-center gap-2 pb-2 border-b border-slate-800">
+                                        <TrendingUp size={16} className="text-blue-500" /> Offensive Profile
                                     </h3>
                                     <ul className="space-y-3">
-                                        {narrative.strengths.map((s, i) => (
+                                        {narrative.offense.map((s, i) => (
                                             <li key={i} className="flex items-start gap-3 text-slate-300">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-2 shrink-0"></span>
+                                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 shrink-0"></span>
                                                 <span className="leading-relaxed">{s}</span>
                                             </li>
                                         ))}
                                     </ul>
                                 </div>
-                                <div className="border-t border-slate-800 pt-6">
-                                    <h3 className="text-sm font-bold text-red-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                        <XCircleIcon /> Vulnerabilities
+                                <div>
+                                    <h3 className="text-sm font-bold text-purple-400 uppercase tracking-widest mb-3 flex items-center gap-2 pb-2 border-b border-slate-800">
+                                        <Shield size={16} className="text-purple-500" /> Defensive Profile
                                     </h3>
                                     <ul className="space-y-3">
-                                        {narrative.weaknesses.map((w, i) => (
+                                        {narrative.defense.map((w, i) => (
                                             <li key={i} className="flex items-start gap-3 text-slate-300">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-2 shrink-0"></span>
+                                                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-2 shrink-0"></span>
                                                 <span className="leading-relaxed">{w}</span>
                                             </li>
                                         ))}
@@ -234,39 +281,47 @@ const MarchMadness = () => {
                     <div className="space-y-8">
                         {/* Roster Block */}
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                            <div className="bg-slate-800/50 p-4 border-b border-slate-800">
+                            <div className="bg-slate-800/50 p-4 border-b border-slate-800 flex justify-between items-center">
                                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                                    <Users className="text-blue-400" /> Key Personnel
+                                    <Users className="text-blue-400" /> Rotation (Top 6)
                                 </h2>
+                                <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">KenPom Adv</span>
                             </div>
                             <div className="divide-y divide-slate-800">
                                 {players.map((p, i) => (
-                                    <div key={i} className="p-4 hover:bg-slate-800/30 transition">
-                                        <div className="flex justify-between items-start mb-1">
-                                            <div className="font-bold text-slate-100 flex items-center gap-2">
-                                                {p.name} <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">{p.pos}</span>
+                                    <div key={i} className="p-4 hover:bg-slate-800/30 transition flex flex-col gap-2">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <div className="font-bold text-slate-100 flex items-center gap-2">
+                                                    {p.name} <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">{p.pos}</span>
+                                                </div>
+                                                <div className="text-xs font-mono text-emerald-400 mt-1">{p.stats}</div>
+                                            </div>
+                                            {/* Advanced Stats Pill Box */}
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-slate-800 border border-slate-700 rounded-lg overflow-hidden shrink-0">
+                                                <div className="bg-slate-900 px-2 py-1 text-center" title="Offensive Rating">
+                                                    <div className="text-[8px] text-slate-500 uppercase font-bold">ORtg</div>
+                                                    <div className="text-[10px] font-mono text-slate-200">{p.adv.ortg}</div>
+                                                </div>
+                                                <div className="bg-slate-900 px-2 py-1 text-center" title="Usage Rate">
+                                                    <div className="text-[8px] text-slate-500 uppercase font-bold">Usg%</div>
+                                                    <div className="text-[10px] font-mono text-blue-300">{p.adv.usg}</div>
+                                                </div>
+                                                <div className="bg-slate-900 px-2 py-1 text-center" title="Effective FG%">
+                                                    <div className="text-[8px] text-slate-500 uppercase font-bold">eFG%</div>
+                                                    <div className="text-[10px] font-mono text-slate-200">{p.adv.efg}</div>
+                                                </div>
+                                                <div className="bg-slate-900 px-2 py-1 text-center" title="Minutes %">
+                                                    <div className="text-[8px] text-slate-500 uppercase font-bold">Min%</div>
+                                                    <div className="text-[10px] font-mono text-slate-400">{p.adv.min}</div>
+                                                </div>
                                             </div>
                                         </div>
-                                        <div className="text-xs font-mono text-blue-400/80 mb-2">{p.stats}</div>
-                                        <p className="text-xs text-slate-400 leading-relaxed">{p.role}</p>
+                                        <p className="text-xs text-slate-400 leading-relaxed italic border-l-2 border-slate-700 pl-2 mt-1">{p.role}</p>
                                     </div>
                                 ))}
                             </div>
                         </div>
-
-                        {/* Torvik Extra */}
-                        {torvik.barthag && (
-                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
-                                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">BartTorvik Analytics</h3>
-                                <div className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
-                                    <span className="text-sm font-semibold text-slate-300">Barthag Win%</span>
-                                    <span className="text-xl font-black text-white">{(torvik.barthag * 100).toFixed(1)}%</span>
-                                </div>
-                                <div className="text-[10px] text-slate-500 mt-3 italic text-center">
-                                    Probability of beating an average D1 team on a neutral court.
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>
