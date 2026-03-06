@@ -96,11 +96,11 @@ export default function AgentCouncil() {
             // 2. Run Council with mode=agents to trigger the orchestrator
             await api.post('/api/jobs/run_council_today', {}, { headers, params: { mode: 'agents' } });
 
-            alert("Jobs triggered successfully! They are running in the background. Data will refresh in a few moments.");
-            setTimeout(loadData, 5000);
+            alert("Council analysis complete! Refreshing the docket and memories.");
+            await loadData();
         } catch (err) {
             console.error("Job trigger failed", err);
-            alert("Failed to trigger jobs. Check console.");
+            alert("Failed to trigger jobs. Note: if you are running locally without a GEMINI_API_KEY, the LLM agents will gracefully skip evaluation.");
         } finally {
             setIsRunningJob(false);
         }

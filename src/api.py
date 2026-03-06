@@ -4452,7 +4452,6 @@ async def trigger_dedupe_model_predictions(request: Request, authorized: bool = 
 @app.api_route("/api/jobs/grade_predictions", methods=["GET", "POST"])
 async def trigger_prediction_grading(
     request: Request, 
-    background_tasks: BackgroundTasks,
     fast: bool = True, 
     backfill_days: int = 10, 
     max_clv_rows: int = 250, 
@@ -4460,38 +4459,37 @@ async def trigger_prediction_grading(
     skip_clv: bool = False, 
     authorized: bool = Depends(verify_cron_secret)
 ):
-    """Cron/manual: grade model_predictions using local game_results.
-
-    Uses BackgroundTasks to avoid Vercel 60s timeout limits.
-    """
-    def do_grade():
-        try:
-            from src.services.grading_service import GradingService
-            import time
-            start_t = time.time()
-            svc = GradingService()
-            if fast:
-                res = svc.grade_predictions(backfill_days=backfill_days, max_clv_rows=max_clv_rows, max_grade_rows=max_grade_rows, skip_clv=skip_clv)
-            else:
-                # Unbounded legacy behavior (use carefully)
-                res = svc.grade_predictions(backfill_days=10, max_clv_rows=2000, max_grade_rows=5000, skip_clv=skip_clv)
-            print(f"[JOB DONE] grade_predictions finished in {time.time() - start_t:.1f}s. Updates: {res}")
-        except Exception as e:
-            print(f"[JOB ERROR] Grading failed: {e}")
-
-    background_tasks.add_task(do_grade)
-    
-    return JSONResponse(
-        status_code=202,
-        content={
-            "status": "accepted",
-            "message": "Prediction grading pushed to background task.",
-            "params": {
-                "fast": fast,
-                "backfill_days": backfill_days
+    """Cron/manual: grade model_predictions using local game_results."""
+    try:
+        from src.services.grading_service import GradingService
+        import time
+        start_t = time.time()
+        svc = GradingService()
+        if fast:
+            res = svc.grade_predictions(backfill_days=backfill_days, max_clv_rows=max_clv_rows, max_grade_rows=max_grade_rows, skip_clv=skip_clv)
+        else:
+            # Unbounded legacy behavior
+            res = svc.grade_predictions(backfill_days=10, max_clv_rows=2000, max_grade_rows=5000, skip_clv=skip_clv)
+        
+        print(f"[JOB DONE] grade_predictions finished in {time.time() - start_t:.1f}s. Updates: {res}")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "message": "Prediction grading completed successfully.",
+                "results": res,
+                "params": {
+                    "fast": fast,
+                    "backfill_days": backfill_days
+                }
             }
-        }
-    )
+        )
+    except Exception as e:
+        print(f"[JOB ERROR] Grading failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Grading failed: {e}"}
+        )
 
 
 @app.api_route("/api/jobs/build_daily_top_picks", methods=["GET", "POST"])
@@ -4604,21 +4602,11 @@ async def trigger_build_daily_top_picks(
 @app.api_route("/api/jobs/run_council_today", methods=["GET", "POST"])
 async def trigger_run_council_today(
     request: Request,
-    background_tasks: BackgroundTasks,
     date: Optional[str] = None,
     mode: str = "agents",
     authorized: bool = Depends(verify_cron_secret),
 ):
-    """Cron/manual: Runs the Agent Council on today's actionable top picks.
-    
-    This invokes the Oracle Agent, Memory Agent, and Research Agent on games where
-    the quantitative model found an edge, stores the qualitative debate to decision_runs,
-    and then re-runs the Top Picks builder to apply the qualitative adjustments.
-
-    Modes:
-    - default: Runs the legacy run_council_today script.
-    - agents: Runs the full DecisionOrchestrator pipeline.
-    """
+    """Cron/manual: Runs the Agent Council on today's actionable top picks."""
     if not settings.GEMINI_API_KEY:
         error_msg = "GEMINI_API_KEY missing. Please add to Vercel Dashboard and REDEPLOY."
         print(f"[JOB ERROR] {error_msg}")
@@ -4638,47 +4626,43 @@ async def trigger_run_council_today(
             from src.agents.memory_agent import MemoryAgent
             from src.agents.oracle_agent import OracleAgent
 
-            def do_run_orchestrator():
-                try:
-                    orchestrator = DecisionOrchestrator(league="NCAAM", model_version="agent_v1")
-                    orchestrator.run_pipeline(
-                        event_ops_agent=EventOpsAgent(),
-                        market_data_agent=MarketDataAgent(),
-                        pricing_agent=PricingAgentNCAAM(),
-                        edge_ev_agent=EdgeEVAgent(),
-                        risk_manager_agent=RiskManagerAgent(),
-                        bet_builder_agent=BetBuilderAgent(),
-                        research_agent=ResearchAgent(),
-                        memory_agent=MemoryAgent(),
-                        oracle_agent=OracleAgent(),
-                        journal_agent=JournalAgent(),
-                        parameters={"mode": "manual_trigger", "date": date}
-                    )
-                    print(f"[JOB SUCCESS] DecisionOrchestrator completed for date={date or 'today'}")
-                except Exception as e:
-                    print(f"[JOB ERROR] Background DecisionOrchestrator failed: {e}")
+            try:
+                orchestrator = DecisionOrchestrator(league="NCAAM", model_version="agent_v1")
+                orchestrator.run_pipeline(
+                    event_ops_agent=EventOpsAgent(),
+                    market_data_agent=MarketDataAgent(),
+                    pricing_agent=PricingAgentNCAAM(),
+                    edge_ev_agent=EdgeEVAgent(),
+                    risk_manager_agent=RiskManagerAgent(),
+                    bet_builder_agent=BetBuilderAgent(),
+                    research_agent=ResearchAgent(),
+                    memory_agent=MemoryAgent(),
+                    oracle_agent=OracleAgent(),
+                    journal_agent=JournalAgent(),
+                    parameters={"mode": "manual_trigger", "date": date}
+                )
+                print(f"[JOB SUCCESS] DecisionOrchestrator completed for date={date or 'today'}")
+                return {
+                    "status": "success",
+                    "message": "Full Agent Orchestrator job completed."
+                }
+            except Exception as e:
+                print(f"[JOB ERROR] DecisionOrchestrator failed: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
-            background_tasks.add_task(do_run_orchestrator)
-            return {
-                "status": "success",
-                "message": "Full Agent Orchestrator job queued in background."
-            }
         else:
             from src.scripts.run_council_today import main as run_council
             
-            def do_run():
-                try:
-                    run_council()
-                    print(f"[JOB SUCCESS] Agent Council completed for date={date or 'today'}")
-                except Exception as e:
-                    print(f"[JOB ERROR] Background run_council_today failed: {e}")
-
-            background_tasks.add_task(do_run)
-
-            return {
-                "status": "success",
-                "message": "Agent Council job queued in background."
-            }
+            try:
+                run_council()
+                print(f"[JOB SUCCESS] Agent Council completed for date={date or 'today'}")
+                return {
+                    "status": "success",
+                    "message": "Agent Council job completed."
+                }
+            except Exception as e:
+                print(f"[JOB ERROR] run_council_today failed: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         print(f"[JOB ERROR] run_council_today failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
