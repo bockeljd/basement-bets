@@ -13,23 +13,27 @@ const MarchMadness = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 10 } });
-            // Look for UConn explicitly
-            const uconn = res.data.teams.find(t => t.team_name.includes('Connecticut') || t.team_name === 'UConn');
-            setTeamData(uconn || res.data.teams[0]); // fallback to #1 if UConn not found
+            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 100 } });
+            const teams = res.data.teams || [];
+            if (teams.length > 0) {
+                // Look for UConn explicitly, if they dropped out of the top 68 we'll catch them up to 100
+                const uconn = teams.find(t => t.team_name.includes('Connecticut') || t.team_name.includes('UConn'));
+                // fallback to the overall #1 seed if UConn is not found at all
+                setTeamData(uconn || teams[0]);
+            }
         } catch (err) {
-            console.error("Failed to load uconn profile", err);
+            console.error("Failed to load tournament profile", err);
         } finally {
             setLoading(false);
         }
     };
 
     if (loading) {
-        return <div className="p-8 text-center text-slate-400 animate-pulse font-mono">Loading Tournament Profile Server...</div>;
+        return <div className="p-8 text-center text-slate-400 animate-pulse font-mono flex items-center justify-center min-h-screen">Loading Tournament Profile Engine...</div>;
     }
 
     if (!teamData) {
-        return <div className="p-8 text-center text-red-400">Profile generation failed. Target team not found in Top 10.</div>;
+        return <div className="p-8 text-center text-red-400 font-mono">Profile generation failed. Target team not found.</div>;
     }
 
     // Mock narrative data strictly for the Template
