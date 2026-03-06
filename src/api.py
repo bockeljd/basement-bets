@@ -3133,6 +3133,56 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/ncaam/tournament-teams")
+async def get_tournament_teams(request: Request, limit: int = 68):
+    """Return the top N teams by KenPom rank for bracket research profiles.
+    
+    Includes their Torvik metrics if available.
+    Returns: { teams: [ { team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t, updated_at, torvik: {...} } ] }
+    """
+    from src.database import get_db_connection, _exec
+
+    try:
+        with get_db_connection() as conn:
+            # Fetch Top 68 KenPom teams
+            krows = _exec(conn, """
+                SELECT team_name, rank, conference, record,
+                       adj_em, adj_o, adj_d, adj_t, updated_at
+                FROM kenpom_ratings
+                ORDER BY rank ASC
+                LIMIT %s
+            """, (limit,)).fetchall()
+            
+            teams = [dict(r) for r in krows]
+            team_names = [t['team_name'] for t in teams]
+
+            # Fetch corresponding Torvik ratings
+            torvik_map = {}
+            if team_names:
+                try:
+                    trows = _exec(conn, """
+                        SELECT team_name, adj_o, adj_d, adj_net, barthag, rank
+                        FROM torvik_ratings
+                        WHERE team_name = ANY(%s)
+                    """, (team_names,)).fetchall()
+                    for r in trows:
+                        torvik_map[r['team_name']] = dict(r)
+                except Exception:
+                    pass  # table may not exist
+            
+            # Combine
+            for t in teams:
+                # Remove datetime objects
+                if hasattr(t.get('updated_at'), 'isoformat'):
+                    t['updated_at'] = str(t['updated_at'])
+                t['torvik'] = torvik_map.get(t['team_name'], {})
+
+        return { 'teams': teams }
+    except Exception as e:
+        print(f"[tournament-teams] error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/ncaam/history")
 async def get_ncaam_history(request: Request, limit: int = 100, user: dict = Depends(get_current_user)):
     """Returns past model predictions/analysis (recommended picks).

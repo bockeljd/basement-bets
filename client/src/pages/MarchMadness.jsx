@@ -5,94 +5,31 @@ import { RefreshCw } from 'lucide-react';
 const MarchMadness = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-
-    const getTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    const [selectedDate, setSelectedDate] = useState(getTodayStr());
-
-    const [rowTopPicks, setRowTopPicks] = useState({});
-    const [matchupProfiles, setMatchupProfiles] = useState({});
+    const [teams, setTeams] = useState([]);
 
     useEffect(() => {
         fetchData();
-    }, [selectedDate]);
+    }, []);
 
     const fetchData = async () => {
         setLoading(true);
         setError(null);
 
-        const topPicksParams = { date: selectedDate, days: 3, limit_games: 250 };
-
         try {
-            const [topPicksRes, matchupRes] = await Promise.all([
-                api.get('/api/ncaam/top-picks', { params: topPicksParams })
-                    .catch((e) => ({ data: null, _error: e })),
-                api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate } })
-                    .catch((e) => ({ data: { matchups: [] } }))
-            ]);
-
-            const mProfiles = {};
-            (matchupRes?.data?.matchups || []).forEach(m => {
-                mProfiles[m.event_id] = m;
-            });
-            setMatchupProfiles(mProfiles);
-
-            const tp = topPicksRes?.data?.picks || null;
-            if (tp && typeof tp === 'object') {
-                const mapped = {};
-                Object.keys(tp).forEach((eid) => {
-                    if (tp[eid]?.rec && tp[eid]?.is_actionable) {
-                        mapped[eid] = tp[eid];
-                    }
-                });
-                setRowTopPicks(mapped);
-            } else {
-                setRowTopPicks({});
-            }
-
+            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 68 } });
+            setTeams(res.data.teams || []);
         } catch (err) {
-            console.error("Failed to load March Madness data", err);
+            console.error("Failed to load tournament teams", err);
             setError("Failed to load tournament data.");
         } finally {
             setLoading(false);
         }
     };
 
-    const shiftDate = (offset) => {
-        try {
-            const d = new Date(selectedDate + 'T12:00:00Z');
-            d.setDate(d.getDate() + offset);
-            setSelectedDate(d.toISOString().slice(0, 10));
-        } catch (e) { }
-    };
-
     const SELECTION_SUNDAY = new Date('2026-03-15T00:00:00-05:00');
     const now = new Date();
     const daysToTourney = Math.max(0, Math.ceil((SELECTION_SUNDAY - now) / (1000 * 60 * 60 * 24)));
     const tourneyStarted = now >= SELECTION_SUNDAY;
-
-    const mmPicks = Object.entries(rowTopPicks || {})
-        .filter(([eid, meta]) => {
-            if (!meta?.is_actionable || !meta?.rec) return false;
-            const bt = String(meta.rec.bet_type || '').toUpperCase();
-            const sel = String(meta.rec.selection || '').trim();
-            if (!bt || bt === 'AUTO' || !sel || sel === '—') return false;
-            const ev = meta?.event || {};
-            const dayEt = ev?.day_et || '';
-            if (dayEt) return String(dayEt) === String(selectedDate);
-            if (ev?.start_time) {
-                try {
-                    const d = new Date(ev.start_time);
-                    return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === String(selectedDate);
-                } catch (e) { return false; }
-            }
-            return false;
-        })
-        .map(([eid, meta]) => ({ eid, meta }))
-        .sort((a, b) => {
-            const aEv = Number(String(a.meta.rec?.edge ?? '').replace('%', '')) || 0;
-            const bEv = Number(String(b.meta.rec?.edge ?? '').replace('%', '')) || 0;
-            return bEv - aEv;
-        });
 
     return (
         <div className="p-4 md:p-6 bg-slate-950 min-h-screen text-white rounded-2xl">
@@ -103,23 +40,6 @@ const MarchMadness = () => {
                     </h1>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-1 py-1 w-full sm:w-auto">
-                        <button onClick={() => shiftDate(-1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                            ←
-                        </button>
-                        <input
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className="bg-transparent text-sm font-bold text-center w-32 sm:w-32 focus:outline-none text-white appearance-none"
-                        />
-                        <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                            →
-                        </button>
-                        <button onClick={() => setSelectedDate(getTodayStr())} className="ml-2 px-2 py-0.5 text-xs bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 rounded">
-                            Today
-                        </button>
-                    </div>
                     <button
                         onClick={fetchData}
                         disabled={loading}
@@ -140,105 +60,84 @@ const MarchMadness = () => {
                             {tourneyStarted ? '🏀 Tournament is Live!' : `${daysToTourney} day${daysToTourney !== 1 ? 's' : ''} to Selection Sunday`}
                         </div>
                         <div className="text-sm text-orange-200/70 mt-1">
-                            {tourneyStarted ? 'Showing actionable tournament picks for ' + selectedDate : 'Showing conference tournament picks for ' + selectedDate + ' · Selection Sunday: Mar 15'}
+                            Tracking the Top 68 KenPom teams to profile potential bracket winners.
                         </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                        <div className="text-3xl font-black text-orange-300">{mmPicks.length}</div>
-                        <div className="text-xs text-orange-200/60 uppercase tracking-wide">Actionable Picks</div>
                     </div>
                 </div>
             </div>
 
-            {/* Pick cards */}
+            {/* Pick cards Grid */}
             {loading ? (
-                <div className="text-center py-12 text-slate-400 font-mono animate-pulse">Loading tournament board...</div>
-            ) : mmPicks.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 font-mono animate-pulse">Loading tournament profiles...</div>
+            ) : error ? (
+                <div className="text-center py-12 bg-red-900/20 border border-red-500/50 rounded-2xl text-red-400">
+                    {error}
+                </div>
+            ) : teams.length === 0 ? (
                 <div className="text-center py-12 bg-slate-900/40 rounded-2xl border border-slate-800">
                     <div className="text-4xl mb-3">🏀</div>
-                    <div className="text-slate-300 font-semibold text-lg mb-1">No picks for {selectedDate}</div>
-                    <div className="text-slate-500 text-sm">The model found no edge on today's slate. Check back tomorrow.</div>
+                    <div className="text-slate-300 font-semibold text-lg mb-1">No profiles generated yet</div>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {mmPicks.map(({ eid, meta }, i) => {
-                        const rec = meta.rec;
-                        const ev = meta.event || {};
-                        const evPct = Number(String(rec.edge || '').replace('%', '')) || 0;
-                        const confLabel = rec.confidence || 'Medium';
-                        const confColor = confLabel === 'High' ? 'text-emerald-400' : confLabel === 'Medium' ? 'text-yellow-400' : 'text-slate-400';
-                        const confBg = confLabel === 'High' ? 'bg-emerald-500/10 border-emerald-500/20' : confLabel === 'Medium' ? 'bg-yellow-500/10 border-yellow-500/20' : 'bg-slate-500/10 border-slate-500/20';
-
-                        const profile = matchupProfiles[eid] || {};
-                        const hk = profile.home_kenpom || {};
-                        const ak = profile.away_kenpom || {};
-
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {teams.map((t) => {
+                        const torvik = t.torvik || {};
                         return (
-                            <div key={eid} className="relative rounded-2xl border border-slate-700/50 bg-slate-800/60 p-5 hover:border-orange-500/40 hover:bg-slate-800/80 transition-all flex flex-col shadow-lg">
+                            <div key={t.team_name} className="relative rounded-2xl border border-slate-700/50 bg-slate-800/60 p-5 hover:border-orange-500/40 hover:bg-slate-800/80 transition-all flex flex-col shadow-lg">
                                 {/* Rank badge */}
-                                <div className="absolute top-4 right-4 w-7 h-7 rounded-full bg-orange-600/20 border border-orange-500/30 flex items-center justify-center text-xs font-black text-orange-300">#{i + 1}</div>
+                                <div className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-900/80 border border-slate-600/50 flex items-center justify-center text-xs font-black text-slate-200">
+                                    #{t.rank}
+                                </div>
 
-                                {/* Matchup Header */}
-                                <div className="mb-4 pr-8">
-                                    <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Matchup</div>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="text-sm font-semibold text-slate-200">{ev.away_team || '—'}</span>
-                                        {ak.rank && <span className="text-[10px] text-slate-500 font-mono">#{ak.rank}</span>}
-                                    </div>
-                                    <div className="text-xs text-slate-500 mb-1 leading-none">@</div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm font-semibold text-slate-200">{ev.home_team || '—'}</span>
-                                        {hk.rank && <span className="text-[10px] text-slate-500 font-mono">#{hk.rank}</span>}
+                                {/* Team Header */}
+                                <div className="mb-4 pr-10">
+                                    <h3 className="text-lg font-bold text-white leading-tight truncate" title={t.team_name}>
+                                        {t.team_name}
+                                    </h3>
+                                    <div className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                                        <span>{t.conference || '—'}</span>
+                                        <span className="text-slate-600">•</span>
+                                        <span className="font-mono">{t.record || '—'}</span>
                                     </div>
                                 </div>
 
-                                {/* Team Profiles (KenPom) */}
-                                <div className="grid grid-cols-2 gap-3 mb-4 p-3 rounded-xl bg-slate-900/50 border border-slate-700/30 text-xs">
-                                    <div>
-                                        <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">{ev.away_team || 'Away'}</div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjEM</span><span className="font-mono text-slate-300">{ak.adj_em ? `+${ak.adj_em}` : '—'}</span></div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjO</span><span className="font-mono text-slate-300">{ak.adj_o || '—'}</span></div>
-                                        <div className="flex justify-between items-center"><span className="text-slate-500">AdjD</span><span className="font-mono text-slate-300">{ak.adj_d || '—'}</span></div>
+                                {/* Main Metrics Grid */}
+                                <div className="grid grid-cols-2 gap-2 mb-4">
+                                    <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-700/30">
+                                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">AdjEM</div>
+                                        <div className="text-xl font-black text-white">
+                                            {t.adj_em ? (t.adj_em > 0 ? `+${t.adj_em}` : t.adj_em) : '—'}
+                                        </div>
                                     </div>
-                                    <div className="pl-3 border-l border-slate-700/50">
-                                        <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">{ev.home_team || 'Home'}</div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjEM</span><span className="font-mono text-slate-300">{hk.adj_em ? `+${hk.adj_em}` : '—'}</span></div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjO</span><span className="font-mono text-slate-300">{hk.adj_o || '—'}</span></div>
-                                        <div className="flex justify-between items-center"><span className="text-slate-500">AdjD</span><span className="font-mono text-slate-300">{hk.adj_d || '—'}</span></div>
+                                    <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-700/30">
+                                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">AdjTempo</div>
+                                        <div className="text-xl font-black text-white">
+                                            {t.adj_t || '—'}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Offense/Defense Splits */}
+                                <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-700/30 text-sm mb-4">
+                                    <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-700/50">
+                                        <span className="text-slate-400 font-semibold text-xs">Adj Offensive Eff.</span>
+                                        <span className="font-mono font-bold text-emerald-400">{t.adj_o || '—'}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-slate-400 font-semibold text-xs">Adj Defensive Eff.</span>
+                                        <span className="font-mono font-bold text-red-400">{t.adj_d || '—'}</span>
                                     </div>
                                 </div>
 
                                 <div className="flex-1"></div>
 
-                                {/* Pick */}
-                                <div className="mb-3 pt-3 border-t border-slate-700/50">
-                                    <div className="text-[11px] text-orange-400/80 uppercase tracking-wider mb-1 font-bold">Model Pick</div>
-                                    <div className="flex justify-between items-end">
-                                        <div>
-                                            <div className="text-base font-black text-white">{rec.bet_type}: {rec.selection}</div>
-                                            {rec.market_line != null && (
-                                                <div className="text-xs text-slate-400 mt-0.5">{rec.price > 0 ? '+' : ''}{rec.price}</div>
-                                            )}
-                                        </div>
+                                {/* Torvik Context (if available) */}
+                                {torvik.barthag && (
+                                    <div className="pt-3 border-t border-slate-700/50 flex justify-between items-center text-xs">
+                                        <span className="text-slate-500 font-medium">Torvik Barthag</span>
+                                        <span className="font-mono text-slate-300">{(torvik.barthag * 100).toFixed(1)}%</span>
                                     </div>
-                                </div>
-
-                                {/* Stats row */}
-                                <div className="flex items-center gap-3">
-                                    <div className="flex-1">
-                                        <div className="text-[10px] text-slate-500 mb-0.5">EV</div>
-                                        <div className="text-sm font-black text-emerald-400">+{evPct.toFixed(1)}%</div>
-                                    </div>
-                                    {rec.win_prob != null && (
-                                        <div className="flex-1">
-                                            <div className="text-[10px] text-slate-500 mb-0.5">Win Prob</div>
-                                            <div className="text-sm font-bold text-slate-200">{(rec.win_prob * 100).toFixed(0)}%</div>
-                                        </div>
-                                    )}
-                                    <div className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold uppercase ${confBg} ${confColor}`}>
-                                        {confLabel}
-                                    </div>
-                                </div>
+                                )}
                             </div>
                         );
                     })}
