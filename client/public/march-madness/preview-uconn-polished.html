@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'/>
+<meta name='viewport' content='width=device-width,initial-scale=1'/>
+<title>UConn Huskies — Team Profile Preview</title>
+<link rel='preconnect' href='https://fonts.googleapis.com'>
+<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
+<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap' rel='stylesheet'>
+<style>
+:root{--bg:#0b1220;--text:#e6edf6;--muted:#a7b4c7;--accent:#74c0fc;--border:#203253;--good:#63e6be;--warn:#ffd43b;--bad:#ff6b6b;}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,var(--bg),#060a14);color:var(--text)}
+.app{display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+.sidebar{padding:18px;border-right:1px solid var(--border);background:rgba(15,27,51,.65);backdrop-filter: blur(8px);position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+.dot{width:10px;height:10px;border-radius:99px;background:var(--accent);box-shadow:0 0 18px rgba(116,192,252,.7)}
+.title{font-weight:700;font-size:14px;letter-spacing:.4px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbtoggle{margin-left:auto;border:1px solid rgba(255,255,255,.10);background:rgba(12,22,43,.45);color:var(--text);border-radius:10px;padding:6px 9px;cursor:pointer;font-weight:700}
+.sbtoggle:hover{border-color:var(--border)}
+.nav{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.nav a{color:var(--muted);text-decoration:none;padding:10px 12px;border:1px solid transparent;border-radius:10px;display:flex;align-items:center;gap:10px}
+.nav a.active{color:var(--text);border-color:var(--border);background:rgba(12,22,43,.8)}
+.nav a:hover{border-color:var(--border)}
+.small{margin-top:10px;color:var(--muted);font-size:12px;line-height:1.3}
+@app{grid-template-columns:74px 1fr}
+body.sb-collapsed .sidebar{padding:12px 10px}
+body.sb-collapsed .brand{gap:8px}
+body.sb-collapsed .title{display:none}
+body.sb-collapsed .small{display:none}
+body.sb-collapsed .nav a{justify-content:center;padding:10px}
+body.sb-collapsed .nav a .label{display:none}
+.main{padding:22px 22px 60px 22px}
+.header h1{margin:0;font-size:22px}
+.header p{margin:6px 0 0 0;color:var(--muted);font-size:13px;max-width:95ch}
+.grid{display:grid;grid-template-columns: 1fr;gap:14px;margin-top:14px}
+.card{border:1px solid var(--border);border-radius:14px;background:rgba(15,27,51,.65);backdrop-filter: blur(6px);overflow:hidden}
+.card .bar{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:rgba(12,22,43,.75)}
+.card .bar .label{font-weight:700;font-size:13px}
+.card .bar .meta{color:var(--muted);font-size:12px}
+.card .content{padding:14px}
+.kpis{display:grid;grid-template-columns: repeat(4, minmax(0,1fr));gap:10px}
+.kpi{border:1px solid var(--border);border-radius:12px;background:rgba(12,22,43,.55);padding:10px}
+.kpi .k{color:var(--muted);font-size:11px}
+.kpi .v{font-weight:800;font-size:16px;margin-top:2px}
+.kpi .s{color:rgba(230,237,246,.75);font-size:11px;margin-top:4px;line-height:1.2}
+.cols{display:grid;grid-template-columns: 1.2fr .8fr; gap:12px}
+.box{border:1px solid var(--border);border-radius:12px;background:rgba(12,22,43,.45);padding:12px}
+.box h3{margin:0 0 8px 0;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.box ul{margin:0;padding-left:16px}
+.box li{margin:5px 0;font-size:12px}
+.u2{display:grid;grid-template-columns:1fr 1fr; gap:12px}
+.meter{border:1px solid var(--border);border-radius:12px;background:rgba(12,22,43,.45);padding:12px}
+.meter h3{margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.barwrap{height:10px;border-radius:999px;background:rgba(32,50,83,.65);border:1px solid rgba(32,50,83,.9);overflow:hidden;margin:6px 0 6px 0}
+.barfill{height:100%;width:0%}
+.barfill.risk{background:linear-gradient(90deg,var(--bad),var(--warn),var(--good))}
+.barfill.potential{background:linear-gradient(90deg,var(--bad),var(--warn),var(--good))}
+.barscore{color:rgba(230,237,246,.75);font-size:12px;font-variant-numeric: tabular-nums}
+.graphgrid{display:grid;grid-template-columns:1fr 1fr; gap:12px; margin-top:12px}
+.graph{border:1px solid var(--border);border-radius:12px;background:rgba(12,22,43,.35);padding:12px}
+.graph h4{margin:0 0 10px 0; font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted)}
+.wlrow{display:grid;grid-template-columns: 52px 1fr 48px; gap:10px; align-items:center; margin:8px 0}
+.wllabel{color:rgba(230,237,246,.75); font-size:12px}
+.wlval{color:rgba(230,237,246,.75); font-size:12px; font-variant-numeric: tabular-nums; text-align:right}
+.wlbar{height:10px;border-radius:999px;background:rgba(32,50,83,.65);border:1px solid rgba(32,50,83,.9);overflow:hidden;display:flex}
+.wlbar .win{background:rgba(99,230,190,.9)}
+.wlbar .loss{background:rgba(255,107,107,.85)}
+.hmap{display:grid;grid-template-columns: repeat(4, 1fr); gap:10px}
+.hcell{border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:10px}
+.hlabel{font-size:11px; color:rgba(255,255,255,.78); text-transform:uppercase; letter-spacing:.4px}
+.hval{font-weight:800; font-size:16px; margin-top:2px}
+.hpct{font-size:12px; color:rgba(255,255,255,.85); margin-top:2px}
+.phm{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden;border:1px solid var(--border);border-radius:12px}
+.phm th,.phm td{padding:8px 10px;font-size:12px;border-bottom:1px solid rgba(32,50,83,.65);vertical-align:top}
+.phm th{text-align:left;color:var(--muted);background:rgba(12,22,43,.75);font-weight:700;position:sticky;top:0}
+.phm tr:last-child td{border-bottom:none}
+.phm td.h{text-align:center; min-width:72px}
+.hv{font-weight:800; font-variant-numeric: tabular-nums}
+.hp{margin-top:4px;font-size:10px;color:rgba(230,237,246,.75);font-variant-numeric: tabular-nums}
+.pcol{min-width:340px}
+.pname{font-weight:800}
+.pnarr{color:rgba(230,237,246,.78); margin-top:4px; line-height:1.25}
+.badges{margin-top:8px; display:flex; flex-wrap:wrap; gap:6px}
+.badge{display:inline-block; font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.10); color:rgba(230,237,246,.92); background:rgba(12,22,43,.35)}
+.badge.good{border-color: rgba(99,230,190,.35); background: rgba(99,230,190,.12)}
+.badge.warn{border-color: rgba(255,212,59,.35); background: rgba(255,212,59,.12)}
+.badge.bad{border-color: rgba(255,107,107,.35); background: rgba(255,107,107,.12)}
+.footer{color:var(--muted);font-size:12px;line-height:1.35}
+@media (max-width: 980px){.app{grid-template-columns:1fr}.sidebar{display:none}.kpis{grid-template-columns: repeat(2, minmax(0,1fr))}.cols{grid-template-columns:1fr}.u2{grid-template-columns:1fr}.graphgrid{grid-template-columns:1fr}.pcol{min-width:auto}}
+</style>
+</head>
+<body>
+<div class='app'>
+  <aside class='sidebar'>
+    <div class='brand'>
+      <div class='dot'></div>
+      <div class='title'>March Madness Dashboard</div>
+      <button class='sbtoggle' type='button' aria-label='Toggle sidebar' title='Toggle sidebar'>≡</button>
+    </div>
+    <div class='nav'>
+      <a class='active' href='#'><span class='label'>Team Profile</span></a>
+      <a href='#'><span class='label'>Game Leans</span></a>
+      <a href='#'><span class='label'>Research Queue</span></a>
+    </div>
+    <div class='small'>Player metrics sourced from player tables (top 6 by %Min).</div>
+  </aside>
+
+  <main class='main'>
+    <div class='header'>
+      <h1>UConn Huskies — Team Profile</h1>
+      <p><b>Conference:</b> Big East · <b>Coach:</b> Dan Hurley · <b>Record:</b> 26-3 · <b>NET:</b> 10 · <b>KenPom:</b> #9</p>
+    </div>
+
+    <section class='grid'>
+      <div class='card'><div class='bar'><div class='label'>Topline KPIs</div><div class='meta'>resume + power snapshot</div></div><div class='content'><div class='kpis'><div class='kpi'><div class='k'>Record (Div I)</div><div class='v'>26-3</div><div class='s'>Big East 16-2</div></div><div class='kpi'><div class='k'>NET</div><div class='v'>10</div><div class='s'>SOR 4</div></div><div class='kpi'><div class='k'>KenPom SOS</div><div class='v'>+11.97 (#26)</div><div class='s'>NCSOS +8.69 (#27)</div></div><div class='kpi'><div class='k'>As-of</div><div class='v'>Feb 26</div><div class='s'>KenPom + WarrenNolan</div></div></div></div></div>
+      <div class='card'><div class='bar'><div class='label'>Top 6 Players — matchup inputs (KenPom)</div><div class='meta'>strengths & weaknesses</div></div><div class='content'>
+        <table class='phm'><thead><tr><th>Player (narrative)</th><th>Min%</th><th>Usage</th><th>ORtg</th><th>eFG</th><th>TS</th><th>3P%</th><th>FT%</th><th>AstR</th><th>TOR</th><th>Blk</th><th>Stl</th><th>FTR</th></tr></thead><tbody>
+        <tr><td class='pcol'><div class='pname'>Alex Karaban</div><div class='pnarr'>low-usage connector, credible spacer</div><div class='badges'><span class='badge good'>Shooter</span> <span class='badge good'>Efficient</span> <span class='badge good'>Clutch FT</span></div></td><td class='h'>82.6%</td><td class='h'>17.2%</td><td class='h'>128</td><td class='h'>56.8</td><td class='h'>59.7</td><td class='h'>40%</td><td class='h'>84%</td><td class='h'>11</td><td class='h'>9</td><td class='h'>3.0</td><td class='h'>1.5</td><td class='h'>21</td></tr>
+        <tr><td class='pcol'><div class='pname'>Solo Ball</div><div class='pnarr'>secondary scorer, 3P swing</div><div class='badges'><span class='badge warn'>Needs spacing</span> <span class='badge good'>Clutch FT</span></div></td><td class='h'>71.3%</td><td class='h'>22.0%</td><td class='h'>115</td><td class='h'>51.1</td><td class='h'>55.5</td><td class='h'>31%</td><td class='h'>84%</td><td class='h'>10</td><td class='h'>11</td><td class='h'>1.1</td><td class='h'>1.0</td><td class='h'>28</td></tr>
+        <tr><td class='pcol'><div class='pname'>Silas Demary Jr.</div><div class='pnarr'>primary engine / table-setter, credible spacer, draws fouls</div><div class='badges'><span class='badge good'>Shooter</span> <span class='badge good'>Creator</span> <span class='badge good'>Rim pressure</span></div></td><td class='h'>70.6%</td><td class='h'>23.9%</td><td class='h'>120</td><td class='h'>53.9</td><td class='h'>59.7</td><td class='h'>43%</td><td class='h'>80%</td><td class='h'>38</td><td class='h'>21</td><td class='h'>1.0</td><td class='h'>3.5</td><td class='h'>51</td></tr>
+        <tr><td class='pcol'><div class='pname'>Tarris Reed Jr.</div><div class='pnarr'>high-usage scorer, draws fouls, rim deterrent</div><div class='badges'><span class='badge good'>Rim pressure</span> <span class='badge warn'>FT liability</span> <span class='badge good'>Rim protector</span></div></td><td class='h'>52.8%</td><td class='h'>25.8%</td><td class='h'>118</td><td class='h'>64.5</td><td class='h'>63.4</td><td class='h'>0%</td><td class='h'>55%</td><td class='h'>18</td><td class='h'>17</td><td class='h'>9.8</td><td class='h'>2.3</td><td class='h'>47</td></tr>
+        <tr><td class='pcol'><div class='pname'>Braylon Mullins</div><div class='pnarr'>secondary scorer, credible spacer</div><div class='badges'><span class='badge good'>Shooter</span> <span class='badge good'>Clutch FT</span> <span class='badge good'>Disruptor</span></div></td><td class='h'>50.3%</td><td class='h'>19.8%</td><td class='h'>116</td><td class='h'>57.5</td><td class='h'>58.8</td><td class='h'>39%</td><td class='h'>84%</td><td class='h'>9</td><td class='h'>13</td><td class='h'>2.7</td><td class='h'>2.5</td><td class='h'>9</td></tr>
+        <tr><td class='pcol'><div class='pname'>Jaylin Stewart</div><div class='pnarr'>low-usage connector, bench minutes matter if foul trouble</div><div class='badges'><span class='badge warn'>FT liability</span></div></td><td class='h'>42.4%</td><td class='h'>14.5%</td><td class='h'>107</td><td class='h'>52.9</td><td class='h'>53.9</td><td class='h'>35%</td><td class='h'>60%</td><td class='h'>11</td><td class='h'>19</td><td class='h'>2.1</td><td class='h'>1.8</td><td class='h'>24</td></tr>
+        </tbody></table>
+        <p class='footer' style='margin-top:10px'>Cells: greener = stronger. TOR is inverted (lower = better). Inputs emphasize March levers: creation (AstR), ball pressure (TOR), rim pressure (FTR), rim protection (Blk), disruption (Stl), finishing (eFG/TS).</p>
+      </div></div>
+      <div class='card'><div class='bar'><div class='label'>Upset Indicator</div><div class='meta'>seed + volatility heuristic</div></div><div class='content'><div class='u2'><div class='meter'><h3>Upset risk (favored)</h3><div class='barwrap'><div class='barfill risk' style='width:58%'></div></div><div class='barscore'>58/100</div><ul style='margin:8px 0 0 16px'><li>[ ] Heavy star dependence (shared creation; primary PG still key)</li></ul></div><div class='meter'><h3>Upset potential (underdog)</h3><div class='barwrap'><div class='barfill potential' style='width:66%'></div></div><div class='barscore'>66/100</div><ul style='margin:8px 0 0 16px'><li>[ ] Heavy star dependence (shared creation; primary PG still key)</li></ul></div></div><div class='box' style='margin-top:12px'><h3>Volatility flags</h3><ul><li>[x] Extreme tempo (very slow / long possessions)</li><li>[ ] High 3PA reliance (moderate volume)</li><li>[x] Turnover-prone vs pressure (not elite ball security)</li><li>[x] Foul/FT sensitivity (high FTR allowed)</li><li>[ ] Thin rotation (TBD)</li><li>[ ] Heavy star dependence (shared creation; primary PG still key)</li></ul></div></div></div>
+      <div class='card'><div class='bar'><div class='label'>Resume / Team Sheet</div><div class='meta'>NET + Quadrants</div></div><div class='content'><div class='graphgrid'><div class='graph'><h4>Quad results (heatmap)</h4><div class='hmap'><div class='hcell' style='background:hsl(93 70% 42%)'><div class='hlabel'>Q1</div><div class='hval'>7-2</div><div class='hpct'>78%</div></div><div class='hcell' style='background:hsl(120 70% 46%)'><div class='hlabel'>Q2</div><div class='hval'>8-0</div><div class='hpct'>100%</div></div><div class='hcell' style='background:hsl(103 70% 43%)'><div class='hlabel'>Q3</div><div class='hval'>6-1</div><div class='hpct'>86%</div></div><div class='hcell' style='background:hsl(120 70% 46%)'><div class='hlabel'>Q4</div><div class='hval'>5-0</div><div class='hpct'>100%</div></div></div></div><div class='graph'><h4>Home/Away/Neutral (win rate)</h4><div class='wlrow'><div class='wllabel'>Away</div><div class='wlbar'><div class='win' style='width:90.0%'></div><div class='loss' style='width:10.0%'></div></div><div class='wlval'>9-1</div></div><div class='wlrow'><div class='wllabel'>Neutral</div><div class='wlbar'><div class='win' style='width:100.0%'></div><div class='loss' style='width:0.0%'></div></div><div class='wlval'>3-0</div></div><div class='wlrow'><div class='wllabel'>Home</div><div class='wlbar'><div class='win' style='width:87.5%'></div><div class='loss' style='width:12.5%'></div></div><div class='wlval'>14-2</div></div></div></div></div>
+      <div class='card'><div class='bar'><div class='label'>Style & Matchup Notes</div><div class='meta'>KenPom/Torvik-derived</div></div><div class='content'><div class='cols'><div class='box'><h3>Offense</h3><ul><li>Efficiency profile: high eFG% offense (56.3, ~#24), elite assist rate (64.4, ~#8) → ball movement is a defining feature.</li><li>3pt profile: moderate-to-high 3P rate (39.8% of shots; rank ~175) with strong 3P% (36.6%; rank ~44).</li><li>Turnovers: not ultra-protective (offensive TO% 16.2; rank ~136).</li><li>Offensive rebounding: solid (OR% 34.5; rank ~59).</li><li>Free throws: not a FT-volume team (FTR 30.8; rank ~291) — they don’t live at the line.</li></ul></div><div class='box'><h3>Defense</h3><ul><li>Overall: top-tier defense (AdjD 95.4; rank ~13) built on shot suppression and rim protection.</li><li>Shot defense: eFG% allowed 45.7 (rank ~8); 3P% allowed 30.1 (rank ~19).</li><li>Rim protection: very strong (defensive block% 15.4; rank ~10).</li><li>Fouling / FTs allowed: major flag — FTR allowed 41.0 (rank ~307). This is the cleanest “how to beat them” lever: get downhill and force whistles.</li></ul></div></div><p class='footer' style='margin-top:10px'><b>KenPom:</b> #9 overall (NetRtg +29.83). AdjO 123.4 (#21), AdjD 93.6 (#9), AdjT 64.8 (#311)<br/><b>Torvik:</b> #9 overall (Barthag ~.9532), AdjO 124.0 (#20), AdjD 95.4 (#13), Adj Tempo 65.2 (#286)</p></div></div>
+    </section>
+  </main>
+</div>
+<script>(()=>{const key='mm_sidebar_collapsed';const defaultCollapsed=true;const stored=localStorage.getItem(key);const collapsed=stored===null?defaultCollapsed:stored==='1';document.body.classList.toggle('sb-collapsed',collapsed);const btn=document.querySelector('.sbtoggle');if(btn){btn.addEventListener('click',()=>{const now=!document.body.classList.contains('sb-collapsed');document.body.classList.toggle('sb-collapsed',now);localStorage.setItem(key,now?'1':'0');});}})();</script>
+</body>
+</html>
