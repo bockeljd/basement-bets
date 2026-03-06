@@ -1,0 +1,4502 @@
+[
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Purdue",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Houston",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Connecticut",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Arizona",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Duke",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Iowa St.",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Auburn",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Kansas",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Alabama",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "99.6",
+    "usg": "Duke",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "91",
+    "usg": "Ohio St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "52.6",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".420"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "100",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".347"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "98.4",
+    "usg": "Arkansas",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".437"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "76.6",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "57.6",
+    "usg": "Stanford",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".348"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Iowa",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".386"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "94",
+    "usg": "Michigan St.",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".298"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Auburn",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".395"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Northwestern",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".421"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "SMU",
+    "efg": "ACC",
+    "ts": "29",
+    "min_pct": ".406"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "93.2",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "28",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Minnesota",
+    "efg": "B10",
+    "ts": "29",
+    "min_pct": ".429"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "99",
+    "usg": "Washington",
+    "efg": "B10",
+    "ts": "27",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "61.2",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".394"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "99.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "24",
+    "min_pct": ".259"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Michigan",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".321"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "78",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".281"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "San Jose St.",
+    "efg": "MWC",
+    "ts": "25",
+    "min_pct": ".388"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".355"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Vanderbilt",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".368"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "25",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Texas Tech",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".458"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "94.4",
+    "usg": "BYU",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".424"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "92.2",
+    "usg": "Tarleton St.",
+    "efg": "WAC",
+    "ts": "18",
+    "min_pct": ".543"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "92.2",
+    "usg": "Iowa St.",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".502"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Indiana",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".384"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "96.8",
+    "usg": "Houston",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".378"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Gonzaga",
+    "efg": "WCC",
+    "ts": "27",
+    "min_pct": ".344"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "96.6",
+    "usg": "Alabama",
+    "efg": "SEC",
+    "ts": "26",
+    "min_pct": ".434"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Akron",
+    "efg": "MAC",
+    "ts": "28",
+    "min_pct": ".385"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Tennessee",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".343"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "78.8",
+    "usg": "Saint Mary's",
+    "efg": "WCC",
+    "ts": "30",
+    "min_pct": ".323"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "83.6",
+    "usg": "Wake Forest",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "56.4",
+    "usg": "UCLA",
+    "efg": "B10",
+    "ts": "28",
+    "min_pct": ".453"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "88.8",
+    "usg": "Baylor",
+    "efg": "B12",
+    "ts": "29",
+    "min_pct": ".393"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "85",
+    "usg": "N.C. State",
+    "efg": "ACC",
+    "ts": "30",
+    "min_pct": ".273"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "83",
+    "usg": "Nebraska",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".404"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "82.4",
+    "usg": "Texas",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".346"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Bellarmine",
+    "efg": "ASun",
+    "ts": "30",
+    "min_pct": ".415"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "94",
+    "usg": "Illinois",
+    "efg": "B10",
+    "ts": "23",
+    "min_pct": ".300"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "45.4",
+    "usg": "Colorado",
+    "efg": "B12",
+    "ts": "30",
+    "min_pct": ".376"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Purdue",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".000"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "70.2",
+    "usg": "Wisconsin",
+    "efg": "B10",
+    "ts": "30",
+    "min_pct": ".333"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "85.2",
+    "usg": "North Carolina",
+    "efg": "ACC",
+    "ts": "28",
+    "min_pct": ".412"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Northern Colorado",
+    "efg": "BSky",
+    "ts": "26",
+    "min_pct": ".345"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "61.6",
+    "usg": "Florida",
+    "efg": "SEC",
+    "ts": "29",
+    "min_pct": ".338"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "95.8",
+    "usg": "Missouri",
+    "efg": "SEC",
+    "ts": "30",
+    "min_pct": ".325"
+  },
+  {
+    "name": "-",
+    "team": "Tennessee",
+    "ortg": "0",
+    "usg": "Yale",
+    "efg": "Ivy",
+    "ts": "24",
+    "min_pct": ".481"
+  }
+]

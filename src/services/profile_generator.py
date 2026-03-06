@@ -32,7 +32,7 @@ class ProfileGeneratorService:
         
         if self.gemini_key and genai:
             genai.configure(api_key=self.gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-3-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
         else:
             self.gemini_model = None
 
@@ -140,18 +140,36 @@ class ProfileGeneratorService:
         }
         
         # Pull real player stats if available (sorted by playing time/rank)
-        real_players = self.kp_client.get_player_stats_for_team(team_name, limit=12)
-        # Sort by minutes/min_pct if available in metrics
-        def get_min(p):
-            m = p.get('metrics', {}).get('cols', [])
-            h = p.get('metrics', {}).get('headers', [])
-            try:
-                idx = next(i for i, x in enumerate(h) if 'min' in x.lower())
-                return float(str(m[idx]).replace('%',''))
-            except:
-                return 0
+        real_players = []
         
-        real_players = sorted(real_players, key=get_min, reverse=True)[:6]
+        # Try to use scraped 2026 Torvik data first (to override bad KenPom DB data for top teams)
+        try:
+            with open("data/imports/torvik_top10_2026.json", "r") as f:
+                torvik_data = json.load(f)
+                torvik_team = [p for p in torvik_data if p["team"] == team_name]
+                if torvik_team:
+                    # Sort by min_pct DESC
+                    torvik_team = sorted(torvik_team, key=lambda x: float(str(x.get("min_pct", "0")).replace("%","")), reverse=True)
+                    # Format to match what the LLM expects
+                    real_players = [{"name": p["name"], "metrics": {"cols": [p.get("ortg"), p.get("usg"), p.get("efg"), p.get("ts"), p.get("min_pct")], "headers": ["O-Rating", "Usage", "eFG%", "TS%", "Min%"]}} for p in torvik_team][:6]
+        except Exception as e:
+            pass
+
+        if not real_players:
+            # Fallback to Database
+            real_players = self.kp_client.get_player_stats_for_team(team_name, limit=12)
+            # Sort by minutes/min_pct if available in metrics
+            def get_min(p):
+                m = p.get('metrics', {}).get('cols', [])
+                h = p.get('metrics', {}).get('headers', [])
+                try:
+                    idx = next(i for i, x in enumerate(h) if 'min' in x.lower())
+                    return float(str(m[idx]).replace('%',''))
+                except:
+                    return 0
+            
+            real_players = sorted(real_players, key=get_min, reverse=True)[:6]
+
 
         # 4. Generate Narrative & Player Stats via LLM
         prompt = f"""
@@ -210,7 +228,7 @@ class ProfileGeneratorService:
             print(f"[ProfileGen] Using Gemini fallback for {team_name}...")
             try:
                 import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key={self.gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
                 headers = {"Content-Type": "application/json"}
                 
                 # Gemini prompt needs slightly different handling for JSON
