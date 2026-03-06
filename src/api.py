@@ -3031,6 +3031,7 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
     Returns: { matchups: [ { event_id, home, away, home_kenpom, away_kenpom, home_torvik, away_torvik } ] }
     """
     from src.database import get_db_connection, _exec
+    from src.services.edge_engine_ncaab import build_team_mapper
 
     if not date:
         with get_db_connection() as conn:
@@ -3049,11 +3050,22 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
                 LIMIT 100
             """, (date,)).fetchall()
 
-            # Collect all unique team names
+            # Collect all unique team names using the standard mapper
+            map_team = build_team_mapper(conn)
             teams = set()
+            mapped_events = []
             for ev in events:
-                teams.add(ev['home_team'])
-                teams.add(ev['away_team'])
+                h_map = map_team(ev['home_team'])
+                a_map = map_team(ev['away_team'])
+                teams.add(h_map)
+                teams.add(a_map)
+                
+                # store the mapped names so we can look them up easily below
+                mapped_events.append({
+                    **dict(ev),
+                    '_mapped_home': h_map,
+                    '_mapped_away': a_map
+                })
 
             # Bulk fetch KenPom ratings
             kenpom_map = {}
@@ -3082,19 +3094,20 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
 
             # Build response
             matchups = []
-            for ev in events:
-                d = dict(ev)
-                st = d.get('start_time')
+            for ev in mapped_events:
+                st = ev.get('start_time')
                 if hasattr(st, 'isoformat'):
                     try:
                         import pytz
                         st = st.astimezone(pytz.utc).isoformat().replace('+00:00', 'Z')
                     except Exception:
                         st = st.isoformat()
-                home = d['home_team']
-                away = d['away_team']
-                hk = dict(kenpom_map.get(home) or {})
-                ak = dict(kenpom_map.get(away) or {})
+                home = ev['home_team']
+                away = ev['away_team']
+                h_map = ev['_mapped_home']
+                a_map = ev['_mapped_away']
+                hk = dict(kenpom_map.get(h_map) or {})
+                ak = dict(kenpom_map.get(a_map) or {})
                 # Remove datetime objects that aren't JSON serializable
                 for k in list(hk.keys()):
                     if hasattr(hk[k], 'isoformat'):
@@ -3110,8 +3123,8 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
                     'day_et': str(d.get('day_et', '')),
                     'home_kenpom': hk,
                     'away_kenpom': ak,
-                    'home_torvik': torvik_map.get(home, {}),
-                    'away_torvik': torvik_map.get(away, {}),
+                    'home_torvik': torvik_map.get(h_map, {}),
+                    'away_torvik': torvik_map.get(a_map, {}),
                 })
 
         return { 'date': date, 'matchups': matchups }
@@ -4439,7 +4452,6 @@ async def trigger_dedupe_model_predictions(request: Request, authorized: bool = 
 @app.api_route("/api/jobs/grade_predictions", methods=["GET", "POST"])
 async def trigger_prediction_grading(
     request: Request, 
-    background_tasks: BackgroundTasks,
     fast: bool = True, 
     backfill_days: int = 10, 
     max_clv_rows: int = 250, 
@@ -4447,38 +4459,37 @@ async def trigger_prediction_grading(
     skip_clv: bool = False, 
     authorized: bool = Depends(verify_cron_secret)
 ):
-    """Cron/manual: grade model_predictions using local game_results.
-
-    Uses BackgroundTasks to avoid Vercel 60s timeout limits.
-    """
-    def do_grade():
-        try:
-            from src.services.grading_service import GradingService
-            import time
-            start_t = time.time()
-            svc = GradingService()
-            if fast:
-                res = svc.grade_predictions(backfill_days=backfill_days, max_clv_rows=max_clv_rows, max_grade_rows=max_grade_rows, skip_clv=skip_clv)
-            else:
-                # Unbounded legacy behavior (use carefully)
-                res = svc.grade_predictions(backfill_days=10, max_clv_rows=2000, max_grade_rows=5000, skip_clv=skip_clv)
-            print(f"[JOB DONE] grade_predictions finished in {time.time() - start_t:.1f}s. Updates: {res}")
-        except Exception as e:
-            print(f"[JOB ERROR] Grading failed: {e}")
-
-    background_tasks.add_task(do_grade)
-    
-    return JSONResponse(
-        status_code=202,
-        content={
-            "status": "accepted",
-            "message": "Prediction grading pushed to background task.",
-            "params": {
-                "fast": fast,
-                "backfill_days": backfill_days
+    """Cron/manual: grade model_predictions using local game_results."""
+    try:
+        from src.services.grading_service import GradingService
+        import time
+        start_t = time.time()
+        svc = GradingService()
+        if fast:
+            res = svc.grade_predictions(backfill_days=backfill_days, max_clv_rows=max_clv_rows, max_grade_rows=max_grade_rows, skip_clv=skip_clv)
+        else:
+            # Unbounded legacy behavior
+            res = svc.grade_predictions(backfill_days=10, max_clv_rows=2000, max_grade_rows=5000, skip_clv=skip_clv)
+        
+        print(f"[JOB DONE] grade_predictions finished in {time.time() - start_t:.1f}s. Updates: {res}")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "message": "Prediction grading completed successfully.",
+                "results": res,
+                "params": {
+                    "fast": fast,
+                    "backfill_days": backfill_days
+                }
             }
-        }
-    )
+        )
+    except Exception as e:
+        print(f"[JOB ERROR] Grading failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Grading failed: {e}"}
+        )
 
 
 @app.api_route("/api/jobs/build_daily_top_picks", methods=["GET", "POST"])
@@ -4591,21 +4602,11 @@ async def trigger_build_daily_top_picks(
 @app.api_route("/api/jobs/run_council_today", methods=["GET", "POST"])
 async def trigger_run_council_today(
     request: Request,
-    background_tasks: BackgroundTasks,
     date: Optional[str] = None,
     mode: str = "agents",
     authorized: bool = Depends(verify_cron_secret),
 ):
-    """Cron/manual: Runs the Agent Council on today's actionable top picks.
-    
-    This invokes the Oracle Agent, Memory Agent, and Research Agent on games where
-    the quantitative model found an edge, stores the qualitative debate to decision_runs,
-    and then re-runs the Top Picks builder to apply the qualitative adjustments.
-
-    Modes:
-    - default: Runs the legacy run_council_today script.
-    - agents: Runs the full DecisionOrchestrator pipeline.
-    """
+    """Cron/manual: Runs the Agent Council on today's actionable top picks."""
     if not settings.GEMINI_API_KEY:
         error_msg = "GEMINI_API_KEY missing. Please add to Vercel Dashboard and REDEPLOY."
         print(f"[JOB ERROR] {error_msg}")
@@ -4625,47 +4626,43 @@ async def trigger_run_council_today(
             from src.agents.memory_agent import MemoryAgent
             from src.agents.oracle_agent import OracleAgent
 
-            def do_run_orchestrator():
-                try:
-                    orchestrator = DecisionOrchestrator(league="NCAAM", model_version="agent_v1")
-                    orchestrator.run_pipeline(
-                        event_ops_agent=EventOpsAgent(),
-                        market_data_agent=MarketDataAgent(),
-                        pricing_agent=PricingAgentNCAAM(),
-                        edge_ev_agent=EdgeEVAgent(),
-                        risk_manager_agent=RiskManagerAgent(),
-                        bet_builder_agent=BetBuilderAgent(),
-                        research_agent=ResearchAgent(),
-                        memory_agent=MemoryAgent(),
-                        oracle_agent=OracleAgent(),
-                        journal_agent=JournalAgent(),
-                        parameters={"mode": "manual_trigger", "date": date}
-                    )
-                    print(f"[JOB SUCCESS] DecisionOrchestrator completed for date={date or 'today'}")
-                except Exception as e:
-                    print(f"[JOB ERROR] Background DecisionOrchestrator failed: {e}")
+            try:
+                orchestrator = DecisionOrchestrator(league="NCAAM", model_version="agent_v1")
+                orchestrator.run_pipeline(
+                    event_ops_agent=EventOpsAgent(),
+                    market_data_agent=MarketDataAgent(),
+                    pricing_agent=PricingAgentNCAAM(),
+                    edge_ev_agent=EdgeEVAgent(),
+                    risk_manager_agent=RiskManagerAgent(),
+                    bet_builder_agent=BetBuilderAgent(),
+                    research_agent=ResearchAgent(),
+                    memory_agent=MemoryAgent(),
+                    oracle_agent=OracleAgent(),
+                    journal_agent=JournalAgent(),
+                    parameters={"mode": "manual_trigger", "date": date}
+                )
+                print(f"[JOB SUCCESS] DecisionOrchestrator completed for date={date or 'today'}")
+                return {
+                    "status": "success",
+                    "message": "Full Agent Orchestrator job completed."
+                }
+            except Exception as e:
+                print(f"[JOB ERROR] DecisionOrchestrator failed: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
-            background_tasks.add_task(do_run_orchestrator)
-            return {
-                "status": "success",
-                "message": "Full Agent Orchestrator job queued in background."
-            }
         else:
             from src.scripts.run_council_today import main as run_council
             
-            def do_run():
-                try:
-                    run_council()
-                    print(f"[JOB SUCCESS] Agent Council completed for date={date or 'today'}")
-                except Exception as e:
-                    print(f"[JOB ERROR] Background run_council_today failed: {e}")
-
-            background_tasks.add_task(do_run)
-
-            return {
-                "status": "success",
-                "message": "Agent Council job queued in background."
-            }
+            try:
+                run_council()
+                print(f"[JOB SUCCESS] Agent Council completed for date={date or 'today'}")
+                return {
+                    "status": "success",
+                    "message": "Agent Council job completed."
+                }
+            except Exception as e:
+                print(f"[JOB ERROR] run_council_today failed: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         print(f"[JOB ERROR] run_council_today failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

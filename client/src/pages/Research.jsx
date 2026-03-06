@@ -611,15 +611,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                         <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                         Refresh Board
                     </button>
-                    <button
-                        onClick={() => setActiveTab('march')}
-                        className={`px-4 py-2 text-sm font-semibold rounded-xl transition ${activeTab === 'march' ? 'bg-orange-600/80 text-white shadow-sm ring-1 ring-orange-400/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                    >
-                        🏀 March Madness
-                    </button>
-
-
-
                 </div>
             </div>
 
@@ -645,945 +636,801 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                         Model Performance
                     </button>
                 </div>
-            )}
+            )
+            }
 
 
-            {/* ── March Madness Tab ── */}
-            {activeTab === 'march' && (() => {
-                const SELECTION_SUNDAY = new Date('2026-03-15T00:00:00-05:00');
-                const now = new Date();
-                const daysToTourney = Math.max(0, Math.ceil((SELECTION_SUNDAY - now) / (1000 * 60 * 60 * 24)));
-                const tourneyStarted = now >= SELECTION_SUNDAY;
 
-                const mmPicks = Object.entries(rowTopPicks || {})
-                    .filter(([eid, meta]) => {
-                        if (!meta?.isActionable || !meta?.rec) return false;
-                        const bt = String(meta.rec.bet_type || '').toUpperCase();
-                        const sel = String(meta.rec.selection || '').trim();
-                        if (!bt || bt === 'AUTO' || !sel || sel === '—') return false;
-                        const ev = meta?.event || {};
-                        const dayEt = ev?.day_et || '';
-                        if (dayEt) return String(dayEt) === String(selectedDate);
-                        if (ev?.start_time) {
-                            try {
-                                const d = new Date(ev.start_time);
-                                return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === String(selectedDate);
-                            } catch (e) { return false; }
-                        }
-                        return false;
-                    })
-                    .map(([eid, meta]) => ({ eid, meta }))
-                    .sort((a, b) => {
-                        const aEv = Number(String(a.meta.rec?.edge ?? '').replace('%', '')) || 0;
-                        const bEv = Number(String(b.meta.rec?.edge ?? '').replace('%', '')) || 0;
-                        return bEv - aEv;
-                    });
 
-                return (
-                    <div className="p-6">
-                        {/* Tournament countdown / header */}
-                        <div className="mb-6 rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #7c2d12 0%, #9a3412 40%, #1e293b 100%)' }}>
-                            <div className="px-6 py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                                <div>
-                                    <div className="text-xs font-bold text-orange-300 uppercase tracking-widest mb-1">NCAA Tournament 2026</div>
-                                    <div className="text-xl font-black text-white">
-                                        {tourneyStarted ? '🏀 Tournament is Live!' : `${daysToTourney} day${daysToTourney !== 1 ? 's' : ''} to Selection Sunday`}
-                                    </div>
-                                    <div className="text-sm text-orange-200/70 mt-1">
-                                        {tourneyStarted ? 'Showing actionable tournament picks for ' + selectedDate : 'Showing conference tournament picks for ' + selectedDate + ' · Selection Sunday: Mar 15'}
-                                    </div>
-                                </div>
-                                <div className="text-right shrink-0">
-                                    <div className="text-3xl font-black text-orange-300">{mmPicks.length}</div>
-                                    <div className="text-xs text-orange-200/60 uppercase tracking-wide">Actionable Picks</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Pick cards */}
-                        {mmPicks.length === 0 ? (
-                            <div className="text-center py-12">
-                                <div className="text-4xl mb-3">🏀</div>
-                                <div className="text-slate-300 font-semibold text-lg mb-1">No picks for {selectedDate}</div>
-                                <div className="text-slate-500 text-sm">The model found no edge on today's slate. Check back tomorrow.</div>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {mmPicks.map(({ eid, meta }, i) => {
-                                    const rec = meta.rec;
-                                    const ev = meta.event || {};
-                                    const evPct = Number(String(rec.edge || '').replace('%', '')) || 0;
-                                    const confLabel = rec.confidence || 'Medium';
-                                    const confColor = confLabel === 'High' ? 'text-emerald-400' : confLabel === 'Medium' ? 'text-yellow-400' : 'text-slate-400';
-                                    const confBg = confLabel === 'High' ? 'bg-emerald-500/10 border-emerald-500/20' : confLabel === 'Medium' ? 'bg-yellow-500/10 border-yellow-500/20' : 'bg-slate-500/10 border-slate-500/20';
-
-                                    const profile = matchupProfiles[eid] || {};
-                                    const hk = profile.home_kenpom || {};
-                                    const ak = profile.away_kenpom || {};
-
-                                    return (
-                                        <div key={eid} className="relative rounded-2xl border border-slate-700/50 bg-slate-800/60 p-5 hover:border-orange-500/40 hover:bg-slate-800/80 transition-all flex flex-col">
-                                            {/* Rank badge */}
-                                            <div className="absolute top-4 right-4 w-7 h-7 rounded-full bg-orange-600/20 border border-orange-500/30 flex items-center justify-center text-xs font-black text-orange-300">#{i + 1}</div>
-
-                                            {/* Matchup Header */}
-                                            <div className="mb-4 pr-8">
-                                                <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Matchup</div>
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className="text-sm font-semibold text-slate-200">{ev.away_team || '—'}</span>
-                                                    {ak.rank && <span className="text-[10px] text-slate-500 font-mono">#{ak.rank}</span>}
-                                                </div>
-                                                <div className="text-xs text-slate-500 mb-1 leading-none">@</div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-semibold text-slate-200">{ev.home_team || '—'}</span>
-                                                    {hk.rank && <span className="text-[10px] text-slate-500 font-mono">#{hk.rank}</span>}
-                                                </div>
-                                            </div>
-
-                                            {/* Team Profiles (KenPom) */}
-                                            <div className="grid grid-cols-2 gap-3 mb-4 p-3 rounded-xl bg-slate-900/50 border border-slate-700/30 text-xs">
-                                                <div>
-                                                    <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">{ev.away_team || 'Away'}</div>
-                                                    <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjEM</span><span className="font-mono text-slate-300">{ak.adj_em ? `+${ak.adj_em}` : '—'}</span></div>
-                                                    <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjO</span><span className="font-mono text-slate-300">{ak.adj_o || '—'}</span></div>
-                                                    <div className="flex justify-between items-center"><span className="text-slate-500">AdjD</span><span className="font-mono text-slate-300">{ak.adj_d || '—'}</span></div>
-                                                </div>
-                                                <div className="pl-3 border-l border-slate-700/50">
-                                                    <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">{ev.home_team || 'Home'}</div>
-                                                    <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjEM</span><span className="font-mono text-slate-300">{hk.adj_em ? `+${hk.adj_em}` : '—'}</span></div>
-                                                    <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjO</span><span className="font-mono text-slate-300">{hk.adj_o || '—'}</span></div>
-                                                    <div className="flex justify-between items-center"><span className="text-slate-500">AdjD</span><span className="font-mono text-slate-300">{hk.adj_d || '—'}</span></div>
-                                                </div>
-                                            </div>
-
-                                            <div className="flex-1"></div>
-
-                                            {/* Pick */}
-                                            <div className="mb-3 pt-3 border-t border-slate-700/50">
-                                                <div className="text-[11px] text-orange-400/80 uppercase tracking-wider mb-1 font-bold">Model Pick</div>
-                                                <div className="flex justify-between items-end">
-                                                    <div>
-                                                        <div className="text-base font-black text-white">{rec.bet_type}: {rec.selection}</div>
-                                                        {rec.market_line != null && (
-                                                            <div className="text-xs text-slate-400 mt-0.5">{rec.price > 0 ? '+' : ''}{rec.price}</div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Stats row */}
-                                            <div className="flex items-center gap-3">
-                                                <div className="flex-1">
-                                                    <div className="text-[10px] text-slate-500 mb-0.5">EV</div>
-                                                    <div className="text-sm font-black text-emerald-400">+{evPct.toFixed(1)}%</div>
-                                                </div>
-                                                {rec.win_prob != null && (
-                                                    <div className="flex-1">
-                                                        <div className="text-[10px] text-slate-500 mb-0.5">Win Prob</div>
-                                                        <div className="text-sm font-bold text-slate-200">{(rec.win_prob * 100).toFixed(0)}%</div>
-                                                    </div>
-                                                )}
-                                                <div className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold uppercase ${confBg} ${confColor}`}>
-                                                    {confLabel}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                );
-            })()}
-
-            {activeTab === 'live' && (
-                <>
-                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4">
-                        <div className="flex flex-wrap items-center gap-3">
-                            {/* League Filter */}
-                            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 focus-within:border-blue-500/50 transition-all w-full sm:w-auto">
-                                <Filter size={14} className="text-slate-500 mr-2" />
-                                <select
-                                    value={leagueFilter}
-                                    onChange={(e) => setLeagueFilter(e.target.value)}
-                                    className="bg-transparent text-sm font-medium focus:outline-none cursor-pointer w-full"
-                                >
-                                    <option value="NCAAM">NCAAM</option>
-                                    <option value="NFL">NFL</option>
-                                    <option value="EPL">EPL</option>
-                                </select>
-                            </div>
-
-                            {/* Date Navigation */}
-                            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-1 py-1 w-full sm:w-auto">
-                                <button onClick={() => shiftDate(-1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                                    ←
-                                </button>
-                                <input
-                                    type="date"
-                                    value={selectedDate}
-                                    onChange={(e) => setSelectedDate(e.target.value)}
-                                    className="bg-transparent text-sm font-bold text-center w-32 sm:w-32 focus:outline-none text-white appearance-none"
-                                />
-                                <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                                    →
-                                </button>
-                                <button onClick={() => setSelectedDate(getTodayStr())} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
-                                    Today
-                                </button>
-                            </div>
-
-                            {/* Board tabs + Data health */}
-                            <div className="inline-flex items-center gap-2">
-                                <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950/30 border border-slate-700/40">
-                                    <button
-                                        onClick={() => setBoardTab('recommended')}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${boardTab === 'recommended'
-                                            ? 'bg-slate-800/70 text-slate-100 border-white/10 shadow-sm'
-                                            : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800/40 hover:text-slate-200'
-                                            }`}
+            {
+                activeTab === 'live' && (
+                    <>
+                        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4">
+                            <div className="flex flex-wrap items-center gap-3">
+                                {/* League Filter */}
+                                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 focus-within:border-blue-500/50 transition-all w-full sm:w-auto">
+                                    <Filter size={14} className="text-slate-500 mr-2" />
+                                    <select
+                                        value={leagueFilter}
+                                        onChange={(e) => setLeagueFilter(e.target.value)}
+                                        className="bg-transparent text-sm font-medium focus:outline-none cursor-pointer w-full"
                                     >
-                                        Recommended
+                                        <option value="NCAAM">NCAAM</option>
+                                        <option value="NFL">NFL</option>
+                                        <option value="EPL">EPL</option>
+                                    </select>
+                                </div>
+
+                                {/* Date Navigation */}
+                                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-1 py-1 w-full sm:w-auto">
+                                    <button onClick={() => shiftDate(-1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
+                                        ←
                                     </button>
-                                    <button
-                                        onClick={() => setBoardTab('full')}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${boardTab === 'full'
-                                            ? 'bg-slate-800/70 text-slate-100 border-white/10 shadow-sm'
-                                            : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800/40 hover:text-slate-200'
-                                            }`}
-                                    >
-                                        Full board
+                                    <input
+                                        type="date"
+                                        value={selectedDate}
+                                        onChange={(e) => setSelectedDate(e.target.value)}
+                                        className="bg-transparent text-sm font-bold text-center w-32 sm:w-32 focus:outline-none text-white appearance-none"
+                                    />
+                                    <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
+                                        →
+                                    </button>
+                                    <button onClick={() => setSelectedDate(getTodayStr())} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
+                                        Today
                                     </button>
                                 </div>
 
-                                {/* Data health shield (hover) */}
-                                {(() => {
-                                    let tooltip = 'System status';
-                                    let iconStatus = 'unknown';
-                                    try {
-                                        const fmtTime = (t) => {
-                                            if (!t) return '—';
-                                            try { return new Date(t).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', month: '2-digit', day: '2-digit' }); } catch { return String(t); }
-                                        };
+                                {/* Board tabs + Data health */}
+                                <div className="inline-flex items-center gap-2">
+                                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950/30 border border-slate-700/40">
+                                        <button
+                                            onClick={() => setBoardTab('recommended')}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${boardTab === 'recommended'
+                                                ? 'bg-slate-800/70 text-slate-100 border-white/10 shadow-sm'
+                                                : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800/40 hover:text-slate-200'
+                                                }`}
+                                        >
+                                            Recommended
+                                        </button>
+                                        <button
+                                            onClick={() => setBoardTab('full')}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${boardTab === 'full'
+                                                ? 'bg-slate-800/70 text-slate-100 border-white/10 shadow-sm'
+                                                : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800/40 hover:text-slate-200'
+                                                }`}
+                                        >
+                                            Full board
+                                        </button>
+                                    </div>
 
-                                        // Filter out seasonal NFL rows (no longer relevant)
-                                        const items = (dataHealth || []).filter((x) => x && x.source && !String(x.source).includes('NFL'));
-                                        const by = {};
-                                        items.forEach((x) => { if (x?.source) by[x.source] = x; });
-
-                                        const hasErr = items.some((x) => x?.status === 'error');
-                                        const hasStale = items.some((x) => x?.status === 'stale');
-                                        const hasAlert = items.some((x) => x?.status === 'alert');
-
-                                        // Icon semantics:
-                                        // - error => red
-                                        // - stale => amber
-                                        // - alert => amber (warning)
-                                        // - ok => green
-                                        if (hasErr) iconStatus = 'error';
-                                        else if (hasStale) iconStatus = 'stale';
-                                        else if (hasAlert) iconStatus = 'alert';
-                                        else if (items.length) iconStatus = 'ok';
-                                        else iconStatus = 'unknown';
-
-                                        const ageMin = (t) => {
-                                            if (!t) return null;
-                                            try {
-                                                const ms = (new Date(t)).getTime();
-                                                if (!ms) return null;
-                                                return Math.round((Date.now() - ms) / 60000);
-                                            } catch {
-                                                return null;
-                                            }
-                                        };
-
-                                        const shortLine = (src) => {
-                                            const x = by[src];
-                                            if (!x) return `${src}: —`;
-                                            const st = x.status || '—';
-                                            const t = fmtTime(x.last_success_at);
-                                            const m = ageMin(x.last_success_at);
-                                            const ago = (m !== null && m >= 0) ? ` • ${m}m ago` : '';
-                                            return `${src}: ${st} (${t})${ago}`;
-                                        };
-
-                                        // Plain English summary (do NOT say "job failing" unless error)
-                                        if (iconStatus === 'ok') tooltip += `\nOK — everything updating.`;
-                                        else if (iconStatus === 'alert') tooltip += `\nWarning — coverage looks thin (not a failure).`;
-                                        else if (iconStatus === 'stale') tooltip += `\nStale — data not updating recently.`;
-                                        else if (iconStatus === 'error') tooltip += `\nError — one or more jobs failed.`;
-                                        else tooltip += `\nUnknown — no health data yet.`;
-
-                                        const boardKey = (leagueFilter === 'EPL') ? 'board:EPL' : 'board:NCAAM';
-                                        const key = ['odds', 'torvik', 'kenpom', boardKey];
-                                        tooltip += `\n\nKey sources:`;
-                                        tooltip += `\n- ${key.map(shortLine).join('\n- ')}`;
-
-                                        const problems = items
-                                            .filter((x) => x?.status && x.status !== 'ok')
-                                            .slice();
-
-                                        const note = (x) => {
-                                            if (!x?.notes) return '';
-                                            const s = String(x.notes);
-                                            return s.length > 140 ? (s.slice(0, 140) + '…') : s;
-                                        };
-
-                                        if (problems.length) {
-                                            const errs = problems.filter((x) => x.status === 'error');
-                                            const stales = problems.filter((x) => x.status === 'stale');
-                                            const alerts = problems.filter((x) => x.status === 'alert');
-
-                                            if (errs.length) {
-                                                tooltip += `\n\nErrors (jobs failing):`;
-                                                errs.slice(0, 6).forEach((x) => {
-                                                    tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)}): ${note(x) || 'error'}`;
-                                                });
-                                            }
-                                            if (stales.length) {
-                                                tooltip += `\n\nStale (no recent data):`;
-                                                stales.slice(0, 6).forEach((x) => {
-                                                    tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)})${note(x) ? ` — ${note(x)}` : ''}`;
-                                                });
-                                            }
-                                            if (alerts.length) {
-                                                tooltip += `\n\nWarnings (coverage):`;
-                                                alerts.slice(0, 6).forEach((x) => {
-                                                    tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)})${note(x) ? ` — ${note(x)}` : ''}`;
-                                                });
-                                            }
-                                        }
-
+                                    {/* Data health shield (hover) */}
+                                    {(() => {
+                                        let tooltip = 'System status';
+                                        let iconStatus = 'unknown';
                                         try {
-                                            const matched = (edges || []).filter((e) => (rowTopPicks?.[e?.id]?.rec)).length;
-                                            const tp = topPicksStats || {};
-                                            tooltip += `\n\nPicks:`
-                                                + ` games=${edges.length}`
-                                                + ` picks=${tp.withPick || 0}`
-                                                + ` actionable=${tp.actionable || 0}`
-                                                + ` matched=${matched}`
-                                                + (topPicksError ? `\nTop-picks error: ${String(topPicksError).slice(0, 140)}` : '');
-                                        } catch { }
+                                            const fmtTime = (t) => {
+                                                if (!t) return '—';
+                                                try { return new Date(t).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', month: '2-digit', day: '2-digit' }); } catch { return String(t); }
+                                            };
 
-                                    } catch {
-                                        // ignore
-                                    }
+                                            // Filter out seasonal NFL rows (no longer relevant)
+                                            const items = (dataHealth || []).filter((x) => x && x.source && !String(x.source).includes('NFL'));
+                                            const by = {};
+                                            items.forEach((x) => { if (x?.source) by[x.source] = x; });
 
-                                    const Icon = (iconStatus === 'ok') ? ShieldCheck : (iconStatus === 'error') ? ShieldAlert : (iconStatus === 'stale' || iconStatus === 'alert') ? ShieldAlert : Shield;
-                                    const color = (iconStatus === 'ok') ? 'text-emerald-400' : (iconStatus === 'error') ? 'text-red-400' : (iconStatus === 'stale' || iconStatus === 'alert') ? 'text-amber-300' : 'text-slate-400';
+                                            const hasErr = items.some((x) => x?.status === 'error');
+                                            const hasStale = items.some((x) => x?.status === 'stale');
+                                            const hasAlert = items.some((x) => x?.status === 'alert');
 
-                                    return (
-                                        <span className="inline-flex items-center">
-                                            <span
-                                                className="inline-flex items-center cursor-help"
-                                                onMouseEnter={(e) => {
-                                                    try {
-                                                        const r = e.currentTarget.getBoundingClientRect();
-                                                        const maxW = 560;
-                                                        const pad = 12;
-                                                        const x = Math.max(pad, Math.min(r.left, window.innerWidth - maxW - pad));
-                                                        const y = Math.max(pad, Math.min(r.bottom + 8, window.innerHeight - 320));
-                                                        if (dhHideTimer) { clearTimeout(dhHideTimer); setDhHideTimer(null); }
-                                                        setDhTip({ open: true, pinned: false, x, y, text: tooltip });
-                                                    } catch {
-                                                        if (dhHideTimer) { clearTimeout(dhHideTimer); setDhHideTimer(null); }
-                                                        setDhTip({ open: true, pinned: false, x: 16, y: 16, text: tooltip });
-                                                    }
-                                                }}
-                                                onClick={() => setDhTip((p) => ({ ...p, open: true, pinned: !p?.pinned, text: tooltip }))}
-                                                onMouseLeave={() => {
-                                                    if (dhTip?.pinned) return;
-                                                    const t = setTimeout(() => setDhTip((p) => ({ ...p, open: false })), 350);
-                                                    setDhHideTimer(t);
-                                                }}
-                                            >
-                                                <Icon size={16} className={color} />
-                                            </span>
-                                        </span>
-                                    );
-                                })()}
-                            </div>
-                        </div>
-                    </div>
+                                            // Icon semantics:
+                                            // - error => red
+                                            // - stale => amber
+                                            // - alert => amber (warning)
+                                            // - ok => green
+                                            if (hasErr) iconStatus = 'error';
+                                            else if (hasStale) iconStatus = 'stale';
+                                            else if (hasAlert) iconStatus = 'alert';
+                                            else if (items.length) iconStatus = 'ok';
+                                            else iconStatus = 'unknown';
 
-                    <div className="bg-slate-900/40 rounded-2xl border border-slate-700/40 shadow-xl overflow-hidden">
-
-                        {loading && (
-                            <div className="flex flex-col justify-center items-center py-20 bg-slate-800/50">
-                                <RefreshCw className="animate-spin text-blue-500 mb-4" size={32} />
-                                <span className="text-slate-400 font-medium tracking-wide">Crunching Monte Carlo & Poisson Sims...</span>
-                            </div>
-                        )}
-
-                        {error && (
-                            <div className="m-6 p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-200 flex items-center">
-                                <AlertCircle className="mr-3 text-red-400" size={20} />
-                                {error}
-                            </div>
-                        )}
-
-                        {degradedMode && (
-                            <div className="m-6 p-4 bg-amber-900/20 border border-amber-500/40 rounded-lg text-amber-100 flex items-start">
-                                <ShieldAlert className="mr-3 mt-0.5 text-amber-300" size={20} />
-                                <div>
-                                    <div className="font-semibold">Stale slate — latest full run produced NO BETS. Showing last cached picks.</div>
-                                    {degradedAsOf && (
-                                        <div className="text-xs text-amber-200/80 mt-1">As-of: {new Date(degradedAsOf).toLocaleString()}</div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {!loading && !error && edges.length === 0 && (
-                            <div className="text-center py-20 text-slate-500 flex flex-col items-center">
-                                <div className="p-4 bg-slate-700/30 rounded-full mb-4">
-                                    <RefreshCw size={24} className="text-slate-600" />
-                                </div>
-                                <p>No active games found in current slate.</p>
-                            </div>
-                        )}
-
-                        {/* (Removed) Historical Top Model Picks summary to reduce duplication. */}
-
-                        {!loading && leagueFilter === 'NCAAM' && edges.length > 0 && (
-                            <div className="px-6 pt-6">
-                                {(() => {
-                                    // Show actionable edges up top (these are the actual "bets with an edge" today)
-                                    // sourced from server-computed daily_top_picks.
-                                    const isSameEtDay = (ts, ymd) => {
-                                        if (!ts || !ymd) return false;
-                                        try {
-                                            const d = new Date(ts);
-                                            const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                            return s === ymd;
-                                        } catch (e) {
-                                            return false;
-                                        }
-                                    };
-
-                                    const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
-                                    const makeKey = (dayEt, away, home) => {
-                                        const d = String(dayEt || '').slice(0, 10);
-                                        const a = norm(away);
-                                        const h = norm(home);
-                                        if (!d || !a || !h) return null;
-                                        return `${d}|${a}|${h}`;
-                                    };
-
-                                    const actionableAll = getProcessedEdges()
-                                        .map((e) => {
-                                            const direct = rowTopPicks?.[e.id] || null;
-                                            const k = makeKey(e?.day_et, e?.away_team, e?.home_team);
-                                            const fallback = (k && rowTopPicksByKey?.[k]) ? rowTopPicksByKey[k] : null;
-                                            const meta = direct || fallback;
-                                            return { edge: e, top: meta?.rec || null, meta };
-                                        })
-                                        .filter(({ edge, top, meta }) => {
-                                            if (!top || !meta?.isActionable) return false;
-                                            // match selected ET date
-                                            if (edge?.day_et) return String(edge.day_et) === String(selectedDate);
-                                            return isSameEtDay(edge?.start_time, selectedDate);
-                                        })
-                                        .sort((a, b) => {
-                                            const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                            const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                            return bEv - aEv;
-                                        });
-
-                                    const spreadTop = actionableAll.filter((x) => String(x?.top?.bet_type || '').toUpperCase() === 'SPREAD').slice(0, 5);
-                                    const totalTop = actionableAll.filter((x) => String(x?.top?.bet_type || '').toUpperCase() === 'TOTAL').slice(0, 5);
-
-                                    const topOverall = [...spreadTop, ...totalTop]
-                                        .slice()
-                                        .sort((a, b) => {
-                                            const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                            const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                            return bEv - aEv;
-                                        })
-                                        .slice(0, 5);
-
-                                    const actionable = topOverall;
-
-                                    const fmtPick = (edge, top) => {
-                                        let pickText = String(top.selection || '').trim();
-                                        try {
-                                            if (top.bet_type === 'SPREAD') {
-                                                if (/^home\b/i.test(pickText)) pickText = pickText.replace(/^home\b/i, edge.home_team);
-                                                if (/^away\b/i.test(pickText)) pickText = pickText.replace(/^away\b/i, edge.away_team);
-                                            }
-                                            if (top.bet_type === 'TOTAL') pickText = pickText.toUpperCase();
-                                        } catch (e) { }
-                                        return pickText;
-                                    };
-
-                                    // Removed per request: the "Today's edges" tile was duplicative with the main recommended picks.
-                                    return null;
-                                })()}
-                            </div>
-                        )}
-
-                        {!loading && edges.length > 0 && boardTab === 'recommended' && (
-                            <div className="p-6">
-
-                                {/* Top 5 Plays + full recommended table (IIFE) */}
-                                {(() => {
-                                    const isSameEtDay = (ts, ymd) => {
-                                        if (!ts || !ymd) return false;
-                                        try {
-                                            const d = new Date(ts);
-                                            const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                            return s === ymd;
-                                        } catch (e) {
-                                            return false;
-                                        }
-                                    };
-
-                                    // Build Top-5 rows directly from stored daily_top_picks (rowTopPicks).
-                                    // This decouples display from live board odds: if the morning model run
-                                    // found an edge, show it — no live odds required.
-                                    // If the evening run removes the edge (is_actionable=false), it disappears.
-                                    const rows = (() => {
-                                        const picks = rowTopPicks || {};
-                                        return Object.entries(picks)
-                                            .filter(([eid, meta]) => {
-                                                if (!meta?.isActionable) return false;
-                                                const top = meta?.rec;
-                                                if (!top) return false;
-                                                const bt = String(top.bet_type || '').toUpperCase();
-                                                const sel = String(top.selection || '').trim();
-                                                if (!bt || bt === 'AUTO') return false;
-                                                if (!sel || sel === '—') return false;
-                                                // Match selected ET date using event metadata stored in the pick
-                                                const ev = meta?.event || {};
-                                                const dayEt = ev?.day_et || '';
-                                                if (dayEt) return String(dayEt) === String(selectedDate);
-                                                // Fallback: parse start_time
-                                                if (ev?.start_time) {
-                                                    try {
-                                                        const d = new Date(ev.start_time);
-                                                        const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                                        return s === String(selectedDate);
-                                                    } catch (e) { return false; }
+                                            const ageMin = (t) => {
+                                                if (!t) return null;
+                                                try {
+                                                    const ms = (new Date(t)).getTime();
+                                                    if (!ms) return null;
+                                                    return Math.round((Date.now() - ms) / 60000);
+                                                } catch {
+                                                    return null;
                                                 }
+                                            };
+
+                                            const shortLine = (src) => {
+                                                const x = by[src];
+                                                if (!x) return `${src}: —`;
+                                                const st = x.status || '—';
+                                                const t = fmtTime(x.last_success_at);
+                                                const m = ageMin(x.last_success_at);
+                                                const ago = (m !== null && m >= 0) ? ` • ${m}m ago` : '';
+                                                return `${src}: ${st} (${t})${ago}`;
+                                            };
+
+                                            // Plain English summary (do NOT say "job failing" unless error)
+                                            if (iconStatus === 'ok') tooltip += `\nOK — everything updating.`;
+                                            else if (iconStatus === 'alert') tooltip += `\nWarning — coverage looks thin (not a failure).`;
+                                            else if (iconStatus === 'stale') tooltip += `\nStale — data not updating recently.`;
+                                            else if (iconStatus === 'error') tooltip += `\nError — one or more jobs failed.`;
+                                            else tooltip += `\nUnknown — no health data yet.`;
+
+                                            const boardKey = (leagueFilter === 'EPL') ? 'board:EPL' : 'board:NCAAM';
+                                            const key = ['odds', 'torvik', 'kenpom', boardKey];
+                                            tooltip += `\n\nKey sources:`;
+                                            tooltip += `\n- ${key.map(shortLine).join('\n- ')}`;
+
+                                            const problems = items
+                                                .filter((x) => x?.status && x.status !== 'ok')
+                                                .slice();
+
+                                            const note = (x) => {
+                                                if (!x?.notes) return '';
+                                                const s = String(x.notes);
+                                                return s.length > 140 ? (s.slice(0, 140) + '…') : s;
+                                            };
+
+                                            if (problems.length) {
+                                                const errs = problems.filter((x) => x.status === 'error');
+                                                const stales = problems.filter((x) => x.status === 'stale');
+                                                const alerts = problems.filter((x) => x.status === 'alert');
+
+                                                if (errs.length) {
+                                                    tooltip += `\n\nErrors (jobs failing):`;
+                                                    errs.slice(0, 6).forEach((x) => {
+                                                        tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)}): ${note(x) || 'error'}`;
+                                                    });
+                                                }
+                                                if (stales.length) {
+                                                    tooltip += `\n\nStale (no recent data):`;
+                                                    stales.slice(0, 6).forEach((x) => {
+                                                        tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)})${note(x) ? ` — ${note(x)}` : ''}`;
+                                                    });
+                                                }
+                                                if (alerts.length) {
+                                                    tooltip += `\n\nWarnings (coverage):`;
+                                                    alerts.slice(0, 6).forEach((x) => {
+                                                        tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)})${note(x) ? ` — ${note(x)}` : ''}`;
+                                                    });
+                                                }
+                                            }
+
+                                            try {
+                                                const matched = (edges || []).filter((e) => (rowTopPicks?.[e?.id]?.rec)).length;
+                                                const tp = topPicksStats || {};
+                                                tooltip += `\n\nPicks:`
+                                                    + ` games=${edges.length}`
+                                                    + ` picks=${tp.withPick || 0}`
+                                                    + ` actionable=${tp.actionable || 0}`
+                                                    + ` matched=${matched}`
+                                                    + (topPicksError ? `\nTop-picks error: ${String(topPicksError).slice(0, 140)}` : '');
+                                            } catch { }
+
+                                        } catch {
+                                            // ignore
+                                        }
+
+                                        const Icon = (iconStatus === 'ok') ? ShieldCheck : (iconStatus === 'error') ? ShieldAlert : (iconStatus === 'stale' || iconStatus === 'alert') ? ShieldAlert : Shield;
+                                        const color = (iconStatus === 'ok') ? 'text-emerald-400' : (iconStatus === 'error') ? 'text-red-400' : (iconStatus === 'stale' || iconStatus === 'alert') ? 'text-amber-300' : 'text-slate-400';
+
+                                        return (
+                                            <span className="inline-flex items-center">
+                                                <span
+                                                    className="inline-flex items-center cursor-help"
+                                                    onMouseEnter={(e) => {
+                                                        try {
+                                                            const r = e.currentTarget.getBoundingClientRect();
+                                                            const maxW = 560;
+                                                            const pad = 12;
+                                                            const x = Math.max(pad, Math.min(r.left, window.innerWidth - maxW - pad));
+                                                            const y = Math.max(pad, Math.min(r.bottom + 8, window.innerHeight - 320));
+                                                            if (dhHideTimer) { clearTimeout(dhHideTimer); setDhHideTimer(null); }
+                                                            setDhTip({ open: true, pinned: false, x, y, text: tooltip });
+                                                        } catch {
+                                                            if (dhHideTimer) { clearTimeout(dhHideTimer); setDhHideTimer(null); }
+                                                            setDhTip({ open: true, pinned: false, x: 16, y: 16, text: tooltip });
+                                                        }
+                                                    }}
+                                                    onClick={() => setDhTip((p) => ({ ...p, open: true, pinned: !p?.pinned, text: tooltip }))}
+                                                    onMouseLeave={() => {
+                                                        if (dhTip?.pinned) return;
+                                                        const t = setTimeout(() => setDhTip((p) => ({ ...p, open: false })), 350);
+                                                        setDhHideTimer(t);
+                                                    }}
+                                                >
+                                                    <Icon size={16} className={color} />
+                                                </span>
+                                            </span>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-900/40 rounded-2xl border border-slate-700/40 shadow-xl overflow-hidden">
+
+                            {loading && (
+                                <div className="flex flex-col justify-center items-center py-20 bg-slate-800/50">
+                                    <RefreshCw className="animate-spin text-blue-500 mb-4" size={32} />
+                                    <span className="text-slate-400 font-medium tracking-wide">Crunching Monte Carlo & Poisson Sims...</span>
+                                </div>
+                            )}
+
+                            {error && (
+                                <div className="m-6 p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-200 flex items-center">
+                                    <AlertCircle className="mr-3 text-red-400" size={20} />
+                                    {error}
+                                </div>
+                            )}
+
+                            {degradedMode && (
+                                <div className="m-6 p-4 bg-amber-900/20 border border-amber-500/40 rounded-lg text-amber-100 flex items-start">
+                                    <ShieldAlert className="mr-3 mt-0.5 text-amber-300" size={20} />
+                                    <div>
+                                        <div className="font-semibold">Stale slate — latest full run produced NO BETS. Showing last cached picks.</div>
+                                        {degradedAsOf && (
+                                            <div className="text-xs text-amber-200/80 mt-1">As-of: {new Date(degradedAsOf).toLocaleString()}</div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {!loading && !error && edges.length === 0 && (
+                                <div className="text-center py-20 text-slate-500 flex flex-col items-center">
+                                    <div className="p-4 bg-slate-700/30 rounded-full mb-4">
+                                        <RefreshCw size={24} className="text-slate-600" />
+                                    </div>
+                                    <p>No active games found in current slate.</p>
+                                </div>
+                            )}
+
+                            {/* (Removed) Historical Top Model Picks summary to reduce duplication. */}
+
+                            {!loading && leagueFilter === 'NCAAM' && edges.length > 0 && (
+                                <div className="px-6 pt-6">
+                                    {(() => {
+                                        // Show actionable edges up top (these are the actual "bets with an edge" today)
+                                        // sourced from server-computed daily_top_picks.
+                                        const isSameEtDay = (ts, ymd) => {
+                                            if (!ts || !ymd) return false;
+                                            try {
+                                                const d = new Date(ts);
+                                                const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+                                                return s === ymd;
+                                            } catch (e) {
                                                 return false;
+                                            }
+                                        };
+
+                                        const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+                                        const makeKey = (dayEt, away, home) => {
+                                            const d = String(dayEt || '').slice(0, 10);
+                                            const a = norm(away);
+                                            const h = norm(home);
+                                            if (!d || !a || !h) return null;
+                                            return `${d}|${a}|${h}`;
+                                        };
+
+                                        const actionableAll = getProcessedEdges()
+                                            .map((e) => {
+                                                const direct = rowTopPicks?.[e.id] || null;
+                                                const k = makeKey(e?.day_et, e?.away_team, e?.home_team);
+                                                const fallback = (k && rowTopPicksByKey?.[k]) ? rowTopPicksByKey[k] : null;
+                                                const meta = direct || fallback;
+                                                return { edge: e, top: meta?.rec || null, meta };
                                             })
-                                            .map(([eid, meta]) => {
-                                                const ev = meta?.event || {};
-                                                // Build a synthetic edge object from stored event metadata
-                                                const edge = {
-                                                    id: eid,
-                                                    home_team: ev?.home_team || '',
-                                                    away_team: ev?.away_team || '',
-                                                    start_time: ev?.start_time || null,
-                                                    day_et: ev?.day_et || selectedDate,
-                                                    sport: 'NCAAM',
-                                                };
-                                                return { edge, top: meta.rec, meta };
+                                            .filter(({ edge, top, meta }) => {
+                                                if (!top || !meta?.isActionable) return false;
+                                                // match selected ET date
+                                                if (edge?.day_et) return String(edge.day_et) === String(selectedDate);
+                                                return isSameEtDay(edge?.start_time, selectedDate);
                                             })
                                             .sort((a, b) => {
                                                 const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
                                                 const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
                                                 return bEv - aEv;
                                             });
-                                    })();
 
-                                    if (!rows.length) {
+                                        const spreadTop = actionableAll.filter((x) => String(x?.top?.bet_type || '').toUpperCase() === 'SPREAD').slice(0, 5);
+                                        const totalTop = actionableAll.filter((x) => String(x?.top?.bet_type || '').toUpperCase() === 'TOTAL').slice(0, 5);
+
+                                        const topOverall = [...spreadTop, ...totalTop]
+                                            .slice()
+                                            .sort((a, b) => {
+                                                const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
+                                                const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
+                                                return bEv - aEv;
+                                            })
+                                            .slice(0, 5);
+
+                                        const actionable = topOverall;
+
+                                        const fmtPick = (edge, top) => {
+                                            let pickText = String(top.selection || '').trim();
+                                            try {
+                                                if (top.bet_type === 'SPREAD') {
+                                                    if (/^home\b/i.test(pickText)) pickText = pickText.replace(/^home\b/i, edge.home_team);
+                                                    if (/^away\b/i.test(pickText)) pickText = pickText.replace(/^away\b/i, edge.away_team);
+                                                }
+                                                if (top.bet_type === 'TOTAL') pickText = pickText.toUpperCase();
+                                            } catch (e) { }
+                                            return pickText;
+                                        };
+
+                                        // Removed per request: the "Today's edges" tile was duplicative with the main recommended picks.
+                                        return null;
+                                    })()}
+                                </div>
+                            )}
+
+                            {!loading && edges.length > 0 && boardTab === 'recommended' && (
+                                <div className="p-6">
+
+                                    {/* Top 5 Plays + full recommended table (IIFE) */}
+                                    {(() => {
+                                        const isSameEtDay = (ts, ymd) => {
+                                            if (!ts || !ymd) return false;
+                                            try {
+                                                const d = new Date(ts);
+                                                const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+                                                return s === ymd;
+                                            } catch (e) {
+                                                return false;
+                                            }
+                                        };
+
+                                        // Build Top-5 rows directly from stored daily_top_picks (rowTopPicks).
+                                        // This decouples display from live board odds: if the morning model run
+                                        // found an edge, show it — no live odds required.
+                                        // If the evening run removes the edge (is_actionable=false), it disappears.
+                                        const rows = (() => {
+                                            const picks = rowTopPicks || {};
+                                            return Object.entries(picks)
+                                                .filter(([eid, meta]) => {
+                                                    if (!meta?.isActionable) return false;
+                                                    const top = meta?.rec;
+                                                    if (!top) return false;
+                                                    const bt = String(top.bet_type || '').toUpperCase();
+                                                    const sel = String(top.selection || '').trim();
+                                                    if (!bt || bt === 'AUTO') return false;
+                                                    if (!sel || sel === '—') return false;
+                                                    // Match selected ET date using event metadata stored in the pick
+                                                    const ev = meta?.event || {};
+                                                    const dayEt = ev?.day_et || '';
+                                                    if (dayEt) return String(dayEt) === String(selectedDate);
+                                                    // Fallback: parse start_time
+                                                    if (ev?.start_time) {
+                                                        try {
+                                                            const d = new Date(ev.start_time);
+                                                            const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+                                                            return s === String(selectedDate);
+                                                        } catch (e) { return false; }
+                                                    }
+                                                    return false;
+                                                })
+                                                .map(([eid, meta]) => {
+                                                    const ev = meta?.event || {};
+                                                    // Build a synthetic edge object from stored event metadata
+                                                    const edge = {
+                                                        id: eid,
+                                                        home_team: ev?.home_team || '',
+                                                        away_team: ev?.away_team || '',
+                                                        start_time: ev?.start_time || null,
+                                                        day_et: ev?.day_et || selectedDate,
+                                                        sport: 'NCAAM',
+                                                    };
+                                                    return { edge, top: meta.rec, meta };
+                                                })
+                                                .sort((a, b) => {
+                                                    const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
+                                                    const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
+                                                    return bEv - aEv;
+                                                });
+                                        })();
+
+                                        if (!rows.length) {
+                                            return (
+                                                <div className="text-slate-500">
+                                                    No recommendations available for this window.
+                                                </div>
+                                            );
+                                        }
+
+                                        const fmtPick = (edge, top) => {
+                                            let pickText = String(top.selection || '').trim();
+                                            try {
+                                                if (top.bet_type === 'SPREAD') {
+                                                    if (/^home\b/i.test(pickText)) pickText = pickText.replace(/^home\b/i, edge.home_team);
+                                                    if (/^away\b/i.test(pickText)) pickText = pickText.replace(/^away\b/i, edge.away_team);
+                                                }
+                                                if (top.bet_type === 'TOTAL') pickText = pickText.toUpperCase();
+                                            } catch (e) { }
+                                            return pickText;
+                                        };
+
+                                        const top6 = rows.slice(0, 5);
+
                                         return (
-                                            <div className="text-slate-500">
-                                                No recommendations available for this window.
+                                            <div className="mb-6">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <TrendingUp className="text-emerald-400" size={18} />
+                                                    <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 5 Plays Today</div>
+                                                    <div className="text-[10px] text-slate-500 ml-auto">{selectedDate} • Sorted by EV%</div>
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {top6.map(({ edge, top }, i) => {
+                                                        const date = edge.start_time ? new Date(edge.start_time) : null;
+                                                        const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
+                                                        const pickText = fmtPick(edge, top);
+                                                        const evRaw = String(top.edge || '').replace('%', '').trim();
+                                                        const evNum = Number(evRaw);
+                                                        const evFormatted = `${evNum >= 0 ? '+' : ''}${evNum.toFixed(1)}%`;
+
+                                                        return (
+                                                            <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
+                                                                <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">{i + 1}</span>
+                                                                        <span className="text-xs font-bold text-slate-300">NCAAM Pick</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-1 bg-green-500/10 px-2 py-1 rounded-md border border-green-500/20">
+                                                                        <TrendingUp size={12} className="text-green-400" />
+                                                                        <span className="text-[11px] font-black text-green-400">{evFormatted} EV</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex flex-col gap-1 min-w-0">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-slate-500 font-bold uppercase">{timeStr}</span>
+                                                                        <span className="text-xs text-slate-400 font-medium truncate">{edge.away_team} @ {edge.home_team}</span>
+                                                                    </div>
+                                                                    <div className="flex items-baseline justify-between gap-4">
+                                                                        <div className="flex flex-col min-w-0">
+                                                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{top.bet_type}</span>
+                                                                            <span className="text-sm font-bold text-slate-100 whitespace-normal leading-tight">{pickText}</span>
+                                                                        </div>
+                                                                        <div className="flex flex-col items-end shrink-0">
+                                                                            <span className="text-xs font-mono font-bold text-slate-400">{(top.price !== null && top.price !== undefined) ? fmtSigned(top.price, 0) : '—'}</span>
+                                                                            <span className="text-[10px] text-slate-500 uppercase font-bold">{top.confidence}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex gap-2 mt-auto pt-2 border-t border-slate-800/40">
+                                                                    <button
+                                                                        onClick={() => onAddBet?.({
+                                                                            sport: edge.sport,
+                                                                            game: `${edge.away_team} @ ${edge.home_team}`,
+                                                                            market: top.bet_type,
+                                                                            pick: pickText,
+                                                                            line: top.market_line,
+                                                                            odds: top.price,
+                                                                            book: top.book,
+                                                                        })}
+                                                                        className="flex-1 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-black border border-emerald-500/20 transition-colors uppercase tracking-widest"
+                                                                    >
+                                                                        Add
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => analyzeGame(edge)}
+                                                                        className="flex-1 py-1.5 rounded-lg bg-slate-800/40 hover:bg-slate-700/40 text-slate-300 text-[10px] font-black border border-slate-700/50 transition-colors uppercase tracking-widest"
+                                                                    >
+                                                                        Details
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         );
-                                    }
+                                    })()}
 
-                                    const fmtPick = (edge, top) => {
-                                        let pickText = String(top.selection || '').trim();
-                                        try {
-                                            if (top.bet_type === 'SPREAD') {
-                                                if (/^home\b/i.test(pickText)) pickText = pickText.replace(/^home\b/i, edge.home_team);
-                                                if (/^away\b/i.test(pickText)) pickText = pickText.replace(/^away\b/i, edge.away_team);
-                                            }
-                                            if (top.bet_type === 'TOTAL') pickText = pickText.toUpperCase();
-                                        } catch (e) { }
-                                        return pickText;
-                                    };
+                                    {/* 2-leg ML Parlay recommendations — below Top 5 Plays */}
+                                    {leagueFilter === 'NCAAM' && String(selectedDate) === String(getTodayStr()) && (
+                                        <ParlayRecommendations />
+                                    )}
 
-                                    const top6 = rows.slice(0, 5);
+                                </div>
+                            )}
 
-                                    return (
-                                        <div className="mb-6">
-                                            <div className="flex items-center gap-2 mb-3">
-                                                <TrendingUp className="text-emerald-400" size={18} />
-                                                <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 5 Plays Today</div>
-                                                <div className="text-[10px] text-slate-500 ml-auto">{selectedDate} • Sorted by EV%</div>
-                                            </div>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                {top6.map(({ edge, top }, i) => {
-                                                    const date = edge.start_time ? new Date(edge.start_time) : null;
-                                                    const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
-                                                    const pickText = fmtPick(edge, top);
-                                                    const evRaw = String(top.edge || '').replace('%', '').trim();
-                                                    const evNum = Number(evRaw);
-                                                    const evFormatted = `${evNum >= 0 ? '+' : ''}${evNum.toFixed(1)}%`;
-
-                                                    return (
-                                                        <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
-                                                            <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">{i + 1}</span>
-                                                                    <span className="text-xs font-bold text-slate-300">NCAAM Pick</span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1 bg-green-500/10 px-2 py-1 rounded-md border border-green-500/20">
-                                                                    <TrendingUp size={12} className="text-green-400" />
-                                                                    <span className="text-[11px] font-black text-green-400">{evFormatted} EV</span>
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex flex-col gap-1 min-w-0">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="text-[10px] text-slate-500 font-bold uppercase">{timeStr}</span>
-                                                                    <span className="text-xs text-slate-400 font-medium truncate">{edge.away_team} @ {edge.home_team}</span>
-                                                                </div>
-                                                                <div className="flex items-baseline justify-between gap-4">
-                                                                    <div className="flex flex-col min-w-0">
-                                                                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{top.bet_type}</span>
-                                                                        <span className="text-sm font-bold text-slate-100 whitespace-normal leading-tight">{pickText}</span>
-                                                                    </div>
-                                                                    <div className="flex flex-col items-end shrink-0">
-                                                                        <span className="text-xs font-mono font-bold text-slate-400">{(top.price !== null && top.price !== undefined) ? fmtSigned(top.price, 0) : '—'}</span>
-                                                                        <span className="text-[10px] text-slate-500 uppercase font-bold">{top.confidence}</span>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex gap-2 mt-auto pt-2 border-t border-slate-800/40">
-                                                                <button
-                                                                    onClick={() => onAddBet?.({
-                                                                        sport: edge.sport,
-                                                                        game: `${edge.away_team} @ ${edge.home_team}`,
-                                                                        market: top.bet_type,
-                                                                        pick: pickText,
-                                                                        line: top.market_line,
-                                                                        odds: top.price,
-                                                                        book: top.book,
-                                                                    })}
-                                                                    className="flex-1 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-black border border-emerald-500/20 transition-colors uppercase tracking-widest"
-                                                                >
-                                                                    Add
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => analyzeGame(edge)}
-                                                                    className="flex-1 py-1.5 rounded-lg bg-slate-800/40 hover:bg-slate-700/40 text-slate-300 text-[10px] font-black border border-slate-700/50 transition-colors uppercase tracking-widest"
-                                                                >
-                                                                    Details
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-
-                                {/* 2-leg ML Parlay recommendations — below Top 5 Plays */}
-                                {leagueFilter === 'NCAAM' && String(selectedDate) === String(getTodayStr()) && (
-                                    <ParlayRecommendations />
-                                )}
-
-                            </div>
-                        )}
-
-                        {!loading && edges.length > 0 && boardTab === 'full' && (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('start_time')}>
-                                                <div className="flex items-center">Time <SortIcon column="start_time" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
-                                                <div className="flex items-center">League <SortIcon column="sport" /></div>
-                                            </th>
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
-                                                <div className="flex items-center">Matchup <SortIcon column="game" /></div>
-                                            </th>
-                                            {leagueFilter === 'EPL' ? (
-                                                <>
-                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                        <div className="flex items-center">Moneyline (1X2)</div>
-                                                    </th>
-                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                        <div className="flex items-center">Total Goals (O/U)</div>
-                                                    </th>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                        <div className="flex items-center">Spread (both sides)</div>
-                                                    </th>
-                                                    <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                        <div className="flex items-center">Total (O/U)</div>
-                                                    </th>
-                                                </>
-                                            )}
-                                            <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
-                                                <div className="flex items-center justify-center">Action</div>
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-700/50">
-                                        {getProcessedEdges().length === 0 ? (
-                                            <tr>
-                                                <td colSpan="9" className="py-12 text-center text-slate-500">
-                                                    <div className="flex flex-col items-center justify-center">
-                                                        <Filter size={32} className="mb-3 opacity-20" />
-                                                        <p className="text-lg font-medium text-slate-400">No games found for this league/date range.</p>
-                                                    </div>
-                                                </td>
+                            {!loading && edges.length > 0 && boardTab === 'full' && (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('start_time')}>
+                                                    <div className="flex items-center">Time <SortIcon column="start_time" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
+                                                    <div className="flex items-center">League <SortIcon column="sport" /></div>
+                                                </th>
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
+                                                    <div className="flex items-center">Matchup <SortIcon column="game" /></div>
+                                                </th>
+                                                {leagueFilter === 'EPL' ? (
+                                                    <>
+                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                            <div className="flex items-center">Moneyline (1X2)</div>
+                                                        </th>
+                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                            <div className="flex items-center">Total Goals (O/U)</div>
+                                                        </th>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                            <div className="flex items-center">Spread (both sides)</div>
+                                                        </th>
+                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                            <div className="flex items-center">Total (O/U)</div>
+                                                        </th>
+                                                    </>
+                                                )}
+                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
+                                                    <div className="flex items-center justify-center">Action</div>
+                                                </th>
                                             </tr>
-                                        ) : (
-                                            (() => {
-                                                const isSameEtDay = (ts, ymd) => {
-                                                    if (!ts || !ymd) return false;
-                                                    try {
-                                                        const d = new Date(ts);
-                                                        const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                                        return s === ymd;
-                                                    } catch (e) {
-                                                        return false;
-                                                    }
-                                                };
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-700/50">
+                                            {getProcessedEdges().length === 0 ? (
+                                                <tr>
+                                                    <td colSpan="9" className="py-12 text-center text-slate-500">
+                                                        <div className="flex flex-col items-center justify-center">
+                                                            <Filter size={32} className="mb-3 opacity-20" />
+                                                            <p className="text-lg font-medium text-slate-400">No games found for this league/date range.</p>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                (() => {
+                                                    const isSameEtDay = (ts, ymd) => {
+                                                        if (!ts || !ymd) return false;
+                                                        try {
+                                                            const d = new Date(ts);
+                                                            const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+                                                            return s === ymd;
+                                                        } catch (e) {
+                                                            return false;
+                                                        }
+                                                    };
 
-                                                const boardEdges = (!showModelPerformanceTab)
-                                                    ? getProcessedEdges().filter((e) => isSameEtDay(e?.start_time, selectedDate))
-                                                    : getProcessedEdges();
+                                                    const boardEdges = (!showModelPerformanceTab)
+                                                        ? getProcessedEdges().filter((e) => isSameEtDay(e?.start_time, selectedDate))
+                                                        : getProcessedEdges();
 
-                                                return boardEdges.map((edge, idx) => {
-                                                    const date = edge.start_time ? new Date(edge.start_time) : null;
-                                                    const dateStr = date ? date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: 'America/New_York' }) : '-';
-                                                    const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
-                                                    const isEdge = edge.is_actionable;
+                                                    return boardEdges.map((edge, idx) => {
+                                                        const date = edge.start_time ? new Date(edge.start_time) : null;
+                                                        const dateStr = date ? date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: 'America/New_York' }) : '-';
+                                                        const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
+                                                        const isEdge = edge.is_actionable;
 
-                                                    return (
-                                                        <tr key={idx} className={`group hover:bg-slate-700/30 transition-all border-b border-slate-700/30`}>
-                                                            <td className="py-3 px-4 text-slate-400 text-xs whitespace-nowrap">
-                                                                {edge.final ? (
-                                                                    <div className="flex flex-col">
-                                                                        <span className="font-bold text-slate-500 uppercase tracking-wider">Final</span>
-                                                                        <span className="text-white font-mono">{edge.home_score}-{edge.away_score}</span>
-                                                                    </div>
+                                                        return (
+                                                            <tr key={idx} className={`group hover:bg-slate-700/30 transition-all border-b border-slate-700/30`}>
+                                                                <td className="py-3 px-4 text-slate-400 text-xs whitespace-nowrap">
+                                                                    {edge.final ? (
+                                                                        <div className="flex flex-col">
+                                                                            <span className="font-bold text-slate-500 uppercase tracking-wider">Final</span>
+                                                                            <span className="text-white font-mono">{edge.home_score}-{edge.away_score}</span>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <>
+                                                                            <div className="font-bold text-slate-300">{dateStr}</div>
+                                                                            <div>{timeStr}</div>
+                                                                        </>
+                                                                    )}
+                                                                </td>
+                                                                <td className="py-3 px-4">
+                                                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
+                                                                ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
+                                                                            edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
+                                                                                edge.sport === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
+                                                                                    'bg-slate-700/50 text-slate-400 border border-slate-600'
+                                                                        }`}>
+                                                                        {edge.sport}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
+                                                                {leagueFilter === 'EPL' ? (
+                                                                    <>
+                                                                        <td className="py-3 px-4">
+                                                                            {(edge.ml_home_odds !== null && edge.ml_home_odds !== undefined) || (edge.ml_away_odds !== null && edge.ml_away_odds !== undefined) || (edge.ml_draw_odds !== null && edge.ml_draw_odds !== undefined) ? (
+                                                                                <div className="flex flex-col gap-1">
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400 truncate">HOME</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_home_odds)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400 truncate">DRAW</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_draw_odds)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400 truncate">AWAY</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_away_odds)}</span>
+                                                                                    </div>
+                                                                                    <div className="text-[10px] text-slate-600">1X2 market odds</div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <span className="text-slate-600 font-mono text-xs">No moneyline</span>
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="py-3 px-4">
+                                                                            {edge.total_line !== null && edge.total_line !== undefined ? (
+                                                                                <div className="flex flex-col gap-1">
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400">OVER</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400">UNDER</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
+                                                                                    </div>
+                                                                                    <div className="text-[10px] text-slate-600">goals total (O/U)</div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <span className="text-slate-600 font-mono text-xs">No total</span>
+                                                                            )}
+                                                                        </td>
+                                                                    </>
                                                                 ) : (
                                                                     <>
-                                                                        <div className="font-bold text-slate-300">{dateStr}</div>
-                                                                        <div>{timeStr}</div>
+                                                                        <td className="py-3 px-4">
+                                                                            {(edge.home_spread !== null && edge.home_spread !== undefined) || (edge.away_spread !== null && edge.away_spread !== undefined) ? (
+                                                                                <div className="flex flex-col gap-1">
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400 truncate">{edge.away_team}</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">
+                                                                                            {fmtSigned(edge.away_spread ?? (edge.home_spread != null ? -Number(edge.home_spread) : null), 1)}
+                                                                                        </span>
+                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">
+                                                                                            {fmtSigned(edge.spread_away_odds)}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400 truncate">{edge.home_team}</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">
+                                                                                            {fmtSigned(edge.home_spread, 1)}
+                                                                                        </span>
+                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">
+                                                                                            {fmtSigned(edge.spread_home_odds ?? edge.moneyline_home)}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="text-[10px] text-slate-600">team • line • odds</div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <span className="text-slate-600 font-mono text-xs">No spread</span>
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="py-3 px-4">
+                                                                            {edge.total_line !== null && edge.total_line !== undefined ? (
+                                                                                <div className="flex flex-col gap-1">
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400">OVER</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds ?? edge.moneyline_away)}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between gap-2 text-xs">
+                                                                                        <span className="text-slate-400">UNDER</span>
+                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
+                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
+                                                                                    </div>
+                                                                                    <div className="text-[10px] text-slate-600">side • line • odds</div>
+                                                                                </div>
+                                                                            ) : (
+                                                                                <span className="text-slate-600 font-mono text-xs">No total</span>
+                                                                            )}
+                                                                        </td>
                                                                     </>
                                                                 )}
-                                                            </td>
-                                                            <td className="py-3 px-4">
-                                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
-                                                                ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
-                                                                        edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                                            edge.sport === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
-                                                                                'bg-slate-700/50 text-slate-400 border border-slate-600'
-                                                                    }`}>
-                                                                    {edge.sport}
-                                                                </span>
-                                                            </td>
-                                                            <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
-                                                            {leagueFilter === 'EPL' ? (
-                                                                <>
-                                                                    <td className="py-3 px-4">
-                                                                        {(edge.ml_home_odds !== null && edge.ml_home_odds !== undefined) || (edge.ml_away_odds !== null && edge.ml_away_odds !== undefined) || (edge.ml_draw_odds !== null && edge.ml_draw_odds !== undefined) ? (
-                                                                            <div className="flex flex-col gap-1">
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400 truncate">HOME</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_home_odds)}</span>
+                                                                <td className="py-3 px-4 text-center">
+                                                                    {(() => {
+                                                                        const meta = rowTopPicks?.[edge.id] || null;
+                                                                        const top = meta?.rec || null;
+                                                                        if (top) {
+                                                                            return (
+                                                                                <div className="flex flex-col items-center gap-2">
+                                                                                    <div className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-widest">
+                                                                                        Top pick
+                                                                                    </div>
+                                                                                    <div className="text-xs font-bold text-white max-w-[180px] truncate" title={top.selection}>
+                                                                                        {top.selection}
+                                                                                    </div>
+                                                                                    <div className="text-[11px] text-green-300 font-mono font-bold">+{top.edge}</div>
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <button
+                                                                                            onClick={() => onAddBet?.({
+                                                                                                sport: edge.sport,
+                                                                                                game: `${edge.away_team} @ ${edge.home_team}`,
+                                                                                                market: top.bet_type,
+                                                                                                pick: top.selection,
+                                                                                                line: top.market_line,
+                                                                                                odds: top.price,
+                                                                                                book: top.book,
+                                                                                            })}
+                                                                                            className="px-3 py-1 bg-green-500/20 text-green-300 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-bold transition-colors"
+                                                                                        >
+                                                                                            Add
+                                                                                        </button>
+                                                                                        <button
+                                                                                            onClick={() => analyzeGame(edge)}
+                                                                                            className="px-3 py-1 bg-slate-800/60 text-slate-200 hover:bg-slate-800 border border-slate-700 rounded text-xs font-bold transition-colors"
+                                                                                        >
+                                                                                            Details
+                                                                                        </button>
+                                                                                    </div>
                                                                                 </div>
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400 truncate">DRAW</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_draw_odds)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400 truncate">AWAY</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_away_odds)}</span>
-                                                                                </div>
-                                                                                <div className="text-[10px] text-slate-600">1X2 market odds</div>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <span className="text-slate-600 font-mono text-xs">No moneyline</span>
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="py-3 px-4">
-                                                                        {edge.total_line !== null && edge.total_line !== undefined ? (
-                                                                            <div className="flex flex-col gap-1">
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400">OVER</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                    <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400">UNDER</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                    <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
-                                                                                </div>
-                                                                                <div className="text-[10px] text-slate-600">goals total (O/U)</div>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <span className="text-slate-600 font-mono text-xs">No total</span>
-                                                                        )}
-                                                                    </td>
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <td className="py-3 px-4">
-                                                                        {(edge.home_spread !== null && edge.home_spread !== undefined) || (edge.away_spread !== null && edge.away_spread !== undefined) ? (
-                                                                            <div className="flex flex-col gap-1">
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400 truncate">{edge.away_team}</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">
-                                                                                        {fmtSigned(edge.away_spread ?? (edge.home_spread != null ? -Number(edge.home_spread) : null), 1)}
-                                                                                    </span>
-                                                                                    <span className="text-slate-500 font-mono whitespace-nowrap">
-                                                                                        {fmtSigned(edge.spread_away_odds)}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400 truncate">{edge.home_team}</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">
-                                                                                        {fmtSigned(edge.home_spread, 1)}
-                                                                                    </span>
-                                                                                    <span className="text-slate-500 font-mono whitespace-nowrap">
-                                                                                        {fmtSigned(edge.spread_home_odds ?? edge.moneyline_home)}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <div className="text-[10px] text-slate-600">team • line • odds</div>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <span className="text-slate-600 font-mono text-xs">No spread</span>
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="py-3 px-4">
-                                                                        {edge.total_line !== null && edge.total_line !== undefined ? (
-                                                                            <div className="flex flex-col gap-1">
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400">OVER</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                    <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds ?? edge.moneyline_away)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between gap-2 text-xs">
-                                                                                    <span className="text-slate-400">UNDER</span>
-                                                                                    <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                    <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
-                                                                                </div>
-                                                                                <div className="text-[10px] text-slate-600">side • line • odds</div>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <span className="text-slate-600 font-mono text-xs">No total</span>
-                                                                        )}
-                                                                    </td>
-                                                                </>
-                                                            )}
-                                                            <td className="py-3 px-4 text-center">
-                                                                {(() => {
-                                                                    const meta = rowTopPicks?.[edge.id] || null;
-                                                                    const top = meta?.rec || null;
-                                                                    if (top) {
-                                                                        return (
-                                                                            <div className="flex flex-col items-center gap-2">
-                                                                                <div className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-widest">
-                                                                                    Top pick
-                                                                                </div>
-                                                                                <div className="text-xs font-bold text-white max-w-[180px] truncate" title={top.selection}>
-                                                                                    {top.selection}
-                                                                                </div>
-                                                                                <div className="text-[11px] text-green-300 font-mono font-bold">+{top.edge}</div>
-                                                                                <div className="flex items-center gap-2">
-                                                                                    <button
-                                                                                        onClick={() => onAddBet?.({
-                                                                                            sport: edge.sport,
-                                                                                            game: `${edge.away_team} @ ${edge.home_team}`,
-                                                                                            market: top.bet_type,
-                                                                                            pick: top.selection,
-                                                                                            line: top.market_line,
-                                                                                            odds: top.price,
-                                                                                            book: top.book,
-                                                                                        })}
-                                                                                        className="px-3 py-1 bg-green-500/20 text-green-300 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-bold transition-colors"
-                                                                                    >
-                                                                                        Add
-                                                                                    </button>
+                                                                            );
+                                                                        }
+
+                                                                        // If server computed a No-Bet state, show it.
+                                                                        if (meta && meta.isActionable === false) {
+                                                                            return (
+                                                                                <div className="flex flex-col items-center gap-2">
+                                                                                    <div className="px-2 py-0.5 rounded bg-slate-800/60 text-slate-300 text-[10px] font-black uppercase tracking-widest border border-slate-700/60">
+                                                                                        No Bet
+                                                                                    </div>
+                                                                                    <div className="text-[11px] text-slate-400 max-w-[220px] truncate" title={meta.reason || ''}>
+                                                                                        {meta.reason || 'Blocked'}
+                                                                                    </div>
                                                                                     <button
                                                                                         onClick={() => analyzeGame(edge)}
-                                                                                        className="px-3 py-1 bg-slate-800/60 text-slate-200 hover:bg-slate-800 border border-slate-700 rounded text-xs font-bold transition-colors"
+                                                                                        disabled={leagueFilter !== 'NCAAM' || (isAnalyzing && selectedGame?.id === edge.id)}
+                                                                                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-lg ring-1 ring-white/10 flex items-center justify-center mx-auto ${(isAnalyzing && selectedGame?.id === edge.id)
+                                                                                            ? 'bg-slate-700 text-slate-400'
+                                                                                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                                                                            }`}
                                                                                     >
-                                                                                        Details
+                                                                                        {isAnalyzing && selectedGame?.id === edge.id ? <RefreshCw className="animate-spin" size={14} /> : 'Details'}
                                                                                     </button>
                                                                                 </div>
-                                                                            </div>
-                                                                        );
-                                                                    }
+                                                                            );
+                                                                        }
 
-                                                                    // If server computed a No-Bet state, show it.
-                                                                    if (meta && meta.isActionable === false) {
+                                                                        // Default: show quick-pick + analyze
                                                                         return (
                                                                             <div className="flex flex-col items-center gap-2">
-                                                                                <div className="px-2 py-0.5 rounded bg-slate-800/60 text-slate-300 text-[10px] font-black uppercase tracking-widest border border-slate-700/60">
-                                                                                    No Bet
-                                                                                </div>
-                                                                                <div className="text-[11px] text-slate-400 max-w-[220px] truncate" title={meta.reason || ''}>
-                                                                                    {meta.reason || 'Blocked'}
-                                                                                </div>
+                                                                                <button
+                                                                                    onClick={() => quickPick(edge)}
+                                                                                    disabled={leagueFilter !== 'NCAAM' || rowPickingId === edge.id}
+                                                                                    className={`px-3 py-1 rounded text-xs font-bold transition-colors border ${rowPickingId === edge.id
+                                                                                        ? 'bg-slate-700 text-slate-400 border-slate-600'
+                                                                                        : 'bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 border-indigo-500/30'
+                                                                                        }`}
+                                                                                >
+                                                                                    {rowPickingId === edge.id ? 'Picking…' : 'Quick pick'}
+                                                                                </button>
                                                                                 <button
                                                                                     onClick={() => analyzeGame(edge)}
                                                                                     disabled={leagueFilter !== 'NCAAM' || (isAnalyzing && selectedGame?.id === edge.id)}
                                                                                     className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-lg ring-1 ring-white/10 flex items-center justify-center mx-auto ${(isAnalyzing && selectedGame?.id === edge.id)
                                                                                         ? 'bg-slate-700 text-slate-400'
-                                                                                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                                                                        : 'bg-indigo-600 hover:bg-indigo-500 text-white'
                                                                                         }`}
                                                                                 >
-                                                                                    {isAnalyzing && selectedGame?.id === edge.id ? <RefreshCw className="animate-spin" size={14} /> : 'Details'}
+                                                                                    {isAnalyzing && selectedGame?.id === edge.id ? <RefreshCw className="animate-spin" size={14} /> : 'Analyze'}
                                                                                 </button>
                                                                             </div>
                                                                         );
-                                                                    }
-
-                                                                    // Default: show quick-pick + analyze
-                                                                    return (
-                                                                        <div className="flex flex-col items-center gap-2">
-                                                                            <button
-                                                                                onClick={() => quickPick(edge)}
-                                                                                disabled={leagueFilter !== 'NCAAM' || rowPickingId === edge.id}
-                                                                                className={`px-3 py-1 rounded text-xs font-bold transition-colors border ${rowPickingId === edge.id
-                                                                                    ? 'bg-slate-700 text-slate-400 border-slate-600'
-                                                                                    : 'bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 border-indigo-500/30'
-                                                                                    }`}
-                                                                            >
-                                                                                {rowPickingId === edge.id ? 'Picking…' : 'Quick pick'}
-                                                                            </button>
-                                                                            <button
-                                                                                onClick={() => analyzeGame(edge)}
-                                                                                disabled={leagueFilter !== 'NCAAM' || (isAnalyzing && selectedGame?.id === edge.id)}
-                                                                                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-lg ring-1 ring-white/10 flex items-center justify-center mx-auto ${(isAnalyzing && selectedGame?.id === edge.id)
-                                                                                    ? 'bg-slate-700 text-slate-400'
-                                                                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                                                                                    }`}
-                                                                            >
-                                                                                {isAnalyzing && selectedGame?.id === edge.id ? <RefreshCw className="animate-spin" size={14} /> : 'Analyze'}
-                                                                            </button>
-                                                                        </div>
-                                                                    );
-                                                                })()}
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                });
-                                            })()
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-                </>
-            )
+                                                                    })()}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    });
+                                                })()
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    </>
+                )
             }
 
             {

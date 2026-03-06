@@ -10,6 +10,7 @@ import Research from './pages/Research';
 import Picks from './pages/Picks';
 import Bankroll from './pages/Bankroll';
 import AgentCouncil from './pages/AgentCouncil';
+import MarchMadness from './pages/MarchMadness';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
 import TransactionView from './components/TransactionView';
 import ManualAddBetModal from './components/ManualAddBetModal';
@@ -118,7 +119,7 @@ const LogoIcon = ({ className }) => (
 );
 
 function App() {
-    const [page, setPage] = useState('today'); // today | model | actuals | council
+    const [page, setPage] = useState('today'); // today | model | actuals | council | march
 
     // Actuals sub-tabs
     const [actualsTab, setActualsTab] = useState('transactions'); // transactions | performance | bankroll
@@ -478,6 +479,14 @@ function App() {
                                     <span className="hidden sm:inline">Agent Council</span>
                                     <span className="sm:hidden">Council</span>
                                 </button>
+                                <button
+                                    onClick={() => setPage('march')}
+                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'march' ? 'bg-orange-600/80 text-white shadow-sm ring-1 ring-orange-400/30' : 'text-orange-400/70 hover:text-orange-200 hover:bg-orange-900/20'}`}
+                                >
+                                    <span className="text-[16px]">🏀</span>
+                                    <span className="hidden sm:inline">March Madness</span>
+                                    <span className="sm:hidden">March Madness</span>
+                                </button>
                             </div>
 
                             <button
@@ -596,6 +605,8 @@ function App() {
                         <Picks />
                     ) : page === 'council' ? (
                         <AgentCouncil />
+                    ) : page === 'march' ? (
+                        <MarchMadness />
                     ) : (
                         <>
                             {actualsTab === 'transactions' ? (
