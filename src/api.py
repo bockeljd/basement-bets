@@ -3134,7 +3134,7 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
 
 
 @app.get("/api/ncaam/tournament-teams")
-async def get_tournament_teams(request: Request, limit: int = 68):
+async def get_tournament_teams(request: Request, limit: int = 68, generate: bool = False):
     """Return the top N teams by KenPom rank for bracket research profiles.
     
     Includes their Torvik metrics if available.
@@ -3147,7 +3147,7 @@ async def get_tournament_teams(request: Request, limit: int = 68):
 
     try:
         with get_db_connection() as conn:
-            # Fetch Top 68 KenPom teams
+            # Fetch Top teams
             krows = _exec(conn, """
                 SELECT team_name, rank, conference, record,
                        adj_em, adj_o, adj_d, adj_t, updated_at
@@ -3175,19 +3175,15 @@ async def get_tournament_teams(request: Request, limit: int = 68):
             
             # Combine
             for t in teams:
-                # Remove datetime objects
                 if hasattr(t.get('updated_at'), 'isoformat'):
                     t['updated_at'] = str(t['updated_at'])
                 t['torvik'] = torvik_map.get(t['team_name'], {})
                 
-                # Fetch cached LLM deep dive profile (or None if not seeded)
-                # To prevent timeout on serverless, we only generate live if specifically explicitly needed,
-                # but currently we just return empty if cache is missing to keep UI fast.
-                cached_profile = profiler.get_cached_profile(t['team_name'])
-                if cached_profile:
-                    t['profile'] = cached_profile
+                # Fetch cached or generate live if requested
+                if generate:
+                    t['profile'] = profiler.generate_profile(t['team_name'])
                 else:
-                    t['profile'] = None
+                    t['profile'] = profiler.get_cached_profile(t['team_name'])
 
         return { 'teams': teams }
     except Exception as e:

@@ -453,17 +453,22 @@ def scrape_player_stats(sess: requests.Session) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table")
     headers, rows = _table_headers_and_rows(table)
+    
+    # Robust column mapping
+    h_idx = {h.lower(): i for i, h in enumerate(headers)}
+    player_i = h_idx.get('player', 0)
+    team_i = h_idx.get('team', 1)
 
     out = []
     for cols in rows:
-        # Heuristic: player rows usually have name + team.
-        if len(cols) < 2:
+        if len(cols) <= max(player_i, team_i):
             continue
-        player = cols[0]
-        team = cols[1] if len(cols) > 1 else None
-        if not player or player.lower() in ("player", "name"):
+        player = cols[player_i]
+        team = cols[team_i]
+        if not player or player.lower() in ("player", "name", "rk"):
             continue
-        out.append({"player_name": player, "team_name": team, "metrics": {"headers": headers, "cols": cols[2:]}, "raw": {"headers": headers, "cols": cols}})
+        # For the metrics, we pass the full cols and the headers
+        out.append({"player_name": player, "team_name": team, "metrics": {"headers": headers, "cols": cols}, "raw": {"headers": headers, "cols": cols}})
     return out
 
 
