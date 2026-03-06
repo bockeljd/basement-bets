@@ -13,7 +13,7 @@ const MarchMadness = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 10 } });
+            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 68 } });
             // Look for UConn explicitly
             const uconn = res.data.teams.find(t => t.team_name.includes('Connecticut') || t.team_name === 'UConn');
             setTeamData(uconn || res.data.teams[0]); // fallback to #1 if UConn not found
