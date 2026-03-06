@@ -1,269 +1,284 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/axios';
-import { RefreshCw } from 'lucide-react';
+import { Shield, Crosshair, Activity, AlertTriangle, Users, TrendingUp, Cpu, RefreshCw } from 'lucide-react';
 
 const MarchMadness = () => {
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-
-    const getTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    const [selectedDate, setSelectedDate] = useState(getTodayStr());
-
-    const [rowTopPicks, setRowTopPicks] = useState({});
-    const [matchupProfiles, setMatchupProfiles] = useState({});
+    const [teamData, setTeamData] = useState(null);
 
     useEffect(() => {
         fetchData();
-    }, [selectedDate]);
+    }, []);
 
     const fetchData = async () => {
         setLoading(true);
-        setError(null);
-
-        const topPicksParams = { date: selectedDate, days: 3, limit_games: 250 };
-
         try {
-            const [topPicksRes, matchupRes] = await Promise.all([
-                api.get('/api/ncaam/top-picks', { params: topPicksParams })
-                    .catch((e) => ({ data: null, _error: e })),
-                api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate } })
-                    .catch((e) => ({ data: { matchups: [] } }))
-            ]);
-
-            const mProfiles = {};
-            (matchupRes?.data?.matchups || []).forEach(m => {
-                mProfiles[m.event_id] = m;
-            });
-            setMatchupProfiles(mProfiles);
-
-            const tp = topPicksRes?.data?.picks || null;
-            if (tp && typeof tp === 'object') {
-                const mapped = {};
-                Object.keys(tp).forEach((eid) => {
-                    if (tp[eid]?.rec && tp[eid]?.is_actionable) {
-                        mapped[eid] = tp[eid];
-                    }
-                });
-                setRowTopPicks(mapped);
-            } else {
-                setRowTopPicks({});
-            }
-
+            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 10 } });
+            // Look for UConn explicitly
+            const uconn = res.data.teams.find(t => t.team_name.includes('Connecticut') || t.team_name === 'UConn');
+            setTeamData(uconn || res.data.teams[0]); // fallback to #1 if UConn not found
         } catch (err) {
-            console.error("Failed to load March Madness data", err);
-            setError("Failed to load tournament data.");
+            console.error("Failed to load uconn profile", err);
         } finally {
             setLoading(false);
         }
     };
 
-    const shiftDate = (offset) => {
-        try {
-            const d = new Date(selectedDate + 'T12:00:00Z');
-            d.setDate(d.getDate() + offset);
-            setSelectedDate(d.toISOString().slice(0, 10));
-        } catch (e) { }
+    if (loading) {
+        return <div className="p-8 text-center text-slate-400 animate-pulse font-mono">Loading Tournament Profile Server...</div>;
+    }
+
+    if (!teamData) {
+        return <div className="p-8 text-center text-red-400">Profile generation failed. Target team not found in Top 10.</div>;
+    }
+
+    // Mock narrative data strictly for the Template
+    const narrative = {
+        summary: "The defending back-to-back national champions operate with ruthless, machine-like efficiency. Dan Hurley's offense is a maze of baseline screens, dribble-handoffs, and pinpoint cutting that routinely shatters opposing defensive rules. They don't just beat teams; they break their will through relentless execution.",
+        strengths: ["Elite Half-Court Execution", "Suffocating Rim Protection", "Tremendous Rebounding Margin"],
+        weaknesses: ["Occasional 3PT Shooting Lulls", "Lower Turnover Forced Rate"],
+        upsetFlags: "A team that can switch 1-through-5 defensively to neutralize the DHOs, combined with elite shot-making gravity to pull Clingan away from the rim."
     };
 
-    const SELECTION_SUNDAY = new Date('2026-03-15T00:00:00-05:00');
-    const now = new Date();
-    const daysToTourney = Math.max(0, Math.ceil((SELECTION_SUNDAY - now) / (1000 * 60 * 60 * 24)));
-    const tourneyStarted = now >= SELECTION_SUNDAY;
+    const players = [
+        { name: "Alex Karaban", pos: "F", role: "Elite stretch forward and offensive fulcrum. Master of the slip screen.", stats: "14.2 PPG | 5.1 RPG | 40% 3PT" },
+        { name: "Tristen Newton", pos: "G", role: "Primary initiator and late-clock bail out artist. Rebounds exceptionally for a guard.", stats: "15.0 PPG | 6.8 APG | 7.1 RPG" },
+        { name: "Donovan Clingan", pos: "C", role: "Generational drop-coverage anchor. Alters every shot in the restricted area.", stats: "12.5 PPG | 7.2 RPG | 2.5 BPG" }
+    ];
 
-    const mmPicks = Object.entries(rowTopPicks || {})
-        .filter(([eid, meta]) => {
-            if (!meta?.is_actionable || !meta?.rec) return false;
-            const bt = String(meta.rec.bet_type || '').toUpperCase();
-            const sel = String(meta.rec.selection || '').trim();
-            if (!bt || bt === 'AUTO' || !sel || sel === '—') return false;
-            const ev = meta?.event || {};
-            const dayEt = ev?.day_et || '';
-            if (dayEt) return String(dayEt) === String(selectedDate);
-            if (ev?.start_time) {
-                try {
-                    const d = new Date(ev.start_time);
-                    return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === String(selectedDate);
-                } catch (e) { return false; }
-            }
-            return false;
-        })
-        .map(([eid, meta]) => ({ eid, meta }))
-        .sort((a, b) => {
-            const aEv = Number(String(a.meta.rec?.edge ?? '').replace('%', '')) || 0;
-            const bEv = Number(String(b.meta.rec?.edge ?? '').replace('%', '')) || 0;
-            return bEv - aEv;
-        });
+    const torvik = teamData.torvik || {};
+
+    // Helper to color grade metrics
+    const getEfficiencyColor = (metric, isDefensive = false) => {
+        if (!metric) return 'text-slate-400';
+        const val = parseFloat(metric);
+        if (isDefensive) {
+            if (val < 90) return 'text-purple-400'; // Elite
+            if (val < 95) return 'text-emerald-400'; // Great
+            if (val > 105) return 'text-red-400'; // Bad
+            return 'text-slate-300';
+        } else {
+            if (val > 120) return 'text-purple-400'; // Elite
+            if (val > 112) return 'text-emerald-400'; // Great
+            if (val < 100) return 'text-red-400'; // Bad
+            return 'text-slate-300';
+        }
+    };
 
     return (
-        <div className="p-4 md:p-6 bg-slate-950 min-h-screen text-white rounded-2xl">
-            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-orange-400 to-red-500 bg-clip-text text-transparent">
-                        March Madness
-                    </h1>
+        <div className="bg-slate-950 min-h-screen text-white pb-20">
+            {/* Action Bar */}
+            <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-900/50">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <Cpu size={14} className="text-blue-500" /> Profiler Engine v2.0
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-1 py-1 w-full sm:w-auto">
-                        <button onClick={() => shiftDate(-1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                            ←
-                        </button>
-                        <input
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className="bg-transparent text-sm font-bold text-center w-32 sm:w-32 focus:outline-none text-white appearance-none"
-                        />
-                        <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                            →
-                        </button>
-                        <button onClick={() => setSelectedDate(getTodayStr())} className="ml-2 px-2 py-0.5 text-xs bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 rounded">
-                            Today
-                        </button>
-                    </div>
-                    <button
-                        onClick={fetchData}
-                        disabled={loading}
-                        className="px-4 py-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 rounded-xl text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                        Refresh
-                    </button>
-                </div>
+                <button
+                    onClick={fetchData}
+                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+                    title="Refresh Data"
+                >
+                    <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                </button>
             </div>
 
-            {/* Tournament countdown / header */}
-            <div className="mb-6 rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #7c2d12 0%, #9a3412 40%, #1e293b 100%)' }}>
-                <div className="px-6 py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div>
-                        <div className="text-xs font-bold text-orange-300 uppercase tracking-widest mb-1">NCAA Tournament 2026</div>
-                        <div className="text-xl font-black text-white">
-                            {tourneyStarted ? '🏀 Tournament is Live!' : `${daysToTourney} day${daysToTourney !== 1 ? 's' : ''} to Selection Sunday`}
+            {/* HEADER HERO */}
+            <div className="relative overflow-hidden border-b border-slate-800">
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-900/40 via-slate-900 to-slate-950 opacity-80" />
+                <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
+
+                <div className="relative px-6 py-12 md:px-12 md:py-16 max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-start gap-8">
+                    {/* Rank / Logo Block */}
+                    <div className="flex flex-col items-center shrink-0">
+                        <div className="w-32 h-32 md:w-40 md:h-40 bg-slate-900 rounded-3xl border border-slate-700 shadow-2xl flex items-center justify-center text-7xl mb-4 relative overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/10 to-transparent"></div>
+                            🐺
                         </div>
-                        <div className="text-sm text-orange-200/70 mt-1">
-                            {tourneyStarted ? 'Showing actionable tournament picks for ' + selectedDate : 'Showing conference tournament picks for ' + selectedDate + ' · Selection Sunday: Mar 15'}
+                        <div className="px-4 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-sm font-black text-slate-200 tracking-wider shadow-lg">
+                            KENPOM #{teamData.rank}
                         </div>
                     </div>
-                    <div className="text-right shrink-0">
-                        <div className="text-3xl font-black text-orange-300">{mmPicks.length}</div>
-                        <div className="text-xs text-orange-200/60 uppercase tracking-wide">Actionable Picks</div>
+
+                    {/* Team Title & Narrative */}
+                    <div className="text-center md:text-left flex-1">
+                        <div className="text-blue-400 font-bold tracking-widest uppercase text-sm mb-2">{teamData.conference || 'Big East'}</div>
+                        <h1 className="text-4xl md:text-6xl font-black text-white mb-2 tracking-tight">
+                            {teamData.team_name}
+                        </h1>
+                        <div className="text-lg md:text-xl font-mono text-slate-400 mb-6 flex items-center justify-center md:justify-start gap-3">
+                            <span>{teamData.record || '31-3'}</span>
+                            <span className="text-slate-600">•</span>
+                            <span>PROJ. 1 SEED</span>
+                        </div>
+                        <p className="text-slate-300 leading-relaxed max-w-3xl text-sm md:text-base border-l-2 border-blue-500 pl-4 italic">
+                            {narrative.summary}
+                        </p>
                     </div>
                 </div>
             </div>
 
-            <section className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
-                <div className="flex items-center justify-between gap-4">
-                    <div>
-                        <div className="text-xs uppercase tracking-widest text-slate-400">Template Preview</div>
-                        <h2 className="text-lg font-semibold">UConn Huskies — Template + Modeling</h2>
-                        <p className="text-sm text-slate-400">This is the polished UConn team-profile card we rendered earlier. It includes the same KPIs, player heatmap, upset flags, and matchup notes that we want to lock in before filling out the remaining research.</p>
+            <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-8">
+
+                {/* METRICS ROW */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl group-hover:bg-blue-500/10 transition duration-500"></div>
+                        <div className="flex items-center gap-2 mb-2 text-slate-400">
+                            <TrendingUp size={16} />
+                            <span className="text-xs font-bold uppercase tracking-wider">AdjEM</span>
+                        </div>
+                        <div className="text-3xl font-black text-white">+{teamData.adj_em}</div>
+                        <div className="text-[10px] text-slate-500 mt-2">Overall Efficiency Margin</div>
                     </div>
-                    <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Live preview</div>
+
+                    <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition duration-500"></div>
+                        <div className="flex items-center gap-2 mb-2 text-slate-400">
+                            <Crosshair size={16} />
+                            <span className="text-xs font-bold uppercase tracking-wider">Offense (AdjO)</span>
+                        </div>
+                        <div className={`text-3xl font-black ${getEfficiencyColor(teamData.adj_o, false)}`}>{teamData.adj_o}</div>
+                        <div className="text-[10px] text-slate-500 mt-2">Points per 100 poss</div>
+                    </div>
+
+                    <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-2xl group-hover:bg-red-500/10 transition duration-500"></div>
+                        <div className="flex items-center gap-2 mb-2 text-slate-400">
+                            <Shield size={16} />
+                            <span className="text-xs font-bold uppercase tracking-wider">Defense (AdjD)</span>
+                        </div>
+                        <div className={`text-3xl font-black ${getEfficiencyColor(teamData.adj_d, true)}`}>{teamData.adj_d}</div>
+                        <div className="text-[10px] text-slate-500 mt-2">Points allowed per 100 poss</div>
+                    </div>
+
+                    <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 shadow-lg relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full blur-2xl group-hover:bg-purple-500/10 transition duration-500"></div>
+                        <div className="flex items-center gap-2 mb-2 text-slate-400">
+                            <Activity size={16} />
+                            <span className="text-xs font-bold uppercase tracking-wider">Tempo</span>
+                        </div>
+                        <div className="text-3xl font-black text-white">{teamData.adj_t}</div>
+                        <div className="text-[10px] text-slate-500 mt-2">Possessions per 40 min</div>
+                    </div>
                 </div>
-                <div className="h-[720px] border border-slate-800 rounded-2xl overflow-hidden">
-                    <iframe
-                        title="UConn Template Preview"
-                        src="/march-madness/preview-uconn-polished.html"
-                        className="w-full h-full"
-                    />
-                </div>
-            </section>
 
-            {/* Pick cards */}
-            {loading ? (
-                <div className="text-center py-12 text-slate-400 font-mono animate-pulse">Loading tournament board...</div>
-            ) : mmPicks.length === 0 ? (
-                <div className="text-center py-12 bg-slate-900/40 rounded-2xl border border-slate-800">
-                    <div className="text-4xl mb-3">🏀</div>
-                    <div className="text-slate-300 font-semibold text-lg mb-1">No picks for {selectedDate}</div>
-                    <div className="text-slate-500 text-sm">The model found no edge on today's slate. Check back tomorrow.</div>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {mmPicks.map(({ eid, meta }, i) => {
-                        const rec = meta.rec;
-                        const ev = meta.event || {};
-                        const evPct = Number(String(rec.edge || '').replace('%', '')) || 0;
-                        const confLabel = rec.confidence || 'Medium';
-                        const confColor = confLabel === 'High' ? 'text-emerald-400' : confLabel === 'Medium' ? 'text-yellow-400' : 'text-slate-400';
-                        const confBg = confLabel === 'High' ? 'bg-emerald-500/10 border-emerald-500/20' : confLabel === 'Medium' ? 'bg-yellow-500/10 border-yellow-500/20' : 'bg-slate-500/10 border-slate-500/20';
+                <div className="grid md:grid-cols-3 gap-8">
+                    {/* LEFT COLUMN: Narrative & Risk */}
+                    <div className="md:col-span-2 space-y-8">
+                        {/* Scouting Report */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                                <FileTextIcon className="text-blue-400" /> Betting Scouting Report
+                            </h2>
 
-                        const profile = matchupProfiles[eid] || {};
-                        const hk = profile.home_kenpom || {};
-                        const ak = profile.away_kenpom || {};
-
-                        return (
-                            <div key={eid} className="relative rounded-2xl border border-slate-700/50 bg-slate-800/60 p-5 hover:border-orange-500/40 hover:bg-slate-800/80 transition-all flex flex-col shadow-lg">
-                                {/* Rank badge */}
-                                <div className="absolute top-4 right-4 w-7 h-7 rounded-full bg-orange-600/20 border border-orange-500/30 flex items-center justify-center text-xs font-black text-orange-300">#{i + 1}</div>
-
-                                {/* Matchup Header */}
-                                <div className="mb-4 pr-8">
-                                    <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Matchup</div>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="text-sm font-semibold text-slate-200">{ev.away_team || '—'}</span>
-                                        {ak.rank && <span className="text-[10px] text-slate-500 font-mono">#{ak.rank}</span>}
-                                    </div>
-                                    <div className="text-xs text-slate-500 mb-1 leading-none">@</div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm font-semibold text-slate-200">{ev.home_team || '—'}</span>
-                                        {hk.rank && <span className="text-[10px] text-slate-500 font-mono">#{hk.rank}</span>}
-                                    </div>
+                            <div className="space-y-6">
+                                <div>
+                                    <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                        <CheckCircleIcon /> Key Strengths
+                                    </h3>
+                                    <ul className="space-y-3">
+                                        {narrative.strengths.map((s, i) => (
+                                            <li key={i} className="flex items-start gap-3 text-slate-300">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-2 shrink-0"></span>
+                                                <span className="leading-relaxed">{s}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
-
-                                {/* Team Profiles (KenPom) */}
-                                <div className="grid grid-cols-2 gap-3 mb-4 p-3 rounded-xl bg-slate-900/50 border border-slate-700/30 text-xs">
-                                    <div>
-                                        <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">{ev.away_team || 'Away'}</div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjEM</span><span className="font-mono text-slate-300">{ak.adj_em ? `+${ak.adj_em}` : '—'}</span></div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjO</span><span className="font-mono text-slate-300">{ak.adj_o || '—'}</span></div>
-                                        <div className="flex justify-between items-center"><span className="text-slate-500">AdjD</span><span className="font-mono text-slate-300">{ak.adj_d || '—'}</span></div>
-                                    </div>
-                                    <div className="pl-3 border-l border-slate-700/50">
-                                        <div className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">{ev.home_team || 'Home'}</div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjEM</span><span className="font-mono text-slate-300">{hk.adj_em ? `+${hk.adj_em}` : '—'}</span></div>
-                                        <div className="flex justify-between items-center mb-0.5"><span className="text-slate-500">AdjO</span><span className="font-mono text-slate-300">{hk.adj_o || '—'}</span></div>
-                                        <div className="flex justify-between items-center"><span className="text-slate-500">AdjD</span><span className="font-mono text-slate-300">{hk.adj_d || '—'}</span></div>
-                                    </div>
-                                </div>
-
-                                <div className="flex-1"></div>
-
-                                {/* Pick */}
-                                <div className="mb-3 pt-3 border-t border-slate-700/50">
-                                    <div className="text-[11px] text-orange-400/80 uppercase tracking-wider mb-1 font-bold">Model Pick</div>
-                                    <div className="flex justify-between items-end">
-                                        <div>
-                                            <div className="text-base font-black text-white">{rec.bet_type}: {rec.selection}</div>
-                                            {rec.market_line != null && (
-                                                <div className="text-xs text-slate-400 mt-0.5">{rec.price > 0 ? '+' : ''}{rec.price}</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Stats row */}
-                                <div className="flex items-center gap-3">
-                                    <div className="flex-1">
-                                        <div className="text-[10px] text-slate-500 mb-0.5">EV</div>
-                                        <div className="text-sm font-black text-emerald-400">+{evPct.toFixed(1)}%</div>
-                                    </div>
-                                    {rec.win_prob != null && (
-                                        <div className="flex-1">
-                                            <div className="text-[10px] text-slate-500 mb-0.5">Win Prob</div>
-                                            <div className="text-sm font-bold text-slate-200">{(rec.win_prob * 100).toFixed(0)}%</div>
-                                        </div>
-                                    )}
-                                    <div className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold uppercase ${confBg} ${confColor}`}>
-                                        {confLabel}
-                                    </div>
+                                <div className="border-t border-slate-800 pt-6">
+                                    <h3 className="text-sm font-bold text-red-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                        <XCircleIcon /> Vulnerabilities
+                                    </h3>
+                                    <ul className="space-y-3">
+                                        {narrative.weaknesses.map((w, i) => (
+                                            <li key={i} className="flex items-start gap-3 text-slate-300">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-2 shrink-0"></span>
+                                                <span className="leading-relaxed">{w}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
                             </div>
-                        );
-                    })}
+                        </div>
+
+                        {/* Upset Volatility */}
+                        <div className="bg-gradient-to-br from-rose-950/40 to-slate-900 border border-rose-900/30 rounded-2xl p-6 shadow-xl">
+                            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                                <AlertTriangle className="text-rose-500" /> Upset Volatility Profile
+                            </h2>
+                            <p className="text-slate-300 text-sm leading-relaxed mb-4">
+                                {narrative.upsetFlags}
+                            </p>
+
+                            <div className="space-y-3 border-t border-slate-800/50 pt-4">
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-400">3P Reliance Var:</span>
+                                    <span className="font-mono text-emerald-400">LOW</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-400">Tempo Var:</span>
+                                    <span className="font-mono text-yellow-400">MED</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-400">Foul Trouble Risk:</span>
+                                    <span className="font-mono text-rose-400 px-2 py-0.5 bg-rose-500/10 rounded">HIGH (Clingan)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* RIGHT COLUMN: Roster & Advanced Context */}
+                    <div className="space-y-8">
+                        {/* Roster Block */}
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                            <div className="bg-slate-800/50 p-4 border-b border-slate-800">
+                                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                                    <Users className="text-blue-400" /> Key Personnel
+                                </h2>
+                            </div>
+                            <div className="divide-y divide-slate-800">
+                                {players.map((p, i) => (
+                                    <div key={i} className="p-4 hover:bg-slate-800/30 transition">
+                                        <div className="flex justify-between items-start mb-1">
+                                            <div className="font-bold text-slate-100 flex items-center gap-2">
+                                                {p.name} <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">{p.pos}</span>
+                                            </div>
+                                        </div>
+                                        <div className="text-xs font-mono text-blue-400/80 mb-2">{p.stats}</div>
+                                        <p className="text-xs text-slate-400 leading-relaxed">{p.role}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Torvik Extra */}
+                        {torvik.barthag && (
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">BartTorvik Analytics</h3>
+                                <div className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                    <span className="text-sm font-semibold text-slate-300">Barthag Win%</span>
+                                    <span className="text-xl font-black text-white">{(torvik.barthag * 100).toFixed(1)}%</span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-3 italic text-center">
+                                    Probability of beating an average D1 team on a neutral court.
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 };
+
+// Simple Icon Helpers
+const FileTextIcon = (props) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+);
+const CheckCircleIcon = (props) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+);
+const XCircleIcon = (props) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+);
 
 export default MarchMadness;
