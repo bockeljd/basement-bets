@@ -150,6 +150,24 @@ const MarchMadness = () => {
                 </div>
             </div>
 
+            <section className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                    <div>
+                        <div className="text-xs uppercase tracking-widest text-slate-400">Template Preview</div>
+                        <h2 className="text-lg font-semibold">UConn Huskies — Template + Modeling</h2>
+                        <p className="text-sm text-slate-400">This is the polished UConn team-profile card we rendered earlier. It includes the same KPIs, player heatmap, upset flags, and matchup notes that we want to lock in before filling out the remaining research.</p>
+                    </div>
+                    <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Live preview</div>
+                </div>
+                <div className="h-[720px] border border-slate-800 rounded-2xl overflow-hidden">
+                    <iframe
+                        title="UConn Template Preview"
+                        src="/march-madness/preview-uconn-polished.html"
+                        className="w-full h-full"
+                    />
+                </div>
+            </section>
+
             {/* Pick cards */}
             {loading ? (
                 <div className="text-center py-12 text-slate-400 font-mono animate-pulse">Loading tournament board...</div>
