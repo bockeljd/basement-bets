@@ -3917,7 +3917,7 @@ async def get_ncaam_parlays_today(
     parlay_odds_lo: int = -120,
     parlay_odds_hi: int = 800,
     max_legs: int = 2,
-    limit_legs: int = 80,
+    limit_legs: int = 150,
     persist: bool = False,
     strategy: str = "all",  # 'all' | 'home_fav'
 ):
@@ -3989,7 +3989,7 @@ async def get_ncaam_parlays_today(
         AND (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date
         AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
         AND COALESCE(m.bet_price, m.price) IS NOT NULL
-      ORDER BY COALESCE(m.ev_per_unit, 0) DESC
+      ORDER BY m.win_prob DESC
       LIMIT %(lim)s
     """
 
@@ -4092,15 +4092,15 @@ async def get_ncaam_parlays_today(
     # Priority 2: Fill in with chalk parlays that are independent from BOTH high_conf and the plus_money ones we just added
     if len(payout_band) < 5:
         sorted_chalk = sorted([c for c in combos_in_band if c not in plus_money], key=lambda x: (x['ev'], x['p_win']), reverse=True)
-        extra_chalk, _ = get_independent_combos(sorted_chalk, 5 - len(payout_band), avoid_eids=payout_eids)
+        combined_avoid = used_eids.union(payout_eids)
+        extra_chalk, _ = get_independent_combos(sorted_chalk, 5 - len(payout_band), avoid_eids=combined_avoid)
         payout_band.extend(extra_chalk)
 
-    # Priority 3 (Fallback): If absolutely no independent parlays exist, just grab the best remaining exact combos
+    # Priority 3 (Fallback): If absolutely no independent parlays exist, just grab the best remaining independent combos overall
     if not payout_band:
-        def get_combo_key(c):
-            return tuple(sorted([c['legs'][0].get('event_id', ''), c['legs'][1].get('event_id', '')]))
-        high_conf_keys = {get_combo_key(c) for c in high_conf}
-        payout_band = [c for c in sorted_by_win if get_combo_key(c) not in high_conf_keys][:5]
+        payout_band, _ = get_independent_combos(sorted_by_win, 5, avoid_eids=used_eids)
+        if not payout_band:
+            payout_band = [c for c in sorted_by_win if c not in high_conf][:5]
 
     # Optional: persist the single recommended parlay so performance/grading can track it.
     # (UI can call with persist=1; duplicates are avoided via unique key.)

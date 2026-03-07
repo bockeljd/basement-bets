@@ -107,7 +107,7 @@ export default function ParlayRecommendations() {
     setErr(null);
     try {
       const [main, homeFav] = await Promise.all([
-        api.get('/api/ncaam/parlays/today', { params: { min_ev_per_unit: 0.02 } }),
+        api.get('/api/ncaam/parlays/today', { params: { min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 } }),
         api.get('/api/ncaam/parlays/today', { params: { strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120, min_ev_per_unit: -0.2 } }).catch(() => ({ data: null })),
       ]);
       setAllData(main.data);
