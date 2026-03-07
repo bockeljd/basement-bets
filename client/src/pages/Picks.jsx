@@ -134,10 +134,21 @@ export default function Picks() {
     return mt || 'OTHER';
   };
 
+  const top5Yesterday = useMemo(() => {
+    const getEv = (h) => {
+      const ev = Number(h?.ev_per_unit ?? h?.ev);
+      return Number.isFinite(ev) ? ev : 0;
+    };
+    return (yesterdaySlate || [])
+      .slice()
+      .sort((a, b) => getEv(b) - getEv(a))
+      .slice(0, 5);
+  }, [yesterdaySlate]);
+
   const gradedYesterday = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return (yesterdaySlate || []).filter((h) => isGraded(res(h)));
-  }, [yesterdaySlate]);
+    return top5Yesterday.filter((h) => isGraded(res(h)));
+  }, [top5Yesterday]);
 
   const gradedYesterdayStraight = useMemo(() => {
     return (gradedYesterday || []).filter((h) => {
@@ -155,8 +166,8 @@ export default function Picks() {
 
   const pendingYesterday = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return (yesterdaySlate || []).filter((h) => !isGraded(res(h))).length;
-  }, [yesterdaySlate]);
+    return top5Yesterday.filter((h) => !isGraded(res(h))).length;
+  }, [top5Yesterday]);
 
   const recordFor = (rows) => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
@@ -464,7 +475,7 @@ export default function Picks() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-2">
             <BarChart3 size={18} className="text-emerald-300" />
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Spreads & Totals</div>
+            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Top 5 Recommended Spreads & Totals</div>
             <div className="ml-auto flex items-center gap-2">
               <div className="text-xs text-slate-500">{yesterdayEt}</div>
               {pendingYesterday > 0 && (
