@@ -1392,7 +1392,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
 
             {/* Analysis Modal */}
             {
-                selectedGame && (
+                selectedGame ? (
                     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                         <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl relative animate-in fade-in zoom-in duration-200">
                             {/* Header */}
@@ -2244,10 +2244,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                         </div>
                     </div>
             </div>
-                )
-            }
+    )
+}
             )
 }
 
 
-            export default Research;
+export default Research;
