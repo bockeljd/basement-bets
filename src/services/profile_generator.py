@@ -32,7 +32,7 @@ class ProfileGeneratorService:
         
         if self.gemini_key and genai:
             genai.configure(api_key=self.gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-3-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
         else:
             self.gemini_model = None
 
@@ -140,18 +140,32 @@ class ProfileGeneratorService:
         }
         
         # Pull real player stats if available (sorted by playing time/rank)
-        real_players = self.kp_client.get_player_stats_for_team(team_name, limit=12)
-        # Sort by minutes/min_pct if available in metrics
-        def get_min(p):
-            m = p.get('metrics', {}).get('cols', [])
-            h = p.get('metrics', {}).get('headers', [])
-            try:
-                idx = next(i for i, x in enumerate(h) if 'min' in x.lower())
-                return float(str(m[idx]).replace('%',''))
-            except:
-                return 0
+        real_players = []
         
-        real_players = sorted(real_players, key=get_min, reverse=True)[:6]
+        # Pull from our guaranteed 2026 ESPN roster map
+        try:
+            with open("data/imports/espn_rosters_2026.json", "r") as f:
+                espn_data = json.load(f)
+                if team_name in espn_data:
+                    # Format to match expectations
+                    real_players = [{"name": p["name"], "metrics": {"cols": [], "headers": []}} for p in espn_data[team_name]]
+        except Exception as e:
+            pass
+
+        if not real_players:
+            # Fallback to Database KenPom
+            real_players = self.kp_client.get_player_stats_for_team(team_name, limit=12)
+            def get_min(p):
+                m = p.get('metrics', {}).get('cols', [])
+                h = p.get('metrics', {}).get('headers', [])
+                try:
+                    idx = next(i for i, x in enumerate(h) if 'min' in x.lower())
+                    return float(str(m[idx]).replace('%',''))
+                except:
+                    return 0
+            
+            real_players = sorted(real_players, key=get_min, reverse=True)[:6]
+
 
         # 4. Generate Narrative & Player Stats via LLM
         prompt = f"""
@@ -206,11 +220,11 @@ class ProfileGeneratorService:
                 print(f"[ProfileGen] OpenAI Error: {e}")
 
         # Fallback to Gemini
-        if not result_json and self.gemini_key:
+        if not result_json and self.gemini_key and len(str(self.gemini_key)) > 5:
             print(f"[ProfileGen] Using Gemini fallback for {team_name}...")
             try:
                 import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key={self.gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
                 headers = {"Content-Type": "application/json"}
                 
                 # Gemini prompt needs slightly different handling for JSON
@@ -266,10 +280,29 @@ class ProfileGeneratorService:
                 # We have real players but no AI narrative, let's at least show the real names
                 profile["players"] = []
                 for p in real_players[:6]:
+                    def get_metric(player, header_fragment, default=0):
+                        m = player.get('metrics', {}).get('cols', [])
+                        h = player.get('metrics', {}).get('headers', [])
+                        try:
+                            idx = next(i for i, x in enumerate(h) if header_fragment.lower() in str(x).lower())
+                            val = str(m[idx]).replace('%', '')
+                            if val.replace('.', '', 1).isdigit():
+                                return float(val)
+                            return float(val) if val else default
+                        except:
+                            return default
+                            
                     profile["players"].append({
-                        "name": p.get('player_name'),
-                        "pos": "N/A", "role": "Key Rotation Player", "stats": "Stats Pending", 
-                        "adv": {"ortg": 0, "usg": 0, "min": 0, "efg": 0}
+                        "name": p.get('name', p.get('player_name', 'Unknown')),
+                        "pos": "TBD", 
+                        "role": "Key Rotation Player", 
+                        "stats": "Stats Pending", 
+                        "adv": {
+                            "ortg": get_metric(p, 'o-rat', 0) or get_metric(p, 'ortg', 0), 
+                            "usg": get_metric(p, 'usag', 0) or get_metric(p, 'usg', 0), 
+                            "min": get_metric(p, 'min', 0), 
+                            "efg": get_metric(p, 'efg', 0)
+                        }
                     })
 
         # 5. Save to Cache

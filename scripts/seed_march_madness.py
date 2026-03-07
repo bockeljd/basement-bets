@@ -55,6 +55,8 @@ MANUAL_PLAYER_DATA = {
 }
 
 def seed_top_teams(limit=68):
+    os.environ['GEMINI_API_KEY'] = ''
+    os.environ['OPENAI_API_KEY'] = ''
     profiler = ProfileGeneratorService()
     
     with get_db_connection() as conn:
@@ -74,13 +76,6 @@ def seed_top_teams(limit=68):
             # Generate the profile (fetches DB + LLM)
             profile = profiler.generate_profile(team)
             
-            # If we have manual overrides for this team, patch them in before final save
-            if team in MANUAL_PLAYER_DATA:
-                print(f"  --> Applying manual player stats override for {team}")
-                profile["players"] = MANUAL_PLAYER_DATA[team]
-                # Re-save to cache with the manual data
-                profiler.save_cached_profile(team, profile)
-                
             print(f"  [OK] Cached {team}")
         except Exception as e:
             print(f"  [ERROR] Failed {team}: {e}")
