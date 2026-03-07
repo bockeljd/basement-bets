@@ -61,7 +61,23 @@ class ProfileGeneratorService:
                 data["torvik"] = dict(bt_row)
             
             # 3. NET Rankings
-            net_row = _exec(conn, "SELECT * FROM ncaam_net_rankings WHERE team_name ILIKE %s LIMIT 1", (f"%{team_name}%",)).fetchone()
+            net_team_name = team_name
+            try:
+                with open('data/team_mapping.json', 'r') as f:
+                    mapping = json.load(f)
+                    # Reverse the mapping (e.g. 'Connecticut' -> 'UConn')
+                    inv_map = {v: k for k, v in mapping.items()}
+                    if team_name in inv_map:
+                        net_team_name = inv_map[team_name]
+            except Exception:
+                pass
+            
+            # Use exact match if we mapped it, else ILIKE
+            if net_team_name != team_name:
+                net_row = _exec(conn, "SELECT * FROM ncaam_net_rankings WHERE team_name = %s LIMIT 1", (net_team_name,)).fetchone()
+            else:
+                net_row = _exec(conn, "SELECT * FROM ncaam_net_rankings WHERE team_name ILIKE %s LIMIT 1", (f"%{team_name}%",)).fetchone()
+                
             if net_row:
                 data["net"] = dict(net_row)
 
