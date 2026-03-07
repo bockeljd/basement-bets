@@ -4064,47 +4064,43 @@ async def get_ncaam_parlays_today(
 
     combos_in_band = [c for c in combos if in_parlay_band(c)]
 
-    # High confidence shortlist (within band)
-    high_conf = sorted(combos_in_band, key=lambda x: (x['p_win'], x['ev']), reverse=True)[:5]
+    # Helper to enforce absolute leg independence
+    def get_independent_combos(combo_list, limit, avoid_eids=None):
+        used = set(avoid_eids) if avoid_eids else set()
+        accepted = []
+        for c in combo_list:
+            e1 = c['legs'][0].get('event_id')
+            e2 = c['legs'][1].get('event_id')
+            if e1 not in used and e2 not in used:
+                accepted.append(c)
+                used.add(e1)
+                used.add(e2)
+            if len(accepted) >= limit:
+                break
+        return accepted, used
 
-    # Deduplicate: Track event pairs used in high_conf
-    def get_combo_key(c):
-        e1 = c['legs'][0].get('event_id', '')
-        e2 = c['legs'][1].get('event_id', '')
-        return tuple(sorted([e1, e2]))
-    
-    high_conf_keys = {get_combo_key(c) for c in high_conf}
-    remaining_combos = [c for c in combos_in_band if get_combo_key(c) not in high_conf_keys]
+    # 1. High confidence shortlist (within band)
+    sorted_by_win = sorted(combos_in_band, key=lambda x: (x['p_win'], x['ev']), reverse=True)
+    high_conf, used_eids = get_independent_combos(sorted_by_win, 5)
 
-    # For UI variety, track all event IDs used in the top 2 High Confidence parlays
-    top_high_conf = high_conf[:2]
-    used_eids = set()
-    for c in top_high_conf:
-        used_eids.add(c['legs'][0].get('event_id'))
-        used_eids.add(c['legs'][1].get('event_id'))
+    # 2. Payout band shortlist (Value Matchups)
+    # Priority 1: Target Plus Money (+100 or better) that share NO legs with top High Confidence parlays
+    plus_money = [c for c in combos_in_band if (c.get('american_odds') or 0) >= 100]
+    sorted_plus_money = sorted(plus_money, key=lambda x: (x['ev'], x['p_win']), reverse=True)
+    payout_band, payout_eids = get_independent_combos(sorted_plus_money, 5, avoid_eids=used_eids)
+    
+    # Priority 2: Fill in with chalk parlays that are independent from BOTH high_conf and the plus_money ones we just added
+    if len(payout_band) < 5:
+        sorted_chalk = sorted([c for c in combos_in_band if c not in plus_money], key=lambda x: (x['ev'], x['p_win']), reverse=True)
+        extra_chalk, _ = get_independent_combos(sorted_chalk, 5 - len(payout_band), avoid_eids=payout_eids)
+        payout_band.extend(extra_chalk)
 
-    # Payout band shortlist: target "Plus Money" (+100 or better) and independent legs
-    plus_money = [c for c in remaining_combos if (c.get('american_odds') or 0) >= 100]
-    
-    # Priority 1: Plus money parlays that share NO legs with top High Confidence parlays
-    independent_plus = [c for c in plus_money if c['legs'][0].get('event_id') not in used_eids and c['legs'][1].get('event_id') not in used_eids]
-    value_combos = sorted(independent_plus, key=lambda x: (x['ev'], x['p_win']), reverse=True)
-    
-    # Priority 2: Fill in with other plus money parlays (might share 1 leg)
-    if len(value_combos) < 5:
-        other_plus = sorted([c for c in plus_money if c not in value_combos], key=lambda x: (x['ev'], x['p_win']), reverse=True)
-        value_combos.extend(other_plus)
-    
-    payout_band = value_combos[:5]
-
-    # Priority 3 (Fallback): If absolutely no plus money parlays exist, use independent chalk parlays so it isn't identical
+    # Priority 3 (Fallback): If absolutely no independent parlays exist, just grab the best remaining exact combos
     if not payout_band:
-        independent_chalk = [c for c in remaining_combos if c['legs'][0].get('event_id') not in used_eids and c['legs'][1].get('event_id') not in used_eids]
-        payout_band = sorted(independent_chalk, key=lambda x: (x['ev'], x['p_win']), reverse=True)[:5]
-        
-    # Final fallback if totally empty
-    if not payout_band:
-        payout_band = sorted(remaining_combos, key=lambda x: (x['ev'], x['p_win']), reverse=True)[:5]
+        def get_combo_key(c):
+            return tuple(sorted([c['legs'][0].get('event_id', ''), c['legs'][1].get('event_id', '')]))
+        high_conf_keys = {get_combo_key(c) for c in high_conf}
+        payout_band = [c for c in sorted_by_win if get_combo_key(c) not in high_conf_keys][:5]
 
     # Optional: persist the single recommended parlay so performance/grading can track it.
     # (UI can call with persist=1; duplicates are avoided via unique key.)
