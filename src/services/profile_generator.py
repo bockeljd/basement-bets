@@ -142,17 +142,18 @@ class ProfileGeneratorService:
         # Pull real player stats if available (sorted by playing time/rank)
         real_players = []
         
-        # Pull from our guaranteed 2026 ESPN roster map
+        # Load from our offline static master repo First (guarantees 2026 accuracy and 100% uptime)
         try:
-            with open("data/imports/espn_rosters_2026.json", "r") as f:
-                espn_data = json.load(f)
-                if team_name in espn_data:
-                    # Format to match expectations
-                    real_players = [{"name": p["name"], "metrics": {"cols": [], "headers": []}} for p in espn_data[team_name]]
+            with open("data/static/master_rosters_2026.json", "r") as f:
+                master_data = json.load(f)
+                if team_name in master_data:
+                    real_players = master_data[team_name]
         except Exception as e:
             pass
 
         if not real_players:
+            import logging
+            logging.info(f"[ProfileGen] Offline Master missing {team_name}, falling back to KenPom DB.")
             # Fallback to Database KenPom
             real_players = self.kp_client.get_player_stats_for_team(team_name, limit=12)
             def get_min(p):
