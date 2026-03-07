@@ -2238,12 +2238,13 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                             </div>
                                         )}
                                     </div>
+                                ) : null}
+                            </div>
                         </div>
-                        </div>
-                ) : null}
                     </div>
-                )
+                ) : null}
+        </div>
+    )
 }
 
-
-            export default Research;
+export default Research;
