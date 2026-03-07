@@ -3917,9 +3917,9 @@ async def get_ncaam_parlays_today(
     parlay_odds_lo: int = -120,
     parlay_odds_hi: int = 800,
     max_legs: int = 2,
-    limit_legs: int = 150,
-    persist: bool = False,
+    limit_legs: int = 80,
     strategy: str = "all",  # 'all' | 'home_fav'
+    days_ago: int = 0,
 ):
     """2-leg ML parlay recommendations for today's NCAAM slate.
 
@@ -3966,13 +3966,14 @@ async def get_ncaam_parlays_today(
             return int(round(x * 100))
         return int(round(-100 / x))
 
-    # Today ET date filter
+    # ET date filter
     q = """
       SELECT
         m.event_id,
         m.model_version,
         m.market_type,
         m.pick,
+        m.outcome,
         m.bet_line,
         COALESCE(m.bet_price, m.price) AS price,
         m.win_prob,
@@ -3986,7 +3987,7 @@ async def get_ncaam_parlays_today(
       JOIN events e ON m.event_id = e.id
       WHERE e.league = 'NCAAM'
         AND UPPER(COALESCE(m.market_type,'')) IN ('MONEYLINE','ML')
-        AND (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date
+        AND (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York' - (%(days)s || ' days')::interval)::date
         AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
         AND COALESCE(m.bet_price, m.price) IS NOT NULL
       ORDER BY m.win_prob DESC
@@ -3994,7 +3995,7 @@ async def get_ncaam_parlays_today(
     """
 
     with get_db_connection() as conn:
-        legs = [dict(r) for r in _exec(conn, q, {"min_ev": float(min_ev_per_unit), "lim": int(limit_legs)}).fetchall()]
+        legs = [dict(r) for r in _exec(conn, q, {"min_ev": float(min_ev_per_unit), "lim": int(limit_legs), "days": int(days_ago)}).fetchall()]
 
     # Build normalized leg objects
     norm_legs = []
@@ -4022,6 +4023,7 @@ async def get_ncaam_parlays_today(
             "price": price,
             "win_prob": wp,
             "ev_per_unit": float(r.get('ev_per_unit') or 0),
+            "outcome": r.get('outcome'),
             "model_version": r.get('model_version'),
             "start_time": str(r.get('start_time') or ''),
             "is_home_pick": is_home_pick,
@@ -4041,6 +4043,24 @@ async def get_ncaam_parlays_today(
             if not a.get('event_id') or a.get('event_id') == b.get('event_id'):
                 continue
 
+            parlay_outcome = None
+            oa = str(a.get('outcome') or '').upper()
+            ob = str(b.get('outcome') or '').upper()
+            if oa in ('PENDING', '') or ob in ('PENDING', ''):
+                parlay_outcome = 'PENDING'
+            elif oa == 'LOST' or ob == 'LOST':
+                parlay_outcome = 'LOST'
+            elif oa == 'WON' and ob == 'WON':
+                parlay_outcome = 'WON'
+            elif oa == 'PUSH' and ob == 'PUSH':
+                parlay_outcome = 'PUSH'
+            elif oa == 'VOID' or ob == 'VOID':
+                parlay_outcome = 'VOID'
+            elif (oa == 'WON' and ob == 'PUSH') or (oa == 'PUSH' and ob == 'WON'):
+                parlay_outcome = 'WON (partial)' 
+            else:
+                parlay_outcome = 'PENDING'
+
             p = float(a['win_prob']) * float(b['win_prob'])
             dec = dec_from_american(a['price']) * dec_from_american(b['price'])
             amer = american_from_dec(dec)
@@ -4052,6 +4072,7 @@ async def get_ncaam_parlays_today(
                 "decimal_odds": dec,
                 "american_odds": amer,
                 "ev": ev,
+                "outcome": parlay_outcome,
             })
 
     # Filter combos by TOTAL parlay odds band (user spec)
