@@ -4029,8 +4029,8 @@ async def get_ncaam_parlays_today(
 
     # Apply strategy filter AFTER building norm_legs so we can inspect is_home_pick
     if _strategy == 'home_fav':
-        # Keep only legs where the model is picking the home team AND they are a favorite (negative ML)
-        norm_legs = [leg for leg in norm_legs if leg.get('is_home_pick') and leg.get('price', 0) < 0]
+        # Keep only legs where the model is picking the home team AND they are HIGHLY favored (ML <= -150)
+        norm_legs = [leg for leg in norm_legs if leg.get('is_home_pick') and leg.get('price', 0) <= -150]
 
     # Enumerate all 2-leg combos (different events)
     combos = []
