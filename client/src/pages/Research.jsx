@@ -1374,7 +1374,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
 
 
 
-
             <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                     <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
@@ -2245,8 +2244,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                     </div>
             </div>
     )
-}
-            )
 }
 
 
