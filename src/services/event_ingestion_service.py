@@ -102,8 +102,14 @@ class EventIngestionService:
         })
 
     def _update_event_status(self, conn, event_id: str, data: Dict):
-        query = "UPDATE events SET status = :s WHERE id = :id"
-        _exec(conn, query, {"s": data['status'], "id": event_id})
+        query = "UPDATE events SET status = :s, start_time = :st WHERE id = :id"
+        try:
+            _exec(conn, query, {"s": data['status'], "st": data['start_time'], "id": event_id})
+        except Exception as e:
+            # Fallback if the DB doesn't like the start_time format or something else fails
+            print(f"Failed to update status and start_time for {event_id}: {e}")
+            query = "UPDATE events SET status = :s WHERE id = :id"
+            _exec(conn, query, {"s": data['status'], "id": event_id})
 
     def _link_provider(self, conn, event_id: str, provider: str, provider_event_id: str):
         query = """
