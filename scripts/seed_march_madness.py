@@ -55,6 +55,8 @@ MANUAL_PLAYER_DATA = {
 }
 
 def seed_top_teams(limit=68):
+    os.environ['GEMINI_API_KEY'] = ''
+    os.environ['OPENAI_API_KEY'] = ''
     profiler = ProfileGeneratorService()
     
     with get_db_connection() as conn:

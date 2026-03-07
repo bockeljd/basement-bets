@@ -142,23 +142,19 @@ class ProfileGeneratorService:
         # Pull real player stats if available (sorted by playing time/rank)
         real_players = []
         
-        # Try to use scraped 2026 Torvik data first (to override bad KenPom DB data for top teams)
+        # Pull from our guaranteed 2026 ESPN roster map
         try:
-            with open("data/imports/torvik_top10_2026.json", "r") as f:
-                torvik_data = json.load(f)
-                torvik_team = [p for p in torvik_data if p["team"] == team_name]
-                if torvik_team:
-                    # Sort by min_pct DESC
-                    torvik_team = sorted(torvik_team, key=lambda x: float(str(x.get("min_pct", "0")).replace("%","")), reverse=True)
-                    # Format to match what the LLM expects
-                    real_players = [{"name": p["name"], "metrics": {"cols": [p.get("ortg"), p.get("usg"), p.get("efg"), p.get("ts"), p.get("min_pct")], "headers": ["O-Rating", "Usage", "eFG%", "TS%", "Min%"]}} for p in torvik_team][:6]
+            with open("data/imports/espn_rosters_2026.json", "r") as f:
+                espn_data = json.load(f)
+                if team_name in espn_data:
+                    # Format to match expectations
+                    real_players = [{"name": p["name"], "metrics": {"cols": [], "headers": []}} for p in espn_data[team_name]]
         except Exception as e:
             pass
 
         if not real_players:
-            # Fallback to Database
+            # Fallback to Database KenPom
             real_players = self.kp_client.get_player_stats_for_team(team_name, limit=12)
-            # Sort by minutes/min_pct if available in metrics
             def get_min(p):
                 m = p.get('metrics', {}).get('cols', [])
                 h = p.get('metrics', {}).get('headers', [])
@@ -224,7 +220,7 @@ class ProfileGeneratorService:
                 print(f"[ProfileGen] OpenAI Error: {e}")
 
         # Fallback to Gemini
-        if not result_json and self.gemini_key:
+        if not result_json and self.gemini_key and len(str(self.gemini_key)) > 5:
             print(f"[ProfileGen] Using Gemini fallback for {team_name}...")
             try:
                 import requests
@@ -284,10 +280,29 @@ class ProfileGeneratorService:
                 # We have real players but no AI narrative, let's at least show the real names
                 profile["players"] = []
                 for p in real_players[:6]:
+                    def get_metric(player, header_fragment, default=0):
+                        m = player.get('metrics', {}).get('cols', [])
+                        h = player.get('metrics', {}).get('headers', [])
+                        try:
+                            idx = next(i for i, x in enumerate(h) if header_fragment.lower() in str(x).lower())
+                            val = str(m[idx]).replace('%', '')
+                            if val.replace('.', '', 1).isdigit():
+                                return float(val)
+                            return float(val) if val else default
+                        except:
+                            return default
+                            
                     profile["players"].append({
-                        "name": p.get('player_name'),
-                        "pos": "N/A", "role": "Key Rotation Player", "stats": "Stats Pending", 
-                        "adv": {"ortg": 0, "usg": 0, "min": 0, "efg": 0}
+                        "name": p.get('name', p.get('player_name', 'Unknown')),
+                        "pos": "TBD", 
+                        "role": "Key Rotation Player", 
+                        "stats": "Stats Pending", 
+                        "adv": {
+                            "ortg": get_metric(p, 'o-rat', 0) or get_metric(p, 'ortg', 0), 
+                            "usg": get_metric(p, 'usag', 0) or get_metric(p, 'usg', 0), 
+                            "min": get_metric(p, 'min', 0), 
+                            "efg": get_metric(p, 'efg', 0)
+                        }
                     })
 
         # 5. Save to Cache
