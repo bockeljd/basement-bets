@@ -19,6 +19,14 @@ class EventIngestionService:
         """
         if not event_data.get('home_team_uuid') or not event_data.get('away_team_uuid'):
             return None
+            
+        # --- MANUAL TIME OVERRIDE ---
+        # Fix for Drexel vs Northeastern (2:30 PM ET)
+        _ht = event_data.get('home_team', '').lower()
+        _at = event_data.get('away_team', '').lower()
+        if ('drexel' in _ht or 'drexel' in _at) and ('northeastern' in _ht or 'northeastern' in _at):
+            event_data['start_time'] = '2026-03-07T19:30:00Z'
+        # ----------------------------
         
         provider = event_data.get('provider', 'ESPN')
         league = event_data['league']
@@ -102,8 +110,8 @@ class EventIngestionService:
         })
 
     def _update_event_status(self, conn, event_id: str, data: Dict):
-        query = "UPDATE events SET status = :s WHERE id = :id"
-        _exec(conn, query, {"s": data['status'], "id": event_id})
+        query = "UPDATE events SET status = :s, start_time = :st WHERE id = :id"
+        _exec(conn, query, {"s": data['status'], "st": data['start_time'], "id": event_id})
 
     def _link_provider(self, conn, event_id: str, provider: str, provider_event_id: str):
         query = """
