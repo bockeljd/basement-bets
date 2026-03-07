@@ -1,0 +1,13 @@
+Usage: flask run [OPTIONS]
+Try 'flask run --help' for help.
+
+Error: While importing 'api', an ImportError was raised:
+
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/flask/cli.py", line 245, in locate_app
+    __import__(module_name)
+    ~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/jordanbockelman/Basement Bets/bet_tracker/src/api.py", line 1, in <module>
+    from src.auth import get_current_user
+ModuleNotFoundError: No module named 'src'
+

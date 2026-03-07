@@ -3133,6 +3133,22 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/ncaam/matchup")
+async def get_matchup_analysis(request: Request, team_a: str, team_b: str):
+    """Generate or retrieve a head-to-head matchup analysis between two teams."""
+    from src.services.profile_generator import ProfileGeneratorService
+    
+    profiler = ProfileGeneratorService()
+    try:
+        analysis = profiler.generate_matchup_analysis(team_a, team_b)
+        return {"team_a": team_a, "team_b": team_b, "analysis": analysis}
+    except Exception as e:
+        print(f"[matchup] error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/ncaam/tournament-teams")
 async def get_tournament_teams(request: Request, limit: int = 68, generate: bool = False):
     """Return the top N teams by KenPom rank for bracket research profiles.

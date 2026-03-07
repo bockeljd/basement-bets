@@ -23,8 +23,8 @@ class ProfileGeneratorService:
     to synthesize tactical scouting reports and player metrics.
     """
     def __init__(self):
-        self.openai_key = os.environ.get("OPENAI_API_KEY")
-        self.gemini_key = os.environ.get("GEMINI_API_KEY")
+        self.gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        self.openai_key = os.getenv("OPENAI_API_KEY", "").strip()
         
         self.client = None
         if self.openai_key and OpenAI:
@@ -62,15 +62,13 @@ class ProfileGeneratorService:
             
             # 3. NET Rankings
             net_team_name = team_name
-            try:
-                with open('data/team_mapping.json', 'r') as f:
-                    mapping = json.load(f)
-                    # Reverse the mapping (e.g. 'Connecticut' -> 'UConn')
-                    inv_map = {v: k for k, v in mapping.items()}
-                    if team_name in inv_map:
-                        net_team_name = inv_map[team_name]
-            except Exception:
-                pass
+            net_overrides = {
+                "Connecticut": "UConn",
+                "Miami FL": "Miami (FL)",
+                "N.C. State": "NC State"
+            }
+            if team_name in net_overrides:
+                net_team_name = net_overrides[team_name]
             
             # Use exact match if we mapped it, else ILIKE
             if net_team_name != team_name:
@@ -242,7 +240,7 @@ class ProfileGeneratorService:
             print(f"[ProfileGen] Using Gemini fallback for {team_name}...")
             try:
                 import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={self.gemini_key}"
                 headers = {"Content-Type": "application/json"}
                 
                 # Gemini prompt needs slightly different handling for JSON
@@ -326,6 +324,97 @@ class ProfileGeneratorService:
         # 5. Save to Cache
         self.save_cached_profile(team_name, profile)
         return profile
+
+    def generate_matchup_analysis(self, team_a: str, team_b: str) -> dict:
+        """
+        Loads the generated profiles for both teams and generates a tactical
+        head-to-head matchup analysis using the LLM.
+        """
+        profile_a = self.generate_profile(team_a)
+        profile_b = self.generate_profile(team_b)
+        
+        prompt = f"""
+        You are a sharp, analytical college basketball betting scout.
+        
+        Task: Provide a detailed, tactical head-to-head analysis between Team A ({team_a}) and Team B ({team_b}) for the 2025-26 season.
+        
+        Team A Profile: {json.dumps(profile_a.get('metrics', {}))} - NET: {profile_a.get('net')}
+        Team A Tactics: {json.dumps(profile_a.get('narrative', {}))}
+
+        Team B Profile: {json.dumps(profile_b.get('metrics', {}))} - NET: {profile_b.get('net')}
+        Team B Tactics: {json.dumps(profile_b.get('narrative', {}))}
+        
+        Output MUST be pure JSON fitting this strict schema:
+        {{
+            "predicted_winner": "Team Name (e.g. Duke)",
+            "confidence": "High/Medium/Low",
+            "summary": "1-2 sentence overall tactical summary.",
+            "team_a_advantages": ["Advantage 1", "Advantage 2"],
+            "team_b_advantages": ["Advantage 1", "Advantage 2"],
+            "key_matchup": "Description of the deciding positional or schematic battle"
+        }}
+        """
+
+        result_json = None
+        
+        # Try OpenAI First
+        if self.openai_key and self.client:
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are an elite college basketball data journalist."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.2
+                )
+                result_json = json.loads(response.choices[0].message.content)
+            except Exception as e:
+                print(f"[MatchupGen] OpenAI Error: {e}")
+
+        # Fallback to Gemini
+        if not result_json and self.gemini_key and len(str(self.gemini_key)) > 5:
+            print(f"[MatchupGen] Using Gemini fallback for {team_a} vs {team_b}...")
+            try:
+                import requests
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={self.gemini_key}"
+                headers = {"Content-Type": "application/json"}
+                
+                gemini_prompt = prompt + "\\n\\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no triple backticks."
+                
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": gemini_prompt}]
+                    }]
+                }
+                
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                res_data = response.json()
+                
+                text = res_data['candidates'][0]['content']['parts'][0]['text']
+                text = text.strip()
+                if "```json" in text:
+                    text = text.split("```json")[1].split("```")[0].strip()
+                elif "```" in text:
+                    text = text.split("```")[1].split("```")[0].strip()
+                
+                result_json = json.loads(text)
+            except Exception as e:
+                print(f"[MatchupGen] Gemini Error: {e}")
+                
+        if not result_json:
+            result_json = {
+                "predicted_winner": "TBD",
+                "confidence": "Low",
+                "summary": "Matchup analysis currently unavailable due to AI service disruption.",
+                "team_a_advantages": [f"{team_a} overall efficiency"],
+                "team_b_advantages": [f"{team_b} overall efficiency"],
+                "key_matchup": "Tempo vs Execution"
+            }
+            
+        return result_json
 
 if __name__ == "__main__":
     from pprint import pprint
