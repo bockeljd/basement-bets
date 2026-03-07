@@ -74,7 +74,7 @@ def seed_top_teams(limit=68):
         
         try:
             # Generate the profile (fetches DB + LLM)
-            profile = profiler.generate_profile(team)
+            profile = profiler.generate_profile(team, force_refresh=True)
             
             print(f"  [OK] Cached {team}")
         except Exception as e:

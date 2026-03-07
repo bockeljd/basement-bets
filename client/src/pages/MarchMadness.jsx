@@ -269,10 +269,10 @@ const MarchMadness = () => {
                                             </div>
                                             <div className="grid grid-cols-2 gap-1 shrink-0">
                                                 <div className="bg-slate-950 px-2 py-0.5 rounded text-[9px] border border-slate-800 text-slate-400">
-                                                    ORtg <span className="text-slate-100">{p.adv.ortg}</span>
+                                                    ORtg <span className="text-slate-100">{p.adv?.ortg || 0}</span>
                                                 </div>
                                                 <div className="bg-slate-950 px-2 py-0.5 rounded text-[9px] border border-slate-800 text-slate-400">
-                                                    Usg% <span className="text-blue-300">{p.adv.usg}</span>
+                                                    Usg% <span className="text-blue-300">{p.adv?.usg || 0}</span>
                                                 </div>
                                             </div>
                                         </div>

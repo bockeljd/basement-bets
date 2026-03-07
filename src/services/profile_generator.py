@@ -97,15 +97,16 @@ class ProfileGeneratorService:
             """, (team_name, json.dumps(profile)))
             conn.commit()
 
-    def generate_profile(self, team_name: str) -> dict:
+    def generate_profile(self, team_name: str, force_refresh: bool = False) -> dict:
         """
         Main entry point. Fetches DB stats, and if no cached LLM narrative/roster exists, 
         generates one using current aggregated stats.
         """
         # 1. Check Cache
-        cached = self.get_cached_profile(team_name)
-        if cached:
-            return cached
+        if not force_refresh:
+            cached = self.get_cached_profile(team_name)
+            if cached:
+                return cached
 
         # 2. Extract Data
         raw_data = self.aggregate_team_data(team_name)
