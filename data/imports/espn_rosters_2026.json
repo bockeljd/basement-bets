@@ -1,0 +1,2586 @@
+{
+  "Michigan": [
+    {
+      "name": "Nimari Burnett",
+      "team": "Michigan",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Elliot Cadeau",
+      "team": "Michigan",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "L.J. Cason",
+      "team": "Michigan",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Howard Eisley Jr.",
+      "team": "Michigan",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Roddy Gayle Jr.",
+      "team": "Michigan",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Oscar Goodman",
+      "team": "Michigan",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Arizona": [
+    {
+      "name": "Dwayne Aristode",
+      "team": "Arizona",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Addison Arnold",
+      "team": "Arizona",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tobe Awaka",
+      "team": "Arizona",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jaden Bradley",
+      "team": "Arizona",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brayden Burries",
+      "team": "Arizona",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jackson Cook",
+      "team": "Arizona",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Iowa St.": [
+    {
+      "name": "Jamarion Batemon",
+      "team": "Iowa St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Blake Buchanan",
+      "team": "Iowa St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nate Heise",
+      "team": "Iowa St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Joshua Jefferson",
+      "team": "Iowa St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Cade Kelderman",
+      "team": "Iowa St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tamin Lipsey",
+      "team": "Iowa St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Purdue": [
+    {
+      "name": "Jack Benter",
+      "team": "Purdue",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Raleigh Burgess",
+      "team": "Purdue",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Oscar Cluff",
+      "team": "Purdue",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "C.J. Cox",
+      "team": "Purdue",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Aaron Fine",
+      "team": "Purdue",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Gicarri Harris",
+      "team": "Purdue",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Gonzaga": [
+    {
+      "name": "Joaquim ArauzMoore",
+      "team": "Gonzaga",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ismaila Diagne",
+      "team": "Gonzaga",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Davis Fogle",
+      "team": "Gonzaga",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tyon Grant-Foster",
+      "team": "Gonzaga",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Noah Haaland",
+      "team": "Gonzaga",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Braden Huff",
+      "team": "Gonzaga",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Duke": [
+    {
+      "name": "Cameron Boozer",
+      "team": "Duke",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Cayden Boozer",
+      "team": "Duke",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Maliq Brown",
+      "team": "Duke",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isaiah Evans",
+      "team": "Duke",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Caleb Foster",
+      "team": "Duke",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Darren Harris",
+      "team": "Duke",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Houston": [
+    {
+      "name": "Chris Cenac Jr.",
+      "team": "Houston",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kingston Flemings",
+      "team": "Houston",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isiah Harwell",
+      "team": "Houston",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Bryce Jackson",
+      "team": "Houston",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kordel Jefferson",
+      "team": "Houston",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Cedric Lath",
+      "team": "Houston",
+      "pos": "C",
+      "role": "Key Rotation"
+    }
+  ],
+  "Illinois": [
+    {
+      "name": "Kylan Boswell",
+      "team": "Illinois",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jake Davis",
+      "team": "Illinois",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Blake Fagbemi",
+      "team": "Illinois",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ben Humrichous",
+      "team": "Illinois",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tomislav Ivisic",
+      "team": "Illinois",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Zvonimir Ivisic",
+      "team": "Illinois",
+      "pos": "C",
+      "role": "Key Rotation"
+    }
+  ],
+  "Florida": [
+    {
+      "name": "AJ Brown",
+      "team": "Florida",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isaiah Brown",
+      "team": "Florida",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Rueben Chinyelu",
+      "team": "Florida",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Alex Condon",
+      "team": "Florida",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Boogie Fland",
+      "team": "Florida",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Micah Handlogten",
+      "team": "Florida",
+      "pos": "C",
+      "role": "Key Rotation"
+    }
+  ],
+  "Connecticut": [
+    {
+      "name": "Solo Ball",
+      "team": "Connecticut",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Silas Demary Jr.",
+      "team": "Connecticut",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Rrezon Elezaj",
+      "team": "Connecticut",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jacob Furphy",
+      "team": "Connecticut",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Alex Karaban",
+      "team": "Connecticut",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dwayne Koroma",
+      "team": "Connecticut",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Vanderbilt": [
+    {
+      "name": "Chandler Bing",
+      "team": "Vanderbilt",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Frankie Collins",
+      "team": "Vanderbilt",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jaylon Dean-Vines",
+      "team": "Vanderbilt",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tyler Harris",
+      "team": "Vanderbilt",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Mike James",
+      "team": "Vanderbilt",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Miles Keeffe",
+      "team": "Vanderbilt",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Michigan St.": [
+    {
+      "name": "Coen Carr",
+      "team": "Michigan St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Carson Cooper",
+      "team": "Michigan St.",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jeremy Fears Jr.",
+      "team": "Michigan St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Trey Fort",
+      "team": "Michigan St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kaleb Glenn",
+      "team": "Michigan St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jaxon Kohler",
+      "team": "Michigan St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "BYU": [
+    {
+      "name": "Abdullah Ahmed",
+      "team": "BYU",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dawson Baker",
+      "team": "BYU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Mihailo Bo\u0161kovic",
+      "team": "BYU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kennard Davis Jr.",
+      "team": "BYU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dominique Diomande",
+      "team": "BYU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "AJ Dybantsa",
+      "team": "BYU",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Virginia": [
+    {
+      "name": "Silas Barksdale",
+      "team": "Virginia",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Martin Carrere",
+      "team": "Virginia",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Thijs De Ridder",
+      "team": "Virginia",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Elijah Gertrude",
+      "team": "Virginia",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Johann Grunloh",
+      "team": "Virginia",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dallin Hall",
+      "team": "Virginia",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Nebraska": [
+    {
+      "name": "Kendall Blue",
+      "team": "Nebraska",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Justin Bolis",
+      "team": "Nebraska",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Henry Burt",
+      "team": "Nebraska",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Berke Buyuktuncel",
+      "team": "Nebraska",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Will Cooper",
+      "team": "Nebraska",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Leo Curtis",
+      "team": "Nebraska",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Kansas": [
+    {
+      "name": "Corbin Allen",
+      "team": "Kansas",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Flory Bidunga",
+      "team": "Kansas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Samis Calderon",
+      "team": "Kansas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Melvin Council Jr.",
+      "team": "Kansas",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Justin Cross",
+      "team": "Kansas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jayden Dawson",
+      "team": "Kansas",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Alabama": [
+    {
+      "name": "Amari Allen",
+      "team": "Alabama",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jalil Bethea",
+      "team": "Alabama",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Taylor Bol Bowen",
+      "team": "Alabama",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Keitenn Bristow",
+      "team": "Alabama",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jack Fagan",
+      "team": "Alabama",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Davion Hannah",
+      "team": "Alabama",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "St. John's": [
+    {
+      "name": "Dylan Darling",
+      "team": "St. John's",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Zuby Ejiofor",
+      "team": "St. John's",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Bryce Hopkins",
+      "team": "St. John's",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Sadiku Ibine Ayo",
+      "team": "St. John's",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ian Jackson",
+      "team": "St. John's",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Fotis Konstantinidis",
+      "team": "St. John's",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Louisville": [
+    {
+      "name": "Mikel Brown Jr.",
+      "team": "Louisville",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Mouhamed Camara",
+      "team": "Louisville",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ryan Conwell",
+      "team": "Louisville",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Sananda Fru",
+      "team": "Louisville",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "J'Vonne Hadley",
+      "team": "Louisville",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Will Hanke",
+      "team": "Louisville",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Iowa": [
+    {
+      "name": "Tavion Banks",
+      "team": "Iowa",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kael Combs",
+      "team": "Iowa",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Alvaro Folgueiras",
+      "team": "Iowa",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brendan Hausen",
+      "team": "Iowa",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isaia Howard",
+      "team": "Iowa",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Trevin Jirak",
+      "team": "Iowa",
+      "pos": "C",
+      "role": "Key Rotation"
+    }
+  ],
+  "Tennessee": [
+    {
+      "name": "Amaree Abram",
+      "team": "Tennessee",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nate Ament",
+      "team": "Tennessee",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Bishop Boswell",
+      "team": "Tennessee",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "DeWayne Brown II",
+      "team": "Tennessee",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ethan Burg",
+      "team": "Tennessee",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jaylen Carey",
+      "team": "Tennessee",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Utah St.": [
+    {
+      "name": "Drake Allen",
+      "team": "Utah St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tucker Anderson",
+      "team": "Utah St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jordy Barnes",
+      "team": "Utah St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brayden Boe",
+      "team": "Utah St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Garry Clark",
+      "team": "Utah St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "MJ Collins Jr.",
+      "team": "Utah St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Texas Tech": [
+    {
+      "name": "Marial Akuentok",
+      "team": "Texas Tech",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Christian Anderson",
+      "team": "Texas Tech",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Donovan Atwell",
+      "team": "Texas Tech",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Luke Bamgboye",
+      "team": "Texas Tech",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tyeree Bryan",
+      "team": "Texas Tech",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jack Francis",
+      "team": "Texas Tech",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Arkansas": [
+    {
+      "name": "Darius Acuff Jr.",
+      "team": "Arkansas",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Trevon Brazile",
+      "team": "Arkansas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Amere Brown",
+      "team": "Arkansas",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Elmir D\u017eafic",
+      "team": "Arkansas",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Malique Ewin",
+      "team": "Arkansas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jaden Karuletwa",
+      "team": "Arkansas",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Villanova": [
+    {
+      "name": "Devin Askew",
+      "team": "Villanova",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Duke Brennan",
+      "team": "Villanova",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Wade Chiddick",
+      "team": "Villanova",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Malcolm Flaggs",
+      "team": "Villanova",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tafara Gapare",
+      "team": "Villanova",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Matt Hodge",
+      "team": "Villanova",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Kentucky": [
+    {
+      "name": "Denzel Aberdeen",
+      "team": "Kentucky",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Collin Chandler",
+      "team": "Kentucky",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Mouhamed Dioubate",
+      "team": "Kentucky",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brandon Garrison",
+      "team": "Kentucky",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Braydon Hawthorne",
+      "team": "Kentucky",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Walker Horn",
+      "team": "Kentucky",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Clemson": [
+    {
+      "name": "Ace Buckner",
+      "team": "Clemson",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Blake Davidson",
+      "team": "Clemson",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nick Davidson",
+      "team": "Clemson",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Zac Foster",
+      "team": "Clemson",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "RJ Godfrey",
+      "team": "Clemson",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dillon Hunter",
+      "team": "Clemson",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Miami FL": [
+    {
+      "name": "Dante Allen",
+      "team": "Miami FL",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Marcus Allen",
+      "team": "Miami FL",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Salih Altuntas",
+      "team": "Miami FL",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tre Donaldson",
+      "team": "Miami FL",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Noam Dovrat",
+      "team": "Miami FL",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Shelton Henderson",
+      "team": "Miami FL",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "N.C. State": [
+    {
+      "name": "Matt Able",
+      "team": "N.C. State",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Terrance Arceneaux",
+      "team": "N.C. State",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Alyn Breed",
+      "team": "N.C. State",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Quadir Copeland",
+      "team": "N.C. State",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jerry Deng",
+      "team": "N.C. State",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Scottie Ebube",
+      "team": "N.C. State",
+      "pos": "C",
+      "role": "Key Rotation"
+    }
+  ],
+  "Saint Mary's": [
+    {
+      "name": "Cade Bennett",
+      "team": "Saint Mary's",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Liam Campbell",
+      "team": "Saint Mary's",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Joshua Dent",
+      "team": "Saint Mary's",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tony Duckett",
+      "team": "Saint Mary's",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Oliver Faubert",
+      "team": "Saint Mary's",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kevin Gad",
+      "team": "Saint Mary's",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Saint Louis": [
+    {
+      "name": "Kalu Anya",
+      "team": "Saint Louis",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Robbie Avila",
+      "team": "Saint Louis",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dion Brown",
+      "team": "Saint Louis",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Badara Diakite",
+      "team": "Saint Louis",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brady Dunlap",
+      "team": "Saint Louis",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Trey Green",
+      "team": "Saint Louis",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Indiana": [
+    {
+      "name": "Andrej Acimovic",
+      "team": "Indiana",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Sam Alexis",
+      "team": "Indiana",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Reed Bailey",
+      "team": "Indiana",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tayton Conerway",
+      "team": "Indiana",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tucker DeVries",
+      "team": "Indiana",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nick Dorn",
+      "team": "Indiana",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Georgia": [
+    {
+      "name": "Justin Abson",
+      "team": "Georgia",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Justin Bailey",
+      "team": "Georgia",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Blue Cain",
+      "team": "Georgia",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kanon Catchings",
+      "team": "Georgia",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Somtochukwu Cyril",
+      "team": "Georgia",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dylan James",
+      "team": "Georgia",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Auburn": [
+    {
+      "name": "Abdul Bashir",
+      "team": "Auburn",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jeremiah Bowman",
+      "team": "Auburn",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Drake Cardwell",
+      "team": "Auburn",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Elyjah Freeman",
+      "team": "Auburn",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Keyshawn Hall",
+      "team": "Auburn",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Filip Jovic",
+      "team": "Auburn",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "North Carolina": [
+    {
+      "name": "Luka Bogavac",
+      "team": "North Carolina",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "James Brown",
+      "team": "North Carolina",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Elijah Davis",
+      "team": "North Carolina",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isaiah Denis",
+      "team": "North Carolina",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Derek Dixon",
+      "team": "North Carolina",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kyan Evans",
+      "team": "North Carolina",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "SMU": [
+    {
+      "name": "B.J. Davis-Ray",
+      "team": "SMU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "B.J. Edwards",
+      "team": "SMU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Mitchell Holmes",
+      "team": "SMU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Niccolo Kalischer-Stork",
+      "team": "SMU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Boopie Miller",
+      "team": "SMU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jermaine O'Neal Jr.",
+      "team": "SMU",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Ohio St.": [
+    {
+      "name": "Amare Bynum",
+      "team": "Ohio St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Taison Chatman",
+      "team": "Ohio St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Gabe Cupps",
+      "team": "Ohio St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Mathieu Grujicic",
+      "team": "Ohio St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Myles Herro",
+      "team": "Ohio St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Puff Johnson",
+      "team": "Ohio St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Wisconsin": [
+    {
+      "name": "Aleksas Bieliauskas",
+      "team": "Wisconsin",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "John Blackwell",
+      "team": "Wisconsin",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nick Boyd",
+      "team": "Wisconsin",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Braeden Carrington",
+      "team": "Wisconsin",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isaac Gard",
+      "team": "Wisconsin",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Will Garlock",
+      "team": "Wisconsin",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Texas": [
+    {
+      "name": "Cole Bott",
+      "team": "Texas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "John Clark",
+      "team": "Texas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nic Codie",
+      "team": "Texas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Declan Duru Jr.",
+      "team": "Texas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Camden Heide",
+      "team": "Texas",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tramon Mark",
+      "team": "Texas",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "UCLA": [
+    {
+      "name": "Markell Alston",
+      "team": "UCLA",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tyler Bilodeau",
+      "team": "UCLA",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Xavier Booker",
+      "team": "UCLA",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jamar Brown",
+      "team": "UCLA",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Skyy Clark",
+      "team": "UCLA",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Eric Dailey Jr.",
+      "team": "UCLA",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Baylor": [
+    {
+      "name": "Obi Agbim",
+      "team": "Baylor",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Juslin Bodo Bodo",
+      "team": "Baylor",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Cameron Carr",
+      "team": "Baylor",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "James Goodis",
+      "team": "Baylor",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Andre Iguodala II",
+      "team": "Baylor",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Will Kuykendall",
+      "team": "Baylor",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Texas A&M": [
+    {
+      "name": "Rashaun Agee",
+      "team": "Texas A&M",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Zach Clemence",
+      "team": "Texas A&M",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ali Dibba",
+      "team": "Texas A&M",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Rub\u00e9n Dominguez",
+      "team": "Texas A&M",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Federiko Federiko",
+      "team": "Texas A&M",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jeremiah Green",
+      "team": "Texas A&M",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "UCF": [
+    {
+      "name": "George Beale Jr.",
+      "team": "UCF",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "John Bol",
+      "team": "UCF",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jordan Burks",
+      "team": "UCF",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Devan Cambridge",
+      "team": "UCF",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jeremy Foumena",
+      "team": "UCF",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Themus Fulks",
+      "team": "UCF",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "LSU": [
+    {
+      "name": "Jaden Bobbett",
+      "team": "LSU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "PJ Carter",
+      "team": "LSU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Matt Gilhool",
+      "team": "LSU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Rashad King",
+      "team": "LSU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Max Mackinnon",
+      "team": "LSU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Robert Miller III",
+      "team": "LSU",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "San Diego St.": [
+    {
+      "name": "Miles Byrd",
+      "team": "San Diego St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Pharaoh Compton",
+      "team": "San Diego St.",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "BJ Davis",
+      "team": "San Diego St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Latrell Davis",
+      "team": "San Diego St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Taj DeGourville",
+      "team": "San Diego St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Reese Dixon-Waters",
+      "team": "San Diego St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "VCU": [
+    {
+      "name": "Michael Belle",
+      "team": "VCU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Lazar Djokovic",
+      "team": "VCU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jordann Dumont",
+      "team": "VCU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Barry Evans",
+      "team": "VCU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Christian Fermin",
+      "team": "VCU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Terrence Hill Jr.",
+      "team": "VCU",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "New Mexico": [
+    {
+      "name": "Deyton Albury",
+      "team": "New Mexico",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tomislav Buljan",
+      "team": "New Mexico",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Antonio Chol",
+      "team": "New Mexico",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jake Hall",
+      "team": "New Mexico",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Luke Haupt",
+      "team": "New Mexico",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Chris Howell",
+      "team": "New Mexico",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Santa Clara": [
+    {
+      "name": "Noah Badibanga",
+      "team": "Santa Clara",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Francis Chukwudebelu",
+      "team": "Santa Clara",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "KJ Cochran",
+      "team": "Santa Clara",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Thierry Darlan",
+      "team": "Santa Clara",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Malachi Douyon",
+      "team": "Santa Clara",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jake Ensminger",
+      "team": "Santa Clara",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Washington": [
+    {
+      "name": "Desmond Claude",
+      "team": "Washington",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Zoom Diallo",
+      "team": "Washington",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nikola Dzepina",
+      "team": "Washington",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Franck Kepnang",
+      "team": "Washington",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "JJ Mandaquit",
+      "team": "Washington",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Courtland Muldrew",
+      "team": "Washington",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "USC": [
+    {
+      "name": "Alijah Arenas",
+      "team": "USC",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ezra Ausar",
+      "team": "USC",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jaden Brownell",
+      "team": "USC",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brit Burden",
+      "team": "USC",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jacob Cofie",
+      "team": "USC",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ryan Cornish",
+      "team": "USC",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "TCU": [
+    {
+      "name": "Malick Diallo",
+      "team": "TCU",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Xavier Edmonds",
+      "team": "TCU",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kayden Edwards",
+      "team": "TCU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brock Harding",
+      "team": "TCU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "RJ Jones",
+      "team": "TCU",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Liutauras Lelevicius",
+      "team": "TCU",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Seton Hall": [
+    {
+      "name": "Adam Clark",
+      "team": "Seton Hall",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jacob Dar",
+      "team": "Seton Hall",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Godswill Erheriene",
+      "team": "Seton Hall",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jahseem Felton",
+      "team": "Seton Hall",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Elijah Fisher",
+      "team": "Seton Hall",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "David Gabriel",
+      "team": "Seton Hall",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Creighton": [
+    {
+      "name": "Ty Davis",
+      "team": "Creighton",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Aleksa Dimitrijevic",
+      "team": "Creighton",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Josh Dix",
+      "team": "Creighton",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Owen Freeman",
+      "team": "Creighton",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nik Graves",
+      "team": "Creighton",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jasen Green",
+      "team": "Creighton",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Missouri": [
+    {
+      "name": "T.O. Barrett",
+      "team": "Missouri",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Annor Boateng",
+      "team": "Missouri",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Trent Burns",
+      "team": "Missouri",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jacob Crews",
+      "team": "Missouri",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Sebastian Mack",
+      "team": "Missouri",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Mark Mitchell",
+      "team": "Missouri",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Virginia Tech": [
+    {
+      "name": "Neoklis Avdalas",
+      "team": "Virginia Tech",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jailen Bedford",
+      "team": "Virginia Tech",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Solomon Davis",
+      "team": "Virginia Tech",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Antonio Dorn",
+      "team": "Virginia Tech",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Brett Freeman",
+      "team": "Virginia Tech",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Christian Gurdak",
+      "team": "Virginia Tech",
+      "pos": "C",
+      "role": "Key Rotation"
+    }
+  ],
+  "Butler": [
+    {
+      "name": "Michael Ajayi",
+      "team": "Butler",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Finley Bizjack",
+      "team": "Butler",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Yame Butler",
+      "team": "Butler",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Bryson Cardinal",
+      "team": "Butler",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Evan Haywood",
+      "team": "Butler",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jalen Jackson",
+      "team": "Butler",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Oklahoma": [
+    {
+      "name": "Kuol Atak",
+      "team": "Oklahoma",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Alec Blair",
+      "team": "Oklahoma",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Xzayvier Brown",
+      "team": "Oklahoma",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tae Davis",
+      "team": "Oklahoma",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kirill Elatontsev",
+      "team": "Oklahoma",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Dayton Forsythe",
+      "team": "Oklahoma",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Cincinnati": [
+    {
+      "name": "Shon Abaev",
+      "team": "Cincinnati",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Lucas Atauri",
+      "team": "Cincinnati",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Bryson Buckingham",
+      "team": "Cincinnati",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jalen Celestine",
+      "team": "Cincinnati",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Grant Darbyshire",
+      "team": "Cincinnati",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Halvine Dzellat",
+      "team": "Cincinnati",
+      "pos": "C",
+      "role": "Key Rotation"
+    }
+  ],
+  "Syracuse": [
+    {
+      "name": "Kiyan Anthony",
+      "team": "Syracuse",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tyler Betsey",
+      "team": "Syracuse",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tiefing Diawara",
+      "team": "Syracuse",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Luke Fennell",
+      "team": "Syracuse",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Donnie Freeman",
+      "team": "Syracuse",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Naithan George",
+      "team": "Syracuse",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Wake Forest": [
+    {
+      "name": "Sebastian Akins",
+      "team": "Wake Forest",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Anson Beard Jr.",
+      "team": "Wake Forest",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Omaha Biliew",
+      "team": "Wake Forest",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nate Calmese",
+      "team": "Wake Forest",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isaac Carr",
+      "team": "Wake Forest",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Myles Colvin",
+      "team": "Wake Forest",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Mississippi": [
+    {
+      "name": "Niko Bundalo",
+      "team": "Mississippi",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Augusto Cassi\u00e1",
+      "team": "Mississippi",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Corey Chest",
+      "team": "Mississippi",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Zach Day",
+      "team": "Mississippi",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Malik Dia",
+      "team": "Mississippi",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kezza Giffa",
+      "team": "Mississippi",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Northwestern": [
+    {
+      "name": "Cade Bennerman",
+      "team": "Northwestern",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Angelo Ciaravino",
+      "team": "Northwestern",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jordan Clayton",
+      "team": "Northwestern",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Phoenix Gill",
+      "team": "Northwestern",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Max Green",
+      "team": "Northwestern",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Gus Hurlburt",
+      "team": "Northwestern",
+      "pos": "F",
+      "role": "Key Rotation"
+    }
+  ],
+  "Akron": [
+    {
+      "name": "Chabi Barre",
+      "team": "Akron",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Rich Brisco",
+      "team": "Akron",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Conner Groce",
+      "team": "Akron",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Zach Halligan",
+      "team": "Akron",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Bowen Hardman",
+      "team": "Akron",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Cody Head",
+      "team": "Akron",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "West Virginia": [
+    {
+      "name": "Evans Barning Jr.",
+      "team": "West Virginia",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Treysen Eaglestaff",
+      "team": "West Virginia",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "MJ Feenane",
+      "team": "West Virginia",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jackson Fields",
+      "team": "West Virginia",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jasper Floyd",
+      "team": "West Virginia",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jayden Forsythe",
+      "team": "West Virginia",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Providence": [
+    {
+      "name": "Rich Barron",
+      "team": "Providence",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Nilavan Daniels",
+      "team": "Providence",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Daquan Davis",
+      "team": "Providence",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jason Edwards",
+      "team": "Providence",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Oswin Erhunmwunse",
+      "team": "Providence",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Corey Floyd Jr.",
+      "team": "Providence",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Belmont": [
+    {
+      "name": "Eoin Dillon",
+      "team": "Belmont",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jake Dykstra",
+      "team": "Belmont",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Cooper Haynes",
+      "team": "Belmont",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jabez Jenkins",
+      "team": "Belmont",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Graydon Lemke",
+      "team": "Belmont",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Tyler Lundblade",
+      "team": "Belmont",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "Oklahoma St.": [
+    {
+      "name": "Benjamin Ahmed",
+      "team": "Oklahoma St.",
+      "pos": "C",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kanye Clary",
+      "team": "Oklahoma St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kirk Cole",
+      "team": "Oklahoma St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Christian Coleman",
+      "team": "Oklahoma St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Isaiah Coleman",
+      "team": "Oklahoma St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Ryan Crotty",
+      "team": "Oklahoma St.",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ],
+  "McNeese": [
+    {
+      "name": "Tyshawn Archie",
+      "team": "McNeese",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Kaleb Brewer",
+      "team": "McNeese",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "T'Johnn Brown",
+      "team": "McNeese",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Carl Cherenfant",
+      "team": "McNeese",
+      "pos": "G",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Jerrell Colbert",
+      "team": "McNeese",
+      "pos": "F",
+      "role": "Key Rotation"
+    },
+    {
+      "name": "Garwey Dual",
+      "team": "McNeese",
+      "pos": "G",
+      "role": "Key Rotation"
+    }
+  ]
+}
