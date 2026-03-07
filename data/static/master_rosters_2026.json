@@ -1,0 +1,3402 @@
+{
+  "Michigan": [
+    {
+      "name": "Nimari Burnett",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Elliot Cadeau",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "L.J. Cason",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Howard Eisley Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Roddy Gayle Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Oscar Goodman",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Arizona": [
+    {
+      "name": "Dwayne Aristode",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Addison Arnold",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tobe Awaka",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jaden Bradley",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brayden Burries",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jackson Cook",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Iowa St.": [
+    {
+      "name": "Jamarion Batemon",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Blake Buchanan",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nate Heise",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Joshua Jefferson",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Cade Kelderman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tamin Lipsey",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Purdue": [
+    {
+      "name": "Jack Benter",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Raleigh Burgess",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Oscar Cluff",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "C.J. Cox",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Aaron Fine",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Gicarri Harris",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Gonzaga": [
+    {
+      "name": "Joaquim ArauzMoore",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ismaila Diagne",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Davis Fogle",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tyon Grant-Foster",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Noah Haaland",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Braden Huff",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Duke": [
+    {
+      "name": "Cameron Boozer",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Cayden Boozer",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Maliq Brown",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isaiah Evans",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Caleb Foster",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Darren Harris",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Houston": [
+    {
+      "name": "Chris Cenac Jr.",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kingston Flemings",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isiah Harwell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Bryce Jackson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kordel Jefferson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Cedric Lath",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Illinois": [
+    {
+      "name": "Kylan Boswell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jake Davis",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Blake Fagbemi",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ben Humrichous",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tomislav Ivisic",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Zvonimir Ivisic",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Florida": [
+    {
+      "name": "AJ Brown",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isaiah Brown",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Rueben Chinyelu",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Alex Condon",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Boogie Fland",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Micah Handlogten",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Connecticut": [
+    {
+      "name": "Solo Ball",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Silas Demary Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Rrezon Elezaj",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jacob Furphy",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Alex Karaban",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dwayne Koroma",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Vanderbilt": [
+    {
+      "name": "Chandler Bing",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Frankie Collins",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jaylon Dean-Vines",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tyler Harris",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Mike James",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Miles Keeffe",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Michigan St.": [
+    {
+      "name": "Coen Carr",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Carson Cooper",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jeremy Fears Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Trey Fort",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kaleb Glenn",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jaxon Kohler",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "BYU": [
+    {
+      "name": "Abdullah Ahmed",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dawson Baker",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Mihailo Bo\u0161kovic",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kennard Davis Jr.",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dominique Diomande",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "AJ Dybantsa",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Virginia": [
+    {
+      "name": "Silas Barksdale",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Martin Carrere",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Thijs De Ridder",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Elijah Gertrude",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Johann Grunloh",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dallin Hall",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Nebraska": [
+    {
+      "name": "Kendall Blue",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Justin Bolis",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Henry Burt",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Berke Buyuktuncel",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Will Cooper",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Leo Curtis",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Kansas": [
+    {
+      "name": "Corbin Allen",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Flory Bidunga",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Samis Calderon",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Melvin Council Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Justin Cross",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jayden Dawson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Alabama": [
+    {
+      "name": "Amari Allen",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jalil Bethea",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Taylor Bol Bowen",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Keitenn Bristow",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jack Fagan",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Davion Hannah",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "St. John's": [
+    {
+      "name": "Dylan Darling",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Zuby Ejiofor",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Bryce Hopkins",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Sadiku Ibine Ayo",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ian Jackson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Fotis Konstantinidis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Louisville": [
+    {
+      "name": "Mikel Brown Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Mouhamed Camara",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ryan Conwell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Sananda Fru",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "J'Vonne Hadley",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Will Hanke",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Iowa": [
+    {
+      "name": "Tavion Banks",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kael Combs",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Alvaro Folgueiras",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brendan Hausen",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isaia Howard",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Trevin Jirak",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Tennessee": [
+    {
+      "name": "Amaree Abram",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nate Ament",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Bishop Boswell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "DeWayne Brown II",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ethan Burg",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jaylen Carey",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Utah St.": [
+    {
+      "name": "Drake Allen",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tucker Anderson",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jordy Barnes",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brayden Boe",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Garry Clark",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "MJ Collins Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Texas Tech": [
+    {
+      "name": "Marial Akuentok",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Christian Anderson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Donovan Atwell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Luke Bamgboye",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tyeree Bryan",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jack Francis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Arkansas": [
+    {
+      "name": "Darius Acuff Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Trevon Brazile",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Amere Brown",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Elmir D\u017eafic",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Malique Ewin",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jaden Karuletwa",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Villanova": [
+    {
+      "name": "Devin Askew",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Duke Brennan",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Wade Chiddick",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Malcolm Flaggs",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tafara Gapare",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Matt Hodge",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Kentucky": [
+    {
+      "name": "Denzel Aberdeen",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Collin Chandler",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Mouhamed Dioubate",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brandon Garrison",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Braydon Hawthorne",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Walker Horn",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Clemson": [
+    {
+      "name": "Ace Buckner",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Blake Davidson",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nick Davidson",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Zac Foster",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "RJ Godfrey",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dillon Hunter",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Miami FL": [
+    {
+      "name": "Dante Allen",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Marcus Allen",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Salih Altuntas",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tre Donaldson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Noam Dovrat",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Shelton Henderson",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "N.C. State": [
+    {
+      "name": "Matt Able",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Terrance Arceneaux",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Alyn Breed",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Quadir Copeland",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jerry Deng",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Scottie Ebube",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Saint Mary's": [
+    {
+      "name": "Cade Bennett",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Liam Campbell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Joshua Dent",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tony Duckett",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Oliver Faubert",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kevin Gad",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Saint Louis": [
+    {
+      "name": "Kalu Anya",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Robbie Avila",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dion Brown",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Badara Diakite",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brady Dunlap",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Trey Green",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Indiana": [
+    {
+      "name": "Andrej Acimovic",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Sam Alexis",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Reed Bailey",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tayton Conerway",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tucker DeVries",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nick Dorn",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Georgia": [
+    {
+      "name": "Justin Abson",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Justin Bailey",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Blue Cain",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kanon Catchings",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Somtochukwu Cyril",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dylan James",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Auburn": [
+    {
+      "name": "Abdul Bashir",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jeremiah Bowman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Drake Cardwell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Elyjah Freeman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Keyshawn Hall",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Filip Jovic",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "North Carolina": [
+    {
+      "name": "Luka Bogavac",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "James Brown",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Elijah Davis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isaiah Denis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Derek Dixon",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kyan Evans",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "SMU": [
+    {
+      "name": "B.J. Davis-Ray",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "B.J. Edwards",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Mitchell Holmes",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Niccolo Kalischer-Stork",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Boopie Miller",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jermaine O'Neal Jr.",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Ohio St.": [
+    {
+      "name": "Amare Bynum",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Taison Chatman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Gabe Cupps",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Mathieu Grujicic",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Myles Herro",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Puff Johnson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Wisconsin": [
+    {
+      "name": "Aleksas Bieliauskas",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "John Blackwell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nick Boyd",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Braeden Carrington",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isaac Gard",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Will Garlock",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Texas": [
+    {
+      "name": "Cole Bott",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "John Clark",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nic Codie",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Declan Duru Jr.",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Camden Heide",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tramon Mark",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "UCLA": [
+    {
+      "name": "Markell Alston",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tyler Bilodeau",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Xavier Booker",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jamar Brown",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Skyy Clark",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Eric Dailey Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Baylor": [
+    {
+      "name": "Obi Agbim",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Juslin Bodo Bodo",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Cameron Carr",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "James Goodis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Andre Iguodala II",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Will Kuykendall",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Texas A&M": [
+    {
+      "name": "Rashaun Agee",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Zach Clemence",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ali Dibba",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Rub\u00e9n Dominguez",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Federiko Federiko",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jeremiah Green",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "UCF": [
+    {
+      "name": "George Beale Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "John Bol",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jordan Burks",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Devan Cambridge",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jeremy Foumena",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Themus Fulks",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "LSU": [
+    {
+      "name": "Jaden Bobbett",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "PJ Carter",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Matt Gilhool",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Rashad King",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Max Mackinnon",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Robert Miller III",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "San Diego St.": [
+    {
+      "name": "Miles Byrd",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Pharaoh Compton",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "BJ Davis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Latrell Davis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Taj DeGourville",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Reese Dixon-Waters",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "VCU": [
+    {
+      "name": "Michael Belle",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Lazar Djokovic",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jordann Dumont",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Barry Evans",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Christian Fermin",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Terrence Hill Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "New Mexico": [
+    {
+      "name": "Deyton Albury",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tomislav Buljan",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Antonio Chol",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jake Hall",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Luke Haupt",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Chris Howell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Santa Clara": [
+    {
+      "name": "Noah Badibanga",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Francis Chukwudebelu",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "KJ Cochran",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Thierry Darlan",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Malachi Douyon",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jake Ensminger",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Washington": [
+    {
+      "name": "Desmond Claude",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Zoom Diallo",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nikola Dzepina",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Franck Kepnang",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "JJ Mandaquit",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Courtland Muldrew",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "USC": [
+    {
+      "name": "Alijah Arenas",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ezra Ausar",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jaden Brownell",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brit Burden",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jacob Cofie",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ryan Cornish",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "TCU": [
+    {
+      "name": "Malick Diallo",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Xavier Edmonds",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kayden Edwards",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brock Harding",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "RJ Jones",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Liutauras Lelevicius",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Seton Hall": [
+    {
+      "name": "Adam Clark",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jacob Dar",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Godswill Erheriene",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jahseem Felton",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Elijah Fisher",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "David Gabriel",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Creighton": [
+    {
+      "name": "Ty Davis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Aleksa Dimitrijevic",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Josh Dix",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Owen Freeman",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nik Graves",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jasen Green",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Missouri": [
+    {
+      "name": "T.O. Barrett",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Annor Boateng",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Trent Burns",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jacob Crews",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Sebastian Mack",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Mark Mitchell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Virginia Tech": [
+    {
+      "name": "Neoklis Avdalas",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jailen Bedford",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Solomon Davis",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Antonio Dorn",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Brett Freeman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Christian Gurdak",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Butler": [
+    {
+      "name": "Michael Ajayi",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Finley Bizjack",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Yame Butler",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Bryson Cardinal",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Evan Haywood",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jalen Jackson",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Oklahoma": [
+    {
+      "name": "Kuol Atak",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Alec Blair",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Xzayvier Brown",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tae Davis",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kirill Elatontsev",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Dayton Forsythe",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Cincinnati": [
+    {
+      "name": "Shon Abaev",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Lucas Atauri",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Bryson Buckingham",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jalen Celestine",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Grant Darbyshire",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Halvine Dzellat",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Syracuse": [
+    {
+      "name": "Kiyan Anthony",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tyler Betsey",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tiefing Diawara",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Luke Fennell",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Donnie Freeman",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Naithan George",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Wake Forest": [
+    {
+      "name": "Sebastian Akins",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Anson Beard Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Omaha Biliew",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nate Calmese",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isaac Carr",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Myles Colvin",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Mississippi": [
+    {
+      "name": "Niko Bundalo",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Augusto Cassi\u00e1",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Corey Chest",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Zach Day",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Malik Dia",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kezza Giffa",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Northwestern": [
+    {
+      "name": "Cade Bennerman",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Angelo Ciaravino",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jordan Clayton",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Phoenix Gill",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Max Green",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Gus Hurlburt",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Akron": [
+    {
+      "name": "Chabi Barre",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Rich Brisco",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Conner Groce",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Zach Halligan",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Bowen Hardman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Cody Head",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "West Virginia": [
+    {
+      "name": "Evans Barning Jr.",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Treysen Eaglestaff",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "MJ Feenane",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jackson Fields",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jasper Floyd",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jayden Forsythe",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Providence": [
+    {
+      "name": "Rich Barron",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Nilavan Daniels",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Daquan Davis",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jason Edwards",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Oswin Erhunmwunse",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Corey Floyd Jr.",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Belmont": [
+    {
+      "name": "Eoin Dillon",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jake Dykstra",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Cooper Haynes",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jabez Jenkins",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Graydon Lemke",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Tyler Lundblade",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "Oklahoma St.": [
+    {
+      "name": "Benjamin Ahmed",
+      "pos": "C",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kanye Clary",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kirk Cole",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Christian Coleman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Isaiah Coleman",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Ryan Crotty",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ],
+  "McNeese": [
+    {
+      "name": "Tyshawn Archie",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Kaleb Brewer",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "T'Johnn Brown",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Carl Cherenfant",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Jerrell Colbert",
+      "pos": "F",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    },
+    {
+      "name": "Garwey Dual",
+      "pos": "G",
+      "metrics": {
+        "cols": [],
+        "headers": []
+      }
+    }
+  ]
+}
