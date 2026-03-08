@@ -572,7 +572,21 @@ export default function Picks() {
             };
 
             const days = [...new Set(hist.map(h => etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)).filter(Boolean))].sort();
-            const lastDay = days.length ? days[days.length - 1] : null;
+
+            // Find most recent day with at least one graded TOP 6 pick
+            let lastSettledDay = null;
+            const reversedDays = [...days].reverse();
+            for (const d of reversedDays) {
+              const top6ForDay = hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === d)
+                .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
+                .slice(0, 6);
+              if (top6ForDay.some(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h)))) {
+                lastSettledDay = d;
+                break;
+              }
+            }
+
+            const lastDay = lastSettledDay || (days.length ? days[days.length - 1] : null);
 
             // Only consider the Top 6 picks (by EV) for the summary to avoid grading "noise"
             const dayRows = lastDay
