@@ -240,7 +240,7 @@ class ProfileGeneratorService:
             print(f"[ProfileGen] Using Gemini fallback for {team_name}...")
             try:
                 import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={self.gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
                 headers = {"Content-Type": "application/json"}
                 
                 # Gemini prompt needs slightly different handling for JSON
@@ -378,7 +378,7 @@ class ProfileGeneratorService:
             print(f"[MatchupGen] Using Gemini fallback for {team_a} vs {team_b}...")
             try:
                 import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={self.gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
                 headers = {"Content-Type": "application/json"}
                 
                 gemini_prompt = prompt + "\\n\\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no triple backticks."

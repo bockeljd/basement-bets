@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/axios';
-import { RefreshCw, BarChart3 } from 'lucide-react';
+import { RefreshCw, BarChart3, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine, ComposedChart, Line, Cell, LabelList } from 'recharts';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
 
@@ -25,6 +25,8 @@ export default function Picks() {
   const [err, setErr] = useState(null);
   const [isGrading, setIsGrading] = useState(false);
   const [yesterdayReco, setYesterdayReco] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+
 
   const gradeNow = async () => {
     try {
@@ -457,8 +459,63 @@ export default function Picks() {
           winRate: Number(winRate.toFixed(1)),
         };
       })
-      .filter((x) => x.picks > 0);
   }, [graded, yesterdaySlate]);
+
+  const handleSort = (key) => {
+    let direction = 'desc';
+    if (sortConfig.key === key && sortConfig.direction === 'desc') {
+      direction = 'asc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const isRecommendedHistoryItem = (h) => {
+    try {
+      const mt = String(h?.market_type || h?.market || '').toUpperCase();
+      const sel = String(h?.selection || '').trim();
+      const pick = String(h?.pick || '').toUpperCase();
+      const ev = Number(h?.ev_per_unit ?? h?.ev ?? 0);
+      if (!mt || mt === 'AUTO') return false;
+      if (!sel || sel === '—') return false;
+      if (!pick || pick === 'NONE') return false;
+      if (!Number.isFinite(ev) || ev < 0.02) return false;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const isTodayET = (ts) => {
+    if (!ts) return false;
+    try {
+      const d = new Date(ts);
+      const day = d.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+      const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+      return day === today;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const getSortedHistory = () => {
+    return [...history].sort((a, b) => {
+      const key = sortConfig.key === 'edge' ? 'created_at' : sortConfig.key;
+      let aVal = a[key] || '';
+      let bVal = b[key] || '';
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+
+  const getRecommendedHistory = () => getSortedHistory()
+    .filter(isRecommendedHistoryItem)
+    .filter(h => !isTodayET(h?.analyzed_at || h?.created_at));
+
+  const SortIcon = ({ column }) => {
+    if (sortConfig.key !== column) return <ArrowUpDown size={12} className="ml-1 opacity-20" />;
+    return sortConfig.direction === 'asc' ? <ChevronUp size={12} className="ml-1 text-blue-400" /> : <ChevronDown size={12} className="ml-1 text-blue-400" />;
+  };
 
   return (
     <div className="space-y-6">
@@ -467,6 +524,119 @@ export default function Picks() {
       {!loading && !err && (!history || history.length === 0) && (
         <div className="p-4 rounded-lg bg-slate-900/40 border border-slate-800 text-slate-400 text-sm">
           No model-performance history returned yet. If it still shows empty, it usually means the backend isn’t returning any stored recommended picks for your user.
+        </div>
+      )}
+
+      {!loading && !err && history.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mb-6">
+          {(() => {
+            const hist = getRecommendedHistory();
+            const etDay = (ts) => {
+              try {
+                return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+              } catch (e) {
+                return null;
+              }
+            };
+            const normalizeOutcome = (x) => {
+              const o = (x?.graded_result || x?.outcome || x?.result || 'PENDING');
+              const s = String(o).toUpperCase();
+              if (s === 'WON' || s === 'WIN') return 'WON';
+              if (s === 'LOST' || s === 'LOSS') return 'LOST';
+              if (s === 'PUSH') return 'PUSH';
+              return 'PENDING';
+            };
+
+            const days = [...new Set(hist.map(h => etDay(h?.analyzed_at || h?.created_at)).filter(Boolean))].sort();
+            const lastDay = days.length ? days[days.length - 1] : null;
+            const dayRows = lastDay ? hist.filter(h => etDay(h?.analyzed_at || h?.created_at) === lastDay) : [];
+            const gradedCount = dayRows.filter(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h)));
+            const w = gradedCount.filter(h => normalizeOutcome(h) === 'WON').length;
+            const l = gradedCount.filter(h => normalizeOutcome(h) === 'LOST').length;
+            const p = gradedCount.filter(h => normalizeOutcome(h) === 'PUSH').length;
+            const winRate = (w + l) ? (w / (w + l) * 100) : 0;
+
+            const confBucket = (h) => {
+              const c = Number(h?.confidence_0_100 ?? h?.confidence ?? 0);
+              if (c >= 80) return 'High';
+              if (c >= 50) return 'Medium';
+              return 'Low';
+            };
+
+            const byConf = { High: [], Medium: [], Low: [] };
+            gradedCount.forEach((h) => {
+              byConf[confBucket(h)].push(h);
+            });
+
+            const confStats = (arr) => {
+              const ww = arr.filter(x => normalizeOutcome(x) === 'WON').length;
+              const ll = arr.filter(x => normalizeOutcome(x) === 'LOST').length;
+              const pp = arr.filter(x => normalizeOutcome(x) === 'PUSH').length;
+              const wr = (ww + ll) ? (ww / (ww + ll) * 100) : null;
+              return { w: ww, l: ll, p: pp, wr };
+            };
+
+            const hi = confStats(byConf.High);
+            const md = confStats(byConf.Medium);
+            const lo = confStats(byConf.Low);
+
+            const fmtMDY = (ymd) => {
+              try {
+                const [yy, mm, dd] = String(ymd || '').split('-');
+                if (yy && mm && dd) return `${mm}/${dd}/${yy}`;
+              } catch (e) { }
+              return ymd || '—';
+            };
+
+            return (
+              <div className="px-6 py-4 border-b border-slate-700 bg-slate-900/20">
+                <div className="flex items-end justify-between gap-4 mb-3">
+                  <div>
+                    <div className="text-white font-black text-xl">{fmtMDY(lastDay)} Summary</div>
+                  </div>
+                  <div className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Most Recent Graded Slate</div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
+                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Bets graded</div>
+                    <div className="mt-1 text-slate-100 font-black text-3xl">{gradedCount.length}</div>
+                    <div className="text-[11px] text-slate-400">W / L / P only</div>
+                    {dayRows.length !== gradedCount.length && (
+                      <div className="text-[12px] text-slate-300 mt-1">Pending: {Math.max(0, dayRows.length - gradedCount.length)}</div>
+                    )}
+                  </div>
+                  <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
+                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Record</div>
+                    <div className="mt-1 text-slate-100 font-black text-3xl">{w}-{l}{p ? `-${p}` : ''}</div>
+                    <div className="text-[11px] text-slate-400">graded favorites</div>
+                  </div>
+                  <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
+                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Win rate</div>
+                    <div className="mt-1 text-slate-100 font-black text-3xl">{(w + l) ? `${winRate.toFixed(1)}%` : '—'}</div>
+                    <div className="text-[11px] text-slate-400">W/L only</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {(() => {
+                    const tiles = [
+                      { label: 'High', s: hi, cls: 'text-green-300' },
+                      { label: 'Medium', s: md, cls: 'text-amber-300' },
+                      { label: 'Low', s: lo, cls: 'text-purple-300' },
+                    ];
+                    return tiles.map(({ label, s, cls }) => (
+                      <div key={label} className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
+                        <div className="text-[11px] text-slate-400 font-semibold">{label} confidence</div>
+                        <div className={`mt-1 font-black text-xl ${cls}`}>{s.w}-{s.l}{s.p ? `-${s.p}` : ''}</div>
+                        <div className="text-[11px] text-slate-400">Win%: <span className="text-slate-200 font-semibold">{s.wr === null ? '—' : `${s.wr.toFixed(1)}%`}</span> • N={(s.w + s.l + s.p)}</div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -700,6 +870,165 @@ export default function Picks() {
 
       {/* Existing analytics (kept) */}
       <ModelPerformanceAnalytics history={history || []} />
+
+      {/* Full Audit Table (Moved from Today tab) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mt-10">
+        <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
+          <h3 className="text-white font-black text-lg">Full Recommended Pick History</h3>
+          <div className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Audit & Performance Logs</div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
+                  <div className="flex items-center">Date <SortIcon column="created_at" /></div>
+                </th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Rec#</th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
+                  <div className="flex items-center">Sport <SortIcon column="sport" /></div>
+                </th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
+                  <div className="flex items-center">Matchup <SortIcon column="matchup" /></div>
+                </th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
+                  <div className="flex items-center">Pick <SortIcon column="bet_on" /></div>
+                </th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Lines</th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
+                  <div className="flex items-center">Edge <SortIcon column="edge" /></div>
+                </th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
+                  <div className="flex items-center">Result <SortIcon column="result" /></div>
+                </th>
+                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const histAll = getRecommendedHistory();
+                const etDayForRecap = (ts) => {
+                  try {
+                    return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+                  } catch (e) {
+                    return null;
+                  }
+                };
+                const keyFor = (x) => {
+                  return String(x?.id || '')
+                    || `${x?.event_id || 'evt'}|${x?.market_type || x?.market || ''}|${x?.selection || ''}|${x?.bet_price || ''}|${x?.analyzed_at || x?.created_at || ''}`;
+                };
+
+                const rankByKey = {};
+                const groups = {};
+                histAll.forEach((h) => {
+                  const d = etDayForRecap(h?.analyzed_at || h?.created_at);
+                  if (!d) return;
+                  groups[d] = groups[d] || [];
+                  groups[d].push(h);
+                });
+                Object.keys(groups).forEach((d) => {
+                  const arr = groups[d];
+                  arr.sort((a, b) => {
+                    const ae = Number(a?.ev_per_unit ?? a?.ev ?? 0);
+                    const be = Number(b?.ev_per_unit ?? b?.ev ?? 0);
+                    return be - ae;
+                  });
+                  arr.forEach((h, i) => {
+                    rankByKey[keyFor(h)] = i + 1;
+                  });
+                });
+
+                return histAll.map((item) => {
+                  let recs = [];
+                  try {
+                    if (item.outputs_json) {
+                      const out = JSON.parse(item.outputs_json);
+                      if (out.recommendations) recs = out.recommendations;
+                    }
+                    if (recs.length === 0 && item.recommendation_json) {
+                      recs = JSON.parse(item.recommendation_json);
+                    }
+                    if (recs.length === 0 && item.pick) {
+                      recs = [{ side: item.pick, line: item.bet_line, edge: item.ev_per_unit || item.edge }];
+                    }
+                  } catch (e) { }
+
+                  const recRank = rankByKey[keyFor(item)] || null;
+                  const mainRec = recs[0] || {};
+                  const resultStatus = item.graded_result || item.outcome || 'Pending';
+                  const s = String(resultStatus).toUpperCase();
+                  const isWon = s === 'WON' || s === 'WIN';
+                  const isLost = s === 'LOST' || s === 'LOSS';
+                  const isPush = s === 'PUSH';
+
+                  const formatDateMDY = (ts) => {
+                    if (!ts) return '';
+                    try {
+                      const d = new Date(ts);
+                      return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: '2-digit' });
+                    } catch (e) { return ts; }
+                  };
+
+                  return (
+                    <tr key={keyFor(item)} className="border-b border-slate-700/40 hover:bg-slate-800/20 transition-colors text-[13px]">
+                      <td className="py-2 px-4 text-slate-400 font-mono whitespace-nowrap">
+                        {formatDateMDY(item.analyzed_at || item.created_at)}
+                      </td>
+                      <td className="py-2 px-4 whitespace-nowrap">
+                        {recRank ? (
+                          <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${recRank <= 6 ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/30' : 'bg-slate-700/30 text-slate-400'
+                            }`}>
+                            {recRank}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="py-2 px-4 text-slate-300 font-bold uppercase text-[11px] whitespace-nowrap">
+                        {item.sport || item.league || '—'}
+                      </td>
+                      <td className="py-2 px-4 text-slate-200 font-semibold whitespace-nowrap">
+                        {item.matchup || item.game || '—'}
+                      </td>
+                      <td className="py-2 px-4 font-black whitespace-nowrap">
+                        <span className="text-white">{item.bet_on || mainRec.side || '—'}</span>
+                        {mainRec.line && mainRec.line !== 0 && (
+                          <span className="text-slate-400 ml-1">({mainRec.line > 0 ? '+' : ''}{mainRec.line})</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-4 text-slate-400 whitespace-nowrap">
+                        <span className="font-mono">{item.bet_price || '—'}</span>
+                      </td>
+                      <td className="py-2 px-4 whitespace-nowrap">
+                        <span className={`font-black ${(item.ev_per_unit || item.edge) > 0.05 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                          {item.ev_per_unit ? `+${(item.ev_per_unit * 100).toFixed(1)}%` : (item.edge ? `+${item.edge}%` : '—')}
+                        </span>
+                      </td>
+                      <td className="py-2 px-4 whitespace-nowrap">
+                        {isWon ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-black tracking-tighter ring-1 ring-emerald-500/20">WON</span>
+                        ) : isLost ? (
+                          <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 font-black tracking-tighter ring-1 ring-red-500/20">LOST</span>
+                        ) : isPush ? (
+                          <span className="px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-400 font-black tracking-tighter ring-1 ring-slate-500/20">PUSH</span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-slate-800/50 text-slate-500 font-bold tracking-tighter">PENDING</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-4 text-slate-400 font-mono text-xs whitespace-nowrap">
+                        {item.score || '—'}
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
+            </tbody>
+          </table>
+        </div>
+        {getRecommendedHistory().length === 0 && (
+          <div className="py-12 text-center text-slate-500 italic">No historical recommended picks found in logs.</div>
+        )}
+      </div>
     </div>
   );
 }
