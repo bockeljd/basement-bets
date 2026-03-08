@@ -3968,29 +3968,33 @@ async def get_ncaam_parlays_today(
 
     # ET date filter
     q = """
-      SELECT
-        m.event_id,
-        m.model_version,
-        m.market_type,
-        m.pick,
-        m.outcome,
-        m.bet_line,
-        COALESCE(m.bet_price, m.price) AS price,
-        m.win_prob,
-        m.ev_per_unit,
-        m.selection,
-        e.away_team,
-        e.home_team,
-        e.start_time,
-        (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date::text AS day_et
-      FROM model_predictions m
-      JOIN events e ON m.event_id = e.id
-      WHERE e.league = 'NCAAM'
-        AND UPPER(COALESCE(m.market_type,'')) IN ('MONEYLINE','ML')
-        AND (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York' - (%(days)s || ' days')::interval)::date
-        AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
-        AND COALESCE(m.bet_price, m.price) IS NOT NULL
-      ORDER BY m.win_prob DESC
+      WITH latest_preds AS (
+        SELECT DISTINCT ON (m.event_id)
+          m.event_id,
+          m.model_version,
+          m.market_type,
+          m.pick,
+          m.outcome,
+          m.bet_line,
+          COALESCE(m.bet_price, m.price) AS price,
+          m.win_prob,
+          m.ev_per_unit,
+          m.selection,
+          e.away_team,
+          e.home_team,
+          e.start_time,
+          (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date::text AS day_et
+        FROM model_predictions m
+        JOIN events e ON m.event_id = e.id
+        WHERE e.league = 'NCAAM'
+          AND UPPER(COALESCE(m.market_type,'')) IN ('MONEYLINE','ML')
+          AND (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York' - (%(days)s || ' days')::interval)::date
+          AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
+          AND COALESCE(m.bet_price, m.price) IS NOT NULL
+        ORDER BY m.event_id, m.analyzed_at DESC
+      )
+      SELECT * FROM latest_preds
+      ORDER BY win_prob DESC
       LIMIT %(lim)s
     """
 
@@ -4682,7 +4686,7 @@ async def trigger_build_daily_top_picks(
         with get_db_connection() as conn:
             for eid in eids:
                 try:
-                    res = model.analyze(eid, relax_gates=False, persist=False)
+                    res = model.analyze(eid, relax_gates=False, persist=True)
                     upsert_pick(date, eid, res if isinstance(res, dict) else {}, conn=conn)
                     ok += 1
                 except Exception as e:
