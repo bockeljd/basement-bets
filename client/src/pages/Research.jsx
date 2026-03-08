@@ -123,13 +123,9 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                     setTopPicksError(null);
                 }
 
-                // If the latest full run says NO_BETS, keep the cached slate but clearly label it stale.
                 try {
                     const rm = topPicksRes?.data?.run_meta || null;
-                    if (rm && rm.status === 'NO_BETS') {
-                        setDegradedMode(true);
-                        if (rm.created_at) setDegradedAsOf(rm.created_at);
-                    }
+                    // Intentionally NOT setting degradedMode=true when there are simply 0 bets.
                 } catch (e) { }
 
                 const tp = topPicksRes?.data?.picks || null;
@@ -808,7 +804,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                 <div className="m-6 p-4 bg-amber-900/20 border border-amber-500/40 rounded-lg text-amber-100 flex items-start">
                                     <ShieldAlert className="mr-3 mt-0.5 text-amber-300" size={20} />
                                     <div>
-                                        <div className="font-semibold">Stale slate — latest full run produced NO BETS. Showing last cached picks.</div>
+                                        <div className="font-semibold">Offline Mode — Showing cached data.</div>
                                         {degradedAsOf && (
                                             <div className="text-xs text-amber-200/80 mt-1">As-of: {new Date(degradedAsOf).toLocaleString()}</div>
                                         )}
