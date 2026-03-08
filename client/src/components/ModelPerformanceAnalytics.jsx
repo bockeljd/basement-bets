@@ -14,7 +14,27 @@ const ModelPerformanceAnalytics = ({ history }) => {
         return s === 'WON' || s === 'WIN' || s === 'LOST' || s === 'LOSS' || s === 'PUSH';
     };
 
-    const graded = history.filter(h => isGradedResult(getResult(h)));
+    // --- Top 6 Filtering Logic ---
+    // User strategy is only Top 6 (by EV/u). We must filter the entire history prop
+    // to strictly include ONLY the Top 6 picks per day to avoid "stale" or "noise" data.
+    const filteredToTop6 = (() => {
+        const groups = {};
+        history.forEach(h => {
+            const day = h.analyzed_at ? (new Date(h.analyzed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })) : '—';
+            if (!groups[day]) groups[day] = [];
+            groups[day].push(h);
+        });
+        const out = [];
+        Object.values(groups).forEach(dayList => {
+            const top6 = dayList
+                .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0))
+                .slice(0, 6);
+            out.push(...top6);
+        });
+        return out;
+    })();
+
+    const graded = filteredToTop6.filter(h => isGradedResult(getResult(h)));
     const wins = graded.filter(h => {
         const s = String(getResult(h)).toUpperCase();
         return s === 'WON' || s === 'WIN';
@@ -41,11 +61,18 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const getEdge = (h) => {
         // For the History analytics, we want EV% bands.
         // Always prefer EV/u (decimal), falling back to edge_points only if EV is missing.
-        const ev = Number(h?.ev_per_unit ?? h?.ev);
-        if (Number.isFinite(ev)) return ev; // decimal EV
+        let ev = Number(h?.ev_per_unit ?? h?.ev);
+        if (Number.isFinite(ev)) {
+            // Safety: if EV is > 1.0, it's likely already in percent format (e.g. 5.0 for 5%)
+            if (Math.abs(ev) > 1.0) ev /= 100;
+            return ev;
+        }
         const raw = h?.edge ?? h?.edge_points;
-        const n = Number(raw);
-        if (Number.isFinite(n)) return n;
+        let n = Number(raw);
+        if (Number.isFinite(n)) {
+            if (Math.abs(n) > 1.0) n /= 100;
+            return n;
+        }
         return null;
     };
 
@@ -59,11 +86,11 @@ const ModelPerformanceAnalytics = ({ history }) => {
     // This is easier to interpret and lets us show the right tail.
     const edgeBands = [
         { lo: 0.00, hi: 0.05, label: '0–5%' },
-        { lo: 0.05, hi: 0.10, label: '5–10%' },
-        { lo: 0.10, hi: 0.15, label: '10–15%' },
-        { lo: 0.15, hi: 0.20, label: '15–20%' },
-        { lo: 0.20, hi: 0.25, label: '20–25%' },
-        { lo: 0.25, hi: 0.30, label: '25–30%' },
+        { lo: 0.05, hi: 0.10, label: '5-10%' },
+        { lo: 0.10, hi: 0.15, label: '10-15%' },
+        { lo: 0.15, hi: 0.20, label: '15-20%' },
+        { lo: 0.20, hi: 0.25, label: '20-25%' },
+        { lo: 0.25, hi: 0.30, label: '25-30%' },
         { lo: 0.30, hi: null, label: '30%+' },
     ];
 
@@ -390,11 +417,11 @@ const ModelPerformanceAnalytics = ({ history }) => {
         ];
 
         const width = 900;
-        const height = 280;
-        const padL = 34;
-        const padR = 12;
-        const padT = 12;
-        const padB = 28;
+        const height = 300;
+        const padL = 46; // Increased from 34 to prevent label cutoff
+        const padR = 24; // Increased from 12
+        const padT = 20;
+        const padB = 40; // Increased from 28
 
         const n = dayKeys.length;
         const xAt = (i) => {
@@ -530,11 +557,11 @@ const ModelPerformanceAnalytics = ({ history }) => {
         const color = '#fbbf24'; // Amber/Gold for top picks
 
         const width = 900;
-        const height = 260;
-        const padL = 34;
-        const padR = 12;
-        const padT = 12;
-        const padB = 28;
+        const height = 300;
+        const padL = 46;
+        const padR = 24;
+        const padT = 20;
+        const padB = 40;
 
         const n = dayKeys.length;
         const plotW = (width - padL - padR);

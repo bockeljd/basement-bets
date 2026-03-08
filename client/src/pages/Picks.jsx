@@ -297,12 +297,25 @@ export default function Picks() {
   const top6DailyWinRate30 = useMemo(() => {
     // For each ET day (last 30 days), compute win% of that day's Top 6 recommended picks (ranked by EV/u).
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
+    const getEdge = (h) => {
+      // For the History analytics, we want EV% bands.
+      // Always prefer EV/u (decimal), falling back to edge_points only if EV is missing.
+      let ev = Number(h?.ev_per_unit ?? h?.ev);
+      if (Number.isFinite(ev)) {
+        // Safety: if EV is > 1.0, it's likely already in percent format (e.g. 5.0 for 5%)
+        if (Math.abs(ev) > 1.0) ev /= 100;
+        return ev;
+      }
+      const raw = h?.edge ?? h?.edge_points;
+      let n = Number(raw);
+      if (Number.isFinite(n)) {
+        if (Math.abs(n) > 1.0) n /= 100;
+        return n;
+      }
+      return null;
+    };
     const isW = (r) => r === 'WON' || r === 'WIN';
     const isL = (r) => r === 'LOST' || r === 'LOSS';
-    const ev = (h) => {
-      const n = Number(h?.ev_per_unit ?? h?.ev);
-      return Number.isFinite(n) ? n : null;
-    };
 
     const now = new Date();
     const days = [];
@@ -349,8 +362,7 @@ export default function Picks() {
   }, [graded, yesterdaySlate]);
 
   const dailyPerformance = useMemo(() => {
-    // Daily net units based on graded recommended picks.
-    // Convention: +1u for win, -1u for loss, 0u for push.
+    // Only perform charts on TOP 6 picks per day to avoid "noise"
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
     const unit = (h) => {
       const r = res(h);
@@ -360,22 +372,37 @@ export default function Picks() {
     };
 
     const byDay = {};
-    graded.forEach((h) => {
+
+    // Group all graded picks by day first
+    const gByDay = {};
+    graded.forEach(h => {
       const day = etDay(h.analyzed_at) || '—';
+      if (!gByDay[day]) gByDay[day] = [];
+      gByDay[day].push(h);
+    });
+
+    // For each day, take only Top 6 (by EV) for performance tracking
+    Object.keys(gByDay).forEach(day => {
+      const top6 = gByDay[day]
+        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0))
+        .slice(0, 6);
+
       byDay[day] = byDay[day] || { day, units: 0, wins: 0, losses: 0, pushes: 0, picks: 0 };
-      const r = res(h);
-      byDay[day].picks += 1;
-      byDay[day].units += unit(h);
-      if (r === 'WON' || r === 'WIN') byDay[day].wins += 1;
-      else if (r === 'LOST' || r === 'LOSS') byDay[day].losses += 1;
-      else if (r === 'PUSH') byDay[day].pushes += 1;
+      top6.forEach(h => {
+        const r = res(h);
+        byDay[day].picks += 1;
+        byDay[day].units += unit(h);
+        if (r === 'WON' || r === 'WIN') byDay[day].wins += 1;
+        else if (r === 'LOST' || r === 'LOSS') byDay[day].losses += 1;
+        else if (r === 'PUSH') byDay[day].pushes += 1;
+      });
     });
 
     return Object.values(byDay)
       .filter((x) => x.day && x.day !== '—')
       .sort((a, b) => String(a.day).localeCompare(String(b.day)))
       .slice(-30);
-  }, [graded, yesterdayEt]);
+  }, [graded]);
 
   const confidenceBreakdown = useMemo(() => {
     const normRes = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
@@ -422,44 +449,54 @@ export default function Picks() {
   }, [graded, yesterdaySlate]);
 
   const edgeBandChart = useMemo(() => {
-    // EV/u decimal bands
     const bands = [
       { lo: 0.0, hi: 0.05, label: '0–5%' },
-      { lo: 0.05, hi: 0.1, label: '5–10%' },
-      { lo: 0.1, hi: 0.15, label: '10–15%' },
-      { lo: 0.15, hi: 0.2, label: '15–20%' },
-      { lo: 0.2, hi: 0.25, label: '20–25%' },
-      { lo: 0.25, hi: 0.3, label: '25–30%' },
+      { lo: 0.05, hi: 0.1, label: '5-10%' },
+      { lo: 0.1, hi: 0.15, label: '10-15%' },
+      { lo: 0.15, hi: 0.2, label: '15-20%' },
+      { lo: 0.2, hi: 0.25, label: '20-25%' },
+      { lo: 0.25, hi: 0.3, label: '25-30%' },
       { lo: 0.3, hi: null, label: '30%+' },
     ];
 
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    const ev = (h) => {
-      const n = Number(h?.ev_per_unit ?? h?.ev);
-      return Number.isFinite(n) ? n : null;
+
+    // Group all graded picks by day and take Top 6 for chart consistency
+    const gByDay = {};
+    graded.forEach(h => {
+      const day = etDay(h.analyzed_at) || '—';
+      if (!gByDay[day]) gByDay[day] = [];
+      gByDay[day].push(h);
+    });
+
+    const topPicksAll = [];
+    Object.values(gByDay).forEach(dayList => {
+      const top6 = dayList
+        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0))
+        .slice(0, 6);
+      topPicksAll.push(...top6);
+    });
+
+    const getEv = (h) => {
+      let n = Number(h?.ev_per_unit ?? h?.ev);
+      if (!Number.isFinite(n)) return null;
+      if (Math.abs(n) > 1.0) n /= 100;
+      return n;
     };
 
-    return bands
-      .map((b) => {
-        const rows = graded.filter((h) => {
-          const e = ev(h);
-          if (!Number.isFinite(e)) return false;
-          if (b.hi == null) return e >= b.lo;
-          return e >= b.lo && e < b.hi;
-        });
-        const w = rows.filter((h) => res(h) === 'WON' || res(h) === 'WIN').length;
-        const l = rows.filter((h) => res(h) === 'LOST' || res(h) === 'LOSS').length;
-        const decided = w + l;
-        const winRate = decided > 0 ? (w / decided) * 100 : 0;
-        return {
-          band: b.label,
-          picks: rows.length,
-          wins: w,
-          losses: l,
-          winRate: Number(winRate.toFixed(1)),
-        };
-      })
-  }, [graded, yesterdaySlate]);
+    return bands.map((b) => {
+      const rows = topPicksAll.filter((h) => {
+        const e = getEv(h);
+        if (e === null) return false;
+        if (b.hi == null) return e >= b.lo;
+        return e >= b.lo && e < b.hi;
+      });
+      const w = rows.filter((h) => res(h) === 'WON' || res(h) === 'WIN').length;
+      const l = rows.filter((h) => res(h) === 'LOST' || res(h) === 'LOSS').length;
+      const wr = (w + l) > 0 ? (w / (w + l)) * 100 : 0;
+      return { label: b.label, winRate: Number(wr.toFixed(1)), n: rows.length };
+    });
+  }, [graded]);
 
   const handleSort = (key) => {
     let direction = 'desc';
@@ -1049,7 +1086,7 @@ export default function Picks() {
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
                         <span className={`font-black ${(item.ev_per_unit || item.edge) > 0.05 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                          {item.ev_per_unit ? `+${(item.ev_per_unit * 100).toFixed(1)}%` : (item.edge ? `+${item.edge}%` : '—')}
+                          {item.ev_per_unit ? `+${(item.ev_per_unit * 100).toFixed(1)}%` : (item.edge ? `+${Number(item.edge).toFixed(1)}%` : '—')}
                         </span>
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
