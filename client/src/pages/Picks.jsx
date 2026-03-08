@@ -213,8 +213,18 @@ export default function Picks() {
     const isL = (r) => r === 'LOST' || r === 'LOSS';
 
     const ev = (h) => {
-      const n = Number(h?.ev_per_unit ?? h?.ev);
-      return Number.isFinite(n) ? n : null;
+      let n = Number(h?.ev_per_unit ?? h?.ev);
+      if (!Number.isFinite(n)) {
+        n = Number(h?.edge ?? h?.edge_points);
+      }
+      if (!Number.isFinite(n)) return null;
+
+      let safety = 0;
+      while (Math.abs(n) > 0.5 && safety < 3) {
+        n /= 100;
+        safety++;
+      }
+      return n;
     };
 
     const ymd = (h) => etDay(h.analyzed_at);
@@ -297,22 +307,20 @@ export default function Picks() {
   const top6DailyWinRate30 = useMemo(() => {
     // For each ET day (last 30 days), compute win% of that day's Top 6 recommended picks (ranked by EV/u).
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    const getEdge = (h) => {
-      // For the History analytics, we want EV% bands.
-      // Always prefer EV/u (decimal), falling back to edge_points only if EV is missing.
-      let ev = Number(h?.ev_per_unit ?? h?.ev);
-      if (Number.isFinite(ev)) {
-        // Safety: if EV is > 1.0, it's likely already in percent format (e.g. 5.0 for 5%)
-        if (Math.abs(ev) > 1.0) ev /= 100;
-        return ev;
+    const ev = (h) => {
+      let n = Number(h?.ev_per_unit ?? h?.ev);
+      if (!Number.isFinite(n)) {
+        n = Number(h?.edge ?? h?.edge_points);
       }
-      const raw = h?.edge ?? h?.edge_points;
-      let n = Number(raw);
-      if (Number.isFinite(n)) {
-        if (Math.abs(n) > 1.0) n /= 100;
-        return n;
+      if (!Number.isFinite(n)) return null;
+
+      let safety = 0;
+      // Recursively divide by 100 if obviously a percentage (e.g. 5.0 or 500)
+      while (Math.abs(n) > 0.5 && safety < 3) {
+        n /= 100;
+        safety++;
       }
-      return null;
+      return n;
     };
     const isW = (r) => r === 'WON' || r === 'WIN';
     const isL = (r) => r === 'LOST' || r === 'LOSS';
@@ -479,8 +487,16 @@ export default function Picks() {
 
     const getEv = (h) => {
       let n = Number(h?.ev_per_unit ?? h?.ev);
+      if (!Number.isFinite(n)) {
+        n = Number(h?.edge ?? h?.edge_points);
+      }
       if (!Number.isFinite(n)) return null;
-      if (Math.abs(n) > 1.0) n /= 100;
+
+      let safety = 0;
+      while (Math.abs(n) > 0.5 && safety < 3) {
+        n /= 100;
+        safety++;
+      }
       return n;
     };
 
