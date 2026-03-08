@@ -613,7 +613,11 @@ export default function Picks() {
             // Find most recent day with at least one graded TOP 6 pick
             let lastSettledDay = null;
             const reversedDays = [...days].reverse();
+            const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
             for (const d of reversedDays) {
+              // Strictly skip today's day for the summary header (user wants focus on settled slates)
+              if (d === todayEt) continue;
+
               const top6ForDay = hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === d)
                 .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
                 .slice(0, 6);
@@ -1106,10 +1110,15 @@ export default function Picks() {
                           }
                           if (!Number.isFinite(ev)) return <span className="text-slate-500">—</span>;
 
-                          // Double-normalization: if it's > 1.0, it's a percent. 
-                          // We want it as a decimal (0.05) for the text color threshold and then *100 for display.
+                          // Aggressive normalization: handle 0.05, 5.0, 500, 2177, etc.
+                          // We want a decimal like 0.05 for the text color threshold and then *100 for display.
                           let normEv = ev;
-                          if (Math.abs(normEv) > 1.0) normEv /= 100;
+                          let safety = 0;
+                          // Use 0.5 (50%) as the threshold for 'this must be a whole number percent'
+                          while (Math.abs(normEv) > 0.5 && safety < 3) {
+                            normEv /= 100;
+                            safety++;
+                          }
 
                           return (
                             <span className={`font-black ${normEv > 0.05 ? 'text-emerald-400' : 'text-slate-300'}`}>

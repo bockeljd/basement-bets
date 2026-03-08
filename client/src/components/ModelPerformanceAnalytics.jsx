@@ -63,14 +63,23 @@ const ModelPerformanceAnalytics = ({ history }) => {
         // Always prefer EV/u (decimal), falling back to edge_points only if EV is missing.
         let ev = Number(h?.ev_per_unit ?? h?.ev);
         if (Number.isFinite(ev)) {
-            // Safety: if EV is > 1.0, it's likely already in percent format (e.g. 5.0 for 5%)
-            if (Math.abs(ev) > 1.0) ev /= 100;
-            return ev;
+            let n = ev;
+            let safety = 0;
+            // Use 0.5 (50%) as the threshold for 'this must be a whole number percent'
+            while (Math.abs(n) > 0.5 && safety < 3) {
+                n /= 100;
+                safety++;
+            }
+            return n;
         }
         const raw = h?.edge ?? h?.edge_points;
         let n = Number(raw);
         if (Number.isFinite(n)) {
-            if (Math.abs(n) > 1.0) n /= 100;
+            let safety = 0;
+            while (Math.abs(n) > 0.5 && safety < 3) {
+                n /= 100;
+                safety++;
+            }
             return n;
         }
         return null;
@@ -470,7 +479,7 @@ const ModelPerformanceAnalytics = ({ history }) => {
                 {[0, 25, 50, 75, 100].map((p) => (
                     <g key={p}>
                         <line x1={padL} x2={width - padR} y1={yAt(p)} y2={yAt(p)} stroke="rgba(148,163,184,0.15)" strokeWidth="1" />
-                        <text x={2} y={yAt(p) + 5} fontSize="14" fill="rgba(148,163,184,0.92)" fontWeight="700">{p}%</text>
+                        <text x={2} y={yAt(p) + 4} fontSize="11" fill="rgba(148,163,184,0.92)" fontWeight="700">{p}%</text>
                     </g>
                 ))}
 
@@ -536,7 +545,7 @@ const ModelPerformanceAnalytics = ({ history }) => {
 
                 {/* x labels (sparse) */}
                 {tickIdx.map((i) => (
-                    <text key={i} x={xAt(i)} y={height - 6} fontSize="14" fill="rgba(148,163,184,0.92)" fontWeight="700" textAnchor="middle">
+                    <text key={i} x={xAt(i)} y={height - 6} fontSize="11" fill="rgba(148,163,184,0.92)" fontWeight="700" textAnchor="middle">
                         {(() => {
                             const parts = String(dayKeys[i] || '').split('/');
                             if (parts.length >= 2) {
@@ -640,7 +649,7 @@ const ModelPerformanceAnalytics = ({ history }) => {
                             stroke={p === 50 ? 'rgba(248,250,252,0.35)' : 'rgba(148,163,184,0.15)'}
                             strokeWidth={p === 50 ? '1.5' : '1'}
                         />
-                        <text x={2} y={yAt(p) + 5} fontSize="14" fill="rgba(148,163,184,0.92)" fontWeight="700">{p}%</text>
+                        <text x={2} y={yAt(p) + 4} fontSize="11" fill="rgba(148,163,184,0.92)" fontWeight="700">{p}%</text>
                     </g>
                 ))}
 
@@ -743,7 +752,7 @@ const ModelPerformanceAnalytics = ({ history }) => {
 
                 {/* x labels (sparse) */}
                 {tickIdx.map((i) => (
-                    <text key={i} x={xBar(i) + bandW / 2} y={height - 6} fontSize="14" fill="rgba(148,163,184,0.92)" fontWeight="700" textAnchor="middle">
+                    <text key={i} x={xBar(i) + bandW / 2} y={height - 6} fontSize="11" fill="rgba(148,163,184,0.92)" fontWeight="700" textAnchor="middle">
                         {(() => {
                             const parts = String(dayKeys[i] || '').split('/');
                             if (parts.length >= 2) {
