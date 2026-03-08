@@ -816,7 +816,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                 </div>
                             )}
 
-                            {!loading && !error && edges.length === 0 && (
+                            {!loading && !error && edges.length === 0 && boardTab === 'full' && (
                                 <div className="text-center py-20 text-slate-500 flex flex-col items-center">
                                     <div className="p-4 bg-slate-700/30 rounded-full mb-4">
                                         <RefreshCw size={24} className="text-slate-600" />
@@ -825,86 +825,9 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                 </div>
                             )}
 
-                            {/* (Removed) Historical Top Model Picks summary to reduce duplication. */}
 
-                            {!loading && leagueFilter === 'NCAAM' && edges.length > 0 && (
-                                <div className="px-6 pt-6">
-                                    {(() => {
-                                        // Show actionable edges up top (these are the actual "bets with an edge" today)
-                                        // sourced from server-computed daily_top_picks.
-                                        const isSameEtDay = (ts, ymd) => {
-                                            if (!ts || !ymd) return false;
-                                            try {
-                                                const d = new Date(ts);
-                                                const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                                return s === ymd;
-                                            } catch (e) {
-                                                return false;
-                                            }
-                                        };
 
-                                        const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
-                                        const makeKey = (dayEt, away, home) => {
-                                            const d = String(dayEt || '').slice(0, 10);
-                                            const a = norm(away);
-                                            const h = norm(home);
-                                            if (!d || !a || !h) return null;
-                                            return `${d}|${a}|${h}`;
-                                        };
-
-                                        const actionableAll = getProcessedEdges()
-                                            .map((e) => {
-                                                const direct = rowTopPicks?.[e.id] || null;
-                                                const k = makeKey(e?.day_et, e?.away_team, e?.home_team);
-                                                const fallback = (k && rowTopPicksByKey?.[k]) ? rowTopPicksByKey[k] : null;
-                                                const meta = direct || fallback;
-                                                return { edge: e, top: meta?.rec || null, meta };
-                                            })
-                                            .filter(({ edge, top, meta }) => {
-                                                if (!top || !meta?.isActionable) return false;
-                                                // match selected ET date
-                                                if (edge?.day_et) return String(edge.day_et) === String(selectedDate);
-                                                return isSameEtDay(edge?.start_time, selectedDate);
-                                            })
-                                            .sort((a, b) => {
-                                                const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                                const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                                return bEv - aEv;
-                                            });
-
-                                        const spreadTop = actionableAll.filter((x) => String(x?.top?.bet_type || '').toUpperCase() === 'SPREAD').slice(0, 5);
-                                        const totalTop = actionableAll.filter((x) => String(x?.top?.bet_type || '').toUpperCase() === 'TOTAL').slice(0, 5);
-
-                                        const topOverall = [...spreadTop, ...totalTop]
-                                            .slice()
-                                            .sort((a, b) => {
-                                                const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                                const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                                return bEv - aEv;
-                                            })
-                                            .slice(0, 5);
-
-                                        const actionable = topOverall;
-
-                                        const fmtPick = (edge, top) => {
-                                            let pickText = String(top.selection || '').trim();
-                                            try {
-                                                if (top.bet_type === 'SPREAD') {
-                                                    if (/^home\b/i.test(pickText)) pickText = pickText.replace(/^home\b/i, edge.home_team);
-                                                    if (/^away\b/i.test(pickText)) pickText = pickText.replace(/^away\b/i, edge.away_team);
-                                                }
-                                                if (top.bet_type === 'TOTAL') pickText = pickText.toUpperCase();
-                                            } catch (e) { }
-                                            return pickText;
-                                        };
-
-                                        // Removed per request: the "Today's edges" tile was duplicative with the main recommended picks.
-                                        return null;
-                                    })()}
-                                </div>
-                            )}
-
-                            {!loading && edges.length > 0 && boardTab === 'recommended' && (
+                            {!loading && boardTab === 'recommended' && (
                                 <div className="p-6">
 
                                     {/* Top 5 Plays + full recommended table (IIFE) */}
@@ -1374,20 +1297,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
 
 
 
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 className="font-bold text-blue-400 mb-2">NFL Model</h3>
-                    <p className="text-sm text-slate-400">Monte Carlo simulation (Gaussian) using EPA/Play volatility. Simulates game flow to find edges &gt;1.5pts.</p>
-                </div>
-                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 className="font-bold text-orange-400 mb-2">NCAAM Model</h3>
-                    <p className="text-sm text-slate-400">Efficiency-based Monte Carlo (10k runs). Uses Tempo & Efficiency metrics to project Totals &gt;4pt edge.</p>
-                </div>
-                <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                    <h3 className="font-bold text-purple-400 mb-2">EPL Model</h3>
-                    <p className="text-sm text-slate-400">Poisson Distribution using scraped xG (Expected Goals) data. Finds Moneyline bets with &gt;5% Expected Value.</p>
-                </div>
-            </div>
+
 
             {/* Analysis Modal */}
             {

@@ -208,39 +208,7 @@ export default function ParlayRecommendations() {
         </div>
       </div>
 
-      {/* YESTERDAY Graded Section */}
-      <div className="pt-6 border-t border-slate-800/60">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday's Parlays (Graded)</div>
-            <div className="text-[11px] text-slate-500">Outcomes for the previous slate</div>
-          </div>
-        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <ParlayColumn
-            title="Highest Confidence"
-            icon={Zap}
-            color="amber"
-            combos={yHighConf}
-            loading={loading}
-          />
-          <ParlayColumn
-            title="Value Matchups"
-            icon={Target}
-            color="purple"
-            combos={yValuePick}
-            loading={loading}
-          />
-          <ParlayColumn
-            title="Home Favorites"
-            icon={Home}
-            color="orange"
-            combos={yHomeFav}
-            loading={loading}
-          />
-        </div>
-      </div>
 
     </div>
   );
