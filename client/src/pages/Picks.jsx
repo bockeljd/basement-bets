@@ -653,13 +653,13 @@ export default function Picks() {
                   </div>
                   <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
                     <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Record</div>
-                    <div className="mt-1 text-slate-100 font-black text-3xl">{w}-{l}{p ? `-${p}` : ''}</div>
-                    <div className="text-[11px] text-slate-400">graded favorites</div>
+                    <div className="mt-1 text-slate-100 font-black text-3xl">{w}-{l}-{p}</div>
+                    <div className="text-[11px] text-slate-400 italic">top-6 ranked plays only</div>
                   </div>
                   <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
-                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Win rate</div>
-                    <div className="mt-1 text-slate-100 font-black text-3xl">{(w + l) ? `${winRate.toFixed(1)}%` : '—'}</div>
-                    <div className="text-[11px] text-slate-400">W/L only</div>
+                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Win Rate</div>
+                    <div className="mt-1 text-slate-100 font-black text-3xl">{winRate.toFixed(1)}%</div>
+                    <div className="text-[11px] text-slate-400">weighted avg</div>
                   </div>
                 </div>
 
