@@ -3983,12 +3983,12 @@ async def get_ncaam_parlays_today(
           e.away_team,
           e.home_team,
           e.start_time,
-          (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date::text AS day_et
+          (e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date::text AS day_et
         FROM model_predictions m
         JOIN events e ON m.event_id = e.id
         WHERE e.league = 'NCAAM'
           AND UPPER(COALESCE(m.market_type,'')) IN ('MONEYLINE','ML')
-          AND (m.analyzed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York' - (%(days)s || ' days')::interval)::date
+          AND (e.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York' - (%(days)s || ' days')::interval)::date
           AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
           AND COALESCE(m.bet_price, m.price) IS NOT NULL
         ORDER BY m.event_id, m.analyzed_at DESC
