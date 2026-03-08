@@ -134,9 +134,9 @@ export default function ParlayRecommendations() {
     try {
       const [main, homeFav, yMain, yHomeFav] = await Promise.all([
         api.get('/api/ncaam/parlays/today', { params: { min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 } }),
-        api.get('/api/ncaam/parlays/today', { params: { strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120, min_ev_per_unit: -0.2 } }).catch(() => ({ data: null })),
+        api.get('/api/ncaam/parlays/today', { params: { strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120 } }).catch(() => ({ data: null })),
         api.get('/api/ncaam/parlays/today', { params: { days_ago: 1, min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 } }).catch(() => ({ data: null })),
-        api.get('/api/ncaam/parlays/today', { params: { days_ago: 1, strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120, min_ev_per_unit: -0.2 } }).catch(() => ({ data: null })),
+        api.get('/api/ncaam/parlays/today', { params: { days_ago: 1, strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120 } }).catch(() => ({ data: null })),
       ]);
       setAllData(main.data);
       setHomeFavData(homeFav.data);
