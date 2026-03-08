@@ -508,9 +508,20 @@ export default function Picks() {
     });
   };
 
-  const getRecommendedHistory = () => getSortedHistory()
-    .filter(isRecommendedHistoryItem)
-    .filter(h => !isTodayET(h?.analyzed_at || h?.created_at));
+  const getRecommendedHistory = () => {
+    const sorted = getSortedHistory()
+      .filter(isRecommendedHistoryItem)
+      .filter(h => {
+        // Exclude games that haven't started yet
+        const st = h?.start_time;
+        if (!st) return true; // fallback for legacy
+        const now = new Date();
+        const start = new Date(st);
+        // Allow a small buffer (10 mins) for games about to start
+        return start <= new Date(now.getTime() + 10 * 60000);
+      });
+    return sorted;
+  };
 
   const SortIcon = ({ column }) => {
     if (sortConfig.key !== column) return <ArrowUpDown size={12} className="ml-1 opacity-20" />;
@@ -547,9 +558,16 @@ export default function Picks() {
               return 'PENDING';
             };
 
-            const days = [...new Set(hist.map(h => etDay(h?.analyzed_at || h?.created_at)).filter(Boolean))].sort();
+            const days = [...new Set(hist.map(h => etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)).filter(Boolean))].sort();
             const lastDay = days.length ? days[days.length - 1] : null;
-            const dayRows = lastDay ? hist.filter(h => etDay(h?.analyzed_at || h?.created_at) === lastDay) : [];
+
+            // Only consider the Top 6 picks (by EV) for the summary to avoid grading "noise"
+            const dayRows = lastDay
+              ? hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === lastDay)
+                .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
+                .slice(0, 6)
+              : [];
+
             const gradedCount = dayRows.filter(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h)));
             const w = gradedCount.filter(h => normalizeOutcome(h) === 'WON').length;
             const l = gradedCount.filter(h => normalizeOutcome(h) === 'LOST').length;
@@ -907,7 +925,7 @@ export default function Picks() {
             </thead>
             <tbody>
               {(() => {
-                const histAll = getRecommendedHistory();
+                const histRaw = getRecommendedHistory();
                 const etDayForRecap = (ts) => {
                   try {
                     return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -922,8 +940,8 @@ export default function Picks() {
 
                 const rankByKey = {};
                 const groups = {};
-                histAll.forEach((h) => {
-                  const d = etDayForRecap(h?.analyzed_at || h?.created_at);
+                histRaw.forEach((h) => {
+                  const d = etDayForRecap(h?.start_time || h?.analyzed_at || h?.created_at);
                   if (!d) return;
                   groups[d] = groups[d] || [];
                   groups[d].push(h);
@@ -939,6 +957,9 @@ export default function Picks() {
                     rankByKey[keyFor(h)] = i + 1;
                   });
                 });
+
+                // Filter to only Top 6 per day
+                const histAll = histRaw.filter(h => rankByKey[keyFor(h)] <= 6);
 
                 return histAll.map((item) => {
                   let recs = [];

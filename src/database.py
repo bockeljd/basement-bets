@@ -1524,6 +1524,9 @@ def fetch_model_history(limit=100, league=None, user_id=None, recommended_only: 
             conditions.append("m.analyzed_at >= (NOW() - (%s || ' days')::interval)")
             params.append(int(lookback_days))
 
+        # Only show games that have actually started or finished
+        conditions.append("e.start_time <= (NOW() + INTERVAL '10 minutes')")
+
     where_sql = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
     # Lightweight columns - excludes inputs_json, outputs_json, narrative_json
