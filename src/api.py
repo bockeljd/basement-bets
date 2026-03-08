@@ -3116,11 +3116,11 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
                     if hasattr(ak[k], 'isoformat'):
                         ak[k] = str(ak[k])
                 matchups.append({
-                    'event_id': d['id'],
+                    'event_id': ev['id'],
                     'home_team': home,
                     'away_team': away,
                     'start_time': st,
-                    'day_et': str(d.get('day_et', '')),
+                    'day_et': str(ev.get('day_et', '')),
                     'home_kenpom': hk,
                     'away_kenpom': ak,
                     'home_torvik': torvik_map.get(h_map, {}),

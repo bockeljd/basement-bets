@@ -79,16 +79,11 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
 
         const boardParams = { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT };
         const topPicksParams = { date: selectedDate, days: BOARD_DAYS_DEFAULT, limit_games: 250 };
-        const historyParams = { limit: 500 };
 
         try {
-            // Fetch board + history
-            const [boardRes, historyRes, topPicksRes, healthRes, matchupRes] = await Promise.all([
+            // Fetch board
+            const [boardRes, topPicksRes, healthRes, matchupRes] = await Promise.all([
                 api.get('/api/board', { params: boardParams }),
-                api.get('/api/ncaam/history', { params: historyParams }).catch((e) => {
-                    console.warn("History fetch failed:", e);
-                    return { data: [] };
-                }),
                 (leagueFilter === 'NCAAM'
                     ? api.get('/api/ncaam/top-picks', { params: topPicksParams })
                         .then((r) => ({ ...r, _error: null }))
@@ -106,7 +101,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
             setDataHealth(healthRes?.data?.items || []);
 
             setEdges(boardRes.data || []);
-            setHistory(historyRes.data || []);
 
             const mProfiles = {};
             (matchupRes?.data?.matchups || []).forEach(m => {
@@ -250,16 +244,14 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
             const result = res.data;
             alert(`Grading Complete! ${result.graded || 0} bets updated.`);
             // Fetch layout/refresh data - CONSISTENT ENDPOINTS
-            const [boardRes, historyRes, topPicksRes] = await Promise.all([
+            const [boardRes, topPicksRes] = await Promise.all([
                 api.get('/api/board', { params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT } }),
-                api.get('/api/ncaam/history', { params: { limit: 500 } }),
                 (leagueFilter === 'NCAAM'
                     ? api.get('/api/ncaam/top-picks', { params: { date: selectedDate, days: BOARD_DAYS_DEFAULT, limit_games: 200 } }).catch(() => ({ data: null }))
                     : Promise.resolve({ data: null })
                 )
             ]);
             setEdges(boardRes.data || []);
-            setHistory(historyRes.data || []);
             try {
                 const tp = topPicksRes?.data?.picks || null;
                 if (tp && typeof tp === 'object') {
@@ -322,13 +314,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                 }
             } catch (e) { }
 
-            // Refresh history in background - isolated so it doesn't block analysis
-            try {
-                const histRes = await api.get('/api/ncaam/history', { params: { limit: 500 } });
-                setHistory(histRes.data || []);
-            } catch (histErr) {
-                console.warn('History refresh failed (non-blocking):', histErr);
-            }
+            // History refresh moved to ModelPerformanceAnalytics
         } catch (err) {
             console.error('Analysis error:', err);
             setAnalysisResult({ error: err.response?.data?.detail || 'Analysis failed' });
@@ -373,12 +359,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
             const result = res.data;
             alert(`Data Refresh Complete! ${result.teams_count || 0} teams updated.`);
             // Fresh fetch
-            const [scheduleRes, historyRes] = await Promise.all([
-                api.get('/api/schedule?sport=all&days=3'),
-                api.get('/api/research/history')
+            const [scheduleRes] = await Promise.all([
+                api.get('/api/schedule?sport=all&days=3')
             ]);
             setEdges(scheduleRes.data || []);
-            setHistory(historyRes.data || []);
         } catch (err) {
             console.error(err);
             alert('Data refresh failed: ' + (err.response?.data?.message || err.message));
