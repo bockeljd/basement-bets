@@ -512,13 +512,26 @@ export default function Picks() {
     const sorted = getSortedHistory()
       .filter(isRecommendedHistoryItem)
       .filter(h => {
-        // Exclude games that haven't started yet
+        // Exclude games that haven't started yet (Strict Date check)
         const st = h?.start_time;
-        if (!st) return true; // fallback for legacy
-        const now = new Date();
-        const start = new Date(st);
-        // Allow a small buffer (10 mins) for games about to start
-        return start <= new Date(now.getTime() + 10 * 60000);
+        if (!st) return false;
+
+        try {
+          const now = new Date();
+          const gameStart = new Date(st);
+
+          const todayStr = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+          const gameDayStr = gameStart.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+          // Exclude if game is tomorrow or later
+          if (gameDayStr > todayStr) return false;
+
+          // If it's today, allow it if it's within 10 mins of starting
+          // This keeps the history feed responsive to currently playing/about to start games.
+          return gameStart <= new Date(now.getTime() + 10 * 60000);
+        } catch (e) {
+          return false;
+        }
       });
     return sorted;
   };
@@ -995,7 +1008,7 @@ export default function Picks() {
                   return (
                     <tr key={keyFor(item)} className="border-b border-slate-700/40 hover:bg-slate-800/20 transition-colors text-[13px]">
                       <td className="py-2 px-4 text-slate-400 font-mono whitespace-nowrap">
-                        {formatDateMDY(item.analyzed_at || item.created_at)}
+                        {formatDateMDY(item.start_time || item.analyzed_at || item.created_at)}
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
                         {recRank ? (
