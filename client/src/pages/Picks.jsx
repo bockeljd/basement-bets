@@ -617,9 +617,23 @@ export default function Picks() {
               const top6ForDay = hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === d)
                 .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
                 .slice(0, 6);
-              if (top6ForDay.some(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h)))) {
+              const gradedN = top6ForDay.filter(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h))).length;
+              // Require a significant portion (4+) of Top 6 to be graded before taking this as the summary day
+              if (gradedN >= 4) {
                 lastSettledDay = d;
                 break;
+              }
+            }
+            // Fallback to first day with ANY grades if no "full" day found
+            if (!lastSettledDay) {
+              for (const d of reversedDays) {
+                const top6ForDay = hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === d)
+                  .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
+                  .slice(0, 6);
+                if (top6ForDay.some(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h)))) {
+                  lastSettledDay = d;
+                  break;
+                }
               }
             }
 
@@ -1085,9 +1099,24 @@ export default function Picks() {
                         <span className="font-mono">{item.bet_price || '—'}</span>
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
-                        <span className={`font-black ${(item.ev_per_unit || item.edge) > 0.05 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                          {item.ev_per_unit ? `+${(item.ev_per_unit * 100).toFixed(1)}%` : (item.edge ? `+${Number(item.edge).toFixed(1)}%` : '—')}
-                        </span>
+                        {(() => {
+                          let ev = Number(item?.ev_per_unit ?? item?.ev);
+                          if (!Number.isFinite(ev)) {
+                            ev = Number(item?.edge ?? item?.edge_points);
+                          }
+                          if (!Number.isFinite(ev)) return <span className="text-slate-500">—</span>;
+
+                          // Double-normalization: if it's > 1.0, it's a percent. 
+                          // We want it as a decimal (0.05) for the text color threshold and then *100 for display.
+                          let normEv = ev;
+                          if (Math.abs(normEv) > 1.0) normEv /= 100;
+
+                          return (
+                            <span className={`font-black ${normEv > 0.05 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                              +{(normEv * 100).toFixed(1)}%
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
                         {isWon ? (
