@@ -32,7 +32,7 @@ class ProfileGeneratorService:
         
         if self.gemini_key and genai:
             genai.configure(api_key=self.gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-flash-latest')
+            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         else:
             self.gemini_model = None
 
@@ -242,7 +242,7 @@ class ProfileGeneratorService:
                 # Gemini prompt needs slightly different handling for JSON
                 gemini_prompt = prompt + "\n\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no triple backticks."
                 
-                response = self.gemini_model.generate_content(gemini_prompt, request_options={"timeout": 30})
+                response = self.gemini_model.generate_content(gemini_prompt, request_options={"timeout": 60})
                 text = response.text.strip()
                 
                 # Clean up markdown if present
@@ -364,7 +364,7 @@ class ProfileGeneratorService:
             try:
                 gemini_prompt = prompt + "\n\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no triple backticks."
                 
-                response = self.gemini_model.generate_content(gemini_prompt, request_options={"timeout": 30})
+                response = self.gemini_model.generate_content(gemini_prompt, request_options={"timeout": 60})
                 text = response.text.strip()
 
                 if "```json" in text:

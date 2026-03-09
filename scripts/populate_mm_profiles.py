@@ -45,7 +45,7 @@ def main():
             results["failed"].append(team)
         
         # Polite delay to avoid rate limiting
-        time.sleep(1.0)
+        time.sleep(15.0)
         
     print(f"\n[{datetime.now().isoformat()}] MM Profile Population Complete.")
     print(f"Summary: {len(results['success'])} Success, {len(results['failed'])} Failed.")
