@@ -32,7 +32,7 @@ class ProfileGeneratorService:
         
         if self.gemini_key and genai:
             genai.configure(api_key=self.gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-flash-latest')
         else:
             self.gemini_model = None
 
@@ -236,28 +236,15 @@ class ProfileGeneratorService:
                 print(f"[ProfileGen] OpenAI Error: {e}")
 
         # Fallback to Gemini
-        if not result_json and self.gemini_key and len(str(self.gemini_key)) > 5:
+        if not result_json and self.gemini_model:
             print(f"[ProfileGen] Using Gemini fallback for {team_name}...")
             try:
-                import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
-                headers = {"Content-Type": "application/json"}
-                
                 # Gemini prompt needs slightly different handling for JSON
                 gemini_prompt = prompt + "\n\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no triple backticks."
                 
-                payload = {
-                    "contents": [{
-                        "parts": [{"text": gemini_prompt}]
-                    }]
-                }
+                response = self.gemini_model.generate_content(gemini_prompt, request_options={"timeout": 30})
+                text = response.text.strip()
                 
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
-                response.raise_for_status()
-                res_data = response.json()
-                
-                text = res_data['candidates'][0]['content']['parts'][0]['text']
-                text = text.strip()
                 # Clean up markdown if present
                 if "```json" in text:
                     text = text.split("```json")[1].split("```")[0].strip()
@@ -267,8 +254,6 @@ class ProfileGeneratorService:
                 result_json = json.loads(text)
             except Exception as e:
                 print(f"[ProfileGen] Gemini Error: {e}")
-                if hasattr(e, 'response') and e.response is not None:
-                     print(f"[ProfileGen] Gemini Response: {e.response.text}")
 
         if result_json:
             profile["narrative"] = result_json.get("narrative")
@@ -374,27 +359,14 @@ class ProfileGeneratorService:
                 print(f"[MatchupGen] OpenAI Error: {e}")
 
         # Fallback to Gemini
-        if not result_json and self.gemini_key and len(str(self.gemini_key)) > 5:
+        if not result_json and self.gemini_model:
             print(f"[MatchupGen] Using Gemini fallback for {team_a} vs {team_b}...")
             try:
-                import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.gemini_key}"
-                headers = {"Content-Type": "application/json"}
+                gemini_prompt = prompt + "\n\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no triple backticks."
                 
-                gemini_prompt = prompt + "\\n\\nIMPORTANT: Return ONLY a valid JSON object. No markdown, no triple backticks."
-                
-                payload = {
-                    "contents": [{
-                        "parts": [{"text": gemini_prompt}]
-                    }]
-                }
-                
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
-                response.raise_for_status()
-                res_data = response.json()
-                
-                text = res_data['candidates'][0]['content']['parts'][0]['text']
-                text = text.strip()
+                response = self.gemini_model.generate_content(gemini_prompt, request_options={"timeout": 30})
+                text = response.text.strip()
+
                 if "```json" in text:
                     text = text.split("```json")[1].split("```")[0].strip()
                 elif "```" in text:
