@@ -11,6 +11,7 @@ from parsers.espn_client import EspnClient
 from services.odds_selection_service import OddsSelectionService
 from src.action_network import get_todays_games
 from src.agents.post_mortem_agent import PostMortemAgent
+from src.utils.naming import standardize_team_name
 
 # Load env variables if not already loaded
 from dotenv import load_dotenv
@@ -403,10 +404,15 @@ class GradingService:
         outcome = 'PENDING'
         
         if market == 'SPREAD':
-            if pick == row['home_team']:
+            # Robust side matching with standardization and substring fallback
+            s_pick = standardize_team_name(str(pick)).lower()
+            s_home = standardize_team_name(str(row['home_team'])).lower()
+            s_away = standardize_team_name(str(row['away_team'])).lower()
+
+            if s_pick == s_home or s_pick in s_home or s_home in s_pick:
                 score = h_score
                 opp_score = a_score
-            elif pick == row['away_team']:
+            elif s_pick == s_away or s_pick in s_away or s_away in s_pick:
                 score = a_score
                 opp_score = h_score
             else:
@@ -418,15 +424,22 @@ class GradingService:
             
         elif market == 'TOTAL':
             total_score = h_score + a_score
-            if pick.upper() == 'OVER':
+            if str(pick).upper() == 'OVER':
                 outcome = 'WON' if total_score > line else 'LOST' if total_score < line else 'PUSH'
-            elif pick.upper() == 'UNDER':
+            elif str(pick).upper() == 'UNDER':
                 outcome = 'WON' if total_score < line else 'LOST' if total_score > line else 'PUSH'
                 
         elif market == 'MONEYLINE':
-            winner = row['home_team'] if h_score > a_score else row['away_team']
-            if pick == winner: outcome = 'WON'
-            else: outcome = 'LOST'
+            s_pick = standardize_team_name(str(pick)).lower()
+            s_home = standardize_team_name(str(row['home_team'])).lower()
+            s_away = standardize_team_name(str(row['away_team'])).lower()
+
+            if s_pick == s_home or s_pick in s_home or s_home in s_pick:
+                outcome = 'WON' if h_score > a_score else 'LOST'
+            elif s_pick == s_away or s_pick in s_away or s_away in s_pick:
+                outcome = 'WON' if a_score > h_score else 'LOST'
+            else:
+                return 'VOID'
             
         return outcome
 

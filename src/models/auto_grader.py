@@ -88,14 +88,18 @@ class AutoGrader:
                 continue
                 
             # Heuristic: verify BOTH teams match
-            # To handle partial names ("Bills" vs "Buffalo Bills"), check containment
-            h_score_name = game['home_team']
-            a_score_name = game['away_team']
+            # To handle partial names ("Bills" vs "Buffalo Bills"), check standardization and containment
+            from src.utils.naming import standardize_team_name
+            h_score_name = standardize_team_name(game['home_team']).lower()
+            a_score_name = standardize_team_name(game['away_team']).lower()
+            p_home_std = standardize_team_name(p_home).lower()
+            p_away_std = standardize_team_name(p_away).lower()
             
-            # Match logic: simple inclusion
-            # "Bills" in "Buffalo Bills" -> True
-            if (p_home in h_score_name or h_score_name in p_home) and \
-               (p_away in a_score_name or a_score_name in p_away):
+            # Match logic: inclusion or exact
+            home_match = (p_home_std in h_score_name or h_score_name in p_home_std)
+            away_match = (p_away_std in a_score_name or a_score_name in p_away_std)
+
+            if home_match and away_match:
                 target_game = game
                 break
                 
@@ -142,7 +146,12 @@ class AutoGrader:
                 opp_score = 0
                 
                 # Is bet_on Home or Away?
-                if bet_on in target_game['home_team'] or target_game['home_team'] in bet_on:
+                from src.utils.naming import standardize_team_name
+                s_bet_on = standardize_team_name(str(bet_on)).lower()
+                s_home = standardize_team_name(target_game['home_team']).lower()
+                s_away = standardize_team_name(target_game['away_team']).lower()
+
+                if s_bet_on == s_home or s_bet_on in s_home or s_home in s_bet_on:
                     team_score = home_score
                     opp_score = away_score
                 else:
@@ -172,8 +181,12 @@ class AutoGrader:
             elif market == 'Moneyline':
                 # Straight up winner
                 winner = target_game['home_team'] if home_score > away_score else target_game['away_team']
-                # Check if bet_on matches winner
-                if bet_on in winner or winner in bet_on:
+                # Check if bet_on matches winner with standardization
+                from src.utils.naming import standardize_team_name
+                s_bet_on = standardize_team_name(str(bet_on)).lower()
+                s_winner = standardize_team_name(str(winner)).lower()
+
+                if s_bet_on == s_winner or s_bet_on in s_winner or s_winner in s_bet_on:
                     return 'Won'
                 else:
                     return 'Lost'

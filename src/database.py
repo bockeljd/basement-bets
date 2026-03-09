@@ -41,8 +41,10 @@ def get_db_connection():
 def get_admin_db_connection():
     """
     Connects to the UNPOOLED url if available, for schema changes/migrations.
-    Falls back to regular URL if unpooled not set.
+    Falls back to regular URL if unpooled not set or fails.
     """
+    # Use UNPOOLED if it looks different from DATABASE_URL (pooled),
+    # but fallback to regular URL if unpooled not set or fails.
     dsn = settings.DATABASE_URL_UNPOOLED or settings.DATABASE_URL
     if not dsn:
         raise RuntimeError("DATABASE_URL is not set.")
@@ -51,10 +53,20 @@ def get_admin_db_connection():
     try:
         conn = psycopg2.connect(dsn, cursor_factory=psycopg2.extras.DictCursor)
         yield conn
+    except psycopg2.OperationalError as e:
+        # Fallback to pooled DATABASE_URL if UNPOOLED fails (e.g. auth issues on certain hosts)
+        if settings.DATABASE_URL_UNPOOLED and settings.DATABASE_URL and settings.DATABASE_URL_UNPOOLED != settings.DATABASE_URL:
+            try:
+                conn = psycopg2.connect(settings.DATABASE_URL, cursor_factory=psycopg2.extras.DictCursor)
+                yield conn
+            except Exception:
+                # If fallback also fails, re-raise the original OperationalError
+                raise e
+        else:
+            # If no fallback option, re-raise the original OperationalError
+            raise e
     except Exception as e:
-        if conn and not conn.closed:
-            try: conn.rollback()
-            except: pass
+        # For any other exception, re-raise it
         raise e
     finally:
         if conn and not conn.closed:

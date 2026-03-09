@@ -427,10 +427,10 @@ const ModelPerformanceAnalytics = ({ history }) => {
 
         const width = 900;
         const height = 300;
-        const padL = 46; // Increased from 34 to prevent label cutoff
-        const padR = 24; // Increased from 12
+        const padL = 60; // Increased from 46 to prevent label cutoff
+        const padR = 30; // Increased from 24
         const padT = 20;
-        const padB = 40; // Increased from 28
+        const padB = 45; // Increased from 40
 
         const n = dayKeys.length;
         const xAt = (i) => {
@@ -567,10 +567,10 @@ const ModelPerformanceAnalytics = ({ history }) => {
 
         const width = 900;
         const height = 300;
-        const padL = 46;
-        const padR = 24;
+        const padL = 60;
+        const padR = 30;
         const padT = 20;
-        const padB = 40;
+        const padB = 45;
 
         const n = dayKeys.length;
         const plotW = (width - padL - padR);
