@@ -32,7 +32,7 @@ class ProfileGeneratorService:
         
         if self.gemini_key and genai:
             genai.configure(api_key=self.gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash-lite')
         else:
             self.gemini_model = None
 
