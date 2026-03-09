@@ -17,6 +17,7 @@ Data ingested:
 NOTE: KenPom HTML can change; keep parsing defensive.
 """
 
+from __future__ import annotations
 import os
 import sys
 import time
