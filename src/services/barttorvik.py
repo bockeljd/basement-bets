@@ -1,7 +1,7 @@
 import requests
 import json
 from datetime import datetime
-from src.database import upsert_bt_team_metrics_daily
+from src.database import upsert_bt_team_metrics_daily, upsert_team_metrics
 
 # NOTE: Do NOT import selenium / undetected_chromedriver at import-time.
 # Vercel/serverless Python often lacks distutils/Chrome and will crash.
@@ -98,6 +98,7 @@ class BartTorvikClient:
             ratings = {}
             metrics_payload = []
             today_str = datetime.now().strftime("%Y-%m-%d")
+            live_payload = []
             
             # Identify column indices based on header/sample
             # The Torvik JSON feed is a list of lists. The first item is NOT always headers.
@@ -183,12 +184,29 @@ class BartTorvikClient:
                     "luck": luck,
                     "continuity": continuity
                 })
+                
+                # Payload for live "bt_team_metrics" table
+                live_payload.append({
+                    "team_name": name,
+                    "year": year,
+                    "adj_oe": adj_oe,
+                    "adj_de": adj_de,
+                    "barthag": row[headers.get("barthag", 32)] if len(row) > 32 else None, # Heuristic
+                    "record": record,
+                    "conf_record": str(row[headers.get("conf_record", 2)]) if len(row) > 2 else None,
+                    "adj_tempo": tempo
+                })
             
             # Persist to DB
             if metrics_payload:
                 try:
                     upsert_bt_team_metrics_daily(metrics_payload)
-                    print(f"  [TORVIK] Persisted {len(metrics_payload)} team metrics to DB.")
+                    print(f"  [TORVIK] Persisted {len(metrics_payload)} daily team metrics to DB.")
+                    
+                    # ALSO update the live table
+                    if live_payload:
+                        upsert_team_metrics(live_payload)
+                        print(f"  [TORVIK] Updated {len(live_payload)} live team metrics.")
                 except Exception as db_e:
                     print(f"  [TORVIK] DB Persist warning: {db_e}")
             

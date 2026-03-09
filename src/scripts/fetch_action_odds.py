@@ -64,12 +64,12 @@ def process_sport(sport, dates_or_weeks):
             
         # Define markets to track
         markets = [
-            ('h2h', 'home', g.get('home_money_line'), None),
-            ('h2h', 'away', g.get('away_money_line'), None),
-            ('spread', 'home', g.get('home_spread_odds'), g.get('home_spread')),
-            ('spread', 'away', g.get('away_spread_odds'), g.get('away_spread')),
-            ('total', 'over', g.get('over_odds'), g.get('total_score')),
-            ('total', 'under', g.get('under_odds'), g.get('total_score'))
+            ('MONEYLINE', 'home', g.get('home_money_line'), None),
+            ('MONEYLINE', 'away', g.get('away_money_line'), None),
+            ('SPREAD', 'home', g.get('home_spread_odds'), g.get('home_spread')),
+            ('SPREAD', 'away', g.get('away_spread_odds'), g.get('away_spread')),
+            ('TOTAL', 'over', g.get('over_odds'), g.get('total_score')),
+            ('TOTAL', 'under', g.get('under_odds'), g.get('total_score'))
         ]
         
         for m_type, side, price, line in markets:

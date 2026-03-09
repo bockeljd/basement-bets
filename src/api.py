@@ -2252,8 +2252,8 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
            ml_away.price as ml_away_odds,
            ml_draw.price as ml_draw_odds,
            -- Back-compat aliases (older UI expected these names)
-           s_home.price as moneyline_home,
-           t_over.price as moneyline_away,
+           ml_home.price as moneyline_home,
+           ml_away.price as moneyline_away,
            gr.home_score, gr.away_score, gr.final
     FROM dedup_events e
     LEFT JOIN (
@@ -3150,7 +3150,7 @@ async def get_matchup_analysis(request: Request, team_a: str, team_b: str):
 
 
 @app.get("/api/ncaam/tournament-teams")
-async def get_tournament_teams(request: Request, limit: int = 68, generate: bool = False):
+async def get_tournament_teams(request: Request, limit: int = 80, generate: bool = False):
     """Return the top N teams by KenPom rank for bracket research profiles.
     
     Includes their Torvik metrics if available.

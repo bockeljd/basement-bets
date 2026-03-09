@@ -18,7 +18,7 @@ const MarchMadness = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 68 } });
+            const res = await api.get('/api/ncaam/tournament-teams', { params: { limit: 80 } });
             const allTeams = res.data.teams || [];
             if (allTeams.length > 0) {
                 setTeams(allTeams);

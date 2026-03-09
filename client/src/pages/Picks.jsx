@@ -32,6 +32,7 @@ export default function Picks() {
     try {
       setIsGrading(true);
       await api.post('/api/research/grade');
+      await load(); // Refresh data after grading
     } catch (e) {
       // ignore
     } finally {
@@ -136,35 +137,47 @@ export default function Picks() {
     return mt || 'OTHER';
   };
 
+  const getEv = (h) => {
+    const ev = Number(h?.ev_per_unit ?? h?.ev);
+    return Number.isFinite(ev) ? ev : 0;
+  };
+
+  const top5YesterdayStraight = useMemo(() => {
+    return (yesterdaySlate || [])
+      .filter(h => {
+        const c = classify(h);
+        return c === 'SPREAD' || c === 'TOTAL';
+      })
+      .sort((a, b) => getEv(b) - getEv(a))
+      .slice(0, 5);
+  }, [yesterdaySlate]);
+
+  const top5YesterdayMlParlay = useMemo(() => {
+    return (yesterdaySlate || [])
+      .filter(h => {
+        const c = classify(h);
+        return c === 'MONEYLINE' || c === 'PARLAY';
+      })
+      .sort((a, b) => getEv(b) - getEv(a))
+      .slice(0, 5);
+  }, [yesterdaySlate]);
+
   const top5Yesterday = useMemo(() => {
-    const getEv = (h) => {
-      const ev = Number(h?.ev_per_unit ?? h?.ev);
-      return Number.isFinite(ev) ? ev : 0;
-    };
     return (yesterdaySlate || [])
       .slice()
       .sort((a, b) => getEv(b) - getEv(a))
       .slice(0, 5);
   }, [yesterdaySlate]);
 
-  const gradedYesterday = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top5Yesterday.filter((h) => isGraded(res(h)));
-  }, [top5Yesterday]);
-
   const gradedYesterdayStraight = useMemo(() => {
-    return (gradedYesterday || []).filter((h) => {
-      const c = classify(h);
-      return c === 'SPREAD' || c === 'TOTAL';
-    });
-  }, [gradedYesterday]);
+    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
+    return top5YesterdayStraight.filter((h) => isGraded(res(h)));
+  }, [top5YesterdayStraight]);
 
   const gradedYesterdayMlParlay = useMemo(() => {
-    return (gradedYesterday || []).filter((h) => {
-      const c = classify(h);
-      return c === 'MONEYLINE' || c === 'PARLAY';
-    });
-  }, [gradedYesterday]);
+    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
+    return top5YesterdayMlParlay.filter((h) => isGraded(res(h)));
+  }, [top5YesterdayMlParlay]);
 
   const pendingYesterday = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
@@ -852,7 +865,7 @@ export default function Picks() {
                   const ev = Number(h?.ev_per_unit ?? h?.ev);
                   return Number.isFinite(ev) ? ev : 0;
                 };
-                const base = (hasReco ? (recoStraight || []) : (gradedYesterdayStraight || []));
+                const base = (hasReco ? (recoStraight || []) : (top5YesterdayStraight || []));
                 const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
                 return rows.slice(0, 6).map((h, idx) => {
                   const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();
@@ -907,7 +920,7 @@ export default function Picks() {
                   const ev = Number(h?.ev_per_unit ?? h?.ev);
                   return Number.isFinite(ev) ? ev : 0;
                 };
-                const base = (hasReco ? (recoMlParlay || []) : (gradedYesterdayMlParlay || []));
+                const base = (hasReco ? (recoMlParlay || []) : (top5YesterdayMlParlay || []));
                 const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
                 return rows.slice(0, 6).map((h, idx) => {
                   const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();

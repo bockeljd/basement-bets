@@ -21,6 +21,7 @@ import os
 import sys
 import time
 import json
+import requests
 from datetime import datetime, timezone
 
 # Allow running from repo root in GitHub Actions
@@ -641,6 +642,7 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
             payload["asof_date"] = asof_date
 
             if table == 'kenpom_team_ratings_daily':
+                # Update snapshot table
                 _exec(conn, """
                 INSERT INTO kenpom_team_ratings_daily(asof_date, team_name, rank, adj_em, adj_o, adj_d, adj_t, conf, record, raw, updated_at)
                 VALUES (%(asof_date)s, %(team_name)s, %(rank)s, %(adj_em)s, %(adj_o)s, %(adj_d)s, %(adj_t)s, %(conf)s, %(record)s, %(raw)s::jsonb, NOW())
@@ -655,6 +657,21 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   raw=EXCLUDED.raw,
                   updated_at=NOW();
                 """, {**payload, "raw": json.dumps(payload.get("raw") or {})})
+
+                # ALSO update the live "kenpom_ratings" table
+                _exec(conn, """
+                INSERT INTO kenpom_ratings(team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t, updated_at)
+                VALUES (%(team_name)s, %(rank)s, %(conf)s, %(record)s, %(adj_em)s, %(adj_o)s, %(adj_d)s, %(adj_t)s, NOW())
+                ON CONFLICT (team_name) DO UPDATE SET
+                  rank=EXCLUDED.rank,
+                  conference=EXCLUDED.conference,
+                  record=EXCLUDED.record,
+                  adj_em=EXCLUDED.adj_em,
+                  adj_o=EXCLUDED.adj_o,
+                  adj_d=EXCLUDED.adj_d,
+                  adj_t=EXCLUDED.adj_t,
+                  updated_at=NOW();
+                """, payload)
                 n += 1
 
             elif table == 'kenpom_home_court_daily':
