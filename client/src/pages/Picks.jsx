@@ -179,6 +179,11 @@ export default function Picks() {
     return top5YesterdayMlParlay.filter((h) => isGraded(res(h)));
   }, [top5YesterdayMlParlay]);
 
+  const gradedYesterday = useMemo(() => {
+    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
+    return top5Yesterday.filter((h) => isGraded(res(h)));
+  }, [top5Yesterday]);
+
   const pendingYesterday = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
     return top5Yesterday.filter((h) => !isGraded(res(h))).length;
