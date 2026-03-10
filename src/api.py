@@ -3480,13 +3480,18 @@ async def ncaam_performance_report(days: int = 30):
     def window_stats(window_days: int):
         with get_db_connection() as conn:
             rows = _exec(conn, """
+              WITH latest_slates AS (
+                  SELECT DISTINCT ON (date_et) id, date_et 
+                  FROM recommended_slates 
+                  WHERE league='NCAAM' 
+                    AND date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+                  ORDER BY date_et DESC, (CASE WHEN source='full' THEN 1 ELSE 2 END) ASC, created_at ASC
+              )
               SELECT m.outcome, m.bet_price, m.ev_per_unit, m.clv_points
               FROM model_predictions m
               JOIN recommended_slate_items rsi ON m.id = rsi.prediction_id
-              JOIN recommended_slates rs ON rsi.slate_id = rs.id
-              WHERE rs.league='NCAAM'
-                AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-                AND rsi.rank <= 5
+              JOIN latest_slates rs ON rsi.slate_id = rs.id
+              WHERE rsi.rank <= 5
             """, {"d": int(window_days)}).fetchall()
 
         decided = [r for r in rows if (r['outcome'] or '').upper() in ('WON','LOST','PUSH')]
@@ -3521,6 +3526,13 @@ async def ncaam_performance_report(days: int = 30):
     # Daily picks (last N days)
     with get_db_connection() as conn:
         rows = _exec(conn, """
+          WITH latest_slates AS (
+              SELECT DISTINCT ON (date_et) id, date_et 
+              FROM recommended_slates 
+              WHERE league='NCAAM' 
+                AND date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+              ORDER BY date_et DESC, (CASE WHEN source='full' THEN 1 ELSE 2 END) ASC, created_at ASC
+          )
           SELECT 
             rs.date_et AS day_et,
             rsi.event_id,
@@ -3539,14 +3551,12 @@ async def ncaam_performance_report(days: int = 30):
             gr.away_score,
             gr.final,
             rsi.rank
-          FROM recommended_slates rs
+          FROM latest_slates rs
           JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
           JOIN events e ON rsi.event_id = e.id
           LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
-          WHERE rs.league = 'NCAAM'
-            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+          WHERE rsi.rank <= 5
           ORDER BY rs.date_et DESC, rsi.rank ASC
           LIMIT 1000
         """, {"d": int(days)}).fetchall()
@@ -3591,18 +3601,23 @@ async def ncaam_performance_report(days: int = 30):
     # Pending / coverage summary
     with get_db_connection() as conn:
         cov = _exec(conn, """
+          WITH latest_slates AS (
+              SELECT DISTINCT ON (date_et) id, date_et 
+              FROM recommended_slates 
+              WHERE league='NCAAM' 
+                AND date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+              ORDER BY date_et DESC, (CASE WHEN source='full' THEN 1 ELSE 2 END) ASC, created_at ASC
+          )
           SELECT
             COUNT(*) as total,
             COUNT(*) FILTER (WHERE (m.outcome IS NULL OR m.outcome='PENDING')) as pending,
             COUNT(*) FILTER (WHERE (m.outcome IN ('WON','LOST','PUSH'))) as decided,
             COUNT(*) FILTER (WHERE (m.outcome IS NULL OR m.outcome='PENDING') AND gr.final=TRUE) as pending_but_final_available
-          FROM recommended_slates rs
+          FROM latest_slates rs
           JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
           LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
-          WHERE rs.league = 'NCAAM'
-            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+          WHERE rsi.rank <= 5
         """, {"d": int(days)}).fetchone()
     coverage = dict(cov) if cov else {}
 
@@ -3621,13 +3636,18 @@ async def ncaam_performance_report(days: int = 30):
     conf_rows = []
     with get_db_connection() as conn:
         conf_rows = _exec(conn, """
+          WITH latest_slates AS (
+              SELECT DISTINCT ON (date_et) id, date_et 
+              FROM recommended_slates 
+              WHERE league='NCAAM' 
+                AND date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+              ORDER BY date_et DESC, (CASE WHEN source='full' THEN 1 ELSE 2 END) ASC, created_at ASC
+          )
           SELECT m.outcome, m.confidence_0_100
           FROM model_predictions m
           JOIN recommended_slate_items rsi ON m.id = rsi.prediction_id
-          JOIN recommended_slates rs ON rsi.slate_id = rs.id
-          WHERE rs.league = 'NCAAM'
-            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+          JOIN latest_slates rs ON rsi.slate_id = rs.id
+          WHERE rsi.rank <= 5
             AND (m.outcome IN ('WON','LOST','PUSH'))
         """, {"d": int(days)}).fetchall()
 
@@ -4365,17 +4385,22 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
 
     with get_db_connection() as conn:
         rows = _exec(conn, """
+          WITH latest_slates AS (
+              SELECT DISTINCT ON (date_et) id, date_et 
+              FROM recommended_slates 
+              WHERE league='NCAAM' 
+                AND date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+              ORDER BY date_et DESC, (CASE WHEN source='full' THEN 1 ELSE 2 END) ASC, created_at ASC
+          )
           SELECT
             rs.date_et as day_et,
             m.outcome,
             COALESCE(m.bet_price, -110) as price,
             COALESCE(m.confidence_0_100, 0) as c0
-          FROM recommended_slates rs
+          FROM latest_slates rs
           JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
-          WHERE rs.league='NCAAM'
-            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+          WHERE rsi.rank <= 5
             AND (m.outcome IN ('WON','LOST','PUSH'))
           ORDER BY rs.date_et ASC, rsi.rank ASC
         """, {"d": int(days)}).fetchall()

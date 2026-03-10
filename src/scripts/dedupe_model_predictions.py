@@ -58,6 +58,9 @@ def main(limit_groups: int | None = None) -> dict:
     )
     DELETE FROM model_predictions
     WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+      AND id NOT IN (
+          SELECT prediction_id FROM recommended_slate_items WHERE prediction_id IS NOT NULL
+      )
     """
 
     # 2) Backfill prediction_key for any remaining NULL/blank
