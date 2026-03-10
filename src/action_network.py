@@ -27,6 +27,9 @@ def get_todays_games(sport, dates_or_weeks, headers=None):
         try:
             if isinstance(date_str, int):
                 url = f"https://api.actionnetwork.com/web/v1/scoreboard/{api_sport}?week={date_str}"
+            elif api_sport == 'ncaab':
+                # V2 is required for full NCAAM coverage (D1) during conference tournaments
+                url = f"https://api.actionnetwork.com/web/v2/scoreboard/ncaab?date={date_str}&division=D1"
             else:
                 url = f"https://api.actionnetwork.com/web/v1/scoreboard/{api_sport}?date={date_str}"
                 
