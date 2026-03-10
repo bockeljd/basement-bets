@@ -3482,12 +3482,11 @@ async def ncaam_performance_report(days: int = 30):
             rows = _exec(conn, """
               SELECT m.outcome, m.bet_price, m.ev_per_unit, m.clv_points
               FROM model_predictions m
-              JOIN events e ON m.event_id=e.id
-              WHERE e.league='NCAAM'
-                AND m.analyzed_at > NOW() - (%(d)s || ' days')::interval
-                AND m.market_type IS NOT NULL AND m.market_type <> 'AUTO'
-                AND m.selection IS NOT NULL AND m.selection <> '' AND m.selection <> '—'
-                AND m.pick IS NOT NULL AND m.pick <> 'NONE'
+              JOIN recommended_slate_items rsi ON m.id = rsi.prediction_id
+              JOIN recommended_slates rs ON rsi.slate_id = rs.id
+              WHERE rs.league='NCAAM'
+                AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+                AND rsi.rank <= 5
             """, {"d": int(window_days)}).fetchall()
 
         decided = [r for r in rows if (r['outcome'] or '').upper() in ('WON','LOST','PUSH')]
@@ -3523,31 +3522,32 @@ async def ncaam_performance_report(days: int = 30):
     with get_db_connection() as conn:
         rows = _exec(conn, """
           SELECT 
-            (m.analyzed_at AT TIME ZONE 'America/New_York')::date::text AS day_et,
-            m.event_id,
+            rs.date_et AS day_et,
+            rsi.event_id,
             e.away_team,
             e.home_team,
             e.start_time,
-            m.market_type,
-            m.selection,
-            m.bet_line,
-            m.bet_price,
+            rsi.market_type,
+            rsi.selection,
+            rsi.bet_line,
+            rsi.bet_price,
             m.ev_per_unit,
             m.confidence_0_100,
             m.clv_points,
             m.outcome,
             gr.home_score,
             gr.away_score,
-            gr.final
-          FROM model_predictions m
-          JOIN events e ON m.event_id=e.id
-          LEFT JOIN game_results gr ON gr.event_id=m.event_id
-          WHERE e.league='NCAAM'
-            AND m.analyzed_at > NOW() - (%(d)s || ' days')::interval
-            AND m.market_type IS NOT NULL AND m.market_type <> 'AUTO'
-            AND m.selection IS NOT NULL AND m.selection <> '' AND m.selection <> '—'
-            AND m.pick IS NOT NULL AND m.pick <> 'NONE'
-          ORDER BY m.analyzed_at DESC
+            gr.final,
+            rsi.rank
+          FROM recommended_slates rs
+          JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
+          LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
+          JOIN events e ON rsi.event_id = e.id
+          LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
+          WHERE rs.league = 'NCAAM'
+            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+            AND rsi.rank <= 5
+          ORDER BY rs.date_et DESC, rsi.rank ASC
           LIMIT 1000
         """, {"d": int(days)}).fetchall()
 
@@ -3596,14 +3596,13 @@ async def ncaam_performance_report(days: int = 30):
             COUNT(*) FILTER (WHERE (m.outcome IS NULL OR m.outcome='PENDING')) as pending,
             COUNT(*) FILTER (WHERE (m.outcome IN ('WON','LOST','PUSH'))) as decided,
             COUNT(*) FILTER (WHERE (m.outcome IS NULL OR m.outcome='PENDING') AND gr.final=TRUE) as pending_but_final_available
-          FROM model_predictions m
-          JOIN events e ON m.event_id=e.id
-          LEFT JOIN game_results gr ON gr.event_id=m.event_id
-          WHERE e.league='NCAAM'
-            AND m.analyzed_at > NOW() - (%(d)s || ' days')::interval
-            AND m.market_type IS NOT NULL AND m.market_type <> 'AUTO'
-            AND m.selection IS NOT NULL AND m.selection <> '' AND m.selection <> '—'
-            AND m.pick IS NOT NULL AND m.pick <> 'NONE'
+          FROM recommended_slates rs
+          JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
+          LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
+          LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
+          WHERE rs.league = 'NCAAM'
+            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+            AND rsi.rank <= 5
         """, {"d": int(days)}).fetchone()
     coverage = dict(cov) if cov else {}
 
@@ -3624,12 +3623,11 @@ async def ncaam_performance_report(days: int = 30):
         conf_rows = _exec(conn, """
           SELECT m.outcome, m.confidence_0_100
           FROM model_predictions m
-          JOIN events e ON m.event_id=e.id
-          WHERE e.league='NCAAM'
-            AND m.analyzed_at > NOW() - (%(d)s || ' days')::interval
-            AND m.market_type IS NOT NULL AND m.market_type <> 'AUTO'
-            AND m.selection IS NOT NULL AND m.selection <> '' AND m.selection <> '—'
-            AND m.pick IS NOT NULL AND m.pick <> 'NONE'
+          JOIN recommended_slate_items rsi ON m.id = rsi.prediction_id
+          JOIN recommended_slates rs ON rsi.slate_id = rs.id
+          WHERE rs.league = 'NCAAM'
+            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+            AND rsi.rank <= 5
             AND (m.outcome IN ('WON','LOST','PUSH'))
         """, {"d": int(days)}).fetchall()
 
@@ -4368,18 +4366,19 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
     with get_db_connection() as conn:
         rows = _exec(conn, """
           SELECT
-            (m.analyzed_at AT TIME ZONE 'America/New_York')::date::text as day_et,
+            rs.date_et as day_et,
             m.outcome,
             COALESCE(m.bet_price, -110) as price,
             COALESCE(m.confidence_0_100, 0) as c0
-          FROM model_predictions m
-          JOIN events e ON m.event_id=e.id
-          WHERE e.league='NCAAM'
-            AND m.analyzed_at > NOW() - (%(d)s || ' days')::interval
-            AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
+          FROM recommended_slates rs
+          JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
+          LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
+          WHERE rs.league='NCAAM'
+            AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+            AND rsi.rank <= 5
             AND (m.outcome IN ('WON','LOST','PUSH'))
-          ORDER BY day_et ASC
-        """, {"d": int(days), "min_ev": float(min_ev_per_unit)}).fetchall()
+          ORDER BY rs.date_et ASC, rsi.rank ASC
+        """, {"d": int(days)}).fetchall()
 
     def bucket(c0: int) -> str:
         try:
