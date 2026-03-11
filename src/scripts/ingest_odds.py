@@ -6,13 +6,13 @@ import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from src.services.odds_adapter import OddsAdapter
-from src.action_network import ActionNetworkClient
+from src.services.odds_fetcher_service import OddsFetcherService
 
 def main():
     print(f"[{datetime.datetime.now()}] Starting Odds Ingestion...")
     
     adapter = OddsAdapter()
-    client = ActionNetworkClient()
+    client = OddsFetcherService()
     
     # Leagues to ingest
     leagues = ['ncaab', 'nba'] # Add others if needed: 'nfl', 'nhl'

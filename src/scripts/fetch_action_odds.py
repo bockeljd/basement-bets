@@ -7,8 +7,9 @@ import time
 # Ensure we can import src
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..'))
 
-from src.action_network import get_todays_games, SPORT_INFO
+from src.action_network import SPORT_INFO
 from src.database import get_latest_odds_for_diffing, store_odds_snapshots
+from src.services.odds_fetcher_service import OddsFetcherService
 
 HEADERS = {
     'Authority': 'api.actionnetwork',
@@ -40,7 +41,16 @@ def process_sport(sport, dates_or_weeks):
         
     print(f"Fetching data for {sport}...")
     try:
-        games = get_todays_games(sport, dates_or_weeks, HEADERS)
+        games = []
+        fetcher = OddsFetcherService()
+        for d in dates_or_weeks:
+            # For week integers, we convert to string or handle accordingly. 
+            # OddsFetcherService expects YYYYMMDD string.
+            d_str = str(d)
+            if len(d_str) < 8:
+                continue # Skip weeks for now if not supported by FetcherService directly
+            games.extend(fetcher.fetch_odds(sport, start_date=d_str))
+            
         if not games:
             print(f"No games found for {sport}.")
             return
