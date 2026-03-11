@@ -119,8 +119,8 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
       model_version = EXCLUDED.model_version,
       is_actionable = EXCLUDED.is_actionable,
       reason = EXCLUDED.reason,
-      rec_json = COALESCE(daily_top_picks.rec_json, EXCLUDED.rec_json),
-      context_json = COALESCE(daily_top_picks.context_json, EXCLUDED.context_json)
+      rec_json = EXCLUDED.rec_json,
+      context_json = EXCLUDED.context_json
     """
     payload = {
         "d": date_et,
