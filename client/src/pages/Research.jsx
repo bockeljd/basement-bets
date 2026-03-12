@@ -5,6 +5,7 @@ import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, Al
 
 import OpenBetsPanel from '../components/OpenBetsPanel';
 import ParlayRecommendations from '../components/ParlayRecommendations';
+import MarchMadness from './MarchMadness';
 
 const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, formatDateMDY }) => {
     const [edges, setEdges] = useState([]);
@@ -2133,6 +2134,12 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                         </div>
                     </div>
                 ) : null}
+
+            {activeTab === 'march' && (
+                <div className="mt-2">
+                    <MarchMadness />
+                </div>
+            )}
         </div>
     )
 }
