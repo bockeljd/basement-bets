@@ -142,52 +142,52 @@ export default function Picks() {
     return Number.isFinite(ev) ? ev : 0;
   };
 
-  const top5YesterdayStraight = useMemo(() => {
+  const top6YesterdayStraight = useMemo(() => {
     return (yesterdaySlate || [])
       .filter(h => {
         const c = classify(h);
         return c === 'SPREAD' || c === 'TOTAL';
       })
       .sort((a, b) => getEv(b) - getEv(a))
-      .slice(0, 5);
+      .slice(0, 6);
   }, [yesterdaySlate]);
 
-  const top5YesterdayMlParlay = useMemo(() => {
+  const top6YesterdayMlParlay = useMemo(() => {
     return (yesterdaySlate || [])
       .filter(h => {
         const c = classify(h);
         return c === 'MONEYLINE' || c === 'PARLAY';
       })
       .sort((a, b) => getEv(b) - getEv(a))
-      .slice(0, 5);
+      .slice(0, 6);
   }, [yesterdaySlate]);
 
-  const top5Yesterday = useMemo(() => {
+  const top6Yesterday = useMemo(() => {
     return (yesterdaySlate || [])
       .slice()
       .sort((a, b) => getEv(b) - getEv(a))
-      .slice(0, 5);
+      .slice(0, 6);
   }, [yesterdaySlate]);
 
   const gradedYesterdayStraight = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top5YesterdayStraight.filter((h) => isGraded(res(h)));
-  }, [top5YesterdayStraight]);
+    return top6YesterdayStraight.filter((h) => isGraded(res(h)));
+  }, [top6YesterdayStraight]);
 
   const gradedYesterdayMlParlay = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top5YesterdayMlParlay.filter((h) => isGraded(res(h)));
-  }, [top5YesterdayMlParlay]);
+    return top6YesterdayMlParlay.filter((h) => isGraded(res(h)));
+  }, [top6YesterdayMlParlay]);
 
   const gradedYesterday = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top5Yesterday.filter((h) => isGraded(res(h)));
-  }, [top5Yesterday]);
+    return top6Yesterday.filter((h) => isGraded(res(h)));
+  }, [top6Yesterday]);
 
   const pendingYesterday = useMemo(() => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top5Yesterday.filter((h) => !isGraded(res(h))).length;
-  }, [top5Yesterday]);
+    return top6Yesterday.filter((h) => !isGraded(res(h))).length;
+  }, [top6Yesterday]);
 
   const recordFor = (rows) => {
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
@@ -622,164 +622,12 @@ export default function Picks() {
         </div>
       )}
 
-      {!loading && !err && history.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mb-6">
-          {(() => {
-            const hist = getRecommendedHistory();
-            const etDay = (ts) => {
-              try {
-                return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-              } catch (e) {
-                return null;
-              }
-            };
-            const normalizeOutcome = (x) => {
-              const o = (x?.graded_result || x?.outcome || x?.result || 'PENDING');
-              const s = String(o).toUpperCase();
-              if (s === 'WON' || s === 'WIN') return 'WON';
-              if (s === 'LOST' || s === 'LOSS') return 'LOST';
-              if (s === 'PUSH') return 'PUSH';
-              return 'PENDING';
-            };
-
-            const days = [...new Set(hist.map(h => etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)).filter(Boolean))].sort();
-
-            // Find most recent day with at least one graded TOP 6 pick
-            let lastSettledDay = null;
-            const reversedDays = [...days].reverse();
-            const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-            for (const d of reversedDays) {
-              // Strictly skip today's day for the summary header (user wants focus on settled slates)
-              if (d === todayEt) continue;
-
-              const top6ForDay = hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === d)
-                .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
-                .slice(0, 6);
-              const gradedN = top6ForDay.filter(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h))).length;
-              // Require a significant portion (4+) of Top 6 to be graded before taking this as the summary day
-              if (gradedN >= 4) {
-                lastSettledDay = d;
-                break;
-              }
-            }
-            // Fallback to first day with ANY grades if no "full" day found
-            if (!lastSettledDay) {
-              for (const d of reversedDays) {
-                const top6ForDay = hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === d)
-                  .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
-                  .slice(0, 6);
-                if (top6ForDay.some(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h)))) {
-                  lastSettledDay = d;
-                  break;
-                }
-              }
-            }
-
-            const lastDay = lastSettledDay || (days.length ? days[days.length - 1] : null);
-
-            // Only consider the Top 6 picks (by EV) for the summary to avoid grading "noise"
-            const dayRows = lastDay
-              ? hist.filter(h => (etDay(h?.start_time) || etDay(h?.analyzed_at || h?.created_at)) === lastDay)
-                .sort((a, b) => (Number(b.ev_per_unit || b.ev || 0)) - (Number(a.ev_per_unit || a.ev || 0)))
-                .slice(0, 6)
-              : [];
-
-            const gradedCount = dayRows.filter(h => ['WON', 'LOST', 'PUSH'].includes(normalizeOutcome(h)));
-            const w = gradedCount.filter(h => normalizeOutcome(h) === 'WON').length;
-            const l = gradedCount.filter(h => normalizeOutcome(h) === 'LOST').length;
-            const p = gradedCount.filter(h => normalizeOutcome(h) === 'PUSH').length;
-            const winRate = (w + l) ? (w / (w + l) * 100) : 0;
-
-            const confBucket = (h) => {
-              const c = Number(h?.confidence_0_100 ?? h?.confidence ?? 0);
-              if (c >= 80) return 'High';
-              if (c >= 50) return 'Medium';
-              return 'Low';
-            };
-
-            const byConf = { High: [], Medium: [], Low: [] };
-            gradedCount.forEach((h) => {
-              byConf[confBucket(h)].push(h);
-            });
-
-            const confStats = (arr) => {
-              const ww = arr.filter(x => normalizeOutcome(x) === 'WON').length;
-              const ll = arr.filter(x => normalizeOutcome(x) === 'LOST').length;
-              const pp = arr.filter(x => normalizeOutcome(x) === 'PUSH').length;
-              const wr = (ww + ll) ? (ww / (ww + ll) * 100) : null;
-              return { w: ww, l: ll, p: pp, wr };
-            };
-
-            const hi = confStats(byConf.High);
-            const md = confStats(byConf.Medium);
-            const lo = confStats(byConf.Low);
-
-            const fmtMDY = (ymd) => {
-              try {
-                const [yy, mm, dd] = String(ymd || '').split('-');
-                if (yy && mm && dd) return `${mm}/${dd}/${yy}`;
-              } catch (e) { }
-              return ymd || '—';
-            };
-
-            return (
-              <div className="px-6 py-4 border-b border-slate-700 bg-slate-900/20">
-                <div className="flex items-end justify-between gap-4 mb-3">
-                  <div>
-                    <div className="text-white font-black text-xl">{fmtMDY(lastDay)} Summary</div>
-                  </div>
-                  <div className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Most Recent Graded Slate</div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
-                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Bets graded</div>
-                    <div className="mt-1 text-slate-100 font-black text-3xl">{gradedCount.length}</div>
-                    <div className="text-[11px] text-slate-400">W / L / P only</div>
-                    {dayRows.length !== gradedCount.length && (
-                      <div className="text-[12px] text-slate-300 mt-1">Pending: {Math.max(0, dayRows.length - gradedCount.length)}</div>
-                    )}
-                  </div>
-                  <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
-                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Record</div>
-                    <div className="mt-1 text-slate-100 font-black text-3xl">{w}-{l}-{p}</div>
-                    <div className="text-[11px] text-slate-400 italic">top-6 ranked plays only</div>
-                  </div>
-                  <div className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
-                    <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Win Rate</div>
-                    <div className="mt-1 text-slate-100 font-black text-3xl">{winRate.toFixed(1)}%</div>
-                    <div className="text-[11px] text-slate-400">weighted avg</div>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {(() => {
-                    const tiles = [
-                      { label: 'High', s: hi, cls: 'text-green-300' },
-                      { label: 'Medium', s: md, cls: 'text-amber-300' },
-                      { label: 'Low', s: lo, cls: 'text-purple-300' },
-                    ];
-                    return tiles.map(({ label, s, cls }) => (
-                      <div key={label} className="bg-slate-950/20 border border-slate-700/40 rounded-2xl p-4">
-                        <div className="text-[11px] text-slate-400 font-semibold">{label} confidence</div>
-                        <div className={`mt-1 font-black text-xl ${cls}`}>{s.w}-{s.l}{s.p ? `-${s.p}` : ''}</div>
-                        <div className="text-[11px] text-slate-400">Win%: <span className="text-slate-200 font-semibold">{s.wr === null ? '—' : `${s.wr.toFixed(1)}%`}</span> • N={(s.w + s.l + s.p)}</div>
-                      </div>
-                    ));
-                  })()}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Yesterday graded results — Straight bets (Spreads/Totals) */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-2">
             <BarChart3 size={18} className="text-emerald-300" />
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Top 5 Recommended Spreads & Totals</div>
+            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Top 6 Recommended Spreads & Totals</div>
             <div className="ml-auto flex items-center gap-2">
               <div className="text-xs text-slate-500">{yesterdayEt}</div>
               {pendingYesterday > 0 && (
@@ -870,7 +718,7 @@ export default function Picks() {
                   const ev = Number(h?.ev_per_unit ?? h?.ev);
                   return Number.isFinite(ev) ? ev : 0;
                 };
-                const base = (hasReco ? (recoStraight || []) : (top5YesterdayStraight || []));
+                const base = (hasReco ? (recoStraight || []) : (top6YesterdayStraight || []));
                 const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
                 return rows.slice(0, 6).map((h, idx) => {
                   const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();
@@ -925,7 +773,7 @@ export default function Picks() {
                   const ev = Number(h?.ev_per_unit ?? h?.ev);
                   return Number.isFinite(ev) ? ev : 0;
                 };
-                const base = (hasReco ? (recoMlParlay || []) : (top5YesterdayMlParlay || []));
+                const base = (hasReco ? (recoMlParlay || []) : (top6YesterdayMlParlay || []));
                 const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
                 return rows.slice(0, 6).map((h, idx) => {
                   const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();
