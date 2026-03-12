@@ -3245,6 +3245,213 @@ async def get_tournament_teams(request: Request, limit: int = 80, generate: bool
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/ncaam/team-deep-profile")
+async def get_team_deep_profile(request: Request, team: str):
+    """Return deep analytics for a single team: parsed player stats,
+    team aggregates, Torvik deep metrics, Upset Risk Score, and Dark Horse Index.
+    """
+    from src.database import get_db_connection, _exec
+    from src.services.kenpom_client import KenPomClient
+    from src.utils.team_matcher import TeamMatcher
+
+    kp_client = KenPomClient()
+    matcher = TeamMatcher()
+
+    def _safe_float(v, default=0.0):
+        try:
+            return float(str(v).replace('%','').replace('+','').strip())
+        except Exception:
+            return default
+
+    def _parse_metric(metrics_jsonb, *candidates):
+        if not metrics_jsonb:
+            return None
+        headers = metrics_jsonb.get('headers') or []
+        cols = metrics_jsonb.get('cols') or []
+        m = min(len(headers), len(cols))
+        for i in range(m):
+            hdr = str(headers[i] or '').lower()
+            if any(c.lower() in hdr for c in candidates):
+                return _safe_float(cols[i])
+        return None
+
+    try:
+        with get_db_connection() as conn:
+            # 1. KenPom team rating
+            kp_name = matcher.find_source_name(team, 'kenpom_ratings', 'team_name') or team
+            kp_row = _exec(conn, """
+                SELECT team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t
+                FROM kenpom_ratings WHERE team_name = %s LIMIT 1
+            """, (kp_name,)).fetchone()
+            kenpom = dict(kp_row) if kp_row else {}
+
+            # 2. NET rankings
+            net_row = _exec(conn, """
+                SELECT team_name, rank as net_rank, record,
+                       quad1, quad2, quad3, quad4, home, road, neutral
+                FROM ncaam_net_rankings
+                WHERE LOWER(REPLACE(team_name,' ','')) = LOWER(REPLACE(%s,' ',''))
+                LIMIT 1
+            """, (team,)).fetchone()
+            if not net_row:
+                net_row = _exec(conn, """
+                    SELECT team_name, rank as net_rank, record,
+                           quad1, quad2, quad3, quad4, home, road, neutral
+                    FROM ncaam_net_rankings
+                    WHERE team_name ILIKE %s LIMIT 1
+                """, (f'%{team.split()[0]}%',)).fetchone()
+            net = dict(net_row) if net_row else {}
+
+            # 3. Torvik / BartTorvik deep metrics
+            torvik_name = matcher.find_source_name(team, 'bt_team_metrics_daily', 'team_text')
+            torvik_row = None
+            if torvik_name:
+                try:
+                    torvik_row = _exec(conn, """
+                        SELECT adj_off, adj_def, adj_tempo, luck, continuity, torvik_rank, record
+                        FROM bt_team_metrics_daily
+                        WHERE team_text = %s
+                        ORDER BY date DESC LIMIT 1
+                    """, (torvik_name,)).fetchone()
+                except Exception:
+                    pass
+            torvik = dict(torvik_row) if torvik_row else {}
+
+            # Barthag from torvik_ratings
+            torvik_rat_name = matcher.find_source_name(team, 'torvik_ratings', 'team_name')
+            barthag = None
+            if torvik_rat_name:
+                try:
+                    tr = _exec(conn, """
+                        SELECT barthag, rank, adj_o, adj_d
+                        FROM torvik_ratings WHERE team_name = %s LIMIT 1
+                    """, (torvik_rat_name,)).fetchone()
+                    if tr:
+                        barthag = tr['barthag']
+                        if not torvik.get('adj_off'):
+                            torvik['adj_off'] = tr['adj_o']
+                        if not torvik.get('adj_def'):
+                            torvik['adj_def'] = tr['adj_d']
+                        if not torvik.get('torvik_rank'):
+                            torvik['torvik_rank'] = tr['rank']
+                except Exception:
+                    pass
+            torvik['barthag'] = barthag
+
+            # 4. Player stats
+            raw_players = kp_client.get_player_stats_for_team(team, limit=40)
+
+            def _player_minutes(p):
+                return _parse_metric(p.get('metrics'), 'min', 'minute') or 0
+
+            raw_players.sort(key=_player_minutes, reverse=True)
+
+            players = []
+            for p in raw_players[:8]:
+                m = p.get('metrics') or {}
+                players.append({
+                    'name':    p.get('player_name', 'Unknown'),
+                    'ppg':     _parse_metric(m, 'pts', 'ppg', 'points'),
+                    'apg':     _parse_metric(m, 'ast', 'apg', 'assist'),
+                    'rpg':     _parse_metric(m, 'reb', 'rpg', 'rebound'),
+                    'ortg':    _parse_metric(m, 'o-rat', 'ortg', 'off rat'),
+                    'usg':     _parse_metric(m, 'usag', 'usg', 'usage'),
+                    'efg':     _parse_metric(m, 'efg', 'eff fg', 'effective'),
+                    'min_pct': _parse_metric(m, '%min', 'min%', 'min pct', 'minute%') or _player_minutes(p),
+                })
+
+            # 5. Team player aggregates
+            team_agg_row = kp_client.get_team_player_agg(team)
+            team_agg = {}
+            if team_agg_row:
+                team_agg = {k: v for k, v in {
+                    'ortg_w':       team_agg_row.get('ortg_w'),
+                    'efg_w':        team_agg_row.get('efg_w'),
+                    'ts_w':         team_agg_row.get('ts_w'),
+                    'ast_rate_w':   team_agg_row.get('ast_rate_w'),
+                    'reb_rate_w':   team_agg_row.get('reb_rate_w'),
+                    'tov_rate_w':   team_agg_row.get('tov_rate_w'),
+                    'top7_min_pct': team_agg_row.get('top7_minutes_pct'),
+                    'n_players':    team_agg_row.get('n_players'),
+                }.items() if v is not None}
+
+        # 6. Upset Risk Score
+        upset_score = 0
+        upset_factors = []
+        luck = _safe_float(torvik.get('luck'), 0)
+        continuity = _safe_float(torvik.get('continuity'), 0)
+        top7_min = _safe_float(team_agg.get('top7_min_pct'), 0)
+        kp_rank = int(kenpom.get('rank') or 50)
+        net_rank_v = int(net.get('net_rank') or 50)
+        tov_rate = _safe_float(team_agg.get('tov_rate_w'), 0)
+
+        if luck > 0.04:
+            upset_score += 25
+            upset_factors.append(f"Lucky season (+{luck:.2f}) — regression risk in pressure games")
+        if top7_min > 88:
+            upset_score += 20
+            upset_factors.append(f"Over-reliant on top 7 ({top7_min:.0f}% mins) — foul trouble = collapse risk")
+        if 0 < continuity < 60:
+            upset_score += 20
+            upset_factors.append(f"Low roster continuity ({continuity:.0f}%) — limited NCAA tournament experience")
+        rank_gap = net_rank_v - kp_rank
+        if rank_gap > 15:
+            upset_score += 20
+            upset_factors.append(f"Over-seeded: NET #{net_rank_v} vs KenPom #{kp_rank} (+{rank_gap} gap)")
+        if tov_rate > 20:
+            upset_score += 15
+            upset_factors.append(f"High turnovers ({tov_rate:.1f}%) — vulnerable under pressure-game execution")
+        if not upset_factors:
+            upset_factors.append("No significant upset flags detected — solid fundamentals")
+
+        # 7. Dark Horse Index
+        dh_score = 0
+        dh_factors = []
+        adj_em = _safe_float(kenpom.get('adj_em'), 0)
+        bath_v = _safe_float(barthag, 0)
+        q1_raw = net.get('quad1') or '0-0'
+        try:
+            q1_wins = int(str(q1_raw).split('-')[0])
+        except Exception:
+            q1_wins = 0
+
+        if bath_v > 0.88:
+            dh_score += 30
+            dh_factors.append(f"Elite Barthag ({bath_v*100:.1f}%) — underlying quality outpaces seeding")
+        if luck < 0.00:
+            dh_score += 20
+            dh_factors.append(f"Unlucky season ({luck:.2f}) — due for positive regression in bracket")
+        if continuity >= 75:
+            dh_score += 20
+            dh_factors.append(f"High roster continuity ({continuity:.0f}%) — experienced tournament rotation")
+        if kp_rank > 12 and adj_em > 22:
+            dh_score += 20
+            dh_factors.append(f"Underrated efficiency: KP #{kp_rank} with AdjEM +{adj_em:.1f}")
+        if q1_wins >= 6:
+            dh_score += 10
+            dh_factors.append(f"Strong Q1 resume ({q1_wins} wins) — proven vs elite")
+        if not dh_factors:
+            dh_factors.append("No significant dark horse signals — team is accurately seeded")
+
+        def _clean(d):
+            return {k: (str(v) if hasattr(v, 'isoformat') else v) for k, v in (d or {}).items()}
+
+        return {
+            'team_name':  team,
+            'kenpom':     _clean(kenpom),
+            'net':        _clean(net),
+            'torvik':     _clean(torvik),
+            'team_agg':   _clean(team_agg),
+            'players':    players,
+            'upset_risk': {'score': min(upset_score, 100), 'factors': upset_factors},
+            'dark_horse': {'score': min(dh_score, 100), 'factors': dh_factors},
+        }
+
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/ncaam/history")
 async def get_ncaam_history(request: Request, limit: int = 100, user: dict = Depends(get_current_user)):
     """Returns past model predictions/analysis (recommended picks).
