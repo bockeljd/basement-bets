@@ -810,7 +810,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                             {!loading && boardTab === 'recommended' && (
                                 <div className="p-6">
 
-                                    {/* Top 5 Plays + full recommended table (IIFE) */}
+                                    {/* Top 6 Plays + full recommended table (IIFE) */}
                                     {(() => {
                                         const isSameEtDay = (ts, ymd) => {
                                             if (!ts || !ymd) return false;
@@ -892,13 +892,13 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                             return pickText;
                                         };
 
-                                        const top6 = rows.slice(0, 5);
+                                        const top6 = rows.slice(0, 6);
 
                                         return (
                                             <div className="mb-6">
                                                 <div className="flex items-center gap-2 mb-3">
                                                     <TrendingUp className="text-emerald-400" size={18} />
-                                                    <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 5 Plays Today</div>
+                                                    <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 6 Plays Today</div>
                                                     <div className="text-[10px] text-slate-500 ml-auto">{selectedDate} • Sorted by EV%</div>
                                                 </div>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -968,7 +968,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                         );
                                     })()}
 
-                                    {/* 2-leg ML Parlay recommendations — below Top 5 Plays */}
+                                    {/* 2-leg ML Parlay recommendations — below Top 6 Plays */}
                                     {leagueFilter === 'NCAAM' && String(selectedDate) === String(getTodayStr()) && (
                                         <ParlayRecommendations />
                                     )}
