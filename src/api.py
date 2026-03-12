@@ -3188,12 +3188,50 @@ async def get_tournament_teams(request: Request, limit: int = 80, generate: bool
                         torvik_map[r['team_name']] = dict(r)
                 except Exception:
                     pass  # table may not exist
-            
+
+            # Fetch NET rankings (quad records, home/away/neutral splits)
+            net_map = {}
+            try:
+                nrows = _exec(conn, """
+                    SELECT team_name, rank as net_rank, record,
+                           quad1, quad2, quad3, quad4,
+                           home, road, neutral
+                    FROM ncaam_net_rankings
+                """).fetchall()
+                for r in nrows:
+                    net_map[r['team_name']] = dict(r)
+                
+                # Also build a fuzzy index: stripped lowercase name -> row
+                net_fuzzy = {}
+                for name, row in net_map.items():
+                    net_fuzzy[name.lower().replace(' ', '')] = row
+            except Exception:
+                net_fuzzy = {}
+
+            def _find_net(kp_name):
+                """Try exact match, then fuzzy match for NET rankings."""
+                if kp_name in net_map:
+                    return net_map[kp_name]
+                key = kp_name.lower().replace(' ', '')
+                return net_fuzzy.get(key, {})
+
             # Combine
             for t in teams:
                 if hasattr(t.get('updated_at'), 'isoformat'):
                     t['updated_at'] = str(t['updated_at'])
                 t['torvik'] = torvik_map.get(t['team_name'], {})
+                
+                # Attach NET data
+                net = _find_net(t['team_name'])
+                t['net_rank'] = net.get('net_rank')
+                t['net_record'] = net.get('record')
+                t['quad1'] = net.get('quad1')
+                t['quad2'] = net.get('quad2')
+                t['quad3'] = net.get('quad3')
+                t['quad4'] = net.get('quad4')
+                t['home_record'] = net.get('home')
+                t['road_record'] = net.get('road')
+                t['neutral_record'] = net.get('neutral')
                 
                 # Fetch cached or generate live if requested
                 if generate:
