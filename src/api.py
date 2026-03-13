@@ -1612,32 +1612,35 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = 
         lookback_days = 400
     lookback_days = max(30, min(lookback_days, 1200))
 
-    # Primary: Canonical Slate-backed history
-    from src.database import fetch_recommended_history_canonical
-    rows = fetch_recommended_history_canonical(limit=limit, lookback_days=lookback_days, user_id=user_id)
-    if rows:
-        # Convert to dict if needed and add source metadata
-        rows = [dict(r) for r in rows]
-        for r in rows:
-            r['source_type'] = 'canonical_slate'
+    # Combined History: Canonical Slate-backed + User Fallback
+    from src.database import fetch_recommended_history_canonical, fetch_model_history
+    canonical_rows = fetch_recommended_history_canonical(limit=limit, lookback_days=lookback_days, user_id=user_id)
+    canonical_rows = [dict(r) for r in canonical_rows]
+    for r in canonical_rows:
+        r['source_type'] = 'canonical_slate'
     
-    # Fallback: model_predictions DISTINCT ON history
+    seen_ids = {r['id'] for r in canonical_rows if r.get('id')}
+    
+    # Legacy User Fallback
+    user_rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
+    user_rows = [dict(r) for r in user_rows if dict(r).get('id') not in seen_ids]
+    for r in user_rows:
+        r['source_type'] = 'fallback_prediction'
+    
+    rows = canonical_rows + user_rows
+    seen_ids.update({r['id'] for r in user_rows if r.get('id')})
+
+    # Global Fallback
     if not rows:
-        rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
-        if rows:
-            rows = [dict(r) for r in rows]
-            for r in rows:
-                r['source_type'] = 'fallback_prediction'
+        global_rows = fetch_model_history(user_id=None, recommended_only=True, limit=limit, lookback_days=lookback_days)
+        global_rows = [dict(r) for r in global_rows if dict(r).get('id') not in seen_ids]
+        for r in global_rows:
+            r['source_type'] = 'legacy_fallback'
+        rows += global_rows
     
-    # Final Fallback: legacy unscoped
-    if not rows:
-        rows = fetch_model_history(user_id=None, recommended_only=True, limit=limit, lookback_days=lookback_days)
-        if rows:
-            rows = [dict(r) for r in rows]
-            for r in rows:
-                r['source_type'] = 'legacy_fallback'
-    
-    return rows
+    # Sort combined results by strongest date marker descending
+    rows.sort(key=lambda x: (x.get('day_et') or x.get('analyzed_at') or x.get('start_time') or ''), reverse=True)
+    return rows[:limit]
 
 
 @app.get("/api/schedule")

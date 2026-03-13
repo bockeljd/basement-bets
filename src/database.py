@@ -1644,6 +1644,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         e.home_team,
         e.away_team,
         e.start_time,
+        (CASE WHEN e.home_score IS NOT NULL AND e.away_score IS NOT NULL THEN (e.home_score || '-' || e.away_score) ELSE NULL END) as score,
         COALESCE(m1.id, m2.id) AS id,
         COALESCE(m1.analyzed_at, m2.analyzed_at) AS analyzed_at,
         COALESCE(m1.mu_final, m2.mu_final) AS mu_final,
@@ -1653,6 +1654,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         COALESCE(m1.outcome, m2.outcome) AS outcome,
         COALESCE(m1.clv_points, m2.clv_points) AS clv_points,
         COALESCE(m1.edge_points, m2.edge_points) AS edge_points,
+        COALESCE(m1.pick, m2.pick) as pick,
         ws.source,
         ws.created_at
     FROM winner_slates ws
@@ -1660,7 +1662,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
     JOIN events e ON rsi.event_id = e.id
     LEFT JOIN model_predictions m1 ON rsi.prediction_id = m1.id
     LEFT JOIN LATERAL (
-        SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100, outcome, clv_points, edge_points
+        SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100, outcome, clv_points, edge_points, pick
         FROM model_predictions m
         WHERE m.event_id = rsi.event_id
           AND m.market_type = rsi.market_type
