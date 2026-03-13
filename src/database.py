@@ -1594,6 +1594,95 @@ def fetch_model_history(limit=100, league=None, user_id=None, recommended_only: 
         return [dict(r) for r in cursor.fetchall()]
 
 
+def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lookback_days=120):
+    """
+    Primary history source for Model Performance: uses recommended_slates as the root.
+    
+    Logic:
+    1. Select unique slates per (league, date_et).
+    2. Prefer source='full', then latest created_at.
+    3. Join recommended_slate_items.
+    4. Relink to model_predictions (m1 by prediction_id, m2 by lateral match on event+selection).
+    """
+    from src.database import get_db_connection, _exec
+    
+    params = []
+    
+    # Nested query to find "Winner" slates (latest or full) per day/league
+    # We use date_et and league as the unique key.
+    # rsi.rank is used for sorting.
+    
+    conditions = []
+    if league:
+        conditions.append("rs.league = %s")
+        params.append(league)
+    
+    if lookback_days and int(lookback_days) > 0:
+        conditions.append("rs.date_et >= (NOW() AT TIME ZONE 'America/New_York' - (%s || ' days')::interval)::date::text")
+        params.append(int(lookback_days))
+
+    where_sql = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    query = f"""
+    WITH winner_slates AS (
+        SELECT DISTINCT ON (rs.league, rs.date_et)
+            rs.id, rs.league, rs.date_et, rs.source, rs.created_at
+        FROM recommended_slates rs
+        {where_sql}
+        ORDER BY rs.league, rs.date_et, (CASE WHEN rs.source = 'full' THEN 1 ELSE 0 END) DESC, rs.created_at DESC
+    )
+    SELECT 
+        ws.date_et AS day_et,
+        rsi.rank,
+        rsi.prediction_id,
+        rsi.event_id,
+        rsi.market_type,
+        rsi.selection,
+        rsi.bet_line,
+        rsi.bet_price,
+        e.league AS sport,
+        e.home_team,
+        e.away_team,
+        e.start_time,
+        COALESCE(m1.id, m2.id) AS id,
+        COALESCE(m1.analyzed_at, m2.analyzed_at) AS analyzed_at,
+        COALESCE(m1.mu_final, m2.mu_final) AS mu_final,
+        COALESCE(m1.win_prob, m2.win_prob) AS win_prob,
+        COALESCE(m1.ev_per_unit, m2.ev_per_unit) AS ev_per_unit,
+        COALESCE(m1.confidence_0_100, m2.confidence_0_100) AS confidence_0_100,
+        COALESCE(m1.outcome, m2.outcome) AS outcome,
+        COALESCE(m1.clv_points, m2.clv_points) AS clv_points,
+        COALESCE(m1.edge_points, m2.edge_points) AS edge_points,
+        ws.source,
+        ws.created_at
+    FROM winner_slates ws
+    JOIN recommended_slate_items rsi ON ws.id = rsi.slate_id
+    JOIN events e ON rsi.event_id = e.id
+    LEFT JOIN model_predictions m1 ON rsi.prediction_id = m1.id
+    LEFT JOIN LATERAL (
+        SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100, outcome, clv_points, edge_points
+        FROM model_predictions m
+        WHERE m.event_id = rsi.event_id
+          AND m.market_type = rsi.market_type
+          -- Match selection and line if available
+          AND (rsi.selection IS NULL OR m.selection = rsi.selection)
+          AND (rsi.bet_line IS NULL OR ABS(m.bet_line - rsi.bet_line) < 0.01)
+        ORDER BY m.analyzed_at DESC
+        LIMIT 1
+    ) m2 ON (m1.id IS NULL)
+    -- Filter out purely upcoming games if lookback is active (similar to Picks)
+    WHERE (e.start_time <= (NOW() + INTERVAL '10 minutes'))
+    ORDER BY ws.date_et DESC, rsi.rank ASC, ws.created_at DESC
+    LIMIT %s
+    """
+    
+    params.append(limit)
+    
+    with get_db_connection() as conn:
+        cursor = _exec(conn, query, tuple(params))
+        return [dict(r) for r in cursor.fetchall()]
+
+
 def fetch_bet_detail(bet_id: int, user_id: str = None):
     """Fetch a single bet with ALL columns including raw_text (detail view)."""
     q = "SELECT * FROM bets WHERE id = %s"

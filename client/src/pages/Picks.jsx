@@ -4,20 +4,10 @@ import { RefreshCw, BarChart3, ArrowUpDown, ChevronUp, ChevronDown } from 'lucid
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine, ComposedChart, Line, Cell, LabelList } from 'recharts';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
 
-const etDay = (dt) => {
-  if (!dt) return null;
-  try {
-    const d = new Date(dt);
-    return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-  } catch (e) {
-    return null;
-  }
-};
-
-const isGraded = (x) => {
-  const s = String(x || '').toUpperCase();
-  return s === 'WON' || s === 'WIN' || s === 'LOST' || s === 'LOSS' || s === 'PUSH';
-};
+import {
+  normalizeOutcome, isGradedOutcome, isWinOutcome, isLossOutcome,
+  toEtDay, getPerformanceDay, roiPerUnit, getNumericConfidence, getConfidenceBucket
+} from '../utils/modelPerformance';
 
 export default function Picks() {
   const [history, setHistory] = useState([]);
@@ -65,21 +55,8 @@ export default function Picks() {
 
       // Ensure yesterday is always settled: if any yesterday-slate picks are pending, trigger grading once.
       try {
-        const yesterdayEt = (() => {
-          const d = new Date();
-          d.setDate(d.getDate() - 1);
-          return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-        })();
-        const etDay = (dt) => {
-          if (!dt) return null;
-          try { return new Date(dt).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); } catch (e) { return null; }
-        };
-        const isGraded = (x) => {
-          const s = String(x || '').toUpperCase();
-          return s === 'WON' || s === 'WIN' || s === 'LOST' || s === 'LOSS' || s === 'PUSH';
-        };
-        const dayKey = (h) => etDay(h?.start_time) || etDay(h?.analyzed_at);
-        const pendingYesterday = (rows || []).filter((h) => dayKey(h) === yesterdayEt && !isGraded(h.graded_result || h.outcome || h.result)).length;
+        const yesterdayEt = toEtDay(new Date(Date.now() - 86400000));
+        const pendingYesterday = (rows || []).filter((h) => getPerformanceDay(h) === yesterdayEt && !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
         const k = `grade_yesterday_attempt_${yesterdayEt}`;
         if (pendingYesterday > 0 && !localStorage.getItem(k)) {
           localStorage.setItem(k, '1');
@@ -118,13 +95,11 @@ export default function Picks() {
   }, []);
 
   const graded = useMemo(() => {
-    return (history || []).filter((h) => isGraded(h.graded_result || h.outcome || h.result));
+    return (history || []).filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [history]);
 
   const yesterdaySlate = useMemo(() => {
-    // Use slate day (event start_time in ET) when available.
-    const dayKey = (h) => etDay(h?.start_time) || etDay(h?.analyzed_at);
-    return (history || []).filter((h) => dayKey(h) === yesterdayEt);
+    return (history || []).filter((h) => getPerformanceDay(h) === yesterdayEt);
   }, [history, yesterdayEt]);
 
   const classify = (h) => {
@@ -170,30 +145,25 @@ export default function Picks() {
   }, [yesterdaySlate]);
 
   const gradedYesterdayStraight = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6YesterdayStraight.filter((h) => isGraded(res(h)));
+    return top6YesterdayStraight.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [top6YesterdayStraight]);
 
   const gradedYesterdayMlParlay = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6YesterdayMlParlay.filter((h) => isGraded(res(h)));
+    return top6YesterdayMlParlay.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [top6YesterdayMlParlay]);
 
   const gradedYesterday = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6Yesterday.filter((h) => isGraded(res(h)));
+    return top6Yesterday.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [top6Yesterday]);
 
   const pendingYesterday = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6Yesterday.filter((h) => !isGraded(res(h))).length;
+    return top6Yesterday.filter((h) => !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
   }, [top6Yesterday]);
 
   const recordFor = (rows) => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    const w = (rows || []).filter((h) => res(h) === 'WON' || res(h) === 'WIN').length;
-    const l = (rows || []).filter((h) => res(h) === 'LOST' || res(h) === 'LOSS').length;
-    const p = (rows || []).filter((h) => res(h) === 'PUSH').length;
+    const w = (rows || []).filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+    const l = (rows || []).filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+    const p = (rows || []).filter((h) => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
     const decided = w + l;
     const winRate = decided > 0 ? (w / decided) * 100 : 0;
     return { w, l, p, decided, winRate };
@@ -209,12 +179,10 @@ export default function Picks() {
   const hasReco = useMemo(() => Boolean(yesterdayReco?.slate?.id), [yesterdayReco]);
 
   const recordForReco = (rows) => {
-    const res = (h) => String(h?.outcome || '').toUpperCase();
-    const norm = (r) => (r === 'WIN') ? 'WON' : (r === 'LOSS') ? 'LOST' : r;
-    const decided = (rows || []).filter((h) => isGraded(res(h)));
-    const w = decided.filter((h) => norm(res(h)) === 'WON').length;
-    const l = decided.filter((h) => norm(res(h)) === 'LOST').length;
-    const p = decided.filter((h) => norm(res(h)) === 'PUSH').length;
+    const decided = (rows || []).filter((h) => isGradedOutcome(h.outcome));
+    const w = decided.filter((h) => isWinOutcome(h.outcome)).length;
+    const l = decided.filter((h) => isLossOutcome(h.outcome)).length;
+    const p = decided.filter((h) => normalizeOutcome(h.outcome) === 'PUSH').length;
     const wl = w + l;
     const winRate = wl > 0 ? (w / wl) * 100.0 : 0.0;
     return { w, l, p, decided: decided.length, winRate };
@@ -245,7 +213,7 @@ export default function Picks() {
       return n;
     };
 
-    const ymd = (h) => etDay(h.analyzed_at);
+    const ymd = (h) => getPerformanceDay(h);
 
     // group graded picks by day
     const byDay = {};
@@ -253,8 +221,8 @@ export default function Picks() {
       const day = ymd(h);
       if (!day) return;
       if (!String(day).startsWith('2026-')) return;
-      const r = res(h);
-      if (!(isW(r) || isL(r) || r === 'PUSH')) return;
+      const res = h.graded_result || h.outcome || h.result;
+      if (!isGradedOutcome(res)) return;
       const e = ev(h);
       if (!Number.isFinite(e)) return;
       byDay[day] = byDay[day] || [];
@@ -279,11 +247,11 @@ export default function Picks() {
         .slice(0, 6);
       yRows.forEach((h, idx) => {
         const rank = idx + 1;
-        const r = res(h);
+        const res = h.graded_result || h.outcome || h.result;
         if (rank < 1 || rank > 6) return;
-        if (isW(r)) yByRank[rank] = 'W';
-        else if (isL(r)) yByRank[rank] = 'L';
-        else if (r == 'PUSH') yByRank[rank] = 'P';
+        if (isWinOutcome(res)) yByRank[rank] = 'W';
+        else if (isLossOutcome(res)) yByRank[rank] = 'L';
+        else if (normalizeOutcome(res) === 'PUSH') yByRank[rank] = 'P';
         else yByRank[rank] = null;
       });
     } catch (e) { }
@@ -295,9 +263,9 @@ export default function Picks() {
       const top6 = rows.slice(0, 6);
       top6.forEach((h, idx) => {
         const rank = idx + 1;
-        const r = res(h);
-        if (isW(r)) agg[rank].w += 1;
-        else if (isL(r)) agg[rank].l += 1;
+        const res = h.graded_result || h.outcome || h.result;
+        if (isWinOutcome(res)) agg[rank].w += 1;
+        else if (isLossOutcome(res)) agg[rank].l += 1;
       });
     });
 
@@ -354,7 +322,7 @@ export default function Picks() {
 
     const byDay = {};
     (graded || []).forEach((h) => {
-      const day = etDay(h.analyzed_at);
+      const day = getPerformanceDay(h);
       if (!day) return;
       if (!days.includes(day)) return;
       const e = ev(h);
@@ -368,9 +336,9 @@ export default function Picks() {
       let w = 0;
       let l = 0;
       picks.forEach((h) => {
-        const r = res(h);
-        if (isW(r)) w += 1;
-        else if (isL(r)) l += 1;
+        const res = h.graded_result || h.outcome || h.result;
+        if (isWinOutcome(res)) w += 1;
+        else if (isLossOutcome(res)) l += 1;
       });
       const decided = w + l;
       const winRate = decided ? (w / decided) * 100 : null;
@@ -389,11 +357,10 @@ export default function Picks() {
 
   const dailyPerformance = useMemo(() => {
     // Only perform charts on TOP 6 picks per day to avoid "noise"
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
     const unit = (h) => {
-      const r = res(h);
-      if (r === 'WON' || r === 'WIN') return 1;
-      if (r === 'LOST' || r === 'LOSS') return -1;
+      const res = h.graded_result || h.outcome || h.result;
+      if (isWinOutcome(res)) return 1;
+      if (isLossOutcome(res)) return -1;
       return 0;
     };
 
@@ -415,12 +382,12 @@ export default function Picks() {
 
       byDay[day] = byDay[day] || { day, units: 0, wins: 0, losses: 0, pushes: 0, picks: 0 };
       top6.forEach(h => {
-        const r = res(h);
+        const res = h.graded_result || h.outcome || h.result;
         byDay[day].picks += 1;
         byDay[day].units += unit(h);
-        if (r === 'WON' || r === 'WIN') byDay[day].wins += 1;
-        else if (r === 'LOST' || r === 'LOSS') byDay[day].losses += 1;
-        else if (r === 'PUSH') byDay[day].pushes += 1;
+        if (isWinOutcome(res)) byDay[day].wins += 1;
+        else if (isLossOutcome(res)) byDay[day].losses += 1;
+        else if (normalizeOutcome(res) === 'PUSH') byDay[day].pushes += 1;
       });
     });
 
@@ -448,13 +415,13 @@ export default function Picks() {
     });
 
     const calc = (rows) => {
-      const w = rows.filter((h) => isW(normRes(h))).length;
-      const l = rows.filter((h) => isL(normRes(h))).length;
-      const p = rows.filter((h) => normRes(h) === 'PUSH').length;
+      const w = rows.filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+      const l = rows.filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+      const p = rows.filter((h) => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
       const decided = w + l;
       const winRate = decided > 0 ? (w / decided) * 100 : null;
-      // Same simplifying assumption used elsewhere in UI: $10 stake, -110 style
-      const roi = rows.length > 0 ? ((w * 9.09 - l * 10) / (rows.length * 10)) * 100 : null;
+      const totalRoi = rows.length > 0 ? rows.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
+      const roi = rows.length > 0 ? (totalRoi / rows.length) * 100 : null;
       return { w, l, p, decided, winRate, roi, n: rows.length };
     };
 
@@ -525,8 +492,8 @@ export default function Picks() {
         if (b.hi == null) return e >= b.lo;
         return e >= b.lo && e < b.hi;
       });
-      const w = rows.filter((h) => res(h) === 'WON' || res(h) === 'WIN').length;
-      const l = rows.filter((h) => res(h) === 'LOST' || res(h) === 'LOSS').length;
+      const w = rows.filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+      const l = rows.filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
       const wr = (w + l) > 0 ? (w / (w + l)) * 100 : 0;
       return { label: b.label, winRate: Number(wr.toFixed(1)), n: rows.length };
     });
@@ -570,7 +537,14 @@ export default function Picks() {
 
   const getSortedHistory = () => {
     return [...history].sort((a, b) => {
-      const key = sortConfig.key === 'edge' ? 'created_at' : sortConfig.key;
+      let key = sortConfig.key;
+      // Fix 'edge' sort: sort numerically by ev_per_unit
+      if (key === 'edge') {
+        const aVal = parseFloat(a.ev_per_unit ?? a.ev ?? a.edge ?? 0);
+        const bVal = parseFloat(b.ev_per_unit ?? b.ev ?? b.edge ?? 0);
+        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      
       let aVal = a[key] || '';
       let bVal = b[key] || '';
       if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -665,23 +639,18 @@ export default function Picks() {
 
           {/* Breakdown by confidence (yesterday only) */}
           {(() => {
-            const bucket = (h) => {
-              const c = Number(h?.confidence_0_100 ?? h?.confidence ?? 0);
-              if (c >= 80) return 'High';
-              if (c >= 50) return 'Medium';
-              return 'Low';
-            };
-            const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-            const norm = (r) => (r === 'WIN') ? 'WON' : (r === 'LOSS') ? 'LOST' : r;
-            const rows = (gradedYesterdayStraight || []).map((h) => ({ b: bucket(h), r: norm(res(h)) }));
+            const dataRows = (hasReco ? recoStraight : gradedYesterdayStraight) || [];
+            if (dataRows.length === 0) return null;
+            
             const by = { High: { w: 0, l: 0, p: 0 }, Medium: { w: 0, l: 0, p: 0 }, Low: { w: 0, l: 0, p: 0 } };
-            rows.forEach(({ b, r }) => {
+            dataRows.forEach((h) => {
+              const b = getConfidenceBucket(h);
+              const r = normalizeOutcome(h.graded_result || h.outcome || h.result);
               if (r === 'WON') by[b].w += 1;
               else if (r === 'LOST') by[b].l += 1;
               else if (r === 'PUSH') by[b].p += 1;
             });
             const tiles = ['High', 'Medium', 'Low'].map((k) => ({ k, ...by[k] }));
-            if (!gradedYesterdayStraight || gradedYesterdayStraight.length === 0) return null;
             return (
               <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                 {tiles.map((t) => (
@@ -694,15 +663,18 @@ export default function Picks() {
             );
           })()}
           {(() => {
-            const pending = pendingYesterday;
-            if ((yesterdaySlate || []).length === 0) {
+            const total = hasReco ? (recoStraight || []).length + (recoMlParlay || []).length : (yesterdaySlate || []).length;
+            const decided = hasReco ? (recoStraight || []).filter(h => isGradedOutcome(h.outcome)).length : gradedYesterdayStraight.length + gradedYesterdayMlParlay.length;
+            const pending = total - decided;
+
+            if (total === 0) {
               return <div className="mt-3 text-xs text-slate-500">No recommended picks found for yesterday.</div>;
             }
-            if (gradedYesterdayStraight.length === 0 && pending > 0) {
+            if (decided === 0 && pending > 0) {
               return <div className="mt-3 text-xs text-slate-500">Yesterday has {pending} pick(s) still pending / ungraded. Click “Grade now”.</div>;
             }
-            if (gradedYesterdayStraight.length === 0) {
-              return <div className="mt-3 text-xs text-slate-500">No graded spreads/totals found for yesterday yet.</div>;
+            if (decided === 0) {
+              return <div className="mt-3 text-xs text-slate-500">No graded recommended picks found for yesterday.</div>;
             }
             if (pending > 0) {
               return <div className="mt-3 text-xs text-slate-500">Also pending: {pending}</div>;
@@ -727,12 +699,14 @@ export default function Picks() {
                     <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950/20">
                       <div className="min-w-0">
                         <div className="text-xs font-black text-slate-100 whitespace-normal break-words leading-snug">
-                          <span className="text-slate-400 mr-2">#{idx + 1}</span>
+                          <span className="text-slate-400 mr-2">#{h.rank || idx + 1}</span>
                           {h.sport || '—'} • {(h.away_team && h.home_team) ? `${h.away_team} @ ${h.home_team}` : (h.matchup || '—')}
                         </div>
                         <div className="text-xs text-slate-400 whitespace-normal break-words leading-snug">{h.market_type || h.bet_type || '—'} • {h.selection || '—'}</div>
                       </div>
-                      <div className={`text-xs font-mono font-black ${cls}`}>{out}</div>
+                      <div className={`text-xs font-mono font-black ${isWinOutcome(h.graded_result || h.outcome || h.result) ? 'text-green-300' : isLossOutcome(h.graded_result || h.outcome || h.result) ? 'text-red-300' : 'text-slate-500'}`}>
+                        {normalizeOutcome(h.graded_result || h.outcome || h.result) || 'PENDING'}
+                      </div>
                     </div>
                   );
                 });
@@ -782,12 +756,14 @@ export default function Picks() {
                     <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950/20">
                       <div className="min-w-0">
                         <div className="text-xs font-black text-slate-100 whitespace-normal break-words leading-snug">
-                          <span className="text-slate-400 mr-2">#{idx + 1}</span>
+                          <span className="text-slate-400 mr-2">#{h.rank || idx + 1}</span>
                           {h.sport || '—'} • {(h.away_team && h.home_team) ? `${h.away_team} @ ${h.home_team}` : (h.matchup || '—')}
                         </div>
                         <div className="text-xs text-slate-400 whitespace-normal break-words leading-snug">{h.market_type || h.bet_type || '—'} • {h.selection || '—'}</div>
                       </div>
-                      <div className={`text-xs font-mono font-black ${cls}`}>{out}</div>
+                      <div className={`text-xs font-mono font-black ${isWinOutcome(h.graded_result || h.outcome || h.result) ? 'text-green-300' : isLossOutcome(h.graded_result || h.outcome || h.result) ? 'text-red-300' : 'text-slate-500'}`}>
+                        {normalizeOutcome(h.graded_result || h.outcome || h.result) || 'PENDING'}
+                      </div>
                     </div>
                   );
                 });
@@ -890,13 +866,7 @@ export default function Picks() {
             <tbody>
               {(() => {
                 const histRaw = getRecommendedHistory();
-                const etDayForRecap = (ts) => {
-                  try {
-                    return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                  } catch (e) {
-                    return null;
-                  }
-                };
+                const etDayForRecap = (ts) => toEtDay(ts);
                 const keyFor = (x) => {
                   return String(x?.id || '')
                     || `${x?.event_id || 'evt'}|${x?.market_type || x?.market || ''}|${x?.selection || ''}|${x?.bet_price || ''}|${x?.analyzed_at || x?.created_at || ''}`;
@@ -942,11 +912,10 @@ export default function Picks() {
 
                   const recRank = rankByKey[keyFor(item)] || null;
                   const mainRec = recs[0] || {};
-                  const resultStatus = item.graded_result || item.outcome || 'Pending';
-                  const s = String(resultStatus).toUpperCase();
-                  const isWon = s === 'WON' || s === 'WIN';
-                  const isLost = s === 'LOST' || s === 'LOSS';
-                  const isPush = s === 'PUSH';
+                  const resultStatus = item.graded_result || item.outcome;
+                  const isWon = isWinOutcome(resultStatus);
+                  const isLost = isLossOutcome(resultStatus);
+                  const isPush = normalizeOutcome(resultStatus) === 'PUSH';
 
                   const formatDateMDY = (ts) => {
                     if (!ts) return '';

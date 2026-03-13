@@ -8,6 +8,7 @@ import os
 
 from src.models.odds_client import OddsAPIClient
 from src.database import fetch_all_bets, insert_model_prediction, fetch_model_history, init_db
+from src.utils.model_performance import norm_outcome, is_decided, payout_per_unit, roi_per_unit, conf_bucket
 from typing import Optional
 
 app = FastAPI()
@@ -1611,11 +1612,31 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = 
         lookback_days = 400
     lookback_days = max(30, min(lookback_days, 1200))
 
-    # Primary: scoped to user
-    rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
-    # Fallback: legacy single-user data may have NULL/mismatched user_id
+    # Primary: Canonical Slate-backed history
+    from src.database import fetch_recommended_history_canonical
+    rows = fetch_recommended_history_canonical(limit=limit, lookback_days=lookback_days, user_id=user_id)
+    if rows:
+        # Convert to dict if needed and add source metadata
+        rows = [dict(r) for r in rows]
+        for r in rows:
+            r['source_type'] = 'canonical_slate'
+    
+    # Fallback: model_predictions DISTINCT ON history
+    if not rows:
+        rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
+        if rows:
+            rows = [dict(r) for r in rows]
+            for r in rows:
+                r['source_type'] = 'fallback_prediction'
+    
+    # Final Fallback: legacy unscoped
     if not rows:
         rows = fetch_model_history(user_id=None, recommended_only=True, limit=limit, lookback_days=lookback_days)
+        if rows:
+            rows = [dict(r) for r in rows]
+            for r in rows:
+                r['source_type'] = 'legacy_fallback'
+    
     return rows
 
 
@@ -3629,16 +3650,15 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
           ORDER BY r.rank ASC
         """, (slate['id'],)).fetchall()
 
-    def is_decided(o: str) -> bool:
-        return str(o or '').upper() in ('WON','LOST','PUSH','WIN','LOSS')
-
     def norm_outcome(o: str) -> str:
         s = str(o or '').upper()
-        if s == 'WIN':
-            return 'WON'
-        if s == 'LOSS':
-            return 'LOST'
-        return s
+        if s in ('WIN', 'WON'): return 'WON'
+        if s in ('LOSS', 'LOST'): return 'LOST'
+        if s == 'PUSH': return 'PUSH'
+        return 'PENDING'
+
+    def is_decided(o: str) -> bool:
+        return norm_outcome(o) in ('WON', 'LOST', 'PUSH')
 
     def classify(mt: str) -> str:
         t = str(mt or '').upper()
@@ -3699,22 +3719,7 @@ async def ncaam_performance_report(days: int = 30):
     """
     from src.database import get_db_connection, _exec
 
-    def payout_per_unit(price: int) -> float:
-        # payout when risking 1u
-        if price is None:
-            price = -110
-        p = int(price)
-        return (p / 100.0) if p > 0 else (100.0 / abs(p))
-
-    def roi_per_unit(outcome: str, price: int) -> float:
-        o = (outcome or '').upper()
-        if o == 'WON':
-            return payout_per_unit(price)
-        if o == 'LOST':
-            return -1.0
-        if o == 'PUSH':
-            return 0.0
-        return 0.0
+    # Helpers imported from src.utils.model_performance
 
     try:
         days = int(days)
@@ -3731,13 +3736,13 @@ async def ncaam_performance_report(days: int = 30):
               JOIN recommended_slates rs ON rsi.slate_id = rs.id
               WHERE rs.league='NCAAM'
                 AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-                AND rsi.rank <= 5
+                AND rsi.rank <= 6
             """, {"d": int(window_days)}).fetchall()
 
-        decided = [r for r in rows if (r['outcome'] or '').upper() in ('WON','LOST','PUSH')]
-        won = sum(1 for r in decided if (r['outcome'] or '').upper() == 'WON')
-        lost = sum(1 for r in decided if (r['outcome'] or '').upper() == 'LOST')
-        push = sum(1 for r in decided if (r['outcome'] or '').upper() == 'PUSH')
+        decided = [r for r in rows if norm_outcome(r['outcome']) in ('WON','LOST','PUSH')]
+        won = sum(1 for r in decided if norm_outcome(r['outcome']) == 'WON')
+        lost = sum(1 for r in decided if norm_outcome(r['outcome']) == 'LOST')
+        push = sum(1 for r in decided if norm_outcome(r['outcome']) == 'PUSH')
         n = len(decided)
         win_rate = (won / (won + lost) * 100.0) if (won + lost) else 0.0
 
@@ -3791,7 +3796,7 @@ async def ncaam_performance_report(days: int = 30):
           LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
           WHERE rs.league = 'NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
           ORDER BY rs.date_et DESC, rsi.rank ASC
           LIMIT 1000
         """, {"d": int(days)}).fetchall()
@@ -3847,20 +3852,11 @@ async def ncaam_performance_report(days: int = 30):
           LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
           WHERE rs.league = 'NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
         """, {"d": int(days)}).fetchone()
     coverage = dict(cov) if cov else {}
 
-    def conf_bucket(c0: int) -> str:
-        try:
-            n = int(c0 or 0)
-        except Exception:
-            n = 0
-        if n >= 80:
-            return 'High'
-        if n >= 50:
-            return 'Medium'
-        return 'Low'
+    # Helpers imported from src.utils.model_performance
 
     # Confidence breakdown (decided only)
     conf_rows = []
@@ -3872,7 +3868,7 @@ async def ncaam_performance_report(days: int = 30):
           JOIN recommended_slates rs ON rsi.slate_id = rs.id
           WHERE rs.league = 'NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
             AND (m.outcome IN ('WON','LOST','PUSH'))
         """, {"d": int(days)}).fetchall()
 
@@ -3930,14 +3926,19 @@ async def get_model_performance_scatter(days: int = 60, min_ev_per_unit: float =
         p = int(price)
         return (p / 100.0) if p > 0 else (100.0 / abs(p))
 
+    def norm_outcome(o: str) -> str:
+        s = str(o or '').upper()
+        if s in ('WIN', 'WON'): return 'WON'
+        if s in ('LOSS', 'LOST'): return 'LOST'
+        if s == 'PUSH': return 'PUSH'
+        return 'PENDING'
+
     def roi_per_unit(outcome: str, price: int) -> float:
-        o = (outcome or '').upper()
+        o = norm_outcome(outcome)
         if o == 'WON':
             return payout_per_unit(price)
         if o == 'LOST':
             return -1.0
-        if o == 'PUSH':
-            return 0.0
         return 0.0
 
     try:
@@ -3950,6 +3951,8 @@ async def get_model_performance_scatter(days: int = 60, min_ev_per_unit: float =
         min_ev = float(min_ev_per_unit)
     except Exception:
         min_ev = 0.02
+    
+    # Helpers imported from src.utils.model_performance
 
     with get_db_connection() as conn:
         rows = _exec(conn, """
@@ -4590,21 +4593,7 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
     """
     from src.database import get_db_connection, _exec
 
-    def payout_per_unit(price: int) -> float:
-        if price is None:
-            price = -110
-        p = int(price)
-        return (p / 100.0) if p > 0 else (100.0 / abs(p))
-
-    def roi_per_unit(outcome: str, price: int) -> float:
-        o = (outcome or '').upper()
-        if o == 'WON':
-            return payout_per_unit(price)
-        if o == 'LOST':
-            return -1.0
-        if o == 'PUSH':
-            return 0.0
-        return 0.0
+    # Helpers imported from src.utils.model_performance
 
     days = max(3, min(int(days or 30), 180))
 
@@ -4620,7 +4609,7 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
           WHERE rs.league='NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
             AND (m.outcome IN ('WON','LOST','PUSH'))
           ORDER BY rs.date_et ASC, rsi.rank ASC
         """, {"d": int(days)}).fetchall()
