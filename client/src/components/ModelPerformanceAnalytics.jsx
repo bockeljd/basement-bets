@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import {
     normalizeOutcome, isGradedOutcome, isWinOutcome, isLossOutcome,
     toEtDay, getPerformanceDay, roiPerUnit, getNumericConfidence, getConfidenceBucket
