@@ -1639,7 +1639,11 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = 
         rows += global_rows
     
     # Sort combined results by strongest date marker descending
-    rows.sort(key=lambda x: (x.get('day_et') or x.get('analyzed_at') or x.get('start_time') or ''), reverse=True)
+    def sort_key(x):
+        val = x.get('day_et') or x.get('analyzed_at') or x.get('start_time') or ''
+        return str(val)
+    
+    rows.sort(key=sort_key, reverse=True)
     return rows[:limit]
 
 
