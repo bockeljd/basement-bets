@@ -4,20 +4,10 @@ import { RefreshCw, BarChart3, ArrowUpDown, ChevronUp, ChevronDown } from 'lucid
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine, ComposedChart, Line, Cell, LabelList } from 'recharts';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
 
-const etDay = (dt) => {
-  if (!dt) return null;
-  try {
-    const d = new Date(dt);
-    return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-  } catch (e) {
-    return null;
-  }
-};
-
-const isGraded = (x) => {
-  const s = String(x || '').toUpperCase();
-  return s === 'WON' || s === 'WIN' || s === 'LOST' || s === 'LOSS' || s === 'PUSH';
-};
+import {
+  normalizeOutcome, isGradedOutcome, isWinOutcome, isLossOutcome,
+  toEtDay, getPerformanceDay, roiPerUnit, getNumericConfidence, getConfidenceBucket
+} from '../utils/modelPerformance';
 
 export default function Picks() {
   const [history, setHistory] = useState([]);
@@ -448,13 +438,13 @@ export default function Picks() {
     });
 
     const calc = (rows) => {
-      const w = rows.filter((h) => isW(normRes(h))).length;
-      const l = rows.filter((h) => isL(normRes(h))).length;
-      const p = rows.filter((h) => normRes(h) === 'PUSH').length;
+      const w = rows.filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+      const l = rows.filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+      const p = rows.filter((h) => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
       const decided = w + l;
       const winRate = decided > 0 ? (w / decided) * 100 : null;
-      // Same simplifying assumption used elsewhere in UI: $10 stake, -110 style
-      const roi = rows.length > 0 ? ((w * 9.09 - l * 10) / (rows.length * 10)) * 100 : null;
+      const totalRoi = rows.length > 0 ? rows.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
+      const roi = rows.length > 0 ? (totalRoi / rows.length) * 100 : null;
       return { w, l, p, decided, winRate, roi, n: rows.length };
     };
 
@@ -570,7 +560,14 @@ export default function Picks() {
 
   const getSortedHistory = () => {
     return [...history].sort((a, b) => {
-      const key = sortConfig.key === 'edge' ? 'created_at' : sortConfig.key;
+      let key = sortConfig.key;
+      // Fix 'edge' sort: sort numerically by ev_per_unit
+      if (key === 'edge') {
+        const aVal = parseFloat(a.ev_per_unit ?? a.ev ?? a.edge ?? 0);
+        const bVal = parseFloat(b.ev_per_unit ?? b.ev ?? b.edge ?? 0);
+        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      
       let aVal = a[key] || '';
       let bVal = b[key] || '';
       if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -665,23 +662,18 @@ export default function Picks() {
 
           {/* Breakdown by confidence (yesterday only) */}
           {(() => {
-            const bucket = (h) => {
-              const c = Number(h?.confidence_0_100 ?? h?.confidence ?? 0);
-              if (c >= 80) return 'High';
-              if (c >= 50) return 'Medium';
-              return 'Low';
-            };
-            const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-            const norm = (r) => (r === 'WIN') ? 'WON' : (r === 'LOSS') ? 'LOST' : r;
-            const rows = (gradedYesterdayStraight || []).map((h) => ({ b: bucket(h), r: norm(res(h)) }));
+            const dataRows = (hasReco ? recoStraight : gradedYesterdayStraight) || [];
+            if (dataRows.length === 0) return null;
+            
             const by = { High: { w: 0, l: 0, p: 0 }, Medium: { w: 0, l: 0, p: 0 }, Low: { w: 0, l: 0, p: 0 } };
-            rows.forEach(({ b, r }) => {
+            dataRows.forEach((h) => {
+              const b = getConfidenceBucket(h);
+              const r = normalizeOutcome(h.graded_result || h.outcome || h.result);
               if (r === 'WON') by[b].w += 1;
               else if (r === 'LOST') by[b].l += 1;
               else if (r === 'PUSH') by[b].p += 1;
             });
             const tiles = ['High', 'Medium', 'Low'].map((k) => ({ k, ...by[k] }));
-            if (!gradedYesterdayStraight || gradedYesterdayStraight.length === 0) return null;
             return (
               <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                 {tiles.map((t) => (
@@ -694,15 +686,18 @@ export default function Picks() {
             );
           })()}
           {(() => {
-            const pending = pendingYesterday;
-            if ((yesterdaySlate || []).length === 0) {
+            const total = hasReco ? (recoStraight || []).length + (recoMlParlay || []).length : (yesterdaySlate || []).length;
+            const decided = hasReco ? (recoStraight || []).filter(h => isGradedOutcome(h.outcome)).length : gradedYesterdayStraight.length + gradedYesterdayMlParlay.length;
+            const pending = total - decided;
+
+            if (total === 0) {
               return <div className="mt-3 text-xs text-slate-500">No recommended picks found for yesterday.</div>;
             }
-            if (gradedYesterdayStraight.length === 0 && pending > 0) {
+            if (decided === 0 && pending > 0) {
               return <div className="mt-3 text-xs text-slate-500">Yesterday has {pending} pick(s) still pending / ungraded. Click “Grade now”.</div>;
             }
-            if (gradedYesterdayStraight.length === 0) {
-              return <div className="mt-3 text-xs text-slate-500">No graded spreads/totals found for yesterday yet.</div>;
+            if (decided === 0) {
+              return <div className="mt-3 text-xs text-slate-500">No graded recommended picks found for yesterday.</div>;
             }
             if (pending > 0) {
               return <div className="mt-3 text-xs text-slate-500">Also pending: {pending}</div>;
@@ -727,12 +722,14 @@ export default function Picks() {
                     <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950/20">
                       <div className="min-w-0">
                         <div className="text-xs font-black text-slate-100 whitespace-normal break-words leading-snug">
-                          <span className="text-slate-400 mr-2">#{idx + 1}</span>
+                          <span className="text-slate-400 mr-2">#{h.rank || idx + 1}</span>
                           {h.sport || '—'} • {(h.away_team && h.home_team) ? `${h.away_team} @ ${h.home_team}` : (h.matchup || '—')}
                         </div>
                         <div className="text-xs text-slate-400 whitespace-normal break-words leading-snug">{h.market_type || h.bet_type || '—'} • {h.selection || '—'}</div>
                       </div>
-                      <div className={`text-xs font-mono font-black ${cls}`}>{out}</div>
+                      <div className={`text-xs font-mono font-black ${isWinOutcome(h.graded_result || h.outcome || h.result) ? 'text-green-300' : isLossOutcome(h.graded_result || h.outcome || h.result) ? 'text-red-300' : 'text-slate-500'}`}>
+                        {normalizeOutcome(h.graded_result || h.outcome || h.result) || 'PENDING'}
+                      </div>
                     </div>
                   );
                 });
@@ -782,12 +779,14 @@ export default function Picks() {
                     <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950/20">
                       <div className="min-w-0">
                         <div className="text-xs font-black text-slate-100 whitespace-normal break-words leading-snug">
-                          <span className="text-slate-400 mr-2">#{idx + 1}</span>
+                          <span className="text-slate-400 mr-2">#{h.rank || idx + 1}</span>
                           {h.sport || '—'} • {(h.away_team && h.home_team) ? `${h.away_team} @ ${h.home_team}` : (h.matchup || '—')}
                         </div>
                         <div className="text-xs text-slate-400 whitespace-normal break-words leading-snug">{h.market_type || h.bet_type || '—'} • {h.selection || '—'}</div>
                       </div>
-                      <div className={`text-xs font-mono font-black ${cls}`}>{out}</div>
+                      <div className={`text-xs font-mono font-black ${isWinOutcome(h.graded_result || h.outcome || h.result) ? 'text-green-300' : isLossOutcome(h.graded_result || h.outcome || h.result) ? 'text-red-300' : 'text-slate-500'}`}>
+                        {normalizeOutcome(h.graded_result || h.outcome || h.result) || 'PENDING'}
+                      </div>
                     </div>
                   );
                 });

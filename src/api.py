@@ -1611,11 +1611,18 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = 
         lookback_days = 400
     lookback_days = max(30, min(lookback_days, 1200))
 
-    # Primary: scoped to user
-    rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
-    # Fallback: legacy single-user data may have NULL/mismatched user_id
+    # Primary: Canonical Slate-backed history
+    from src.database import fetch_recommended_history_canonical
+    rows = fetch_recommended_history_canonical(limit=limit, lookback_days=lookback_days, user_id=user_id)
+    
+    # Fallback: model_predictions DISTINCT ON history
+    if not rows:
+        rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
+    
+    # Final Fallback: legacy unscoped
     if not rows:
         rows = fetch_model_history(user_id=None, recommended_only=True, limit=limit, lookback_days=lookback_days)
+    
     return rows
 
 
@@ -3731,7 +3738,7 @@ async def ncaam_performance_report(days: int = 30):
               JOIN recommended_slates rs ON rsi.slate_id = rs.id
               WHERE rs.league='NCAAM'
                 AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-                AND rsi.rank <= 5
+                AND rsi.rank <= 6
             """, {"d": int(window_days)}).fetchall()
 
         decided = [r for r in rows if (r['outcome'] or '').upper() in ('WON','LOST','PUSH')]
@@ -3791,7 +3798,7 @@ async def ncaam_performance_report(days: int = 30):
           LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
           WHERE rs.league = 'NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
           ORDER BY rs.date_et DESC, rsi.rank ASC
           LIMIT 1000
         """, {"d": int(days)}).fetchall()
@@ -3847,7 +3854,7 @@ async def ncaam_performance_report(days: int = 30):
           LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
           WHERE rs.league = 'NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
         """, {"d": int(days)}).fetchone()
     coverage = dict(cov) if cov else {}
 
@@ -3872,7 +3879,7 @@ async def ncaam_performance_report(days: int = 30):
           JOIN recommended_slates rs ON rsi.slate_id = rs.id
           WHERE rs.league = 'NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
             AND (m.outcome IN ('WON','LOST','PUSH'))
         """, {"d": int(days)}).fetchall()
 
@@ -4620,7 +4627,7 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
           WHERE rs.league='NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
-            AND rsi.rank <= 5
+            AND rsi.rank <= 6
             AND (m.outcome IN ('WON','LOST','PUSH'))
           ORDER BY rs.date_et ASC, rsi.rank ASC
         """, {"d": int(days)}).fetchall()

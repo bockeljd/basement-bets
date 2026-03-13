@@ -1,18 +1,12 @@
-import React, { useState } from 'react';
+import {
+    normalizeOutcome, isGradedOutcome, isWinOutcome, isLossOutcome,
+    toEtDay, getPerformanceDay, roiPerUnit, getNumericConfidence, getConfidenceBucket
+} from '../utils/modelPerformance';
 
 const ModelPerformanceAnalytics = ({ history }) => {
     // Hover state for inline SVG charts
     const [hoverConfIdx, setHoverConfIdx] = useState(null);
     const [hoverTop6Idx, setHoverTop6Idx] = useState(null);
-
-    // Schema Migration: use graded_result (new) or outcome or result
-    const getResult = (h) => h.graded_result || h.outcome || h.result;
-
-    const isGradedResult = (res) => {
-        if (!res) return false;
-        const s = String(res).toUpperCase();
-        return s === 'WON' || s === 'WIN' || s === 'LOST' || s === 'LOSS' || s === 'PUSH';
-    };
 
     // --- Top 6 Filtering Logic ---
     // User strategy is only Top 6 (by EV/u). We must filter the entire history prop
@@ -20,32 +14,37 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const filteredToTop6 = (() => {
         const groups = {};
         history.forEach(h => {
-            const day = h.analyzed_at ? (new Date(h.analyzed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })) : '—';
+            const day = getPerformanceDay(h);
+            if (!day) return;
             if (!groups[day]) groups[day] = [];
             groups[day].push(h);
         });
         const out = [];
         Object.values(groups).forEach(dayList => {
             const top6 = dayList
-                .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0))
+                .sort((a, b) => {
+                    const aVal = parseFloat(a.ev_per_unit || a.ev || 0);
+                    const bVal = parseFloat(b.ev_per_unit || b.ev || 0);
+                    return bVal - aVal;
+                })
                 .slice(0, 6);
             out.push(...top6);
         });
         return out;
     })();
 
-    const graded = filteredToTop6.filter(h => isGradedResult(getResult(h)));
-    const wins = graded.filter(h => {
-        const s = String(getResult(h)).toUpperCase();
-        return s === 'WON' || s === 'WIN';
-    }).length;
-    const losses = graded.filter(h => {
-        const s = String(getResult(h)).toUpperCase();
-        return s === 'LOST' || s === 'LOSS';
-    }).length;
-    const pushes = graded.filter(h => String(getResult(h)).toUpperCase() === 'PUSH').length;
+    const graded = filteredToTop6.filter(h => isGradedOutcome(h.graded_result || h.outcome || h.result));
+    const wins = graded.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+    const losses = graded.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+    const pushes = graded.filter(h => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
+    
     const winRate = graded.length > 0 ? (wins / (wins + losses) * 100) : 0;
-    const roi = graded.length > 0 ? ((wins * 9.09 - losses * 10) / (graded.length * 10) * 100) : 0;
+    
+    const roi = (() => {
+        if (graded.length === 0) return 0;
+        const totalRoi = graded.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0);
+        return (totalRoi / graded.length) * 100;
+    })();
 
     // CLV Metrics
     const clvData = history.filter(h => h.clv_points !== null && h.clv_points !== undefined);
@@ -111,17 +110,12 @@ const ModelPerformanceAnalytics = ({ history }) => {
 
     const edgeBandPerformance = edgeBands.map((band) => {
         const filtered = graded.filter(h => inBand(getEdge(h), band));
-        const w = filtered.filter(h => {
-            const s = String(getResult(h)).toUpperCase();
-            return s === 'WON' || s === 'WIN';
-        }).length;
-        const l = filtered.filter(h => {
-            const s = String(getResult(h)).toUpperCase();
-            return s === 'LOST' || s === 'LOSS';
-        }).length;
+        const w = filtered.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+        const l = filtered.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
         const decided = w + l;
         const wr = decided > 0 ? (w / decided * 100) : 0;
-        const roiPct = filtered.length > 0 ? ((w * 9.09 - l * 10) / (filtered.length * 10) * 100) : 0;
+        const totalRoi = filtered.length > 0 ? filtered.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
+        const roiPct = filtered.length > 0 ? (totalRoi / filtered.length * 100) : 0;
         return {
             label: band.label,
             count: filtered.length,
@@ -137,132 +131,49 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const sports = [...new Set(graded.map(getSport).filter(Boolean))];
     const sportPerformance = sports.map(sport => {
         const filtered = graded.filter(h => getSport(h) === sport);
-        const w = filtered.filter(h => getResult(h) === 'WON' || getResult(h) === 'Win').length;
-        const l = filtered.filter(h => getResult(h) === 'LOST' || getResult(h) === 'Loss').length;
-        const wr = filtered.length > 0 ? (w / (w + l) * 100) : 0;
-        const r = filtered.length > 0 ? ((w * 9.09 - l * 10) / (filtered.length * 10) * 100) : 0;
-        return { sport, count: filtered.length, wins: w, losses: l, winRate: wr, roi: r };
+        const w = filtered.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+        const l = filtered.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+        const wr = (w + l) > 0 ? (w / (w + l) * 100) : 0;
+        const totalRoi = filtered.length > 0 ? filtered.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
+        const roiPct = filtered.length > 0 ? (totalRoi / filtered.length * 100) : 0;
+        return { sport, count: filtered.length, wins: w, losses: l, winRate: wr, roi: roiPct };
     });
 
     // Performance by market type
-    const getMarket = (h) => h?.market || h?.market_type;
+    const getMarket = (h) => h?.market_type || h?.market;
     const markets = [...new Set(graded.map(getMarket).filter(Boolean))];
     const marketPerformance = markets.map(market => {
         const filtered = graded.filter(h => getMarket(h) === market);
-        const w = filtered.filter(h => getResult(h) === 'WON' || getResult(h) === 'Win').length;
-        const l = filtered.filter(h => getResult(h) === 'LOST' || getResult(h) === 'Loss').length;
-        const wr = filtered.length > 0 ? (w / (w + l) * 100) : 0;
-        const r = filtered.length > 0 ? ((w * 9.09 - l * 10) / (filtered.length * 10) * 100) : 0;
-        return { market, count: filtered.length, wins: w, losses: l, winRate: wr, roi: r };
+        const w = filtered.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+        const l = filtered.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+        const wr = (w + l) > 0 ? (w / (w + l) * 100) : 0;
+        const totalRoi = filtered.length > 0 ? filtered.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
+        const roiPct = filtered.length > 0 ? (totalRoi / filtered.length * 100) : 0;
+        return { market, count: filtered.length, wins: w, losses: l, winRate: wr, roi: roiPct };
     });
 
     // Performance by confidence level
     // Confidence should always be attached to the *recommended bet*. Depending on schema version,
     // it may live on the row, inside outputs_json, or inside recommendation_json.
-    const normalizeConfidence = (val) => {
-        // numeric confidence
-        const asNum = Number(val);
-        if (Number.isFinite(asNum)) {
-            if (asNum >= 0.75) return 'High';
-            if (asNum >= 0.6) return 'Medium';
-            return 'Low';
-        }
-
-        const s = String(val ?? '').trim();
-        const up = s.toUpperCase();
-        if (!up || up === '—') return null;
-        if (up === 'H' || up.startsWith('HIGH')) return 'High';
-        if (up === 'M' || up.startsWith('MED')) return 'Medium';
-        if (up === 'L' || up.startsWith('LOW')) return 'Low';
-        return null;
-    };
-
-    const inferConfidenceFromEv = (h) => {
-        // Bucket by EV/u using the SAME thresholds as the model UI labels:
-        // confidence = High if ev*100*5 > 80  => ev > 0.16
-        // confidence = Medium if ev*100*5 > 50 => ev > 0.10
-        const ev = Number(h?.ev_per_unit ?? h?.ev);
-        if (!Number.isFinite(ev)) return 'Low';
-        if (ev >= 0.16) return 'High';
-        if (ev >= 0.10) return 'Medium';
-        return 'Low';
-    };
-
-    const getConfidenceLabel = (h) => {
-        // 1) explicit row-level fields
-        const explicit = h?.confidence_label || h?.confidenceLevel || h?.confidence_level || h?.confidence;
-        const n1 = normalizeConfidence(explicit);
-        if (n1) return n1;
-
-        // 2) outputs_json: { confidence_label } or { recommendations: [{confidence_level/confidence_label/confidence}] }
-        try {
-            if (h?.outputs_json) {
-                const out = JSON.parse(h.outputs_json);
-                const n2 = normalizeConfidence(out?.confidence_label || out?.confidenceLevel || out?.confidence);
-                if (n2) return n2;
-                const rec = Array.isArray(out?.recommendations) ? out.recommendations[0] : null;
-                const n2b = normalizeConfidence(rec?.confidence_level || rec?.confidence_label || rec?.confidence);
-                if (n2b) return n2b;
-            }
-        } catch (e) { }
-
-        // 3) recommendation_json: legacy recommendations array
-        try {
-            if (h?.recommendation_json) {
-                const recs = JSON.parse(h.recommendation_json);
-                const rec = Array.isArray(recs) ? recs[0] : recs;
-                const n3 = normalizeConfidence(rec?.confidence_level || rec?.confidence_label || rec?.confidence);
-                if (n3) return n3;
-            }
-        } catch (e) { }
-
-        // 4) last resort: infer from EV
-        return inferConfidenceFromEv(h);
-    };
-
     const confidenceLevels = ['High', 'Medium', 'Low'];
     const confidencePerformance = confidenceLevels.map(level => {
-        const filtered = graded.filter(h => getConfidenceLabel(h) === level);
-        const w = filtered.filter(h => getResult(h) === 'WON' || getResult(h) === 'Win').length;
-        const l = filtered.filter(h => getResult(h) === 'LOST' || getResult(h) === 'Loss').length;
+        const filtered = graded.filter(h => getConfidenceBucket(h) === level);
+        const w = filtered.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+        const l = filtered.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
         const wr = (w + l) > 0 ? (w / (w + l) * 100) : 0;
-        const r = filtered.length > 0 ? ((w * 9.09 - l * 10) / (filtered.length * 10) * 100) : 0;
-        return { level, count: filtered.length, wins: w, losses: l, winRate: wr, roi: r };
+        const totalRoi = filtered.length > 0 ? filtered.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
+        const roiPct = filtered.length > 0 ? (totalRoi / filtered.length * 100) : 0;
+        return { level, count: filtered.length, wins: w, losses: l, winRate: wr, roi: roiPct };
     });
 
-    const toEtDay = (ts) => {
-        if (!ts) return null;
-        try {
-            const d = new Date(ts);
-            const s = d.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
-            return s || null;
-        } catch (e) {
-            return null;
-        }
-    };
-
-    const fmtEtDayShort = (ts) => {
-        const day = toEtDay(ts);
-        if (!day) return '—';
-        // day is like M/D/YYYY
-        try {
-            const parts = day.split('/');
-            if (parts.length === 3) {
-                const mm = String(parts[0]).padStart(2, '0');
-                const dd = String(parts[1]).padStart(2, '0');
-                return `${mm}/${dd}`;
-            }
-        } catch (e) { }
-        return day;
-    };
-
     const isWithinDays = (h, days) => {
-        const ts = h?.analyzed_at || h?.created_at;
-        if (!ts) return false;
+        const day = getPerformanceDay(h);
+        if (!day) return false;
         try {
-            const t = new Date(ts).getTime();
-            if (!Number.isFinite(t)) return false;
-            const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+            const t = new Date(day).getTime();
+            const now = new Date();
+            const today = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+            const cutoff = new Date(new Date(today).getTime() - (days * 24 * 60 * 60 * 1000)).getTime();
             return t >= cutoff;
         } catch (e) {
             return false;
@@ -270,22 +181,21 @@ const ModelPerformanceAnalytics = ({ history }) => {
     };
 
     const isYesterdayET = (h) => {
-        const ts = h?.analyzed_at || h?.created_at;
-        const day = toEtDay(ts);
+        const day = getPerformanceDay(h);
         if (!day) return false;
         const now = new Date();
         const y = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        const yday = y.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+        const yday = y.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
         return day === yday;
     };
 
     const confidenceTrend = (predicateFn) => confidenceLevels.map(level => {
         const filtered = graded
-            .filter(h => getConfidenceLabel(h) === level)
+            .filter(h => getConfidenceBucket(h) === level)
             .filter(predicateFn);
-        const w = filtered.filter(h => getResult(h) === 'WON' || getResult(h) === 'Win').length;
-        const l = filtered.filter(h => getResult(h) === 'LOST' || getResult(h) === 'Loss').length;
-        const p = filtered.filter(h => getResult(h) === 'PUSH' || getResult(h) === 'Push').length;
+        const w = filtered.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+        const l = filtered.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+        const p = filtered.filter(h => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
         const decided = w + l;
         const wr = decided > 0 ? (w / decided * 100) : 0;
         return { level, count: filtered.length, wins: w, losses: l, pushes: p, winRate: wr };
@@ -299,43 +209,37 @@ const ModelPerformanceAnalytics = ({ history }) => {
     };
 
     const dailyTopN = (() => {
-        // Group all recommended+graded bets by ET day of analyzed_at.
+        // Group all recommended+graded bets by canonical performance day.
         const groups = {};
         for (const h of graded) {
-            const day = toEtDay(h?.analyzed_at || h?.created_at);
+            const day = getPerformanceDay(h);
             if (!day) continue;
             if (!groups[day]) groups[day] = [];
             groups[day].push(h);
         }
 
-        const days = Object.keys(groups).sort((a, b) => {
-            const da = new Date(a).getTime();
-            const db = new Date(b).getTime();
-            if (Number.isFinite(da) && Number.isFinite(db)) return db - da;
-            return String(b).localeCompare(String(a));
-        });
+        const days = Object.keys(groups).sort((a, b) => b.localeCompare(a));
 
         const out = [];
         for (const day of days) {
             const bets = (groups[day] || [])
                 .slice()
-                .sort((x, y) => getEv(y) - getEv(x))
+                .sort((x, y) => {
+                    const xEv = parseFloat(x.ev_per_unit || x.ev || 0);
+                    const yEv = parseFloat(y.ev_per_unit || y.ev || 0);
+                    return yEv - xEv;
+                })
                 .slice(0, topN);
 
-            const w = bets.filter(h => {
-                const s = String(getResult(h)).toUpperCase();
-                return s === 'WON' || s === 'WIN';
-            }).length;
-            const l = bets.filter(h => {
-                const s = String(getResult(h)).toUpperCase();
-                return s === 'LOST' || s === 'LOSS';
-            }).length;
-            const p = bets.filter(h => String(getResult(h)).toUpperCase() === 'PUSH').length;
+            const w = bets.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+            const l = bets.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+            const p = bets.filter(h => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
             const decided = w + l;
             const wr = decided > 0 ? (w / decided * 100) : 0;
-            const roi = bets.length > 0 ? ((w * 9.09 - l * 10) / (bets.length * 10) * 100) : 0;
+            const totalRoi = bets.length > 0 ? bets.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
+            const roiPct = bets.length > 0 ? (totalRoi / bets.length * 100) : 0;
 
-            out.push({ day, bets, count: bets.length, wins: w, losses: l, pushes: p, winRate: wr, roi });
+            out.push({ day, bets, count: bets.length, wins: w, losses: l, pushes: p, winRate: wr, roi: roiPct });
         }
         return out;
     })();
@@ -352,21 +256,19 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const dailyWinSeries = (() => {
         const days = 14;
         const now = new Date();
-        const etToday = now.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+        const etToday = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
-        // Build ET date keys for last N days (oldest -> newest), EXCLUDING today
-        // because today's slate may be ungraded until the next day.
         const dayKeys = [];
         for (let i = days; i >= 1; i--) {
             const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-            const key = d.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+            const key = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
             if (key === etToday) continue;
             dayKeys.push(key);
         }
 
         const byDay = {};
         for (const h of graded) {
-            const key = toEtDay(h?.analyzed_at || h?.created_at);
+            const key = getPerformanceDay(h);
             if (!key) continue;
             if (!byDay[key]) byDay[key] = [];
             byDay[key].push(h);
@@ -379,15 +281,9 @@ const ModelPerformanceAnalytics = ({ history }) => {
         for (const key of dayKeys) {
             const rows = byDay[key] || [];
             for (const b of bands) {
-                const xs = rows.filter(r => getConfidenceLabel(r) === b);
-                const w = xs.filter(r => {
-                    const s = String(getResult(r)).toUpperCase();
-                    return s === 'WON' || s === 'WIN';
-                }).length;
-                const l = xs.filter(r => {
-                    const s = String(getResult(r)).toUpperCase();
-                    return s === 'LOST' || s === 'LOSS';
-                }).length;
+                const xs = rows.filter(r => getConfidenceBucket(r) === b);
+                const w = xs.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
+                const l = xs.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
                 const decided = w + l;
                 const wr = decided > 0 ? (w / decided * 100) : null;
                 series[b].push(wr);
@@ -397,18 +293,15 @@ const ModelPerformanceAnalytics = ({ history }) => {
         const seriesTop6 = [];
         for (const key of dayKeys) {
             const rows = byDay[key] || [];
-            // Sort by EV/u desc
-            const sorted = [...rows].sort((a, b) => getEv(b) - getEv(a));
+            const sorted = [...rows].sort((a, b) => {
+                const aVal = parseFloat(a.ev_per_unit || a.ev || 0);
+                const bVal = parseFloat(b.ev_per_unit || b.ev || 0);
+                return bVal - aVal;
+            });
             const top6 = sorted.slice(0, 6);
 
-            const w = top6.filter(r => {
-                const s = String(getResult(r)).toUpperCase();
-                return s === 'WON' || s === 'WIN';
-            }).length;
-            const l = top6.filter(r => {
-                const s = String(getResult(r)).toUpperCase();
-                return s === 'LOST' || s === 'LOSS';
-            }).length;
+            const w = top6.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
+            const l = top6.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
             const decided = w + l;
             const wr = decided > 0 ? (w / decided * 100) : null;
             seriesTop6.push(wr);
@@ -547,13 +440,15 @@ const ModelPerformanceAnalytics = ({ history }) => {
                 {tickIdx.map((i) => (
                     <text key={i} x={xAt(i)} y={height - 6} fontSize="11" fill="rgba(148,163,184,0.92)" fontWeight="700" textAnchor="middle">
                         {(() => {
-                            const parts = String(dayKeys[i] || '').split('/');
+                            const val = dayKeys[i] || '';
+                            const parts = val.includes('-') ? val.split('-') : val.split('/');
                             if (parts.length >= 2) {
-                                const mm = String(parts[0]).padStart(2, '0');
-                                const dd = String(parts[1]).padStart(2, '0');
+                                // YYYY-MM-DD -> MM/DD
+                                const mm = parts.length === 3 ? parts[1] : parts[0];
+                                const dd = parts.length === 3 ? parts[2] : parts[1];
                                 return `${mm}/${dd}`;
                             }
-                            return dayKeys[i] || '';
+                            return val;
                         })()}
                     </text>
                 ))}
@@ -754,13 +649,14 @@ const ModelPerformanceAnalytics = ({ history }) => {
                 {tickIdx.map((i) => (
                     <text key={i} x={xBar(i) + bandW / 2} y={height - 6} fontSize="11" fill="rgba(148,163,184,0.92)" fontWeight="700" textAnchor="middle">
                         {(() => {
-                            const parts = String(dayKeys[i] || '').split('/');
+                            const val = dayKeys[i] || '';
+                            const parts = val.includes('-') ? val.split('-') : val.split('/');
                             if (parts.length >= 2) {
-                                const mm = String(parts[0]).padStart(2, '0');
-                                const dd = String(parts[1]).padStart(2, '0');
+                                const mm = parts.length === 3 ? parts[1] : parts[0];
+                                const dd = parts.length === 3 ? parts[2] : parts[1];
                                 return `${mm}/${dd}`;
                             }
-                            return dayKeys[i] || '';
+                            return val;
                         })()}
                     </text>
                 ))}
