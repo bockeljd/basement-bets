@@ -183,10 +183,8 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const isYesterdayET = (h) => {
         const day = getPerformanceDay(h);
         if (!day) return false;
-        const now = new Date();
-        const y = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        const yday = y.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-        return day === yday;
+        const yesterday = toEtDay(new Date(Date.now() - 24 * 60 * 60 * 1000));
+        return day === yesterday;
     };
 
     const confidenceTrend = (predicateFn) => confidenceLevels.map(level => {

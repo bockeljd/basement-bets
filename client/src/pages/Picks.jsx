@@ -55,21 +55,8 @@ export default function Picks() {
 
       // Ensure yesterday is always settled: if any yesterday-slate picks are pending, trigger grading once.
       try {
-        const yesterdayEt = (() => {
-          const d = new Date();
-          d.setDate(d.getDate() - 1);
-          return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-        })();
-        const etDay = (dt) => {
-          if (!dt) return null;
-          try { return new Date(dt).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); } catch (e) { return null; }
-        };
-        const isGraded = (x) => {
-          const s = String(x || '').toUpperCase();
-          return s === 'WON' || s === 'WIN' || s === 'LOST' || s === 'LOSS' || s === 'PUSH';
-        };
-        const dayKey = (h) => etDay(h?.start_time) || etDay(h?.analyzed_at);
-        const pendingYesterday = (rows || []).filter((h) => dayKey(h) === yesterdayEt && !isGraded(h.graded_result || h.outcome || h.result)).length;
+        const yesterdayEt = toEtDay(new Date(Date.now() - 86400000));
+        const pendingYesterday = (rows || []).filter((h) => getPerformanceDay(h) === yesterdayEt && !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
         const k = `grade_yesterday_attempt_${yesterdayEt}`;
         if (pendingYesterday > 0 && !localStorage.getItem(k)) {
           localStorage.setItem(k, '1');
@@ -108,13 +95,11 @@ export default function Picks() {
   }, []);
 
   const graded = useMemo(() => {
-    return (history || []).filter((h) => isGraded(h.graded_result || h.outcome || h.result));
+    return (history || []).filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [history]);
 
   const yesterdaySlate = useMemo(() => {
-    // Use slate day (event start_time in ET) when available.
-    const dayKey = (h) => etDay(h?.start_time) || etDay(h?.analyzed_at);
-    return (history || []).filter((h) => dayKey(h) === yesterdayEt);
+    return (history || []).filter((h) => getPerformanceDay(h) === yesterdayEt);
   }, [history, yesterdayEt]);
 
   const classify = (h) => {
@@ -160,30 +145,25 @@ export default function Picks() {
   }, [yesterdaySlate]);
 
   const gradedYesterdayStraight = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6YesterdayStraight.filter((h) => isGraded(res(h)));
+    return top6YesterdayStraight.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [top6YesterdayStraight]);
 
   const gradedYesterdayMlParlay = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6YesterdayMlParlay.filter((h) => isGraded(res(h)));
+    return top6YesterdayMlParlay.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [top6YesterdayMlParlay]);
 
   const gradedYesterday = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6Yesterday.filter((h) => isGraded(res(h)));
+    return top6Yesterday.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
   }, [top6Yesterday]);
 
   const pendingYesterday = useMemo(() => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    return top6Yesterday.filter((h) => !isGraded(res(h))).length;
+    return top6Yesterday.filter((h) => !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
   }, [top6Yesterday]);
 
   const recordFor = (rows) => {
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    const w = (rows || []).filter((h) => res(h) === 'WON' || res(h) === 'WIN').length;
-    const l = (rows || []).filter((h) => res(h) === 'LOST' || res(h) === 'LOSS').length;
-    const p = (rows || []).filter((h) => res(h) === 'PUSH').length;
+    const w = (rows || []).filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+    const l = (rows || []).filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+    const p = (rows || []).filter((h) => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
     const decided = w + l;
     const winRate = decided > 0 ? (w / decided) * 100 : 0;
     return { w, l, p, decided, winRate };
@@ -199,12 +179,10 @@ export default function Picks() {
   const hasReco = useMemo(() => Boolean(yesterdayReco?.slate?.id), [yesterdayReco]);
 
   const recordForReco = (rows) => {
-    const res = (h) => String(h?.outcome || '').toUpperCase();
-    const norm = (r) => (r === 'WIN') ? 'WON' : (r === 'LOSS') ? 'LOST' : r;
-    const decided = (rows || []).filter((h) => isGraded(res(h)));
-    const w = decided.filter((h) => norm(res(h)) === 'WON').length;
-    const l = decided.filter((h) => norm(res(h)) === 'LOST').length;
-    const p = decided.filter((h) => norm(res(h)) === 'PUSH').length;
+    const decided = (rows || []).filter((h) => isGradedOutcome(h.outcome));
+    const w = decided.filter((h) => isWinOutcome(h.outcome)).length;
+    const l = decided.filter((h) => isLossOutcome(h.outcome)).length;
+    const p = decided.filter((h) => normalizeOutcome(h.outcome) === 'PUSH').length;
     const wl = w + l;
     const winRate = wl > 0 ? (w / wl) * 100.0 : 0.0;
     return { w, l, p, decided: decided.length, winRate };
@@ -235,7 +213,7 @@ export default function Picks() {
       return n;
     };
 
-    const ymd = (h) => etDay(h.analyzed_at);
+    const ymd = (h) => getPerformanceDay(h);
 
     // group graded picks by day
     const byDay = {};
@@ -243,8 +221,8 @@ export default function Picks() {
       const day = ymd(h);
       if (!day) return;
       if (!String(day).startsWith('2026-')) return;
-      const r = res(h);
-      if (!(isW(r) || isL(r) || r === 'PUSH')) return;
+      const res = h.graded_result || h.outcome || h.result;
+      if (!isGradedOutcome(res)) return;
       const e = ev(h);
       if (!Number.isFinite(e)) return;
       byDay[day] = byDay[day] || [];
@@ -269,11 +247,11 @@ export default function Picks() {
         .slice(0, 6);
       yRows.forEach((h, idx) => {
         const rank = idx + 1;
-        const r = res(h);
+        const res = h.graded_result || h.outcome || h.result;
         if (rank < 1 || rank > 6) return;
-        if (isW(r)) yByRank[rank] = 'W';
-        else if (isL(r)) yByRank[rank] = 'L';
-        else if (r == 'PUSH') yByRank[rank] = 'P';
+        if (isWinOutcome(res)) yByRank[rank] = 'W';
+        else if (isLossOutcome(res)) yByRank[rank] = 'L';
+        else if (normalizeOutcome(res) === 'PUSH') yByRank[rank] = 'P';
         else yByRank[rank] = null;
       });
     } catch (e) { }
@@ -285,9 +263,9 @@ export default function Picks() {
       const top6 = rows.slice(0, 6);
       top6.forEach((h, idx) => {
         const rank = idx + 1;
-        const r = res(h);
-        if (isW(r)) agg[rank].w += 1;
-        else if (isL(r)) agg[rank].l += 1;
+        const res = h.graded_result || h.outcome || h.result;
+        if (isWinOutcome(res)) agg[rank].w += 1;
+        else if (isLossOutcome(res)) agg[rank].l += 1;
       });
     });
 
@@ -344,7 +322,7 @@ export default function Picks() {
 
     const byDay = {};
     (graded || []).forEach((h) => {
-      const day = etDay(h.analyzed_at);
+      const day = getPerformanceDay(h);
       if (!day) return;
       if (!days.includes(day)) return;
       const e = ev(h);
@@ -358,9 +336,9 @@ export default function Picks() {
       let w = 0;
       let l = 0;
       picks.forEach((h) => {
-        const r = res(h);
-        if (isW(r)) w += 1;
-        else if (isL(r)) l += 1;
+        const res = h.graded_result || h.outcome || h.result;
+        if (isWinOutcome(res)) w += 1;
+        else if (isLossOutcome(res)) l += 1;
       });
       const decided = w + l;
       const winRate = decided ? (w / decided) * 100 : null;
@@ -379,11 +357,10 @@ export default function Picks() {
 
   const dailyPerformance = useMemo(() => {
     // Only perform charts on TOP 6 picks per day to avoid "noise"
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
     const unit = (h) => {
-      const r = res(h);
-      if (r === 'WON' || r === 'WIN') return 1;
-      if (r === 'LOST' || r === 'LOSS') return -1;
+      const res = h.graded_result || h.outcome || h.result;
+      if (isWinOutcome(res)) return 1;
+      if (isLossOutcome(res)) return -1;
       return 0;
     };
 
@@ -405,12 +382,12 @@ export default function Picks() {
 
       byDay[day] = byDay[day] || { day, units: 0, wins: 0, losses: 0, pushes: 0, picks: 0 };
       top6.forEach(h => {
-        const r = res(h);
+        const res = h.graded_result || h.outcome || h.result;
         byDay[day].picks += 1;
         byDay[day].units += unit(h);
-        if (r === 'WON' || r === 'WIN') byDay[day].wins += 1;
-        else if (r === 'LOST' || r === 'LOSS') byDay[day].losses += 1;
-        else if (r === 'PUSH') byDay[day].pushes += 1;
+        if (isWinOutcome(res)) byDay[day].wins += 1;
+        else if (isLossOutcome(res)) byDay[day].losses += 1;
+        else if (normalizeOutcome(res) === 'PUSH') byDay[day].pushes += 1;
       });
     });
 
@@ -515,8 +492,8 @@ export default function Picks() {
         if (b.hi == null) return e >= b.lo;
         return e >= b.lo && e < b.hi;
       });
-      const w = rows.filter((h) => res(h) === 'WON' || res(h) === 'WIN').length;
-      const l = rows.filter((h) => res(h) === 'LOST' || res(h) === 'LOSS').length;
+      const w = rows.filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+      const l = rows.filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
       const wr = (w + l) > 0 ? (w / (w + l)) * 100 : 0;
       return { label: b.label, winRate: Number(wr.toFixed(1)), n: rows.length };
     });
@@ -889,13 +866,7 @@ export default function Picks() {
             <tbody>
               {(() => {
                 const histRaw = getRecommendedHistory();
-                const etDayForRecap = (ts) => {
-                  try {
-                    return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                  } catch (e) {
-                    return null;
-                  }
-                };
+                const etDayForRecap = (ts) => toEtDay(ts);
                 const keyFor = (x) => {
                   return String(x?.id || '')
                     || `${x?.event_id || 'evt'}|${x?.market_type || x?.market || ''}|${x?.selection || ''}|${x?.bet_price || ''}|${x?.analyzed_at || x?.created_at || ''}`;
@@ -941,11 +912,10 @@ export default function Picks() {
 
                   const recRank = rankByKey[keyFor(item)] || null;
                   const mainRec = recs[0] || {};
-                  const resultStatus = item.graded_result || item.outcome || 'Pending';
-                  const s = String(resultStatus).toUpperCase();
-                  const isWon = s === 'WON' || s === 'WIN';
-                  const isLost = s === 'LOST' || s === 'LOSS';
-                  const isPush = s === 'PUSH';
+                  const resultStatus = item.graded_result || item.outcome;
+                  const isWon = isWinOutcome(resultStatus);
+                  const isLost = isLossOutcome(resultStatus);
+                  const isPush = normalizeOutcome(resultStatus) === 'PUSH';
 
                   const formatDateMDY = (ts) => {
                     if (!ts) return '';
