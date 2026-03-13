@@ -369,7 +369,7 @@ export default function Picks() {
     // Group all graded picks by day first
     const gByDay = {};
     graded.forEach(h => {
-      const day = etDay(h.analyzed_at) || '—';
+      const day = toEtDay(h.analyzed_at) || '—';
       if (!gByDay[day]) gByDay[day] = [];
       gByDay[day].push(h);
     });
@@ -457,7 +457,7 @@ export default function Picks() {
     // Group all graded picks by day and take Top 6 for chart consistency
     const gByDay = {};
     graded.forEach(h => {
-      const day = etDay(h.analyzed_at) || '—';
+      const day = toEtDay(h.analyzed_at) || '—';
       if (!gByDay[day]) gByDay[day] = [];
       gByDay[day].push(h);
     });
