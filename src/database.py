@@ -1034,9 +1034,13 @@ def insert_model_prediction(doc: dict) -> bool:
     raw = "|".join(parts)
     doc['prediction_key'] = hashlib.sha256(raw.encode()).hexdigest()
 
-    # Ensure missing keys matching schema are handled
-    keys = ["selection", "price", "fair_line", "edge_points", "open_line", "open_price",
-            "close_line", "close_price", "clv_points", "clv_method", "close_captured_at", "model_version", "context_json"]
+    # Ensure missing keys matching schema are handled to avoid KeyError in _exec
+    keys = [
+        "selection", "price", "fair_line", "edge_points", "open_line", "open_price",
+        "close_line", "close_price", "clv_points", "clv_method", "close_captured_at",
+        "model_version", "context_json", "mu_market", "mu_torvik", "mu_final", "sigma",
+        "win_prob", "ev_per_unit", "confidence_0_100", "inputs_json", "outputs_json", "narrative_json"
+    ]
     for k in keys:
          if k not in doc: doc[k] = None
 
@@ -1079,9 +1083,14 @@ def insert_model_prediction(doc: dict) -> bool:
     """
     try:
         with get_db_connection() as conn:
-            _exec(conn, query, doc)
+            # Use RETURNING id to ensure we get the actual DB id (especially on update)
+            query += " RETURNING id"
+            cur = _exec(conn, query, doc)
+            row = cur.fetchone()
             conn.commit()
-            return True
+            if row:
+                return row['id'] if isinstance(row, dict) else row[0]
+            return doc.get('id')
     except Exception as e:
         # Self-heal schema drift in production: context_json column may not exist yet.
         msg = str(e)
@@ -1093,12 +1102,20 @@ def insert_model_prediction(doc: dict) -> bool:
                     conn2.commit()
                 # Retry once
                 with get_db_connection() as conn3:
-                    _exec(conn3, query, doc)
+                    # RETURNING id here too
+                    retry_query = query
+                    if "RETURNING id" not in retry_query:
+                         retry_query += " RETURNING id"
+                    cur3 = _exec(conn3, retry_query, doc)
+                    row3 = cur3.fetchone()
                     conn3.commit()
-                    return True
+                    if row3:
+                        return row3['id'] if isinstance(row3, dict) else row3[0]
+                    return doc.get('id')
             except Exception as e2:
                 print(f"[DB] insert_model_prediction migration+retry failed: {e2}")
                 return False
+        
         print(f"[DB] insert_model_prediction error: {e}")
         return False
 
@@ -1629,7 +1646,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
             rs.id, rs.league, rs.date_et, rs.source, rs.created_at
         FROM recommended_slates rs
         {where_sql}
-        ORDER BY rs.league, rs.date_et, (CASE WHEN rs.source = 'full' THEN 1 ELSE 0 END) DESC, rs.created_at DESC
+        ORDER BY rs.league, rs.date_et, (CASE WHEN rs.source = 'cached' THEN 0 ELSE 1 END) ASC, rs.created_at ASC
     )
     SELECT 
         ws.date_et AS day_et,
