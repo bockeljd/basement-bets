@@ -122,42 +122,46 @@ def run_predictions(window_hours: int = 24, lookback_hours: int = 4, show_errors
         scanned += 1
         game_id = g["id"] if isinstance(g, dict) else g[0]
         try:
-            res = model.analyze(game_id)
-            recommendations = res.get("recommendations", []) or []
+                res = model.analyze(game_id)
+                recommendations = res.get("recommendations", []) or []
 
-            if recommendations:
-                top_rec = recommendations[0]
-                matchup = f"{g['away_team']} @ {g['home_team']}"
-                mkt = str(top_rec.get('bet_type') or '').upper() or '—'
-                line = top_rec.get('market_line')
-                price = top_rec.get('price')
-                ev = top_rec.get('edge')
-                sel = str(top_rec.get('selection') or '').strip()
-                conf = top_rec.get('confidence')
-                book = top_rec.get('book')
-                fmt_conf = f" ({conf})" if conf else ''
-                fmt_book = f" [{book}]" if book else ''
+                if recommendations:
+                    top_rec = recommendations[0]
+                    # Update res['id'] if it was returned by persistence inside analyze()
+                    actual_pred_id = res.get('id')
+                    
+                    matchup = f"{g['away_team']} @ {g['home_team']}"
+                    mkt = str(top_rec.get('bet_type') or '').upper() or '—'
+                    line = top_rec.get('market_line')
+                    price = top_rec.get('price')
+                    ev = top_rec.get('edge')
+                    sel = str(top_rec.get('selection') or '').strip()
+                    conf = top_rec.get('confidence')
+                    book = top_rec.get('book')
+                    fmt_conf = f" ({conf})" if conf else ''
+                    fmt_book = f" [{book}]" if book else ''
 
-                print(
-                    f"{matchup:<40} | {mkt:<8} | {fmt_line(line):<8} | {fmt_odds(price):<6} | {fmt_ev(ev):<6} | {sel}{fmt_conf}{fmt_book}"
-                )
-                recs += 1
+                    print(
+                        f"{matchup:<40} | {mkt:<8} | {fmt_line(line):<8} | {fmt_odds(price):<6} | {fmt_ev(ev):<6} | {sel}{fmt_conf}{fmt_book}"
+                    )
+                    recs += 1
 
-                for rec in recommendations:
-                    pid = rec.get('prediction_id')
-                    if not pid:
-                        continue
-                    ev_val = parse_edge(rec.get('edge'))
-                    persisted.append({
-                        'prediction_id': pid,
-                        'ev_per_unit': ev_val,
-                        'selection': rec.get('selection'),
-                        'price': rec.get('price'),
-                        'event_id': str(game_id),
-                        'matchup': matchup,
-                        'market_type': rec.get('bet_type'),
-                        'bet_line': rec.get('market_line') if rec.get('market_line') is not None else rec.get('line'),
-                    })
+                    for rec in recommendations:
+                        # Use the actual ID from the persistence layer if available
+                        pid = rec.get('prediction_id') or actual_pred_id
+                        if not pid:
+                            continue
+                        ev_val = parse_edge(rec.get('edge'))
+                        persisted.append({
+                            'prediction_id': pid,
+                            'ev_per_unit': ev_val,
+                            'selection': rec.get('selection'),
+                            'price': rec.get('price'),
+                            'event_id': str(game_id),
+                            'matchup': matchup,
+                            'market_type': rec.get('bet_type'),
+                            'bet_line': rec.get('market_line') if rec.get('market_line') is not None else rec.get('line'),
+                        })
         except Exception as e:
             errors += 1
             if show_errors:
