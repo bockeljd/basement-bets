@@ -373,15 +373,13 @@ export default function Picks() {
       if (!gByDay[day]) gByDay[day] = [];
       gByDay[day].push(h);
     });
-
-    // For each day, take only Top 6 (by EV) for performance tracking
+    // Track performance for all recommended bets per day
     Object.keys(gByDay).forEach(day => {
-      const top6 = gByDay[day]
-        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0))
-        .slice(0, 6);
+      const topPicks = gByDay[day]
+        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0));
 
       byDay[day] = byDay[day] || { day, units: 0, wins: 0, losses: 0, pushes: 0, picks: 0 };
-      top6.forEach(h => {
+      topPicks.forEach(h => {
         const res = h.graded_result || h.outcome || h.result;
         byDay[day].picks += 1;
         byDay[day].units += unit(h);
@@ -465,8 +463,7 @@ export default function Picks() {
     const topPicksAll = [];
     Object.values(gByDay).forEach(dayList => {
       const top6 = dayList
-        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0))
-        .slice(0, 6);
+        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0));
       topPicksAll.push(...top6);
     });
 

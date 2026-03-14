@@ -211,7 +211,8 @@ def run_predictions(window_hours: int = 24, lookback_hours: int = 4, show_errors
 
     try:
         ensure_recommended_slates_tables()
-        top = sorted(persisted, key=lambda x: float(x.get('ev_per_unit') or 0.0), reverse=True)[:6]
+        # No longer slicing to Top 6; track all persisted recommendations
+        top = sorted(persisted, key=lambda x: float(x.get('ev_per_unit') or 0.0), reverse=True)
         if top:
             import uuid
             slate_id = str(uuid.uuid4())
