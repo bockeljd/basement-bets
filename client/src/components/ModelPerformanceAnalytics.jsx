@@ -9,32 +9,13 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const [hoverConfIdx, setHoverConfIdx] = useState(null);
     const [hoverTop6Idx, setHoverTop6Idx] = useState(null);
 
-    // --- Top 6 Filtering Logic ---
-    // User strategy is only Top 6 (by EV/u). We must filter the entire history prop
-    // to strictly include ONLY the Top 6 picks per day to avoid "stale" or "noise" data.
-    const filteredToTop6 = (() => {
-        const groups = {};
-        history.forEach(h => {
-            const day = getPerformanceDay(h);
-            if (!day) return;
-            if (!groups[day]) groups[day] = [];
-            groups[day].push(h);
-        });
-        const out = [];
-        Object.values(groups).forEach(dayList => {
-            const top6 = dayList
-                .sort((a, b) => {
-                    const aVal = parseFloat(a.ev_per_unit || a.ev || 0);
-                    const bVal = parseFloat(b.ev_per_unit || b.ev || 0);
-                    return bVal - aVal;
-                })
-                .slice(0, 6);
-            out.push(...top6);
-        });
-        return out;
+    // History analytics now includes ALL recommended bets (previously restricted to Top 6)
+    // to give a comprehensive view of model performance across the entire slate.
+    const filteredToAll = (() => {
+        return history.filter(h => h.id || h.prediction_id); 
     })();
 
-    const graded = filteredToTop6.filter(h => isGradedOutcome(h.graded_result || h.outcome || h.result));
+    const graded = filteredToAll.filter(h => isGradedOutcome(h.graded_result || h.outcome || h.result));
     const wins = graded.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
     const losses = graded.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
     const pushes = graded.filter(h => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
@@ -227,8 +208,7 @@ const ModelPerformanceAnalytics = ({ history }) => {
                     const xEv = parseFloat(x.ev_per_unit || x.ev || 0);
                     const yEv = parseFloat(y.ev_per_unit || y.ev || 0);
                     return yEv - xEv;
-                })
-                .slice(0, topN);
+                });
 
             const w = bets.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
             const l = bets.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
@@ -297,10 +277,10 @@ const ModelPerformanceAnalytics = ({ history }) => {
                 const bVal = parseFloat(b.ev_per_unit || b.ev || 0);
                 return bVal - aVal;
             });
-            const top6 = sorted.slice(0, 6);
+            const topPicks = sorted;
 
-            const w = top6.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
-            const l = top6.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
+            const w = topPicks.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
+            const l = topPicks.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
             const decided = w + l;
             const wr = decided > 0 ? (w / decided * 100) : null;
             seriesTop6.push(wr);
