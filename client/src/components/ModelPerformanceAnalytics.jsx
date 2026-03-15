@@ -272,15 +272,11 @@ const ModelPerformanceAnalytics = ({ history }) => {
         const seriesTop6 = [];
         for (const key of dayKeys) {
             const rows = byDay[key] || [];
-            const sorted = [...rows].sort((a, b) => {
-                const aVal = parseFloat(a.ev_per_unit || a.ev || 0);
-                const bVal = parseFloat(b.ev_per_unit || b.ev || 0);
-                return bVal - aVal;
-            });
-            const topPicks = sorted;
+            // Use locked-in ranks 1-6 for the "Top 6" series chart
+            const rankedPicks = rows.filter(r => r.rank >= 1 && r.rank <= 6);
 
-            const w = topPicks.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
-            const l = topPicks.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
+            const w = rankedPicks.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
+            const l = rankedPicks.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
             const decided = w + l;
             const wr = decided > 0 ? (w / decided * 100) : null;
             seriesTop6.push(wr);

@@ -117,48 +117,45 @@ export default function Picks() {
     return Number.isFinite(ev) ? ev : 0;
   };
 
-  const top6YesterdayStraight = useMemo(() => {
+  const recoYesterdayStraight = useMemo(() => {
     return (yesterdaySlate || [])
       .filter(h => {
         const c = classify(h);
         return c === 'SPREAD' || c === 'TOTAL';
       })
-      .sort((a, b) => getEv(b) - getEv(a))
-      .slice(0, 6);
+      .sort((a, b) => (a.rank || 999) - (b.rank || 999));
   }, [yesterdaySlate]);
 
-  const top6YesterdayMlParlay = useMemo(() => {
+  const recoYesterdayMlParlay = useMemo(() => {
     return (yesterdaySlate || [])
       .filter(h => {
         const c = classify(h);
         return c === 'MONEYLINE' || c === 'PARLAY';
       })
-      .sort((a, b) => getEv(b) - getEv(a))
-      .slice(0, 6);
+      .sort((a, b) => (a.rank || 999) - (b.rank || 999));
   }, [yesterdaySlate]);
 
-  const top6Yesterday = useMemo(() => {
+  const recoYesterdayAll = useMemo(() => {
     return (yesterdaySlate || [])
       .slice()
-      .sort((a, b) => getEv(b) - getEv(a))
-      .slice(0, 6);
+      .sort((a, b) => (a.rank || 999) - (b.rank || 999));
   }, [yesterdaySlate]);
 
   const gradedYesterdayStraight = useMemo(() => {
-    return top6YesterdayStraight.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
-  }, [top6YesterdayStraight]);
+    return recoYesterdayStraight.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
+  }, [recoYesterdayStraight]);
 
   const gradedYesterdayMlParlay = useMemo(() => {
-    return top6YesterdayMlParlay.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
-  }, [top6YesterdayMlParlay]);
+    return recoYesterdayMlParlay.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
+  }, [recoYesterdayMlParlay]);
 
   const gradedYesterday = useMemo(() => {
-    return top6Yesterday.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
-  }, [top6Yesterday]);
+    return recoYesterdayAll.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
+  }, [recoYesterdayAll]);
 
   const pendingYesterday = useMemo(() => {
-    return top6Yesterday.filter((h) => !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
-  }, [top6Yesterday]);
+    return recoYesterdayAll.filter((h) => !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
+  }, [recoYesterdayAll]);
 
   const recordFor = (rows) => {
     const w = (rows || []).filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
@@ -238,17 +235,14 @@ export default function Picks() {
       6: { w: 0, l: 0 },
     };
 
-    // Yesterday: determine W/L/P by rank (Top-6 by EV/u).
+    // Yesterday: determine W/L/P by rank (locked in from database).
     const yByRank = { 1: null, 2: null, 3: null, 4: null, 5: null, 6: null };
     try {
       const yRows = (yesterdaySlate || [])
-        .slice()
-        .sort((a, b) => (ev(b) ?? -999) - (ev(a) ?? -999))
-        .slice(0, 6);
-      yRows.forEach((h, idx) => {
-        const rank = idx + 1;
+        .filter(h => h.rank >= 1 && h.rank <= 6);
+      yRows.forEach((h) => {
+        const rank = h.rank;
         const res = h.graded_result || h.outcome || h.result;
-        if (rank < 1 || rank > 6) return;
         if (isWinOutcome(res)) yByRank[rank] = 'W';
         else if (isLossOutcome(res)) yByRank[rank] = 'L';
         else if (normalizeOutcome(res) === 'PUSH') yByRank[rank] = 'P';
@@ -257,13 +251,13 @@ export default function Picks() {
     } catch (e) { }
 
     Object.keys(byDay).forEach((day) => {
-      const rows = (byDay[day] || [])
-        .slice()
-        .sort((a, b) => (ev(b) ?? -999) - (ev(a) ?? -999));
-      const top6 = rows.slice(0, 6);
-      top6.forEach((h, idx) => {
-        const rank = idx + 1;
+      const rows = (byDay[day] || []);
+      // Only include items with explicit static ranks 1-6 for the rank analytics chart
+      const rankedItems = rows.filter(h => h.rank >= 1 && h.rank <= 6);
+      rankedItems.forEach((h) => {
+        const rank = h.rank;
         const res = h.graded_result || h.outcome || h.result;
+        agg[rank] = agg[rank] || { w: 0, l: 0 };
         if (isWinOutcome(res)) agg[rank].w += 1;
         else if (isLossOutcome(res)) agg[rank].l += 1;
       });
@@ -598,7 +592,7 @@ export default function Picks() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-2">
             <BarChart3 size={18} className="text-emerald-300" />
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Top 6 Recommended Spreads & Totals</div>
+            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Recommended Spreads & Totals</div>
             <div className="ml-auto flex items-center gap-2">
               <div className="text-xs text-slate-500">{yesterdayEt}</div>
               {pendingYesterday > 0 && (
@@ -687,9 +681,9 @@ export default function Picks() {
                   const ev = Number(h?.ev_per_unit ?? h?.ev);
                   return Number.isFinite(ev) ? ev : 0;
                 };
-                const base = (hasReco ? (recoStraight || []) : (top6YesterdayStraight || []));
+                const base = (hasReco ? (recoStraight || []) : (recoYesterdayStraight || []));
                 const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
-                return rows.slice(0, 6).map((h, idx) => {
+                return rows.map((h, idx) => {
                   const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();
                   const cls = out === 'WON' || out === 'WIN' ? 'text-green-300' : out === 'LOST' || out === 'LOSS' ? 'text-red-300' : out === 'PUSH' ? 'text-slate-300' : 'text-slate-500';
                   return (
@@ -708,7 +702,8 @@ export default function Picks() {
                   );
                 });
               })()}
-              {((hasReco ? recoStraight.length : gradedYesterdayStraight.length) > 6) && <div className="text-[11px] text-slate-500">Showing first 6.</div>}
+              {/* No longer capping to 6; show all */}
+
             </div>
           )}
         </div>
@@ -744,9 +739,9 @@ export default function Picks() {
                   const ev = Number(h?.ev_per_unit ?? h?.ev);
                   return Number.isFinite(ev) ? ev : 0;
                 };
-                const base = (hasReco ? (recoMlParlay || []) : (top6YesterdayMlParlay || []));
+                const base = (hasReco ? (recoMlParlay || []) : (recoYesterdayMlParlay || []));
                 const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
-                return rows.slice(0, 6).map((h, idx) => {
+                return rows.map((h, idx) => {
                   const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();
                   const cls = out === 'WON' || out === 'WIN' ? 'text-green-300' : out === 'LOST' || out === 'LOSS' ? 'text-red-300' : out === 'PUSH' ? 'text-slate-300' : 'text-slate-500';
                   return (
