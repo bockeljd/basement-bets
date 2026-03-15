@@ -2101,6 +2101,7 @@ async def trigger_lock_morning_slate(request: Request, authorized: bool = Depend
     job_key = "lock_morning_slate"
     from src.services.job_service import JobContext, JobLockedException
     import subprocess
+    import sys
     import os
     
     try:
