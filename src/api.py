@@ -3607,22 +3607,16 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
     with get_db_connection() as conn:
         yday = _exec(conn, "SELECT ((NOW() AT TIME ZONE 'America/New_York')::date - INTERVAL '1 day')::date::text").fetchone()[0]
 
-        # Pick the slate: prefer full.
+        # Pick the slate: prioritize 'cached' (morning slate) over 'full' (late slate)
+        # to ensure the "Yesterday" card matches the original recommendations.
         s = _exec(conn, """
           SELECT id, source, created_at
           FROM recommended_slates
-          WHERE league='NCAAM' AND date_et=%s AND source='full'
-          ORDER BY created_at DESC
+          WHERE league='NCAAM' AND date_et=%s
+          ORDER BY (CASE WHEN source = 'cached' THEN 0 ELSE 1 END) ASC, created_at ASC
           LIMIT 1
         """, (yday,)).fetchone()
-        if not s:
-            s = _exec(conn, """
-              SELECT id, source, created_at
-              FROM recommended_slates
-              WHERE league='NCAAM' AND date_et=%s
-              ORDER BY created_at DESC
-              LIMIT 1
-            """, (yday,)).fetchone()
+
 
         slate = dict(s) if s else None
         if not slate:
