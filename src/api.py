@@ -2093,6 +2093,33 @@ async def trigger_policy_refresh(request: Request, authorized: bool = Depends(ve
         print(f"[Job] Policy Refresh Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.api_route("/api/jobs/lock_morning_slate", methods=["GET", "POST"])
+async def trigger_lock_morning_slate(request: Request, authorized: bool = Depends(verify_cron_secret)):
+    """
+    Cron Job: Lock the morning slate for 'Yesterday' card stabilization.
+    """
+    job_key = "lock_morning_slate"
+    from src.services.job_service import JobContext, JobLockedException
+    import subprocess
+    import os
+    
+    try:
+        with JobContext(job_key) as ctx:
+            script_path = os.path.join(os.getcwd(), "scripts", "send_ncaam_top_picks_cached.py")
+            # Run without --force normally, just to capture whatever is current at 9 AM ET
+            result = subprocess.run([sys.executable, script_path], capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"[Job] Morning slate locked successfully: {result.stdout.splitlines()[0] if result.stdout else ''}")
+                return {"status": "success", "message": "Morning slate locked", "output": result.stdout.splitlines()[0] if result.stdout else ""}
+            else:
+                print(f"[Job] Morning slate lock failed: {result.stderr}")
+                return {"status": "error", "message": result.stderr}
+    except JobLockedException:
+        return {"status": "skipped", "reason": "Job execution overlapping (locked)"}
+    except Exception as e:
+        print(f"[Job] Morning slate lock failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.api_route("/api/jobs/ingest_torvik", methods=["GET", "POST"])
 async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(verify_cron_secret)):
     """

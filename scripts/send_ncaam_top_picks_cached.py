@@ -38,6 +38,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--date', default=None, help='ET date YYYY-MM-DD (default today ET)')
     ap.add_argument('--limit', type=int, default=100)
+    ap.add_argument('--force', action='store_true', help='Delete existing slate for date/source before creating new one')
     args = ap.parse_args()
 
     with get_db_connection() as conn:
@@ -93,6 +94,11 @@ def main():
         import uuid
         slate_id = str(uuid.uuid4())
         with get_db_connection() as conn:
+            if args.force:
+                print(f"FORCING re-generation: Deleting existing slates for {date_et} (source=cached)")
+                _exec(conn, "DELETE FROM recommended_slate_items WHERE slate_id IN (SELECT id FROM recommended_slates WHERE date_et=%s AND source='cached' AND league='NCAAM')", (date_et,))
+                _exec(conn, "DELETE FROM recommended_slates WHERE date_et=%s AND source='cached' AND league='NCAAM'", (date_et,))
+
             _exec(conn, """
               INSERT INTO recommended_slates (id, league, date_et, source)
               VALUES (%s, %s, %s, %s)

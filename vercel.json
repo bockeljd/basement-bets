@@ -52,6 +52,10 @@
         {
             "path": "/api/jobs/queue_sync/draftkings",
             "schedule": "0 7 * * *"
+        },
+        {
+            "path": "/api/jobs/lock_morning_slate",
+            "schedule": "0 13 * * *"
         }
     ]
 }
