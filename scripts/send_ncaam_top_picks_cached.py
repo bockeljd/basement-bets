@@ -37,7 +37,7 @@ def _ev_from_rec(rec: dict) -> Optional[float]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--date', default=None, help='ET date YYYY-MM-DD (default today ET)')
-    ap.add_argument('--limit', type=int, default=6)
+    ap.add_argument('--limit', type=int, default=100)
     args = ap.parse_args()
 
     with get_db_connection() as conn:
@@ -146,7 +146,7 @@ def main():
     except Exception:
         slate_id = None
 
-    print(f"Top {min(len(rows), int(args.limit))} Plays {date_et} • Sorted by EV%")
+    print(f"Actionable Plays for {date_et} • Sorted by EV%")
     if slate_id:
         print(f"[recommended_slate] id={slate_id} items={min(len(rows), int(args.limit))}")
 
