@@ -866,57 +866,99 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
     const champion = data.champion;
 
     return (
-        <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
 
             {/* Champion Banner */}
             {champion && (
-                <div className="relative overflow-hidden rounded-2xl border border-yellow-500/40 bg-gradient-to-br from-yellow-950/60 via-slate-900 to-slate-950 p-6 text-center shadow-2xl">
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-64 bg-yellow-500/10 rounded-full blur-[80px] pointer-events-none" />
+                <div className="relative overflow-hidden rounded-3xl border border-yellow-500/30 bg-gradient-to-br from-yellow-950/60 via-slate-900 to-slate-950 p-8 text-center shadow-[0_0_50px_-12px_rgba(234,179,8,0.3)] mx-auto max-w-2xl">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
                     <div className="relative">
-                        <div className="text-4xl mb-2">🏆</div>
-                        <div className="text-[10px] font-black text-yellow-400 uppercase tracking-[0.3em] mb-1">2026 Predicted National Champion</div>
-                        <div className="text-3xl md:text-4xl font-black text-white mb-3 tracking-tight">{champion}</div>
+                        <div className="text-5xl mb-4 animate-bounce">🏆</div>
+                        <div className="text-xs font-black text-yellow-500 uppercase tracking-[0.4em] mb-2">2026 Predicted National Champion</div>
+                        <div className="text-4xl md:text-5xl font-black text-white mb-4 tracking-tighter drop-shadow-lg">{champion}</div>
                         {champ && (
-                            <div className="flex flex-wrap justify-center gap-4 text-xs text-slate-400">
-                                <span>Win Prob: <span className="font-black text-yellow-400">{Math.max(champ.win_prob_a, champ.win_prob_b)}%</span></span>
-                                <span>Spread: <span className="font-black text-white">{champ.spread > 0 ? '+' : ''}{champ.spread}</span></span>
-                                <span>O/U: <span className="font-black text-white">{champ.total?.toFixed(1)}</span></span>
+                            <div className="flex flex-wrap justify-center gap-6 text-sm">
+                                <span className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50">Win Prob: <span className="font-black text-yellow-400">{Math.max(champ.win_prob_a, champ.win_prob_b)}%</span></span>
+                                <span className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50">Fair Spread: <span className="font-black text-white">{champ.spread > 0 ? '+' : ''}{champ.spread}</span></span>
+                                <span className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50">O/U: <span className="font-black text-white">{champ.total?.toFixed(1)}</span></span>
                             </div>
                         )}
+                        <p className="mt-6 text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-loose">
+                            Model Consensus | 10k Monte Carlo Trials | Market-Calibrated σ:{data.sigma_used || '10.5'}
+                        </p>
                     </div>
                 </div>
             )}
 
             {/* Final Four */}
             {data.final_four?.length > 0 && (
-                <div>
-                    <div className="flex items-center gap-3 border-b border-slate-800 pb-2 mb-4">
-                        <span className="text-xl font-black text-white italic">Final Four</span>
-                        <span className="px-2 py-0.5 rounded bg-yellow-900/40 text-[10px] font-bold text-yellow-400 uppercase tracking-tighter">National Semifinals</span>
+                <div className="space-y-4">
+                    <div className="flex items-center justify-center gap-4">
+                        <div className="h-px bg-gradient-to-r from-transparent via-slate-800 to-transparent flex-1" />
+                        <div className="flex items-center gap-3">
+                            <span className="text-2xl font-black text-white italic tracking-tighter">Final Four</span>
+                            <span className="px-3 py-1 rounded-full bg-yellow-900/40 text-[10px] font-black text-yellow-400 uppercase tracking-widest border border-yellow-500/20">National Semifinals</span>
+                        </div>
+                        <div className="h-px bg-gradient-to-r from-transparent via-slate-800 to-transparent flex-1" />
                     </div>
-                    <div className="grid md:grid-cols-2 gap-3">
-                        {data.final_four.map((m, i) => <MatchupCard key={i} m={m} onMatchupClick={onMatchupClick} />)}
+                    <div className="grid md:grid-cols-2 gap-4 max-w-4xl mx-auto">
+                        {data.final_four.map((m, i) => (
+                            <div key={i} className="group relative">
+                                <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-500" />
+                                <MatchupCard m={m} onMatchupClick={onMatchupClick} />
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
 
-            {/* Regional Brackets */}
-            <div className="grid lg:grid-cols-2 gap-10">
+            {/* Regional Brackets Overhaul */}
+            <div className="grid 2xl:grid-cols-2 gap-12">
                 {regions.map(name => {
                     const region = data.regions[name];
                     if (!region) return null;
                     return (
-                        <div key={name} className="space-y-4">
-                            <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
-                                <span className="text-xl font-black text-white italic">{name} Region</span>
+                        <div key={name} className="relative overflow-hidden rounded-3xl bg-slate-900/20 border border-slate-800/50 p-6 md:p-8">
+                            <div className="absolute top-0 right-0 p-8 opacity-5">
+                                <span className="text-8xl font-black text-white pointer-events-none">{name[0]}</span>
                             </div>
-                            <RoundSection title="Elite 8" badge="Regional Final" badgeColor="bg-rose-900/40 text-rose-400" matchups={region.elite_8} onMatchupClick={onMatchupClick} defaultOpen={true} />
-                            <RoundSection title="Sweet 16" badge="Round of 16" badgeColor="bg-purple-900/40 text-purple-400" matchups={region.sweet_16} onMatchupClick={onMatchupClick} defaultOpen={true} />
-                            <RoundSection title="Round of 32" badge="Second Round" badgeColor="bg-blue-900/40 text-blue-400" matchups={region.round_of_32} onMatchupClick={onMatchupClick} defaultOpen={false} />
-                            <RoundSection title="Round of 64" badge="First Round" badgeColor="bg-slate-800 text-slate-400" matchups={region.round_of_64} onMatchupClick={onMatchupClick} defaultOpen={false} />
+                            
+                            <div className="flex items-center gap-4 mb-8">
+                                <h3 className="text-2xl font-black text-white italic tracking-tighter">{name} Region</h3>
+                                <div className="h-px bg-slate-800 flex-1" />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 relative">
+                                {/* Connector lines could be SVGs here in a more complex tree, 
+                                    but for now we use a structured chronological round view */}
+                                
+                                {/* Round of 64 */}
+                                <div className="space-y-4 opacity-80 hover:opacity-100 transition shadow-inner">
+                                    <RoundSection title="Round of 64" badge="Opening" badgeColor="bg-slate-800 text-slate-500" matchups={region.round_of_64} onMatchupClick={onMatchupClick} defaultOpen={true} />
+                                </div>
+
+                                {/* Round of 32 */}
+                                <div className="space-y-4 pt-0 sm:pt-4 md:pt-12">
+                                    <RoundSection title="Round of 32" badge="2nd Round" badgeColor="bg-blue-900/40 text-blue-400" matchups={region.round_of_32} onMatchupClick={onMatchupClick} defaultOpen={true} />
+                                </div>
+
+                                {/* Sweet 16 */}
+                                <div className="space-y-4 pt-0 sm:pt-8 md:pt-24">
+                                    <RoundSection title="Sweet 16" badge="Regional Semi" badgeColor="bg-purple-900/40 text-purple-400" matchups={region.sweet_16} onMatchupClick={onMatchupClick} defaultOpen={true} />
+                                </div>
+
+                                {/* Elite 8 */}
+                                <div className="space-y-4 pt-0 sm:pt-12 md:pt-40">
+                                    <RoundSection title="Elite 8" badge="Regional Final" badgeColor="bg-rose-900/40 text-rose-400" matchups={region.elite_8} onMatchupClick={onMatchupClick} defaultOpen={true} />
+                                </div>
+                            </div>
                         </div>
                     );
                 })}
+            </div>
+            
+            <div className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-widest pb-10">
+                Data calibrated via Torvik AdjEM & KenPom ratings • Updated {new Date(data.simulated_at).toLocaleDateString()}
             </div>
         </div>
     );
