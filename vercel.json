@@ -12,7 +12,7 @@
     ],
     "functions": {
         "api/**/*.py": {
-            "includeFiles": "src/api_extensions/resources/tournament_predictions_2026.json",
+            "includeFiles": "src/api_extensions/tournament_predictions_2026.json",
             "excludeFiles": "{tests/**,docs/**,scripts/**,client/**,data/**,**/*.db,**/*.parquet,node_modules/**,venv/**,.venv/**,chrome_profile/**,chrome_profile_fd/**,playwright_profile_fd/**,test_profile/**}",
             "maxDuration": 60
         }

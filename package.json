@@ -6,7 +6,7 @@
     ],
     "scripts": {
         "build": "cd client && npm install && npm rebuild && npm run build",
-        "vercel-build": "cd client && npm install && npm rebuild && npm run build # v1.2.1-deploy-v11"
+        "vercel-build": "cd client && npm install && npm rebuild && npm run build # v1.2.1-deploy-v12"
     },
     "engines": {
         "node": ">=18"

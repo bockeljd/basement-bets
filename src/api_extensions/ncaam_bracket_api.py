@@ -28,7 +28,7 @@ async def get_2026_bracket(request: Request):
             
         # 2. Load pre-computed projections
         _dir = os.path.dirname(os.path.abspath(__file__))
-        proj_path = os.path.join(_dir, "resources", "tournament_predictions_2026.json")
+        proj_path = os.path.join(_dir, "tournament_predictions_2026.json")
         projections = {}
         if os.path.exists(proj_path):
             with open(proj_path, "r") as f:
@@ -66,9 +66,9 @@ async def get_2026_bracket(request: Request):
                 "proj_path": proj_path,
                 "exists": os.path.exists(proj_path),
                 "dir_contents": os.listdir(_dir) if os.path.exists(_dir) else "DIR_NOT_FOUND",
-                "resources_contents": os.listdir(os.path.join(_dir, "resources")) if os.path.exists(os.path.join(_dir, "resources")) else "RES_NOT_FOUND",
                 "cwd": os.getcwd(),
-                "file_path": __file__
+                "file_path": __file__,
+                "v": 2
             }
         }
 
