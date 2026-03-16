@@ -61,7 +61,13 @@ async def get_2026_bracket(request: Request):
             "champion": projections.get("champion"),
             "championship": projections.get("championship"),
             "final_four": enrich_matchups(projections.get("final_four", [])),
-            "regions": {}
+            "regions": {},
+            "debug_info": {
+                "proj_path": proj_path,
+                "exists": os.path.exists(proj_path),
+                "dir_contents": os.listdir(_dir) if os.path.exists(_dir) else "DIR_NOT_FOUND",
+                "cwd": os.getcwd()
+            }
         }
 
         for region in ["East", "South", "West", "Midwest"]:
