@@ -9,6 +9,9 @@ class TeamMatcher:
     to Data Source Names (e.g. 'Duke' in Torvik/KenPom).
     """
 
+    # Class-level cache to share across instances
+    _source_names_cache = {}
+
     def __init__(self):
         self._cache = {}
 
@@ -29,18 +32,18 @@ class TeamMatcher:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
+        # Use class-level cache for source names to avoid repeated SELECT DISTINCT
+        source_cache_key = (source_table, source_col)
+        if source_cache_key not in TeamMatcher._source_names_cache:
+            with get_db_connection() as conn:
+                # Use a more efficient query or just fetch known teams
+                # If these are metrics tables, fetching DISTINCT team names once is best.
+                rows = _exec(conn, f"SELECT DISTINCT {source_col} FROM {source_table}").fetchall()
+                TeamMatcher._source_names_cache[source_cache_key] = [r[0] for r in rows if r[0]]
+        
+        source_names = TeamMatcher._source_names_cache[source_cache_key]
         norm_event = self.normalize(event_team_name)
         
-        with get_db_connection() as conn:
-            # Fetch all candidate names from source
-            # This is cached in memory per instance usually, but for now we fetch simply
-            # Optimization: fetch distinct names once? No, do it query time for simplicity or fetch all
-            
-            # Let's fetch all source names once per call or use a LIKE query?
-            # Fetching all ~360 names is cheap.
-            rows = _exec(conn, f"SELECT DISTINCT {source_col} FROM {source_table}").fetchall()
-            source_names = [r[0] for r in rows if r[0]]
-
         best_match = None
         
         # 1. Exact Match Check
@@ -50,50 +53,35 @@ class TeamMatcher:
                 break
         
         # 2. Substring/Prefix Check
-        # Find ALL candidates that are prefixes, then pick longest
-        candidates = []
-        for s in source_names:
-            norm_s = self.normalize(s)
-            if norm_event.startswith(norm_s):
-                 # Length/Diff check
-                 if len(norm_event) > len(norm_s):
-                     # Boundary check: next char must be space if not end (implied by len check and regex norm)
-                     # Normalized string "southern miss golden eagles" starts with "southern" (len 8). Next char at 8 is ' '.
-                     # Starts with "southern miss" (len 13). Next char at 13 is ' '.
-                     # Logic:
-                     if len(norm_s) < len(norm_event) and norm_event[len(norm_s)] != ' ':
-                         continue # E.g. "Io" in "Iowa" -> "io" (2) != "iowa" (4). norm_event[2] is 'w'. Skip.
-                     
-                     candidates.append(s)
-        
-        if candidates:
-            # Sort by length descending (Longest match is best match)
-            # e.g. ["Southern", "Southern Miss"] -> "Southern Miss"
-            candidates.sort(key=lambda x: len(x), reverse=True)
-            best_match = candidates[0]
-        
-        # 3. Reverse Check (Source 'Miami FL' vs 'Miami') - hard to generalize
-        
-        # 4. Hardcoded Fixes (if needed)
-        # e.g. "Southern Miss" vs "Southern Mississippi"
         if not best_match:
-            # Quick Map
+            candidates = []
+            for s in source_names:
+                norm_s = self.normalize(s)
+                if norm_event.startswith(norm_s):
+                     if len(norm_s) < len(norm_event) and norm_event[len(norm_s)] != ' ':
+                         continue
+                     candidates.append(s)
+            
+            if candidates:
+                candidates.sort(key=lambda x: len(x), reverse=True)
+                best_match = candidates[0]
+        
+        # 3. Hardcoded Fixes
+        if not best_match:
             manual_map = {
                 "southern miss golden eagles": "Southern Miss",
                 "miami fl hurricanes": "Miami FL",
                 "miami (fl) hurricanes": "Miami FL",
-                "uconn huskies": "Connecticut", # Torvik uses different names sometimes
+                "uconn huskies": "Connecticut",
                 "ole miss rebels": "Ole Miss",
             }
-            # Check map
             for k, v in manual_map.items():
                 if k in norm_event:
-                    # Check if v is in source_names
-                    # This requires case insensitive match on v
                     for s in source_names:
                         if self.normalize(s) == self.normalize(v):
                             best_match = s
                             break
+                    if best_match: break
         
         self._cache[cache_key] = best_match
         return best_match

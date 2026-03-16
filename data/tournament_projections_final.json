@@ -1,0 +1,218 @@
+{
+  "East": [
+    {
+      "home": "Duke",
+      "away": "Siena",
+      "spread": 4.103000000000001,
+      "total": 143.18265962264152,
+      "home_rank": 1,
+      "away_rank": 192
+    },
+    {
+      "home": "Ohio",
+      "away": "TCU",
+      "spread": -2.317,
+      "total": 152.1215977122642,
+      "home_rank": 228,
+      "away_rank": 43
+    },
+    {
+      "home": "St. John's",
+      "away": "Northern Iowa",
+      "spread": 1.406,
+      "total": 137.82555849056604,
+      "home_rank": 16,
+      "away_rank": 71
+    },
+    {
+      "home": "Kansas",
+      "away": "California",
+      "spread": 1.2990000000000002,
+      "total": 146.32530070754717,
+      "home_rank": 21,
+      "away_rank": 74
+    },
+    {
+      "home": "Louisville",
+      "away": "South Florida",
+      "spread": 0.9590000000000001,
+      "total": 161.75986584905667,
+      "home_rank": 19,
+      "away_rank": 49
+    },
+    {
+      "home": "Michigan",
+      "away": "North Dakota",
+      "spread": 4.7860000000000005,
+      "total": 156.0545483490566,
+      "home_rank": 2,
+      "away_rank": 275
+    },
+    {
+      "home": "UCLA",
+      "away": "UCF",
+      "spread": 0.659,
+      "total": 160.2066391509434,
+      "home_rank": 27,
+      "away_rank": 54
+    }
+  ],
+  "South": [
+    {
+      "home": "Florida",
+      "away": "Lehigh",
+      "spread": 4.4190000000000005,
+      "total": 151.73593358490567,
+      "home_rank": 4,
+      "away_rank": 284
+    },
+    {
+      "home": "Clemson",
+      "away": "Iowa",
+      "spread": -0.31700000000000017,
+      "total": 140.90103471698112,
+      "home_rank": 36,
+      "away_rank": 25
+    },
+    {
+      "home": "Vanderbilt",
+      "away": "McNeese",
+      "spread": 1.563,
+      "total": 154.84736603773584,
+      "home_rank": 11,
+      "away_rank": 68
+    },
+    {
+      "home": "Nebraska",
+      "away": "Troy",
+      "spread": 2.439,
+      "total": 143.62454268867927,
+      "home_rank": 14,
+      "away_rank": 143
+    },
+    {
+      "home": "North Carolina",
+      "away": "VCU",
+      "spread": 0.3870000000000001,
+      "total": 158.4592869811321,
+      "home_rank": 29,
+      "away_rank": 46
+    },
+    {
+      "home": "Illinois",
+      "away": "Penn",
+      "spread": 3.1290000000000004,
+      "total": 155.1910433962264,
+      "home_rank": 7,
+      "away_rank": 159
+    },
+    {
+      "home": "Saint Mary's",
+      "away": "Texas A&M",
+      "spread": 0.44800000000000006,
+      "total": 152.24003773584906,
+      "home_rank": 24,
+      "away_rank": 39
+    },
+    {
+      "home": "Houston",
+      "away": "Idaho",
+      "spread": 3.186,
+      "total": 143.82317283018867,
+      "home_rank": 5,
+      "away_rank": 145
+    }
+  ],
+  "West": [
+    {
+      "home": "Villanova",
+      "away": "Utah",
+      "spread": 1.6310000000000002,
+      "total": 153.906329764151,
+      "home_rank": 33,
+      "away_rank": 126
+    },
+    {
+      "home": "Wisconsin",
+      "away": "High Point",
+      "spread": 1.499,
+      "total": 167.26300235849058,
+      "home_rank": 22,
+      "away_rank": 92
+    },
+    {
+      "home": "Arkansas",
+      "away": "Hawaii",
+      "spread": 1.9450000000000003,
+      "total": 158.56071837264153,
+      "home_rank": 18,
+      "away_rank": 107
+    },
+    {
+      "home": "Purdue",
+      "away": "Queens",
+      "spread": 3.1940000000000004,
+      "total": 170.18204594339625,
+      "home_rank": 8,
+      "away_rank": 181
+    }
+  ],
+  "Midwest": [
+    {
+      "home": "Michigan",
+      "away": "Howard",
+      "spread": 4.152,
+      "total": 148.11421365566036,
+      "home_rank": 2,
+      "away_rank": 207
+    },
+    {
+      "home": "Georgia",
+      "away": "Saint Louis",
+      "spread": 0.21500000000000022,
+      "total": 168.61192160377357,
+      "home_rank": 32,
+      "away_rank": 41
+    },
+    {
+      "home": "Texas",
+      "away": "Akron",
+      "spread": 0.6230000000000001,
+      "total": 167.6383374056604,
+      "home_rank": 37,
+      "away_rank": 64
+    },
+    {
+      "home": "Alabama",
+      "away": "Hofstra",
+      "spread": 1.6239999999999999,
+      "total": 165.22974339622638,
+      "home_rank": 17,
+      "away_rank": 88
+    },
+    {
+      "home": "Tennessee",
+      "away": "SMU",
+      "spread": 0.7960000000000002,
+      "total": 153.72725094339626,
+      "home_rank": 15,
+      "away_rank": 42
+    },
+    {
+      "home": "Kentucky",
+      "away": "Santa Clara",
+      "spread": 0.209,
+      "total": 161.11486641509438,
+      "home_rank": 28,
+      "away_rank": 35
+    },
+    {
+      "home": "Iowa",
+      "away": "Tennessee",
+      "spread": -0.36600000000000005,
+      "total": 142.77295358490562,
+      "home_rank": 25,
+      "away_rank": 15
+    }
+  ]
+}

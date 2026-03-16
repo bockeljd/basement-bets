@@ -1,0 +1,320 @@
+{
+  "East": [
+    {
+      "team_a": "Duke Blue Devils",
+      "team_b": "Siena Saints",
+      "spread": 0.12,
+      "total": 144.89,
+      "win_prob_a": 50.0,
+      "win_prob_b": 50.0,
+      "winner": "Siena Saints",
+      "summary": "MC Simulations: 10000 | Sigma: 13.5"
+    },
+    {
+      "team_a": "Ohio State Buckeyes",
+      "team_b": "TCU Horned Frogs",
+      "spread": 0.0,
+      "total": 144.97,
+      "win_prob_a": 50.2,
+      "win_prob_b": 49.8,
+      "winner": "Ohio State Buckeyes",
+      "summary": "MC Simulations: 10000 | Sigma: 11.6"
+    },
+    {
+      "team_a": "Kansas Jayhawks",
+      "team_b": "California Baptist Lancers",
+      "spread": -0.09,
+      "total": 145.0,
+      "win_prob_a": 50.8,
+      "win_prob_b": 49.2,
+      "winner": "Kansas Jayhawks",
+      "summary": "MC Simulations: 10000 | Sigma: 11.7"
+    },
+    {
+      "team_a": "Louisville Cardinals",
+      "team_b": "South Florida Bulls",
+      "spread": -0.04,
+      "total": 145.11,
+      "win_prob_a": 50.1,
+      "win_prob_b": 49.9,
+      "winner": "Louisville Cardinals",
+      "summary": "MC Simulations: 10000 | Sigma: 11.5"
+    },
+    {
+      "team_a": "Michigan State Spartans",
+      "team_b": "North Dakota State Bison",
+      "spread": -0.13,
+      "total": 144.81,
+      "win_prob_a": 50.5,
+      "win_prob_b": 49.5,
+      "winner": "Michigan State Spartans",
+      "summary": "MC Simulations: 10000 | Sigma: 15.0"
+    },
+    {
+      "team_a": "UCLA Bruins",
+      "team_b": "UCF Knights",
+      "spread": -0.02,
+      "total": 144.89,
+      "win_prob_a": 50.2,
+      "win_prob_b": 49.8,
+      "winner": "UCLA Bruins",
+      "summary": "MC Simulations: 10000 | Sigma: 15.6"
+    },
+    {
+      "team_a": "UConn Huskies",
+      "team_b": "Furman Paladins",
+      "spread": -0.27,
+      "total": 144.91,
+      "win_prob_a": 50.8,
+      "win_prob_b": 49.2,
+      "winner": "UConn Huskies",
+      "summary": "MC Simulations: 10000 | Sigma: 12.9"
+    }
+  ],
+  "South": [
+    {
+      "team_a": "Florida Gators",
+      "team_b": "Lehigh / Prairie View A&M",
+      "spread": 0.16,
+      "total": 144.93,
+      "win_prob_a": 49.4,
+      "win_prob_b": 50.6,
+      "winner": "Lehigh / Prairie View A&M",
+      "summary": "MC Simulations: 10000 | Sigma: 13.9"
+    },
+    {
+      "team_a": "Clemson Tigers",
+      "team_b": "Iowa Hawkeyes",
+      "spread": -0.25,
+      "total": 145.01,
+      "win_prob_a": 50.7,
+      "win_prob_b": 49.3,
+      "winner": "Clemson Tigers",
+      "summary": "MC Simulations: 10000 | Sigma: 15.9"
+    },
+    {
+      "team_a": "Vanderbilt Commodores",
+      "team_b": "McNeese Cowboys",
+      "spread": 1.49,
+      "total": 144.93,
+      "win_prob_a": 44.8,
+      "win_prob_b": 55.2,
+      "winner": "McNeese Cowboys",
+      "summary": "MC Simulations: 10000 | Sigma: 10.5"
+    },
+    {
+      "team_a": "Nebraska Cornhuskers",
+      "team_b": "Troy Trojans",
+      "spread": 0.04,
+      "total": 144.81,
+      "win_prob_a": 50.0,
+      "win_prob_b": 50.0,
+      "winner": "Troy Trojans",
+      "summary": "MC Simulations: 10000 | Sigma: 12.4"
+    },
+    {
+      "team_a": "North Carolina Tar Heels",
+      "team_b": "VCU Rams",
+      "spread": -0.13,
+      "total": 145.27,
+      "win_prob_a": 50.0,
+      "win_prob_b": 50.0,
+      "winner": "North Carolina Tar Heels",
+      "summary": "MC Simulations: 10000 | Sigma: 11.2"
+    },
+    {
+      "team_a": "Illinois Fighting Illini",
+      "team_b": "Penn Quakers",
+      "spread": -0.01,
+      "total": 144.9,
+      "win_prob_a": 49.7,
+      "win_prob_b": 50.3,
+      "winner": "Penn Quakers",
+      "summary": "MC Simulations: 10000 | Sigma: 13.0"
+    },
+    {
+      "team_a": "Saint Mary's Gaels",
+      "team_b": "Texas A&M Aggies",
+      "spread": 0.0,
+      "total": 144.95,
+      "win_prob_a": 49.8,
+      "win_prob_b": 50.2,
+      "winner": "Texas A&M Aggies",
+      "summary": "MC Simulations: 10000 | Sigma: 11.1"
+    },
+    {
+      "team_a": "Houston Cougars",
+      "team_b": "Idaho Vandals",
+      "spread": 0.02,
+      "total": 145.04,
+      "win_prob_a": 49.6,
+      "win_prob_b": 50.4,
+      "winner": "Idaho Vandals",
+      "summary": "MC Simulations: 10000 | Sigma: 14.3"
+    }
+  ],
+  "West": [
+    {
+      "team_a": "Arizona Wildcats",
+      "team_b": "Long Island Sharks",
+      "spread": 0.01,
+      "total": 144.99,
+      "win_prob_a": 50.1,
+      "win_prob_b": 49.9,
+      "winner": "Arizona Wildcats",
+      "summary": "MC Simulations: 10000 | Sigma: 10.5"
+    },
+    {
+      "team_a": "Villanova Wildcats",
+      "team_b": "Utah State Aggies",
+      "spread": 0.05,
+      "total": 144.97,
+      "win_prob_a": 49.8,
+      "win_prob_b": 50.2,
+      "winner": "Utah State Aggies",
+      "summary": "MC Simulations: 10000 | Sigma: 15.1"
+    },
+    {
+      "team_a": "Wisconsin Badgers",
+      "team_b": "High Point Panthers",
+      "spread": -0.01,
+      "total": 144.85,
+      "win_prob_a": 50.3,
+      "win_prob_b": 49.7,
+      "winner": "Wisconsin Badgers",
+      "summary": "MC Simulations: 10000 | Sigma: 12.0"
+    },
+    {
+      "team_a": "Arkansas Razorbacks",
+      "team_b": "Hawaii Rainbow Warriors",
+      "spread": 0.03,
+      "total": 145.09,
+      "win_prob_a": 49.6,
+      "win_prob_b": 50.4,
+      "winner": "Hawaii Rainbow Warriors",
+      "summary": "MC Simulations: 10000 | Sigma: 12.2"
+    },
+    {
+      "team_a": "BYU Cougars",
+      "team_b": "NC State / Texas",
+      "spread": 0.49,
+      "total": 145.53,
+      "win_prob_a": 48.3,
+      "win_prob_b": 51.7,
+      "winner": "NC State / Texas",
+      "summary": "MC Simulations: 10000 | Sigma: 10.5"
+    },
+    {
+      "team_a": "Gonzaga Bulldogs",
+      "team_b": "Kennesaw State Owls",
+      "spread": 0.15,
+      "total": 145.09,
+      "win_prob_a": 49.6,
+      "win_prob_b": 50.4,
+      "winner": "Kennesaw State Owls",
+      "summary": "MC Simulations: 10000 | Sigma: 10.5"
+    },
+    {
+      "team_a": "Miami (FL) Hurricanes",
+      "team_b": "Missouri Tigers",
+      "spread": 0.63,
+      "total": 144.57,
+      "win_prob_a": 47.5,
+      "win_prob_b": 52.5,
+      "winner": "Missouri Tigers",
+      "summary": "MC Simulations: 10000 | Sigma: 10.5"
+    },
+    {
+      "team_a": "Purdue Boilermakers",
+      "team_b": "Queens (N.C.) Royals",
+      "spread": 0.1,
+      "total": 145.08,
+      "win_prob_a": 49.8,
+      "win_prob_b": 50.2,
+      "winner": "Queens (N.C.) Royals",
+      "summary": "MC Simulations: 10000 | Sigma: 13.5"
+    }
+  ],
+  "Midwest": [
+    {
+      "team_a": "Michigan Wolverines",
+      "team_b": "Howard / UMBC",
+      "spread": 0.07,
+      "total": 145.0,
+      "win_prob_a": 49.8,
+      "win_prob_b": 50.2,
+      "winner": "Howard / UMBC",
+      "summary": "MC Simulations: 10000 | Sigma: 14.1"
+    },
+    {
+      "team_a": "Georgia Bulldogs",
+      "team_b": "Saint Louis Billikens",
+      "spread": 0.03,
+      "total": 144.91,
+      "win_prob_a": 50.1,
+      "win_prob_b": 49.9,
+      "winner": "Georgia Bulldogs",
+      "summary": "MC Simulations: 10000 | Sigma: 17.1"
+    },
+    {
+      "team_a": "Texas Tech Red Raiders",
+      "team_b": "Akron Zips",
+      "spread": -0.04,
+      "total": 144.86,
+      "win_prob_a": 50.5,
+      "win_prob_b": 49.5,
+      "winner": "Texas Tech Red Raiders",
+      "summary": "MC Simulations: 10000 | Sigma: 11.9"
+    },
+    {
+      "team_a": "Alabama Crimson Tide",
+      "team_b": "Hofstra Pride",
+      "spread": -0.09,
+      "total": 145.08,
+      "win_prob_a": 50.6,
+      "win_prob_b": 49.4,
+      "winner": "Alabama Crimson Tide",
+      "summary": "MC Simulations: 10000 | Sigma: 15.5"
+    },
+    {
+      "team_a": "Tennessee Volunteers",
+      "team_b": "SMU / Miami (OH)",
+      "spread": -0.19,
+      "total": 145.06,
+      "win_prob_a": 50.9,
+      "win_prob_b": 49.1,
+      "winner": "Tennessee Volunteers",
+      "summary": "MC Simulations: 10000 | Sigma: 11.5"
+    },
+    {
+      "team_a": "Virginia Cavaliers",
+      "team_b": "Wright State Raiders",
+      "spread": 0.1,
+      "total": 144.99,
+      "win_prob_a": 49.6,
+      "win_prob_b": 50.4,
+      "winner": "Wright State Raiders",
+      "summary": "MC Simulations: 10000 | Sigma: 10.5"
+    },
+    {
+      "team_a": "Kentucky Wildcats",
+      "team_b": "Santa Clara Broncos",
+      "spread": 0.01,
+      "total": 145.16,
+      "win_prob_a": 49.8,
+      "win_prob_b": 50.2,
+      "winner": "Santa Clara Broncos",
+      "summary": "MC Simulations: 10000 | Sigma: 15.3"
+    },
+    {
+      "team_a": "Iowa State Cyclones",
+      "team_b": "Tennessee State Tigers",
+      "spread": -0.05,
+      "total": 145.16,
+      "win_prob_a": 50.4,
+      "win_prob_b": 49.6,
+      "winner": "Iowa State Cyclones",
+      "summary": "MC Simulations: 10000 | Sigma: 16.1"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+
+{
+  "East": [
+    ["Duke Blue Devils", "Siena Saints"],
+    ["Ohio State Buckeyes", "TCU Horned Frogs"],
+    ["St. John's Red Storm", "Northern Iowa Panthers"],
+    ["Kansas Jayhawks", "California Baptist Lancers"],
+    ["Louisville Cardinals", "South Florida Bulls"],
+    ["Michigan State Spartans", "North Dakota State Bison"],
+    ["UCLA Bruins", "UCF Knights"],
+    ["UConn Huskies", "Furman Paladins"]
+  ],
+  "South": [
+    ["Florida Gators", "Lehigh / Prairie View A&M"],
+    ["Clemson Tigers", "Iowa Hawkeyes"],
+    ["Vanderbilt Commodores", "McNeese Cowboys"],
+    ["Nebraska Cornhuskers", "Troy Trojans"],
+    ["North Carolina Tar Heels", "VCU Rams"],
+    ["Illinois Fighting Illini", "Penn Quakers"],
+    ["Saint Mary's Gaels", "Texas A&M Aggies"],
+    ["Houston Cougars", "Idaho Vandals"]
+  ],
+  "West": [
+    ["Arizona Wildcats", "Long Island Sharks"],
+    ["Villanova Wildcats", "Utah State Aggies"],
+    ["Wisconsin Badgers", "High Point Panthers"],
+    ["Arkansas Razorbacks", "Hawaii Rainbow Warriors"],
+    ["BYU Cougars", "NC State / Texas"],
+    ["Gonzaga Bulldogs", "Kennesaw State Owls"],
+    ["Miami (FL) Hurricanes", "Missouri Tigers"],
+    ["Purdue Boilermakers", "Queens (N.C.) Royals"]
+  ],
+  "Midwest": [
+    ["Michigan Wolverines", "Howard / UMBC"],
+    ["Georgia Bulldogs", "Saint Louis Billikens"],
+    ["Texas Tech Red Raiders", "Akron Zips"],
+    ["Alabama Crimson Tide", "Hofstra Pride"],
+    ["Tennessee Volunteers", "SMU / Miami (OH)"],
+    ["Virginia Cavaliers", "Wright State Raiders"],
+    ["Kentucky Wildcats", "Santa Clara Broncos"],
+    ["Iowa State Cyclones", "Tennessee State Tigers"]
+  ]
+}
