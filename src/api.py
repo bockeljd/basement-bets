@@ -13,6 +13,10 @@ from typing import Optional
 
 app = FastAPI()
 
+# Register Extensions
+from src.api_extensions.ncaam_bracket_api import router as bracket_router
+app.include_router(bracket_router)
+
 # Trigger Reload - 1.2.1-v6
 
 # -----------------------------------------------------------------------------
@@ -3271,11 +3275,34 @@ async def get_tournament_teams(request: Request, limit: int = 80, generate: bool
                 key = kp_name.lower().replace(' ', '')
                 return net_fuzzy.get(key, {})
 
+            # Fetch seeds for the current tournament
+            seeds_map = {}
+            try:
+                srows = _exec(conn, """
+                    SELECT team_name, seed, region
+                    FROM ncaam_tournament_seeds
+                    WHERE season = '2025-26'
+                """).fetchall()
+                from src.utils.naming import standardize_team_name
+                for sr in srows:
+                    sn = standardize_team_name(sr['team_name'].split(' / ')[0].split(' - ')[0]) # Handle play-ins
+                    seeds_map[sn.lower()] = dict(sr)
+            except Exception as e:
+                print(f"Seed fetch error: {e}")
+
             # Combine
             for t in teams:
                 if hasattr(t.get('updated_at'), 'isoformat'):
                     t['updated_at'] = str(t['updated_at'])
                 t['torvik'] = torvik_map.get(t['team_name'], {})
+                
+                # Attach seed data
+                from src.utils.naming import standardize_team_name
+                stn = standardize_team_name(t['team_name']).lower()
+                seed_info = seeds_map.get(stn)
+                if seed_info:
+                    t['seed'] = seed_info['seed']
+                    t['region'] = seed_info['region']
                 
                 # Attach NET data
                 net = _find_net(t['team_name'])
@@ -3697,12 +3724,14 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
             return 'TOTAL'
         if 'MONEYLINE' in t or t == 'ML':
             return 'MONEYLINE'
+        if 'PARLAY' in t:
+            return 'PARLAY'
         return 'OTHER'
 
     items = [dict(r) for r in rows]
 
     straight = [x for x in items if classify(x.get('market_type')) in ('SPREAD','TOTAL')]
-    ml_parlay = [x for x in items if classify(x.get('market_type')) == 'MONEYLINE']
+    ml_parlay = [x for x in items if classify(x.get('market_type')) in ('MONEYLINE', 'PARLAY')]
 
     def record(xs):
         decided = [x for x in xs if is_decided(x.get('outcome'))]

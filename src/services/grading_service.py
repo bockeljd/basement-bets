@@ -440,8 +440,148 @@ class GradingService:
                 outcome = 'WON' if a_score > h_score else 'LOST'
             else:
                 return 'VOID'
+        elif market == 'PARLAY':
+            outcome = self._grade_parlay(row['selection'])
             
         return outcome
+
+    def _grade_parlay(self, selection: str) -> str:
+        """Grade a parlay by checking each leg.
+        Format expected: "Parlay: Team A [Spread] | Team B [Total]"
+        """
+        if not selection or 'Parlay:' not in selection:
+            return 'PENDING'
+            
+        # Strip "Parlay:" and split by "|"
+        legs_str = selection.replace('Parlay:', '').split('|')
+        leg_outcomes = []
+        
+        from src.database import get_db_connection, _exec
+        from src.utils.normalize import normalize_market
+        from src.utils.naming import standardize_team_name
+        
+        with get_db_connection() as conn:
+            for leg_raw in legs_str:
+                leg = leg_raw.strip()
+                if not leg: continue
+                
+                print(f"[GRADING] DEBUG: Processing parlay leg: '{leg}'")
+                leg_res = 'PENDING'
+                
+                # Check if it's a Total leg
+                if any(x in leg.upper() for x in ('OVER', 'UNDER')):
+                    is_over = 'OVER' in leg.upper()
+                    # Extract line (e.g. "OVER 174.5" -> 174.5)
+                    try:
+                        line_match = [float(s) for s in leg.replace('OVER','').replace('UNDER','').split() if any(c.isdigit() for c in s)]
+                        if line_match:
+                            line = line_match[0]
+                            # For NCAAM, parlays usually list at least one team name for context in the string
+                            # Example: "Cornell Over 174.5"
+                            # We'll search for game_results on this day that match any team names in the string
+                            search_q = """
+                                SELECT gr.home_score, gr.away_score, e.home_team, e.away_team
+                                FROM game_results gr
+                                JOIN events e ON gr.event_id = e.id
+                                WHERE (e.home_team ILIKE %s OR e.away_team ILIKE %s)
+                                  AND e.start_time::date = '2026-03-14'
+                                  AND gr.final = TRUE
+                                LIMIT 1
+                            """
+                            # Heuristic: find a name in the leg string that isn't 'OVER' or 'UNDER'
+                            possible_names = [w for w in leg.split() if w.upper() not in ('OVER', 'UNDER') and not any(c.isdigit() for c in w)]
+                            for name in possible_names:
+                                r_game = _exec(conn, search_q, (f"%{name}%", f"%{name}%")).fetchone()
+                                if r_game:
+                                    total = r_game['home_score'] + r_game['away_score']
+                                    if is_over:
+                                        leg_res = 'WON' if total > line else ('LOST' if total < line else 'PUSH')
+                                    else:
+                                        leg_res = 'WON' if total < line else ('LOST' if total > line else 'PUSH')
+                                    break
+                    except Exception as e:
+                        print(f"[GRADING] Error manual grading total leg '{leg}': {e}")
+                
+                # Check if it's a Spread/ML leg (Team Name + +/- line)
+                else:
+                    try:
+                        # Extract team and line
+                        # Example: "UCLA -6.5", "Arizona Wildcats -10.5", "Charlotte 49ers +15.5"
+                        parts = leg.split()
+                        line = 0.0
+                        team_name_parts = []
+                        for p in parts:
+                            if any(c in p for c in ('+', '-')) and any(c.isdigit() for c in p):
+                                try:
+                                    line = float(p)
+                                except: pass
+                            else:
+                                if p.lower() not in ('parlay:', '|'):
+                                    team_name_parts.append(p)
+                        
+                        team_query = " ".join(team_name_parts).strip()
+                        if team_query:
+                            search_q = """
+                                SELECT gr.home_score, gr.away_score, e.home_team, e.away_team
+                                FROM game_results gr
+                                JOIN events e ON gr.event_id = e.id
+                                WHERE (e.home_team ILIKE %s OR e.away_team ILIKE %s)
+                                  AND e.start_time::date = '2026-03-14'
+                                  AND gr.final = TRUE
+                                LIMIT 1
+                            """
+                            r_game = _exec(conn, search_q, (f"%{team_query}%", f"%{team_query}%")).fetchone()
+                            if r_game:
+                                s_pick = standardize_team_name(team_query).lower()
+                                s_home = standardize_team_name(r_game['home_team']).lower()
+                                s_away = standardize_team_name(r_game['away_team']).lower()
+                                
+                                score, opp = 0, 0
+                                if s_pick == s_home or s_pick in s_home or s_home in s_pick:
+                                    score, opp = r_game['home_score'], r_game['away_score']
+                                elif s_pick == s_away or s_pick in s_away or s_away in s_pick:
+                                    score, opp = r_game['away_score'], r_game['home_score']
+                                
+                                if score > 0 or opp > 0:
+                                    if score + line > opp: leg_res = 'WON'
+                                    elif score + line < opp: leg_res = 'LOST'
+                                    else: leg_res = 'PUSH'
+                    except Exception as e:
+                        print(f"[GRADING] Error manual grading spread leg '{leg}': {e}")
+                
+                # A more reliable way: Search model_predictions for this exact selection as a straight bet
+                # on the same day, and inherit its outcome.
+                try:
+                    q = """
+                    SELECT outcome 
+                    FROM model_predictions 
+                    WHERE (selection = %s OR selection ILIKE %s)
+                      AND outcome IS NOT NULL
+                      AND analyzed_at > (CURRENT_DATE - INTERVAL '2 days')
+                    ORDER BY analyzed_at DESC
+                    LIMIT 1
+                    """
+                    # Try exact match first, then partial
+                    r = _exec(conn, q, (leg, f"%{leg}%")).fetchone()
+                    if r:
+                        leg_res = r['outcome']
+                    else:
+                        # If no direct prediction was found, we'd need to grade from scores.
+                        # For Phase 66, we'll rely on the fact that legs are usually also straight bets we tracked.
+                        leg_res = 'PENDING'
+                except:
+                    leg_res = 'PENDING'
+                
+                leg_outcomes.append(leg_res)
+        
+        if not leg_outcomes: return 'PENDING'
+        if any(o == 'LOST' for o in leg_outcomes): return 'LOST'
+        if all(o == 'WON' or o == 'PUSH' for o in leg_outcomes): 
+            # If all are PUSH, it's a PUSH. If some WON and some PUSH, it's a WON (odds reduced).
+            if all(o == 'PUSH' for o in leg_outcomes): return 'PUSH'
+            return 'WON'
+            
+        return 'PENDING'
 
 if __name__ == "__main__":
     service = GradingService()

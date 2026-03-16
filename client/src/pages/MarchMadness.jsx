@@ -117,7 +117,7 @@ function PlayerStatsTable({ players = [] }) {
 
 /* ─── Main Component ─── */
 const MarchMadness = () => {
-    const TABS = ['profile', 'matchup', 'darkhorse'];
+    const TABS = ['profile', 'matchup', 'darkhorse', 'bracket'];
     const [activeTab, setActiveTab] = useState('profile');
     const [loading, setLoading] = useState(true);
     const [teams, setTeams] = useState([]);
@@ -138,6 +138,10 @@ const MarchMadness = () => {
     // Dark horse sorted list
     const [dhLoading, setDhLoading] = useState(false);
     const [dhProfiles, setDhProfiles] = useState([]);
+
+    // Bracket data
+    const [bracketData, setBracketData] = useState(null);
+    const [loadingBracket, setLoadingBracket] = useState(false);
 
     useEffect(() => { fetchTeams(); }, []);
 
@@ -216,6 +220,31 @@ const MarchMadness = () => {
         if (activeTab === 'darkhorse' && dhProfiles.length === 0) fetchDarkHorse();
     }, [activeTab]);
 
+    const fetchBracket = async () => {
+        setLoadingBracket(true);
+        try {
+            const res = await api.get('/api/ncaam/bracket/2026');
+            setBracketData(res.data);
+        } catch (e) {
+            console.error('Bracket fetch error', e);
+        } finally {
+            setLoadingBracket(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'bracket' && !bracketData) fetchBracket();
+    }, [activeTab]);
+
+    const handleMatchupClick = (teamA, teamB) => {
+        const tA = teams.find(t => t.team_name === teamA || teamA.includes(t.team_name) || t.team_name.includes(teamA));
+        const tB = teams.find(t => t.team_name === teamB || teamB.includes(t.team_name) || t.team_name.includes(teamB));
+        if (tA) setSelectedTeam(tA);
+        if (tB) setSelectedTeamB(tB);
+        setActiveTab('matchup');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     const filteredTeams = useMemo(() => {
         if (!search.trim()) return teams;
         const q = search.toLowerCase();
@@ -246,7 +275,7 @@ const MarchMadness = () => {
             {(search ? filteredTeams : teams).map(t => (
                 <option key={t.team_name} value={t.team_name}
                     disabled={side === 'B' && t.team_name === selectedTeam.team_name}>
-                    #{t.rank} {t.team_name}
+                    {t.seed ? `[#${t.seed}] ` : `[KP #${t.rank}] `} {t.team_name}
                 </option>
             ))}
         </select>
@@ -274,6 +303,10 @@ const MarchMadness = () => {
                             className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 transition ${activeTab === 'darkhorse' ? 'bg-yellow-500 text-black shadow-md' : 'text-slate-400 hover:text-white'}`}>
                             <Star size={12} /> Dark Horses
                         </button>
+                        <button onClick={() => setActiveTab('bracket')}
+                            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 transition ${activeTab === 'bracket' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>
+                            <Layout size={12} /> Bracket 2026
+                        </button>
                     </div>
 
                     {/* Team search + selectors */}
@@ -295,12 +328,13 @@ const MarchMadness = () => {
                 <button
                     onClick={() => {
                         if (activeTab === 'darkhorse') fetchDarkHorse();
+                        else if (activeTab === 'bracket') fetchBracket();
                         else if (activeTab === 'matchup') { fetchMatchup(); fetchDeepProfile(selectedTeam.team_name, setDeepA, setLoadingDeepA); fetchDeepProfile(selectedTeamB?.team_name, setDeepB, setLoadingDeepB); }
                         else fetchDeepProfile(selectedTeam.team_name, setDeepA, setLoadingDeepA);
                     }}
                     className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
                     title="Refresh">
-                    <RefreshCw size={14} className={(loading || loadingDeepA || loadingMatchup || dhLoading) ? 'animate-spin' : ''} />
+                    <RefreshCw size={14} className={(loading || loadingDeepA || loadingMatchup || dhLoading || loadingBracket) ? 'animate-spin' : ''} />
                 </button>
             </div>
 
@@ -316,7 +350,18 @@ const MarchMadness = () => {
                                 <div className="w-28 h-28 bg-slate-900 rounded-3xl border border-slate-700 shadow-2xl flex items-center justify-center text-6xl relative">
                                     <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/10 to-transparent rounded-3xl" />🏀
                                 </div>
-                                <div className="mt-3 px-4 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-sm font-black text-slate-200">KP #{selectedTeam.rank}</div>
+                                <div className="mt-3 px-4 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-sm font-black text-slate-200 flex items-center gap-1.5">
+                                    {selectedTeam.seed ? (
+                                        <><Layout size={12} className="text-orange-500" /> Seed #{selectedTeam.seed}</>
+                                    ) : (
+                                        <>KP #{selectedTeam.rank}</>
+                                    )}
+                                </div>
+                                {selectedTeam.region && (
+                                    <div className="mt-1.5 px-4 py-1 rounded-full bg-blue-900/40 border border-blue-600/30 text-xs font-bold text-blue-300 italic">
+                                        {selectedTeam.region} Region
+                                    </div>
+                                )}
                                 {(deepA?.net?.net_rank || selectedTeam.net_rank) && (
                                     <div className="mt-1.5 px-4 py-1 rounded-full bg-orange-900/30 border border-orange-600/30 text-xs font-bold text-orange-300">
                                         NET #{deepA?.net?.net_rank || selectedTeam.net_rank}
@@ -736,6 +781,77 @@ const MarchMadness = () => {
                     )}
                 </div>
             )}
+
+            {/* ════ BRACKET TAB ════ */}
+            {activeTab === 'bracket' && (
+                <BracketView
+                    data={bracketData}
+                    loading={loadingBracket}
+                    onMatchupClick={handleMatchupClick}
+                />
+            )}
+        </div>
+    );
+};
+
+const BracketView = ({ data, loading, onMatchupClick }) => {
+    if (loading) return (
+        <div className="p-12 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400">
+            <RefreshCw size={32} className="text-orange-500 animate-spin" />
+            <span className="font-bold tracking-widest uppercase text-xs">Computing Tournament Projections…</span>
+        </div>
+    );
+    if (!data || !data.regions) return <div className="p-12 text-center text-red-400 font-mono">Bracket data unavailable. Check back soon.</div>;
+
+    const regions = ['East', 'South', 'West', 'Midwest'];
+
+    return (
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="grid lg:grid-cols-2 gap-12">
+                {regions.map(name => {
+                    const region = data.regions[name];
+                    if (!region) return null;
+                    return (
+                        <div key={name} className="space-y-6">
+                            <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
+                                <span className="text-xl font-black text-white italic">{name} Region</span>
+                                <span className="px-2 py-0.5 rounded bg-blue-900/40 text-[10px] font-bold text-blue-400 uppercase tracking-tighter">Round of 64</span>
+                            </div>
+                            <div className="grid gap-3">
+                                {region.first_round.map((m, i) => (
+                                    <div key={i}
+                                        onClick={() => onMatchupClick(m.team_a, m.team_b)}
+                                        className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 hover:border-blue-500/50 hover:bg-slate-800/40 transition cursor-pointer group relative overflow-hidden backdrop-blur-sm">
+                                        <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition">
+                                            <Swords size={12} className="text-blue-400" />
+                                        </div>
+                                        <div className="flex justify-between items-center mb-1.5">
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-[10px] font-black text-slate-600 w-4 tracking-tighter">S{m.seed_a}</span>
+                                                <span className={`text-sm font-bold ${m.winner === m.team_a ? 'text-white' : 'text-slate-400'}`}>{m.team_a}</span>
+                                            </div>
+                                            <span className="text-[10px] font-mono text-slate-500">{m.win_prob_a}%</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-[10px] font-black text-slate-600 w-4 tracking-tighter">S{m.seed_b}</span>
+                                                <span className={`text-sm font-bold ${m.winner === m.team_b ? 'text-white' : 'text-slate-400'}`}>{m.team_b}</span>
+                                            </div>
+                                            <span className="text-[10px] font-mono text-slate-500">{m.win_prob_b}%</span>
+                                        </div>
+                                        <div className="mt-3 pt-3 border-t border-slate-800/50 flex justify-between items-center">
+                                            <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Projection</div>
+                                            <div className="text-[11px] font-black text-blue-500">
+                                                {m.spread < 0 ? m.team_a : m.team_b} -{Math.abs(m.spread)} <span className="text-slate-600 ml-1">O/U {m.total}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 };
