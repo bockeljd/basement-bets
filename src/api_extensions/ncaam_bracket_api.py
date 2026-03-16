@@ -27,7 +27,7 @@ async def get_2026_bracket(request: Request):
             seeds_by_region[reg].append(dict(r))
             
         # 2. Load pre-computed projections
-        proj_path = "data/tournament_predictions_2026.json"
+        proj_path = "src/api_extensions/resources/tournament_predictions_2026.json"
         projections = {}
         if os.path.exists(proj_path):
             with open(proj_path, "r") as f:
