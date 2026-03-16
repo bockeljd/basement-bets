@@ -66,7 +66,9 @@ async def get_2026_bracket(request: Request):
                 "proj_path": proj_path,
                 "exists": os.path.exists(proj_path),
                 "dir_contents": os.listdir(_dir) if os.path.exists(_dir) else "DIR_NOT_FOUND",
-                "cwd": os.getcwd()
+                "resources_contents": os.listdir(os.path.join(_dir, "resources")) if os.path.exists(os.path.join(_dir, "resources")) else "RES_NOT_FOUND",
+                "cwd": os.getcwd(),
+                "file_path": __file__
             }
         }
 
