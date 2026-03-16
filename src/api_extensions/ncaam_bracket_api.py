@@ -27,11 +27,14 @@ async def get_2026_bracket(request: Request):
             seeds_by_region[reg].append(dict(r))
             
         # 2. Load pre-computed projections
-        proj_path = "src/api_extensions/resources/tournament_predictions_2026.json"
+        _dir = os.path.dirname(os.path.abspath(__file__))
+        proj_path = os.path.join(_dir, "resources", "tournament_predictions_2026.json")
         projections = {}
         if os.path.exists(proj_path):
             with open(proj_path, "r") as f:
                 projections = json.load(f)
+        else:
+            print(f"[bracket-api] WARNING: Projections file not found at {proj_path}")
         
         from src.utils.naming import standardize_team_name
 
