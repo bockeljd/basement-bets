@@ -26,15 +26,12 @@ async def get_2026_bracket(request: Request):
                 seeds_by_region[reg] = []
             seeds_by_region[reg].append(dict(r))
             
-        # 2. Load pre-computed projections
-        _dir = os.path.dirname(os.path.abspath(__file__))
-        proj_path = os.path.join(_dir, "tournament_predictions_2026.json")
-        projections = {}
-        if os.path.exists(proj_path):
-            with open(proj_path, "r") as f:
-                projections = json.load(f)
-        else:
-            print(f"[bracket-api] WARNING: Projections file not found at {proj_path}")
+        # 2. Load pre-computed projections from Python module
+        try:
+            from .bracket_data_2026 import DATA as projections
+        except ImportError:
+            projections = {}
+            print("[bracket-api] WARNING: bracket_data_2026.py not found.")
         
         from src.utils.naming import standardize_team_name
 
@@ -62,14 +59,7 @@ async def get_2026_bracket(request: Request):
             "championship": projections.get("championship"),
             "final_four": enrich_matchups(projections.get("final_four", [])),
             "regions": {},
-            "debug_info": {
-                "proj_path": proj_path,
-                "exists": os.path.exists(proj_path),
-                "dir_contents": os.listdir(_dir) if os.path.exists(_dir) else "DIR_NOT_FOUND",
-                "cwd": os.getcwd(),
-                "file_path": __file__,
-                "v": 2
-            }
+            "v": 3
         }
 
         for region in ["East", "South", "West", "Midwest"]:
