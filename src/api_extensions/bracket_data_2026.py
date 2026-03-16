@@ -1,5 +1,6 @@
-DATA = 
-{
+import json
+
+RAW_DATA = r'''{
   "season": "2025-26",
   "rounds": {
     "East": {
@@ -676,4 +677,6 @@ DATA =
     "summary": "MC:10000 | \u03c3:10.5"
   },
   "champion": "Duke Blue Devils"
-}
+}'''
+
+DATA = json.loads(RAW_DATA)
