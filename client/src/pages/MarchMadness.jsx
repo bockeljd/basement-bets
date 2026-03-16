@@ -794,6 +794,64 @@ const MarchMadness = () => {
     );
 };
 
+/* ─── Matchup Card ─── */
+function MatchupCard({ m, onMatchupClick }) {
+    if (!m) return null;
+    return (
+        <div
+            onClick={() => onMatchupClick && onMatchupClick(m.team_a, m.team_b)}
+            className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-3 hover:border-blue-500/50 hover:bg-slate-800/40 transition cursor-pointer group relative overflow-hidden"
+        >
+            <div className="absolute top-0 right-0 p-1.5 opacity-0 group-hover:opacity-100 transition">
+                <Swords size={10} className="text-blue-400" />
+            </div>
+            <div className="flex justify-between items-center mb-1">
+                <div className="flex items-center gap-2">
+                    {m.seed_a && <span className="text-[9px] font-black text-slate-600 w-4">{m.seed_a}</span>}
+                    <span className={`text-xs font-bold ${m.winner === m.team_a ? 'text-white' : 'text-slate-500'}`}>{m.team_a}</span>
+                </div>
+                <span className="text-[9px] font-mono text-slate-500">{m.win_prob_a}%</span>
+            </div>
+            <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                    {m.seed_b && <span className="text-[9px] font-black text-slate-600 w-4">{m.seed_b}</span>}
+                    <span className={`text-xs font-bold ${m.winner === m.team_b ? 'text-white' : 'text-slate-500'}`}>{m.team_b}</span>
+                </div>
+                <span className="text-[9px] font-mono text-slate-500">{m.win_prob_b}%</span>
+            </div>
+            {m.spread != null && (
+                <div className="mt-1.5 pt-1.5 border-t border-slate-800/50 flex justify-between items-center">
+                    <span className="text-[8px] font-black text-slate-700 uppercase tracking-widest">MC Proj</span>
+                    <span className="text-[9px] font-black text-blue-500">
+                        {m.spread < 0 ? m.team_a : m.team_b} {m.spread < 0 ? '' : '+'}{Math.abs(m.spread).toFixed(1)}
+                        <span className="text-slate-700 ml-1">O/U {m.total?.toFixed(1)}</span>
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ─── Round Section ─── */
+function RoundSection({ title, badge, badgeColor, matchups, onMatchupClick, defaultOpen = false }) {
+    const [open, setOpen] = React.useState(defaultOpen);
+    if (!matchups || matchups.length === 0) return null;
+    return (
+        <div>
+            <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2 mb-2 w-full text-left">
+                <span className="text-xs font-black text-slate-300 uppercase tracking-widest">{title}</span>
+                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-tighter ${badgeColor}`}>{badge}</span>
+                <span className="ml-auto text-slate-600">{open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</span>
+            </button>
+            {open && (
+                <div className="grid gap-2">
+                    {matchups.map((m, i) => <MatchupCard key={i} m={m} onMatchupClick={onMatchupClick} />)}
+                </div>
+            )}
+        </div>
+    );
+}
+
 const BracketView = ({ data, loading, onMatchupClick }) => {
     if (loading) return (
         <div className="p-12 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400">
@@ -804,50 +862,58 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
     if (!data || !data.regions) return <div className="p-12 text-center text-red-400 font-mono">Bracket data unavailable. Check back soon.</div>;
 
     const regions = ['East', 'South', 'West', 'Midwest'];
+    const champ = data.championship;
+    const champion = data.champion;
 
     return (
-        <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="grid lg:grid-cols-2 gap-12">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+
+            {/* Champion Banner */}
+            {champion && (
+                <div className="relative overflow-hidden rounded-2xl border border-yellow-500/40 bg-gradient-to-br from-yellow-950/60 via-slate-900 to-slate-950 p-6 text-center shadow-2xl">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-64 bg-yellow-500/10 rounded-full blur-[80px] pointer-events-none" />
+                    <div className="relative">
+                        <div className="text-4xl mb-2">🏆</div>
+                        <div className="text-[10px] font-black text-yellow-400 uppercase tracking-[0.3em] mb-1">2026 Predicted National Champion</div>
+                        <div className="text-3xl md:text-4xl font-black text-white mb-3 tracking-tight">{champion}</div>
+                        {champ && (
+                            <div className="flex flex-wrap justify-center gap-4 text-xs text-slate-400">
+                                <span>Win Prob: <span className="font-black text-yellow-400">{Math.max(champ.win_prob_a, champ.win_prob_b)}%</span></span>
+                                <span>Spread: <span className="font-black text-white">{champ.spread > 0 ? '+' : ''}{champ.spread}</span></span>
+                                <span>O/U: <span className="font-black text-white">{champ.total?.toFixed(1)}</span></span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Final Four */}
+            {data.final_four?.length > 0 && (
+                <div>
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-2 mb-4">
+                        <span className="text-xl font-black text-white italic">Final Four</span>
+                        <span className="px-2 py-0.5 rounded bg-yellow-900/40 text-[10px] font-bold text-yellow-400 uppercase tracking-tighter">National Semifinals</span>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-3">
+                        {data.final_four.map((m, i) => <MatchupCard key={i} m={m} onMatchupClick={onMatchupClick} />)}
+                    </div>
+                </div>
+            )}
+
+            {/* Regional Brackets */}
+            <div className="grid lg:grid-cols-2 gap-10">
                 {regions.map(name => {
                     const region = data.regions[name];
                     if (!region) return null;
                     return (
-                        <div key={name} className="space-y-6">
+                        <div key={name} className="space-y-4">
                             <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
                                 <span className="text-xl font-black text-white italic">{name} Region</span>
-                                <span className="px-2 py-0.5 rounded bg-blue-900/40 text-[10px] font-bold text-blue-400 uppercase tracking-tighter">Round of 64</span>
                             </div>
-                            <div className="grid gap-3">
-                                {region.first_round.map((m, i) => (
-                                    <div key={i}
-                                        onClick={() => onMatchupClick(m.team_a, m.team_b)}
-                                        className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 hover:border-blue-500/50 hover:bg-slate-800/40 transition cursor-pointer group relative overflow-hidden backdrop-blur-sm">
-                                        <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition">
-                                            <Swords size={12} className="text-blue-400" />
-                                        </div>
-                                        <div className="flex justify-between items-center mb-1.5">
-                                            <div className="flex items-center gap-3">
-                                                <span className="text-[10px] font-black text-slate-600 w-4 tracking-tighter">S{m.seed_a}</span>
-                                                <span className={`text-sm font-bold ${m.winner === m.team_a ? 'text-white' : 'text-slate-400'}`}>{m.team_a}</span>
-                                            </div>
-                                            <span className="text-[10px] font-mono text-slate-500">{m.win_prob_a}%</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                            <div className="flex items-center gap-3">
-                                                <span className="text-[10px] font-black text-slate-600 w-4 tracking-tighter">S{m.seed_b}</span>
-                                                <span className={`text-sm font-bold ${m.winner === m.team_b ? 'text-white' : 'text-slate-400'}`}>{m.team_b}</span>
-                                            </div>
-                                            <span className="text-[10px] font-mono text-slate-500">{m.win_prob_b}%</span>
-                                        </div>
-                                        <div className="mt-3 pt-3 border-t border-slate-800/50 flex justify-between items-center">
-                                            <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Projection</div>
-                                            <div className="text-[11px] font-black text-blue-500">
-                                                {m.spread < 0 ? m.team_a : m.team_b} -{Math.abs(m.spread)} <span className="text-slate-600 ml-1">O/U {m.total}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                            <RoundSection title="Elite 8" badge="Regional Final" badgeColor="bg-rose-900/40 text-rose-400" matchups={region.elite_8} onMatchupClick={onMatchupClick} defaultOpen={true} />
+                            <RoundSection title="Sweet 16" badge="Round of 16" badgeColor="bg-purple-900/40 text-purple-400" matchups={region.sweet_16} onMatchupClick={onMatchupClick} defaultOpen={true} />
+                            <RoundSection title="Round of 32" badge="Second Round" badgeColor="bg-blue-900/40 text-blue-400" matchups={region.round_of_32} onMatchupClick={onMatchupClick} defaultOpen={false} />
+                            <RoundSection title="Round of 64" badge="First Round" badgeColor="bg-slate-800 text-slate-400" matchups={region.round_of_64} onMatchupClick={onMatchupClick} defaultOpen={false} />
                         </div>
                     );
                 })}
@@ -857,3 +923,6 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
 };
 
 export default MarchMadness;
+
+
+

@@ -8,7 +8,7 @@ router = APIRouter()
 
 @router.get("/api/ncaam/bracket/2026")
 async def get_2026_bracket(request: Request):
-    """Return the full 2026 bracket structure with pre-computed projections."""
+    """Return the full 2026 bracket structure with all rounds and champion prediction."""
     try:
         # 1. Fetch seeds from database
         with get_db_connection() as conn:
@@ -33,14 +33,8 @@ async def get_2026_bracket(request: Request):
             with open(proj_path, "r") as f:
                 projections = json.load(f)
         
-        # 3. Combine - Attach seeds to projections
-        bracket_data = {
-            "season": "2025-26",
-            "regions": {}
-        }
-        
         from src.utils.naming import standardize_team_name
-        
+
         # Create a lookup for seeds
         seed_lookup = {}
         for region, seeds in seeds_by_region.items():
@@ -48,20 +42,35 @@ async def get_2026_bracket(request: Request):
                 name = standardize_team_name(s['team_name'])
                 seed_lookup[name] = s['seed']
 
+        def enrich_matchups(matchup_list):
+            """Add seed info to a list of matchup dicts."""
+            enriched = []
+            for m in (matchup_list or []):
+                m = dict(m)
+                m['seed_a'] = seed_lookup.get(standardize_team_name(m.get('team_a', '')))
+                m['seed_b'] = seed_lookup.get(standardize_team_name(m.get('team_b', '')))
+                enriched.append(m)
+            return enriched
+
+        # 3. Combine - Build enriched bracket data
+        bracket_data = {
+            "season": "2025-26",
+            "champion": projections.get("champion"),
+            "championship": projections.get("championship"),
+            "final_four": enrich_matchups(projections.get("final_four", [])),
+            "regions": {}
+        }
+
         for region in ["East", "South", "West", "Midwest"]:
             reg_seeds = seeds_by_region.get(region, [])
-            reg_projections = projections.get(region, [])
-            
-            # Enrich projections with seeds
-            enriched_projections = []
-            for m in reg_projections:
-                m['seed_a'] = seed_lookup.get(standardize_team_name(m['team_a']))
-                m['seed_b'] = seed_lookup.get(standardize_team_name(m['team_b']))
-                enriched_projections.append(m)
+            reg_rounds = projections.get("rounds", {}).get(region, {})
             
             bracket_data["regions"][region] = {
                 "seeds": reg_seeds,
-                "first_round": enriched_projections
+                "round_of_64": enrich_matchups(reg_rounds.get("round_of_64", [])),
+                "round_of_32": enrich_matchups(reg_rounds.get("round_of_32", [])),
+                "sweet_16": enrich_matchups(reg_rounds.get("sweet_16", [])),
+                "elite_8": enrich_matchups(reg_rounds.get("elite_8", [])),
             }
             
         return bracket_data
