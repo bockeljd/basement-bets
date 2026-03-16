@@ -1,41 +1,46 @@
 
 import json
 import os
+import time
 from fastapi import APIRouter, HTTPException, Request
 from src.database import get_db_connection, _exec
+from src.services.bracket_simulator import LiveBracketSimulator, SimulatorDataError
+from src.utils.naming import standardize_team_name
 
 router = APIRouter()
 
-@router.get("/api/ncaam/bracket/2026")
-async def get_2026_bracket(request: Request):
-    """Return the full 2026 bracket structure with all rounds and champion prediction."""
-    try:
-        # 1. Fetch seeds from database
-        with get_db_connection() as conn:
-            rows = _exec(conn, """
-                SELECT team_name, seed, region
-                FROM ncaam_tournament_seeds
-                WHERE season = '2025-26'
-                ORDER BY region, seed
-            """).fetchall()
-            
-        seeds_by_region = {}
-        for r in rows:
-            reg = r['region']
-            if reg not in seeds_by_region:
-                seeds_by_region[reg] = []
-            seeds_by_region[reg].append(dict(r))
-            
-        # 2. Load pre-computed projections from Python module
-        try:
-            from .bracket_data_2026 import DATA as projections
-        except ImportError:
-            projections = {}
-            print("[bracket-api] WARNING: bracket_data_2026.py not found.")
-        
-        from src.utils.naming import standardize_team_name
+# Simple in-memory cache for simulation results
+# key: "2026_bracket", value: {"data": {...}, "expiry": timestamp}
+_SIM_CACHE = {}
+CACHE_TTL = 3600  # 1 hour
 
-        # Create a lookup for seeds
+@router.get("/api/ncaam/bracket/2026")
+async def get_2026_bracket(request: Request, refresh: bool = False):
+    """Return the full 2026 bracket structure with real-time simulations."""
+    try:
+        current_time = time.time()
+        
+        # 1. Check Cache
+        if not refresh and "2026_bracket" in _SIM_CACHE:
+            entry = _SIM_CACHE["2026_bracket"]
+            if current_time < entry["expiry"]:
+                return entry["data"]
+
+        # 2. Run Live Simulation
+        simulator = LiveBracketSimulator(simulations=10000)
+        
+        # Fetch seeds for simulation
+        seeds_by_region = simulator.get_seeds_from_db()
+        if not seeds_by_region:
+            raise HTTPException(status_code=404, detail="Tournament seeds not found for 2026.")
+            
+        try:
+            projections = simulator.simulate_full_bracket(seeds_by_region)
+        except SimulatorDataError as e:
+            # ZERO SILENT FALLBACKS
+            raise HTTPException(status_code=500, detail=str(e))
+
+        # 3. Create a lookup for seeds for UI enrichment
         seed_lookup = {}
         for region, seeds in seeds_by_region.items():
             for s in seeds:
@@ -52,14 +57,14 @@ async def get_2026_bracket(request: Request):
                 enriched.append(m)
             return enriched
 
-        # 3. Combine - Build enriched bracket data
+        # 4. Combine - Build enriched bracket data
         bracket_data = {
             "season": "2025-26",
             "champion": projections.get("champion"),
             "championship": projections.get("championship"),
             "final_four": enrich_matchups(projections.get("final_four", [])),
             "regions": {},
-            "v": 3
+            "v": 4  # Version bump for live simulator
         }
 
         for region in ["East", "South", "West", "Midwest"]:
@@ -74,8 +79,16 @@ async def get_2026_bracket(request: Request):
                 "elite_8": enrich_matchups(reg_rounds.get("elite_8", [])),
             }
             
+        # Update Cache
+        _SIM_CACHE["2026_bracket"] = {
+            "data": bracket_data,
+            "expiry": current_time + CACHE_TTL
+        }
+            
         return bracket_data
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[bracket-api] Error: {e}")
         import traceback
