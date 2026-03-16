@@ -24,6 +24,69 @@ function emToWinPct(emA, emB) {
     return Math.round((1 / (1 + Math.exp(-diff / 10))) * 100);
 }
 
+// Smart Name Shortening for high-density bracket view
+const shortenTeamName = (name) => {
+    if (!name) return "";
+    let n = name;
+    // Common long names
+    const mapping = {
+        "North Carolina": "UNC",
+        "South Carolina": "S Car",
+        "Mississippi State": "Miss St",
+        "Mississippi": "Ole Miss",
+        "Connecticut": "UConn",
+        "Saint Mary's": "St Mary's",
+        "Michigan State": "Mich St",
+        "Ohio State": "Ohio St",
+        "Florida State": "FSU",
+        "Kansas State": "K-State",
+        "West Virginia": "W Virginia",
+        "New Mexico State": "NMSU",
+        "South Dakota": "S Dakota",
+        "North Dakota": "N Dakota",
+        "Loyola Chicago": "Loyola CHI",
+        "St. John's": "St John's",
+        "South Florida": "USF",
+        "Virginia Tech": "VT",
+        "Georgia Tech": "GT",
+        "Texas A&M": "TAMU",
+        "Texas Southern": "TX Southern",
+        "Long Beach State": "LBSU",
+        "Middle Tennessee": "MTSU",
+        "Southwestern": "SW",
+        "Grambling State": "Grambling",
+        "Prairie View A&M": "Prairie View",
+        "Fairleigh Dickinson": "FDU",
+        "Arkansas-Little Rock": "UALR",
+        "Cal State": "CSU",
+        "Florida International": "FIU",
+        "Northern Colorado": "N Colorado",
+    };
+    
+    // Check if name contains any of the keys
+    for (const key in mapping) {
+        if (n.includes(key)) return mapping[key];
+    }
+
+    // Generic replacements
+    n = n.replace("State", "St")
+         .replace("University", "Univ")
+         .replace("College", "Coll")
+         .replace("A&M", "AM")
+         .replace("Saint", "St")
+         .replace("Northwestern", "NW");
+
+    // Remove common mascots to save space if it's still long
+    if (n.length > 12) {
+        const mascots = ["Huskies", "Tar Heels", "Tigers", "Bulldogs", "Wildcats", "Eagles", "Cougars", "Panthers", "Spartans", "Gators", "Ducks", "Volunteers", "Jayhawks", "Fighting Irish", "Aggies", "Longhorns", "Badgers", "Cardinals", "Commodores", "Gamecocks", "Mountaineers", "Wolfpack", "Wolverines", "Hoosiers", "Sooners", "Cowboys", "Rebels", "Lions", "Blue Devils"];
+        mascots.forEach(m => {
+            n = n.replace(new RegExp(` ${m}$`, 'i'), "");
+        });
+    }
+
+    return n.trim();
+};
+
 // Circular gauge
 function Gauge({ score = 0, label, color = '#f97316', subLabel }) {
     const radius = 36; const circ = 2 * Math.PI * radius;
@@ -795,7 +858,6 @@ const MarchMadness = () => {
 };
 
 /* ─── Matchup Card ─── */
-/* ─── Matchup Card ─── */
 function MatchupCard({ m, onMatchupClick }) {
     if (!m) return null;
     const isWinnerA = m.winner === m.team_a;
@@ -804,56 +866,56 @@ function MatchupCard({ m, onMatchupClick }) {
     return (
         <div
             onClick={() => onMatchupClick && onMatchupClick(m.team_a, m.team_b)}
-            className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 hover:border-blue-500/50 hover:bg-slate-800/60 transition cursor-pointer group relative overflow-hidden shadow-lg backdrop-blur-sm"
+            className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-blue-500/50 hover:bg-slate-800/60 transition cursor-pointer group relative overflow-hidden shadow-lg backdrop-blur-sm"
         >
-            <div className="absolute top-0 right-0 p-2 opacity-0 group-hover:opacity-100 transition duration-300">
-                <Swords size={12} className="text-blue-400/70" />
+            <div className="absolute top-0 right-0 p-1.5 opacity-0 group-hover:opacity-100 transition duration-300">
+                <Swords size={10} className="text-blue-400/50" />
             </div>
             
-            <div className="space-y-2.5">
+            <div className="space-y-1.5">
                 {/* Team A */}
-                <div className="flex justify-between items-center gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                        {m.seed_a && <span className="text-[10px] font-black text-slate-500 w-5 text-center bg-slate-800/50 rounded py-0.5 shrink-0">{m.seed_a}</span>}
+                <div className="flex justify-between items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                        {m.seed_a && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded py-0.5 shrink-0">{m.seed_a}</span>}
                         <span 
-                            className={`text-sm font-black truncate ${isWinnerA ? 'text-white' : 'text-slate-500/80'}`}
+                            className={`text-[11px] font-black truncate ${isWinnerA ? 'text-white' : 'text-slate-500/80'}`}
                             title={m.team_a}
                         >
-                            {m.team_a}
+                            {shortenTeamName(m.team_a)}
                         </span>
-                        {isWinnerA && <span className="text-[10px] text-emerald-500 animate-pulse">●</span>}
+                        {isWinnerA && <span className="text-emerald-500 text-[8px] animate-pulse shrink-0">●</span>}
                     </div>
-                    <span className={`text-[10px] font-bold font-mono shrink-0 ${isWinnerA ? 'text-emerald-400' : 'text-slate-600'}`}>
+                    <span className={`text-[9px] font-bold font-mono shrink-0 ${isWinnerA ? 'text-emerald-400' : 'text-slate-600'}`}>
                         {m.win_prob_a}%
                     </span>
                 </div>
 
                 {/* Team B */}
-                <div className="flex justify-between items-center gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                        {m.seed_b && <span className="text-[10px] font-black text-slate-500 w-5 text-center bg-slate-800/50 rounded py-0.5 shrink-0">{m.seed_b}</span>}
+                <div className="flex justify-between items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                        {m.seed_b && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded py-0.5 shrink-0">{m.seed_b}</span>}
                         <span 
-                            className={`text-sm font-black truncate ${isWinnerB ? 'text-white' : 'text-slate-500/80'}`}
+                            className={`text-[11px] font-black truncate ${isWinnerB ? 'text-white' : 'text-slate-500/80'}`}
                             title={m.team_b}
                         >
-                            {m.team_b}
+                            {shortenTeamName(m.team_b)}
                         </span>
-                        {isWinnerB && <span className="text-[10px] text-emerald-500 animate-pulse">●</span>}
+                        {isWinnerB && <span className="text-emerald-500 text-[8px] animate-pulse shrink-0">●</span>}
                     </div>
-                    <span className={`text-[10px] font-bold font-mono shrink-0 ${isWinnerB ? 'text-emerald-400' : 'text-slate-600'}`}>
+                    <span className={`text-[9px] font-bold font-mono shrink-0 ${isWinnerB ? 'text-emerald-400' : 'text-slate-600'}`}>
                         {m.win_prob_b}%
                     </span>
                 </div>
             </div>
 
             {m.spread != null && (
-                <div className="mt-3 pt-3 border-t border-slate-800/80 flex justify-between items-center">
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Projection</span>
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black text-blue-400">
-                            {m.spread < 0 ? m.team_a.split(' ')[0] : m.team_b.split(' ')[0]} {m.spread < 0 ? '' : '+'}{Math.abs(m.spread).toFixed(1)}
+                <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex justify-between items-center">
+                    <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Proj</span>
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-black text-blue-500">
+                            {shortenTeamName(m.spread < 0 ? m.team_a : m.team_b)} {m.spread < 0 ? '' : '+'}{Math.abs(m.spread).toFixed(1)}
                         </span>
-                        <span className="text-[10px] font-black text-slate-400 border-l border-slate-800 pl-2">O/U {m.total?.toFixed(1)}</span>
+                        <span className="text-[9px] font-black text-slate-600 border-l border-slate-800 pl-1.5">O/U {m.total?.toFixed(0)}</span>
                     </div>
                 </div>
             )}
@@ -942,25 +1004,25 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
             )}
 
             {/* Regional Brackets Overhaul */}
-            <div className="grid 2xl:grid-cols-2 gap-16">
+            <div className="grid 2xl:grid-cols-2 gap-8 md:gap-12">
                 {regions.map(name => {
                     const region = data.regions[name];
                     if (!region) return null;
                     return (
-                        <div key={name} className="relative overflow-hidden rounded-[2rem] bg-slate-900/30 border border-slate-800/60 p-6 md:p-10 shadow-3xl">
+                        <div key={name} className="relative overflow-hidden rounded-[2rem] bg-slate-900/30 border border-slate-800/60 p-5 md:p-8 shadow-3xl">
                             <div className="absolute top-0 right-0 p-12 opacity-[0.03] select-none">
                                 <span className="text-[12rem] font-black text-white leading-none">{name[0]}</span>
                             </div>
                             
-                            <div className="relative flex items-center justify-between gap-6 mb-12">
-                                <h3 className="text-3xl font-black text-white italic tracking-tighter flex items-center gap-4">
-                                    <span className="w-1.5 h-8 bg-blue-500 rounded-full" />
+                            <div className="relative flex items-center justify-between gap-6 mb-8">
+                                <h3 className="text-2xl font-black text-white italic tracking-tighter flex items-center gap-3">
+                                    <span className="w-1.5 h-6 bg-blue-500 rounded-full" />
                                     {name} Region
                                 </h3>
                                 <div className="hidden md:block h-px bg-gradient-to-r from-slate-800 to-transparent flex-1" />
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8 relative">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5 relative">
                                 {/* Round of 64 */}
                                 <div className="space-y-6">
                                     <RoundSection 
