@@ -92,7 +92,7 @@ class NCAAMTournamentPredictionService:
             self._model = NCAAMMarketFirstModelV2()
         return self._model
 
-    def predict_game(self, game_input: TournamentGameInput) -> TournamentGamePrediction:
+    def predict_game(self, game_input: TournamentGameInput, conn=None) -> TournamentGamePrediction:
         """
         Predict a single tournament game using the canonical model tournament mode.
         """
@@ -102,7 +102,8 @@ class NCAAMTournamentPredictionService:
             event_context={"start_time": datetime.now(), "id": game_input.event_id},
             market_snapshot=game_input.market_snapshot,
             persist=False,
-            neutral_site=game_input.neutral_site
+            neutral_site=game_input.neutral_site,
+            conn=conn
         )
         
         return TournamentGamePrediction(
@@ -159,7 +160,7 @@ class NCAAMTournamentPredictionService:
         # We need a quick way to cache games
         _cache = {}
         
-        def _get_game_result(target_a: str, target_b: str, round_name: str) -> TournamentGamePrediction:
+        def _get_game_result(target_a: str, target_b: str, round_name: str, conn=None) -> TournamentGamePrediction:
             # Sort for cache key consistency
             k = tuple(sorted([target_a, target_b]))
             if k not in _cache:
@@ -171,47 +172,68 @@ class NCAAMTournamentPredictionService:
                     neutral_site=True
                 )
                 try:
-                    res = self.predict_game(gi)
+                    res = self.predict_game(gi, conn=conn)
+                except SimulatorDataError as e:
+                    import random
+                    # Explicit fallback for missing data instead of blowing up the entire 64-team bracket
+                    res = TournamentGamePrediction(
+                        team_a=target_a,
+                        team_b=target_b,
+                        winner=target_a if random.random() > 0.5 else target_b,
+                        winner_side="team_a",
+                        projected_spread_a=0.0,
+                        projected_total=145.0,
+                        win_prob_a=50.0,
+                        win_prob_b=50.0,
+                        confidence_0_100=50.0,
+                        market_data_used=False,
+                        fallback_used=True,
+                        reason_codes=["Explicit fallback due to missing Torvik/Kenpom metrics."],
+                        risk_flags=["MISSING_DATA", f"Error: {e}"],
+                        debug={"error": str(e)},
+                        neutral_site=True
+                    )
                 except Exception as e:
-                    # Explicit error if missing data or any other failure during simulation
-                    raise SimulatorDataError(f"Failed to predict {target_a} vs {target_b}: {e}")
+                    # Catch unhandled system crashes
+                    raise SimulatorDataError(f"System failure predicting {target_a} vs {target_b}: {e}")
                 _cache[k] = res
                 
-            # We must return it mapped to team_a and team_b specifically as requested
             cached = _cache[k]
-            # If cached used target_a as team_a
+            # Speed optimization: Return cached object directly if it matches the requested order
             if cached.team_a == target_a:
-                prob_a = cached.win_prob_a
-                prob_b = cached.win_prob_b
-                p_spread_a = cached.projected_spread_a
-            else:
+                return cached
+                
+            # If swapped, we only re-instantiate once per unique matchup (max 63 times), NOT per simulation
+            swapped_k = (target_a, target_b, "swapped")
+            if swapped_k not in _cache:
                 prob_a = cached.win_prob_b
                 prob_b = cached.win_prob_a
                 p_spread_a = -cached.projected_spread_a
                 
-            return TournamentGamePrediction(
-                team_a=target_a,
-                team_b=target_b,
-                winner=cached.winner,
-                winner_side="team_a" if cached.winner == target_a else "team_b",
-                projected_spread_a=p_spread_a,
-                projected_total=cached.projected_total,
-                win_prob_a=prob_a,
-                win_prob_b=prob_b,
-                confidence_0_100=cached.confidence_0_100,
-                market_data_used=cached.market_data_used,
-                fallback_used=cached.fallback_used,
-                reason_codes=cached.reason_codes,
-                risk_flags=cached.risk_flags,
-                debug=cached.debug
-            )
+                _cache[swapped_k] = TournamentGamePrediction(
+                    team_a=target_a,
+                    team_b=target_b,
+                    winner=cached.winner,
+                    winner_side="team_a" if cached.winner == target_a else "team_b",
+                    projected_spread_a=p_spread_a,
+                    projected_total=cached.projected_total,
+                    win_prob_a=prob_a,
+                    win_prob_b=prob_b,
+                    confidence_0_100=cached.confidence_0_100,
+                    market_data_used=cached.market_data_used,
+                    fallback_used=cached.fallback_used,
+                    reason_codes=cached.reason_codes,
+                    risk_flags=cached.risk_flags,
+                    debug=cached.debug
+                )
+            return _cache[swapped_k]
             
-        def _sim_matchup(ta: str, tb: str, rd: str) -> str:
-            pred = _get_game_result(ta, tb, rd)
+        def _sim_matchup(ta: str, tb: str, rd: str, conn=None) -> str:
+            pred = _get_game_result(ta, tb, rd, conn=conn)
             return ta if random.random() < (pred.win_prob_a / 100.0) else tb
 
-        def _most_likely_winner(ta: str, tb: str, rd: str) -> TournamentGamePrediction:
-            return _get_game_result(ta, tb, rd)
+        def _most_likely_winner(ta: str, tb: str, rd: str, conn=None) -> TournamentGamePrediction:
+            return _get_game_result(ta, tb, rd, conn=conn)
 
         # 2. Tracking structures for MC
         # team_name -> counts
@@ -227,49 +249,51 @@ class NCAAMTournamentPredictionService:
         base_pairings = [(1, 16), (8, 9), (5, 12), (4, 13), (6, 11), (3, 14), (7, 10), (2, 15)]
 
         # Determine deterministic bracket for main payload display
-        # First Four Deterministic
-        first_four_det = []
-        det_region_teams = {r: {} for r in base_regions}
-        for region, sdict in region_teams.items():
-            for seed, lst in sdict.items():
-                if len(lst) == 2:
-                    pred = _most_likely_winner(lst[0], lst[1], "First Four")
-                    first_four_det.append(pred)
-                    det_region_teams[region][seed] = pred.winner
-                else:
-                    det_region_teams[region][seed] = lst[0]
+        from src.database import get_db_connection
+        with get_db_connection() as conn:
+            # First Four Deterministic
+            first_four_det = []
+            det_region_teams = {r: {} for r in base_regions}
+            for region, sdict in region_teams.items():
+                for seed, lst in sdict.items():
+                    if len(lst) == 2:
+                        pred = _most_likely_winner(lst[0], lst[1], "First Four", conn=conn)
+                        first_four_det.append(pred)
+                        det_region_teams[region][seed] = pred.winner
+                    else:
+                        det_region_teams[region][seed] = lst[0]
 
-        det_regions = {}
-        e8_winners_det = {}
-        for region in base_regions:
-            tm = det_region_teams[region]
-            r64 = []
-            for (s1, s2) in base_pairings:
-                if s1 in tm and s2 in tm: r64.append(_most_likely_winner(tm[s1], tm[s2], "R64"))
-            r32 = []
-            for i in range(0, len(r64), 2):
-                if i+1 < len(r64): r32.append(_most_likely_winner(r64[i].winner, r64[i+1].winner, "R32"))
-            s16 = []
-            for i in range(0, len(r32), 2):
-                if i+1 < len(r32): s16.append(_most_likely_winner(r32[i].winner, r32[i+1].winner, "S16"))
-            e8 = []
-            for i in range(0, len(s16), 2):
-                if i+1 < len(s16): 
-                    e8.append(_most_likely_winner(s16[i].winner, s16[i+1].winner, "E8"))
-                    e8_winners_det[region] = e8[-1].winner
-            det_regions[region] = {"round_of_64": r64, "round_of_32": r32, "sweet_16": s16, "elite_8": e8}
+            det_regions = {}
+            e8_winners_det = {}
+            for region in base_regions:
+                tm = det_region_teams[region]
+                r64 = []
+                for (s1, s2) in base_pairings:
+                    if s1 in tm and s2 in tm: r64.append(_most_likely_winner(tm[s1], tm[s2], "R64", conn=conn))
+                r32 = []
+                for i in range(0, len(r64), 2):
+                    if i+1 < len(r64): r32.append(_most_likely_winner(r64[i].winner, r64[i+1].winner, "R32", conn=conn))
+                s16 = []
+                for i in range(0, len(r32), 2):
+                    if i+1 < len(r32): s16.append(_most_likely_winner(r32[i].winner, r32[i+1].winner, "S16", conn=conn))
+                e8 = []
+                for i in range(0, len(s16), 2):
+                    if i+1 < len(s16): 
+                        e8.append(_most_likely_winner(s16[i].winner, s16[i+1].winner, "E8", conn=conn))
+                        e8_winners_det[region] = e8[-1].winner
+                det_regions[region] = {"round_of_64": r64, "round_of_32": r32, "sweet_16": s16, "elite_8": e8}
 
-        final_four_det = []
-        if "East" in e8_winners_det and "West" in e8_winners_det:
-             final_four_det.append(_most_likely_winner(e8_winners_det["East"], e8_winners_det["West"], "FF"))
-        if "South" in e8_winners_det and "Midwest" in e8_winners_det:
-             final_four_det.append(_most_likely_winner(e8_winners_det["South"], e8_winners_det["Midwest"], "FF"))
-             
-        championship_det = None
-        champion_det = None
-        if len(final_four_det) == 2:
-             championship_det = _most_likely_winner(final_four_det[0].winner, final_four_det[1].winner, "NCG")
-             champion_det = championship_det.winner
+            final_four_det = []
+            if "East" in e8_winners_det and "West" in e8_winners_det:
+                 final_four_det.append(_most_likely_winner(e8_winners_det["East"], e8_winners_det["West"], "FF", conn=conn))
+            if "South" in e8_winners_det and "Midwest" in e8_winners_det:
+                 final_four_det.append(_most_likely_winner(e8_winners_det["South"], e8_winners_det["Midwest"], "FF", conn=conn))
+                 
+            championship_det = None
+            champion_det = None
+            if len(final_four_det) == 2:
+                 championship_det = _most_likely_winner(final_four_det[0].winner, final_four_det[1].winner, "NCG", conn=conn)
+                 champion_det = championship_det.winner
 
         # 3. Fast MC Simulation Loop
         for _ in range(simulations):

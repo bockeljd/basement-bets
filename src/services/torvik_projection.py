@@ -17,8 +17,10 @@ class TorvikProjectionService:
         self.bt_client = BartTorvikClient()
         self.identity = TeamIdentityService()
         self.matcher = TeamMatcher()
+        self._metrics_cache = {}
+        self._official_cache = {}
 
-    def get_projection(self, home_team: str, away_team: str, date: str = None) -> Dict:
+    def get_projection(self, home_team: str, away_team: str, date: str = None, conn=None) -> Dict:
         """
         Main entry point for "Torvik View".
         1. Try to fetch official Torvik projection for the day.
@@ -52,10 +54,10 @@ class TorvikProjectionService:
         return self.compute_torvik_projection(home_team, away_team, date=date)
 
     def _fetch_official_from_db(self, date_yyyymmdd: str) -> Optional[Dict]:
-        """Load official Torvik schedule JSON from DB if present.
+        """Load official Torvik schedule JSON from DB if present."""
+        if date_yyyymmdd in self._official_cache:
+            return self._official_cache[date_yyyymmdd]
 
-        Returns a projections dict keyed by team name (like BartTorvikClient.fetch_daily_projections).
-        """
         try:
             with get_db_connection() as conn:
                 row = _exec(conn, """
@@ -115,7 +117,8 @@ class TorvikProjectionService:
             except Exception:
                 continue
 
-        return projections or None
+        self._official_cache[date_yyyymmdd] = projections if projections else None
+        return self._official_cache[date_yyyymmdd]
 
 
     def _find_projection(self, team_name: str, projections: Dict) -> Optional[Dict]:
@@ -239,14 +242,25 @@ class TorvikProjectionService:
             "lean": "Computed from Raw Efficiency"
         }
 
-    def _get_latest_metrics(self, team_name: str, date: str = None) -> Optional[Dict]:
+    def _get_latest_metrics(self, team_name: str, date: str = None, conn=None) -> Optional[Dict]:
         """Fetch latest daily metrics for a team from DB."""
+        cache_key = f"{team_name}_{date}"
+        if cache_key in self._metrics_cache:
+            return self._metrics_cache[cache_key]
+
         # Find canonical name
         t = self.matcher.find_source_name(team_name, "bt_team_metrics_daily", "team_text")
         if not t:
-            # print(f"[Torvik] No match found for '{team_name}'") # Reduce noise
+            self._metrics_cache[cache_key] = None
             return None
 
+        if conn:
+             return self._exec_metrics_query(conn, t, date, cache_key)
+        else:
+             with get_db_connection() as c:
+                  return self._exec_metrics_query(c, t, date, cache_key)
+
+    def _exec_metrics_query(self, conn, t, date, cache_key):
         # Build query
         # If date provided, find latest metrics ON OR BEFORE that date.
         
@@ -278,7 +292,10 @@ class TorvikProjectionService:
             except Exception:
                 row = _exec(conn, query_min, params).fetchone()
             if row:
-                return dict(row)
+                res = dict(row)
+                self._metrics_cache[cache_key] = res
+                return res
+            self._metrics_cache[cache_key] = None
             return None
 
 if __name__ == "__main__":

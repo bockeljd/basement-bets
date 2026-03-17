@@ -21,6 +21,7 @@ class NCAAMTournamentFeatures:
         from src.utils.team_matcher import TeamMatcher
         self.kp_client = KenPomClient()
         self.matcher = TeamMatcher()
+        self._profile_cache = {} # memoize team profiles for simulation loop
         
     def _safe_float(self, v, default=0.0):
         try:
@@ -40,108 +41,118 @@ class NCAAMTournamentFeatures:
                 return self._safe_float(cols[i])
         return None
 
-    def get_team_tournament_profile(self, team: str) -> Dict[str, Any]:
-        from src.database import get_db_connection, _exec
+    def get_team_tournament_profile(self, team: str, conn=None) -> Dict[str, Any]:
+        if team in self._profile_cache:
+            return self._profile_cache[team]
+            
+        if conn:
+             return self._exec_profile(team, conn)
+        else:
+             from src.database import get_db_connection
+             with get_db_connection() as c:
+                  return self._exec_profile(team, c)
+
+    def _exec_profile(self, team, conn):
+        from src.database import _exec
         
         try:
-            with get_db_connection() as conn:
-                # 1. KenPom team rating
-                kp_name = self.matcher.find_source_name(team, 'kenpom_ratings', 'team_name') or team
-                kp_row = _exec(conn, """
-                    SELECT team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t
-                    FROM kenpom_ratings WHERE team_name = %s LIMIT 1
-                """, (kp_name,)).fetchone()
-                kenpom = dict(kp_row) if kp_row else {}
+            # 1. KenPom team rating
+            kp_name = self.matcher.find_source_name(team, 'kenpom_ratings', 'team_name') or team
+            kp_row = _exec(conn, """
+                SELECT team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t
+                FROM kenpom_ratings WHERE team_name = %s LIMIT 1
+            """, (kp_name,)).fetchone()
+            kenpom = dict(kp_row) if kp_row else {}
 
-                # 2. NET rankings
+            # 2. NET rankings
+            net_row = _exec(conn, """
+                SELECT team_name, rank as net_rank, record,
+                       quad1, quad2, quad3, quad4, home, road, neutral
+                FROM ncaam_net_rankings
+                WHERE LOWER(REPLACE(team_name,' ','')) = LOWER(REPLACE(%s,' ',''))
+                LIMIT 1
+            """, (team,)).fetchone()
+            if not net_row:
                 net_row = _exec(conn, """
                     SELECT team_name, rank as net_rank, record,
                            quad1, quad2, quad3, quad4, home, road, neutral
                     FROM ncaam_net_rankings
-                    WHERE LOWER(REPLACE(team_name,' ','')) = LOWER(REPLACE(%s,' ',''))
-                    LIMIT 1
-                """, (team,)).fetchone()
-                if not net_row:
-                    net_row = _exec(conn, """
-                        SELECT team_name, rank as net_rank, record,
-                               quad1, quad2, quad3, quad4, home, road, neutral
-                        FROM ncaam_net_rankings
-                        WHERE team_name ILIKE %s LIMIT 1
-                    """, (f'%{team.split()[0]}%',)).fetchone()
-                net = dict(net_row) if net_row else {}
+                    WHERE team_name ILIKE %s LIMIT 1
+                """, (f'%{team.split()[0]}%',)).fetchone()
+            net = dict(net_row) if net_row else {}
 
-                # 3. Torvik / BartTorvik deep metrics
-                torvik_name = self.matcher.find_source_name(team, 'bt_team_metrics_daily', 'team_text')
-                torvik_row = None
-                if torvik_name:
-                    try:
-                        torvik_row = _exec(conn, """
-                            SELECT adj_off, adj_def, adj_tempo, luck, continuity, torvik_rank, record
-                            FROM bt_team_metrics_daily
-                            WHERE team_text = %s
-                            ORDER BY date DESC LIMIT 1
-                        """, (torvik_name,)).fetchone()
-                    except Exception:
-                        pass
-                torvik = dict(torvik_row) if torvik_row else {}
+            # 3. Torvik / BartTorvik deep metrics
+            torvik_name = self.matcher.find_source_name(team, 'bt_team_metrics_daily', 'team_text')
+            torvik_row = None
+            if torvik_name:
+                try:
+                    torvik_row = _exec(conn, """
+                        SELECT adj_off, adj_def, adj_tempo, luck, continuity, torvik_rank, record
+                        FROM bt_team_metrics_daily
+                        WHERE team_text = %s
+                        ORDER BY date DESC LIMIT 1
+                    """, (torvik_name,)).fetchone()
+                except Exception:
+                    pass
+            torvik = dict(torvik_row) if torvik_row else {}
 
-                # Barthag from torvik_ratings
-                torvik_rat_name = self.matcher.find_source_name(team, 'torvik_ratings', 'team_name')
-                barthag = None
-                if torvik_rat_name:
-                    try:
-                        tr = _exec(conn, """
-                            SELECT barthag, rank, adj_o, adj_d
-                            FROM torvik_ratings WHERE team_name = %s LIMIT 1
-                        """, (torvik_rat_name,)).fetchone()
-                        if tr:
-                            barthag = tr['barthag']
-                            if not torvik.get('adj_off'):
-                                torvik['adj_off'] = tr['adj_o']
-                            if not torvik.get('adj_def'):
-                                torvik['adj_def'] = tr['adj_d']
-                            if not torvik.get('torvik_rank'):
-                                torvik['torvik_rank'] = tr['rank']
-                    except Exception:
-                        pass
-                torvik['barthag'] = barthag
+            # Barthag from torvik_ratings
+            torvik_rat_name = self.matcher.find_source_name(team, 'torvik_ratings', 'team_name')
+            barthag = None
+            if torvik_rat_name:
+                try:
+                    tr = _exec(conn, """
+                        SELECT barthag, rank, adj_o, adj_d
+                        FROM torvik_ratings WHERE team_name = %s LIMIT 1
+                    """, (torvik_rat_name,)).fetchone()
+                    if tr:
+                        barthag = tr['barthag']
+                        if not torvik.get('adj_off'):
+                            torvik['adj_off'] = tr['adj_o']
+                        if not torvik.get('adj_def'):
+                            torvik['adj_def'] = tr['adj_d']
+                        if not torvik.get('torvik_rank'):
+                            torvik['torvik_rank'] = tr['rank']
+                except Exception:
+                    pass
+            torvik['barthag'] = barthag
 
-                # 4. Player stats
-                raw_players = self.kp_client.get_player_stats_for_team(team, limit=40)
+            # 4. Player stats
+            raw_players = self.kp_client.get_player_stats_for_team(team, limit=40)
 
-                def _player_minutes(p):
-                    return self._parse_metric(p.get('metrics'), 'min', 'minute') or 0
+            def _player_minutes(p):
+                return self._parse_metric(p.get('metrics'), 'min', 'minute') or 0
 
-                raw_players.sort(key=_player_minutes, reverse=True)
+            raw_players.sort(key=_player_minutes, reverse=True)
 
-                players = []
-                for p in raw_players[:8]:
-                    m = p.get('metrics') or {}
-                    players.append({
-                        'name':    p.get('player_name', 'Unknown'),
-                        'ppg':     self._parse_metric(m, 'pts', 'ppg', 'points'),
-                        'apg':     self._parse_metric(m, 'ast', 'apg', 'assist'),
-                        'rpg':     self._parse_metric(m, 'reb', 'rpg', 'rebound'),
-                        'ortg':    self._parse_metric(m, 'o-rat', 'ortg', 'off rat'),
-                        'usg':     self._parse_metric(m, 'usag', 'usg', 'usage'),
-                        'efg':     self._parse_metric(m, 'efg', 'eff fg', 'effective'),
-                        'min_pct': self._parse_metric(m, '%min', 'min%', 'min pct', 'minute%') or _player_minutes(p),
-                    })
+            players = []
+            for p in raw_players[:8]:
+                m = p.get('metrics') or {}
+                players.append({
+                    'name':    p.get('player_name', 'Unknown'),
+                    'ppg':     self._parse_metric(m, 'pts', 'ppg', 'points'),
+                    'apg':     self._parse_metric(m, 'ast', 'apg', 'assist'),
+                    'rpg':     self._parse_metric(m, 'reb', 'rpg', 'rebound'),
+                    'ortg':    self._parse_metric(m, 'o-rat', 'ortg', 'off rat'),
+                    'usg':     self._parse_metric(m, 'usag', 'usg', 'usage'),
+                    'efg':     self._parse_metric(m, 'efg', 'eff fg', 'effective'),
+                    'min_pct': self._parse_metric(m, '%min', 'min%', 'min pct', 'minute%') or _player_minutes(p),
+                })
 
-                # 5. Team player aggregates
-                team_agg_row = self.kp_client.get_team_player_agg(team)
-                team_agg = {}
-                if team_agg_row:
-                    team_agg = {k: v for k, v in {
-                        'ortg_w':       team_agg_row.get('ortg_w'),
-                        'efg_w':        team_agg_row.get('efg_w'),
-                        'ts_w':         team_agg_row.get('ts_w'),
-                        'ast_rate_w':   team_agg_row.get('ast_rate_w'),
-                        'reb_rate_w':   team_agg_row.get('reb_rate_w'),
-                        'tov_rate_w':   team_agg_row.get('tov_rate_w'),
-                        'top7_min_pct': team_agg_row.get('top7_minutes_pct'),
-                        'n_players':    team_agg_row.get('n_players'),
-                    }.items() if v is not None}
+            # 5. Team player aggregates
+            team_agg_row = self.kp_client.get_team_player_agg(team)
+            team_agg = {}
+            if team_agg_row:
+                team_agg = {k: v for k, v in {
+                    'ortg_w':       team_agg_row.get('ortg_w'),
+                    'efg_w':        team_agg_row.get('efg_w'),
+                    'ts_w':         team_agg_row.get('ts_w'),
+                    'ast_rate_w':   team_agg_row.get('ast_rate_w'),
+                    'reb_rate_w':   team_agg_row.get('reb_rate_w'),
+                    'tov_rate_w':   team_agg_row.get('tov_rate_w'),
+                    'top7_min_pct': team_agg_row.get('top7_minutes_pct'),
+                    'n_players':    team_agg_row.get('n_players'),
+                }.items() if v is not None}
 
             # 6. Upset Risk Score
             upset_score = 0
@@ -221,6 +232,8 @@ class NCAAMTournamentFeatures:
                 'tov_rate': tov_rate,
                 'q1_wins': q1_wins
             }
+            self._profile_cache[team] = res
+            return res
 
         except Exception as e:
             traceback.print_exc()
@@ -236,12 +249,12 @@ class NCAAMTournamentFeatures:
                 'dark_horse': {'score': 0, 'factors': []}
             }
 
-    def get_tournament_modifiers(self, team_name: str) -> Dict[str, float]:
+    def get_tournament_modifiers(self, team_name: str, conn=None) -> Dict[str, float]:
         """
         Calculates bounded modifiers for a specific team, specifically for use
         in tournament game simulation models.
         """
-        profile = self.get_team_tournament_profile(team_name)
+        profile = self.get_team_tournament_profile(team_name, conn=conn)
         
         # Bounded Modifiers:
         luck_modifier = 0.0

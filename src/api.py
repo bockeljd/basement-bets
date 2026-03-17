@@ -82,6 +82,7 @@ async def check_access_key(request: Request, call_next):
             "/api/health",
             "/api/board",
             "/api/ncaam/top-picks",
+            "/api/ncaam/bracket/2026",
             "/api/data-health",
         }
 
