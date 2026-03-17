@@ -74,9 +74,24 @@ class LiveBracketSimulator:
             """).fetchall()
             
         seeds_by_region = {}
+        split_count = 0
         for r in rows:
             reg = r['region']
             if reg not in seeds_by_region:
                 seeds_by_region[reg] = []
-            seeds_by_region[reg].append(dict(r))
+            
+            tname = r['team_name']
+            if " / " in tname:
+                teams = [t.strip() for t in tname.split(" / ")]
+                for t in teams:
+                    new_row = dict(r)
+                    new_row['team_name'] = t
+                    seeds_by_region[reg].append(new_row)
+                split_count += 1
+            else:
+                seeds_by_region[reg].append(dict(r))
+        
+        if split_count > 0:
+            print(f"[Simulator] Split {split_count} slash-combined play-in rows.")
+            
         return seeds_by_region

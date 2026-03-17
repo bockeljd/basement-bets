@@ -64,14 +64,24 @@ async def get_2026_bracket(request: Request, refresh: bool = False):
         simulator = LiveBracketSimulator(simulations=2500)
         seeds_by_region = simulator.get_seeds_from_db()
         
+        total_teams = sum(len(lst) for lst in seeds_by_region.values())
+        print(f"[bracket-api] Loaded {total_teams} teams across {len(seeds_by_region)} regions from DB.")
+
         if not seeds_by_region:
+            print("[bracket-api] ERROR: No seeds found in DB for 2026.")
             raise HTTPException(status_code=404, detail="Tournament seeds not found for 2026.")
             
         try:
             # Simulate bracket (returns TournamentBracketSimulation pydantic model)
+            print(f"[bracket-api] Starting Monte Carlo simulation ({2500} iterations)...")
             projections = service.simulate_bracket(seeds_by_region, simulations=2500)
+            print("[bracket-api] Simulation completed successfully.")
         except SimulatorDataError as e:
+            print(f"[bracket-api] SimulatorDataError: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            print(f"[bracket-api] Unexpected Simulation Error: {type(e).__name__}: {e}")
+            raise HTTPException(status_code=500, detail=f"Simulation failed: {str(e)}")
 
         # 3. Dump the canonical model and enrich with seeds for UI
         bracket_data = projections.model_dump()
