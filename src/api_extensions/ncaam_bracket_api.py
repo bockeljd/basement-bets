@@ -14,6 +14,35 @@ router = APIRouter()
 _SIM_CACHE = {}
 CACHE_TTL = 3600  # 1 hour
 
+@router.get("/api/ncaam/bracket/2026/debug")
+async def get_bracket_debug(request: Request):
+    """Internal debug endpoint for bracket prediction health."""
+    from src.api import _is_valid_base_key
+    
+    # Optional authorization, but good practice for debug hooks
+    key = request.headers.get("X-BASEMENT-KEY")
+    if key and not _is_valid_base_key(key):
+        raise HTTPException(status_code=403, detail="Invalid Basement Key")
+        
+    cache_keys = list(_SIM_CACHE.keys())
+    active_cache = "2026_bracket" in _SIM_CACHE
+    
+    time_remaining = 0
+    if active_cache:
+        time_remaining = max(0, _SIM_CACHE["2026_bracket"]["expiry"] - time.time())
+        
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    return {
+        "status": "healthy",
+        "model_version": NCAAMMarketFirstModelV2.VERSION,
+        "cache": {
+            "active": active_cache,
+            "keys_loaded": len(cache_keys),
+            "ttl_remaining_seconds": int(time_remaining)
+        },
+        "system_time": time.time()
+    }
+
 @router.get("/api/ncaam/bracket/2026")
 async def get_2026_bracket(request: Request, refresh: bool = False):
     """Return the full 2026 bracket structure with real-time simulations."""
@@ -26,59 +55,53 @@ async def get_2026_bracket(request: Request, refresh: bool = False):
             if current_time < entry["expiry"]:
                 return entry["data"]
 
-        # 2. Run Live Simulation
-        simulator = LiveBracketSimulator(simulations=10000)
+        # 2. Run Live Simulation Canonical Service
+        from src.services.ncaam_tournament_service import NCAAMTournamentPredictionService
+        service = NCAAMTournamentPredictionService()
         
-        # Fetch seeds for simulation
+        # Use 2,500 for fast response times while preserving simulation accuracy
+        # 10,000 takes ~6s, risking Vercel function timeouts on cold starts.
+        simulator = LiveBracketSimulator(simulations=2500)
         seeds_by_region = simulator.get_seeds_from_db()
+        
         if not seeds_by_region:
             raise HTTPException(status_code=404, detail="Tournament seeds not found for 2026.")
             
         try:
-            projections = simulator.simulate_full_bracket(seeds_by_region)
+            # Simulate bracket (returns TournamentBracketSimulation pydantic model)
+            projections = service.simulate_bracket(seeds_by_region, simulations=2500)
         except SimulatorDataError as e:
-            # ZERO SILENT FALLBACKS
             raise HTTPException(status_code=500, detail=str(e))
 
-        # 3. Create a lookup for seeds for UI enrichment
+        # 3. Dump the canonical model and enrich with seeds for UI
+        bracket_data = projections.model_dump()
+        bracket_data["v"] = "5-canonical" # Mark as the new canonical API format
+        
+        # Build seed lookup
         seed_lookup = {}
         for region, seeds in seeds_by_region.items():
             for s in seeds:
                 name = standardize_team_name(s['team_name'])
                 seed_lookup[name] = s['seed']
 
-        def enrich_matchups(matchup_list):
-            """Add seed info to a list of matchup dicts."""
-            enriched = []
-            for m in (matchup_list or []):
-                m = dict(m)
+        def enrich_matchups(matchups_list):
+            for m in matchups_list:
                 m['seed_a'] = seed_lookup.get(standardize_team_name(m.get('team_a', '')))
                 m['seed_b'] = seed_lookup.get(standardize_team_name(m.get('team_b', '')))
-                enriched.append(m)
-            return enriched
-
-        # 4. Combine - Build enriched bracket data
-        bracket_data = {
-            "season": "2025-26",
-            "champion": projections.get("champion"),
-            "championship": projections.get("championship"),
-            "final_four": enrich_matchups(projections.get("final_four", [])),
-            "regions": {},
-            "v": 4  # Version bump for live simulator
-        }
-
-        for region in ["East", "South", "West", "Midwest"]:
-            reg_seeds = seeds_by_region.get(region, [])
-            reg_rounds = projections.get("rounds", {}).get(region, {})
+            return matchups_list
             
-            bracket_data["regions"][region] = {
-                "seeds": reg_seeds,
-                "round_of_64": enrich_matchups(reg_rounds.get("round_of_64", [])),
-                "round_of_32": enrich_matchups(reg_rounds.get("round_of_32", [])),
-                "sweet_16": enrich_matchups(reg_rounds.get("sweet_16", [])),
-                "elite_8": enrich_matchups(reg_rounds.get("elite_8", [])),
-            }
+        # Inject into lists
+        bracket_data["first_four"] = enrich_matchups(bracket_data.get("first_four", []))
+        bracket_data["final_four"] = enrich_matchups(bracket_data.get("final_four", []))
+        if bracket_data.get("championship"):
+            enrich_matchups([bracket_data["championship"]])
             
+        for region, rounds_dict in bracket_data.get("regions", {}).items():
+            for round_name, matchups_list in rounds_dict.items():
+                rounds_dict[round_name] = enrich_matchups(matchups_list)
+            # Inject flat seed array into region for the UI header rendering
+            rounds_dict["seeds"] = seeds_by_region.get(region, [])
+
         # Update Cache
         _SIM_CACHE["2026_bracket"] = {
             "data": bracket_data,
