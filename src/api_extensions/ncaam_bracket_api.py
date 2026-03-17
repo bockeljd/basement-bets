@@ -9,85 +9,93 @@ from src.utils.naming import standardize_team_name
 
 router = APIRouter()
 
-# Simple in-memory cache for simulation results
-# key: "2026_bracket", value: {"data": {...}, "expiry": timestamp}
-_SIM_CACHE = {}
-CACHE_TTL = 3600  # 1 hour
+# Local memory cache for ultra-fast hits (10s TTL)
+_LOCAL_CACHE = {"data": None, "expiry": 0}
+LOCAL_TTL = 10
+
+def _get_db_cache():
+    """Fetch simulation from ncaam_bracket_cache table."""
+    try:
+        with get_db_connection() as conn:
+            row = _exec(conn, "SELECT data_json FROM ncaam_bracket_cache WHERE season = '2025-26'").fetchone()
+            if row:
+                return row['data_json']
+    except Exception as e:
+        print(f"[bracket-api] Cache read error: {e}")
+    return None
+
+def _save_db_cache(data):
+    """Save simulation to ncaam_bracket_cache table."""
+    try:
+        with get_db_connection() as conn:
+            _exec(conn, """
+                INSERT INTO ncaam_bracket_cache (season, data_json, updated_at)
+                VALUES ('2025-26', %s, NOW())
+                ON CONFLICT (season) DO UPDATE SET data_json = EXCLUDED.data_json, updated_at = NOW()
+            """, (json.dumps(data),))
+            conn.commit()
+            print("[bracket-api] Cache persisted to DB.")
+    except Exception as e:
+        print(f"[bracket-api] Cache write error: {e}")
 
 @router.get("/api/ncaam/bracket/2026/debug")
 async def get_bracket_debug(request: Request):
     """Internal debug endpoint for bracket prediction health."""
-    from src.api import _is_valid_base_key
-    
-    # Optional authorization, but good practice for debug hooks
-    key = request.headers.get("X-BASEMENT-KEY")
-    if key and not _is_valid_base_key(key):
-        raise HTTPException(status_code=403, detail="Invalid Basement Key")
-        
-    cache_keys = list(_SIM_CACHE.keys())
-    active_cache = "2026_bracket" in _SIM_CACHE
-    
-    time_remaining = 0
-    if active_cache:
-        time_remaining = max(0, _SIM_CACHE["2026_bracket"]["expiry"] - time.time())
-        
+    db_cache = _get_db_cache()
     from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
     return {
         "status": "healthy",
         "model_version": NCAAMMarketFirstModelV2.VERSION,
-        "cache": {
-            "active": active_cache,
-            "keys_loaded": len(cache_keys),
-            "ttl_remaining_seconds": int(time_remaining)
+        "local_cache": {
+            "active": _LOCAL_CACHE["data"] is not None,
+            "expiry": _LOCAL_CACHE["expiry"],
+            "remaining": max(0, int(_LOCAL_CACHE["expiry"] - time.time()))
+        },
+        "db_cache": {
+            "present": db_cache is not None,
+            "size": len(json.dumps(db_cache)) if db_cache else 0
         },
         "system_time": time.time()
     }
 
+@router.post("/api/ncaam/bracket/2026/recompute")
+async def recompute_bracket(request: Request):
+    """Force re-run the simulation and update the DB cache."""
+    return await get_2026_bracket(request, refresh=True)
+
 @router.get("/api/ncaam/bracket/2026")
 async def get_2026_bracket(request: Request, refresh: bool = False):
-    """Return the full 2026 bracket structure with real-time simulations."""
-    try:
-        current_time = time.time()
-        
-        # 1. Check Cache
-        if not refresh and "2026_bracket" in _SIM_CACHE:
-            entry = _SIM_CACHE["2026_bracket"]
-            if current_time < entry["expiry"]:
-                return entry["data"]
+    """Return the full 2026 bracket structure with real-time or cached simulations."""
+    current_time = time.time()
+    
+    # 1. Local Memory Cache (Fastest)
+    if not refresh and _LOCAL_CACHE["data"] and current_time < _LOCAL_CACHE["expiry"]:
+        return _LOCAL_CACHE["data"]
 
-        # 2. Run Live Simulation Canonical Service
+    # 2. DB Cache (Faster than simulation)
+    if not refresh:
+        cached = _get_db_cache()
+        if cached:
+            _LOCAL_CACHE["data"] = cached
+            _LOCAL_CACHE["expiry"] = current_time + LOCAL_TTL
+            return cached
+
+    # 3. Live Simulation (Compute)
+    print("[bracket-api] Cache miss or refresh requested. Starting simulation...")
+    try:
         from src.services.ncaam_tournament_service import NCAAMTournamentPredictionService
         service = NCAAMTournamentPredictionService()
-        
-        # Use 2,500 for fast response times while preserving simulation accuracy
-        # 10,000 takes ~6s, risking Vercel function timeouts on cold starts.
         simulator = LiveBracketSimulator(simulations=2500)
         seeds_by_region = simulator.get_seeds_from_db()
         
-        total_teams = sum(len(lst) for lst in seeds_by_region.values())
-        print(f"[bracket-api] Loaded {total_teams} teams across {len(seeds_by_region)} regions from DB.")
-
         if not seeds_by_region:
-            print("[bracket-api] ERROR: No seeds found in DB for 2026.")
             raise HTTPException(status_code=404, detail="Tournament seeds not found for 2026.")
             
-        try:
-            # Simulate bracket (returns TournamentBracketSimulation pydantic model)
-            print(f"[bracket-api] Starting Monte Carlo simulation ({2500} iterations)...")
-            projections = service.simulate_bracket(seeds_by_region, simulations=2500)
-            print("[bracket-api] Simulation completed successfully.")
-        except SimulatorDataError as e:
-            print(f"[bracket-api] SimulatorDataError: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-        except Exception as e:
-            print(f"[bracket-api] Unexpected Simulation Error: {type(e).__name__}: {e}")
-            raise HTTPException(status_code=500, detail=f"Simulation failed: {str(e)}")
-
-        # 3. Dump the canonical model and enrich with seeds for UI
+        projections = service.simulate_bracket(seeds_by_region, simulations=2500)
         bracket_data = projections.model_dump()
-        bracket_data["v"] = "5-canonical" # Mark as the new canonical API format
+        bracket_data["v"] = "5-canonical-cached"
         
-        # Build seed lookup
+        # Build seed lookup for UI enrichment
         seed_lookup = {}
         for region, seeds in seeds_by_region.items():
             for s in seeds:
@@ -100,7 +108,6 @@ async def get_2026_bracket(request: Request, refresh: bool = False):
                 m['seed_b'] = seed_lookup.get(standardize_team_name(m.get('team_b', '')))
             return matchups_list
             
-        # Inject into lists
         bracket_data["first_four"] = enrich_matchups(bracket_data.get("first_four", []))
         bracket_data["final_four"] = enrich_matchups(bracket_data.get("final_four", []))
         if bracket_data.get("championship"):
@@ -109,21 +116,17 @@ async def get_2026_bracket(request: Request, refresh: bool = False):
         for region, rounds_dict in bracket_data.get("regions", {}).items():
             for round_name, matchups_list in rounds_dict.items():
                 rounds_dict[round_name] = enrich_matchups(matchups_list)
-            # Inject flat seed array into region for the UI header rendering
             rounds_dict["seeds"] = seeds_by_region.get(region, [])
 
-        # Update Cache
-        _SIM_CACHE["2026_bracket"] = {
-            "data": bracket_data,
-            "expiry": current_time + CACHE_TTL
-        }
+        # 4. Save to DB Cache & Local Cache
+        _save_db_cache(bracket_data)
+        _LOCAL_CACHE["data"] = bracket_data
+        _LOCAL_CACHE["expiry"] = current_time + LOCAL_TTL
             
         return bracket_data
         
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"[bracket-api] Error: {e}")
+        print(f"[bracket-api] Fatal Error: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

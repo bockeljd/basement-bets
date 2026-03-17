@@ -180,11 +180,30 @@ def init_db():
     init_ncaam_net_rankings_db()
     init_council_signals_db()
     init_agent_traces_db()
+    init_ncaam_bracket_cache_db()
 
     # Explicitly init bets last as it depends on others conceptually (not foreign key wise mostly)
     init_bets_db()
     init_transactions_db()
     init_balance_snapshots_db()
+
+def init_ncaam_bracket_cache_db():
+    """
+    Persistent cache for bracket simulation results.
+    Avoids expensive re-simulation on every request.
+    """
+    schema = """
+    CREATE TABLE IF NOT EXISTS ncaam_bracket_cache (
+        season TEXT PRIMARY KEY,
+        data_json JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """
+    with get_admin_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(schema)
+        conn.commit()
+    print("NCAAM Bracket Cache table initialized.")
 
 def _force_reset() -> bool:
     return os.environ.get("BASEMENT_DB_RESET") == "1"
