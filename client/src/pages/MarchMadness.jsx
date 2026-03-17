@@ -872,6 +872,11 @@ function MatchupCard({ m, onMatchupClick, mirrored = false }) {
             onClick={() => onMatchupClick && onMatchupClick(m.team_a, m.team_b)}
             className="group cursor-pointer relative"
         >
+            {m.fallback_used && (
+                <div className="absolute -top-2 -right-2 z-20 bg-amber-500 text-black rounded-full p-0.5 shadow-lg border border-amber-300 animate-pulse" title="Degraded Data: Seed-based fallback used">
+                    <AlertTriangle size={12} fill="currentColor" />
+                </div>
+            )}
             <div className={`
                 bg-slate-900 border border-slate-800 rounded shadow-md 
                 hover:border-blue-500/50 hover:bg-slate-800/80 transition-all duration-300
@@ -940,6 +945,12 @@ function MatchupCard({ m, onMatchupClick, mirrored = false }) {
                     <span className="text-slate-400">Total: <span className="text-white">{parseFloat(m.projected_total).toFixed(1)}</span></span>
                     <span className="text-slate-400">Conf: <span className="text-blue-400">{parseFloat(m.confidence_0_100).toFixed(0)}</span></span>
                 </div>
+                {m.fallback_used && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded p-1.5 text-[9px] text-amber-200 flex items-start gap-1.5">
+                        <AlertTriangle size={10} className="shrink-0 mt-0.5" />
+                        <span><strong>Data Issue:</strong> Missing core metrics. Model reverted to seed-based prior.</span>
+                    </div>
+                )}
                 {m.reason_codes && m.reason_codes.length > 0 && (
                     <div className="text-[9px] text-slate-300 space-y-1 mt-1">
                         {m.reason_codes.slice(0, 3).map((r, i) => (
@@ -1019,6 +1030,21 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
 
     return (
         <div className="py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 px-4">
+            
+            {data.degraded_simulation && (
+                <div className="max-w-4xl mx-auto bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center gap-4 text-amber-200">
+                    <AlertTriangle size={24} className="shrink-0 text-amber-500" />
+                    <div>
+                        <div className="text-sm font-bold uppercase tracking-tight">Degraded Simulation Mode</div>
+                        <p className="text-xs opacity-80">This bracket contains matchups with missing performance data (e.g. invalid team mappings or new D1 teams). Seed-based priors were used for those specific games. Look for the <AlertTriangle size={10} className="inline mx-0.5" /> icon on affected matchups.</p>
+                    </div>
+                    {data.data_issues && data.data_issues.length > 0 && (
+                        <div className="ml-auto text-[10px] font-mono bg-amber-500/20 px-2 py-1 rounded">
+                            {data.data_issues.length} Issues
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Symmetrical Theater Layout */}
             <div className="flex justify-center items-stretch gap-8">

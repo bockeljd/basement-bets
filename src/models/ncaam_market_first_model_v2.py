@@ -70,6 +70,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
         self.news_service = NewsService()
         self.geo_service = GeoService()
 
+        from src.services.ncaam_tournament_features import NCAAMTournamentFeatures
+        self.tournament_features = NCAAMTournamentFeatures()
+
         self.manual_adjustments = manual_adjustments or {}
 
         # Set weights (defaults)
@@ -409,16 +412,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
         }
         return self.analyze(game_id, market_snapshot=snap, event_context=event)
 
-    def analyze_tournament_game(self, team_a: str, team_b: str, event_context: Optional[Dict] = None, market_snapshot: Optional[Dict] = None, persist: bool = False, neutral_site: bool = True) -> Dict:
+    def analyze_tournament_game(self, team_a: str, team_b: str, event_context: Optional[Dict] = None, market_snapshot: Optional[Dict] = None, persist: bool = False, neutral_site: bool = True, conn=None) -> Dict:
         """
         Tournament mode prediction avoiding fake market priors when missing.
         Uses Torvik, KenPom, and bounded modifiers.
         """
         from datetime import datetime
-        from src.services.ncaam_tournament_features import NCAAMTournamentFeatures
         import math
         
-        tf = NCAAMTournamentFeatures()
+        tf = self.tournament_features
+        
+        team_a_canon = standardize_team_name(team_a)
+        team_b_canon = standardize_team_name(team_b)
         
         # 1. Base logic
         game_date = (event_context or {}).get('start_time')
@@ -431,12 +436,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
              if isinstance(game_date, datetime):
                  game_date_str = game_date.strftime("%Y%m%d")
                  
-        torvik_view = self.torvik_service.get_projection(team_a, team_b, date=game_date_str)
-        kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a, team_b)
+        torvik_view = self.torvik_service.get_projection(team_a_canon, team_b_canon, date=game_date_str, conn=conn)
+        kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn)
         
         # 3. Features
-        mods_a = tf.get_tournament_modifiers(team_a)
-        mods_b = tf.get_tournament_modifiers(team_b)
+        mods_a = tf.get_tournament_modifiers(team_a_canon, conn=conn)
+        mods_b = tf.get_tournament_modifiers(team_b_canon, conn=conn)
         
         # 4. Math
         fallback_used = False
@@ -446,7 +451,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if not torvik_view or torvik_view.get('lean') == 'No Data':
             fallback_used = True
             from src.services.ncaam_tournament_service import SimulatorDataError
-            raise SimulatorDataError(f"Missing core data (Torvik) for {team_a} vs {team_b}. Halting simulation.")
+            raise SimulatorDataError(f"Missing core data (Torvik) for {team_a_canon} vs {team_b_canon}. Halting simulation.")
         else:
             mu_base_spread = -(torvik_view.get('margin') or 0.0)
             
@@ -486,7 +491,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             
         # Variance
         tempo_factor = 1.0
-        torvik_team_stats = self.torvik_service.get_matchup_team_stats(team_a, team_b, date=game_date_str)
+        torvik_team_stats = self.torvik_service.get_matchup_team_stats(team_a_canon, team_b_canon, date=game_date_str)
         if torvik_team_stats:
              tempo = torvik_team_stats.get('game_tempo')
              if tempo: tempo_factor = math.sqrt(tempo / 68.0)
