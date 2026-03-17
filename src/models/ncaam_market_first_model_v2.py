@@ -409,6 +409,125 @@ class NCAAMMarketFirstModelV2(BaseModel):
         }
         return self.analyze(game_id, market_snapshot=snap, event_context=event)
 
+    def analyze_tournament_game(self, team_a: str, team_b: str, event_context: Optional[Dict] = None, market_snapshot: Optional[Dict] = None, persist: bool = False, neutral_site: bool = True) -> Dict:
+        """
+        Tournament mode prediction avoiding fake market priors when missing.
+        Uses Torvik, KenPom, and bounded modifiers.
+        """
+        from datetime import datetime
+        from src.services.ncaam_tournament_features import NCAAMTournamentFeatures
+        import math
+        
+        tf = NCAAMTournamentFeatures()
+        
+        # 1. Base logic
+        game_date = (event_context or {}).get('start_time')
+        game_date_str = None
+        if game_date:
+             if isinstance(game_date, str):
+                 try:
+                     game_date = datetime.fromisoformat(game_date.replace('Z', '+00:00'))
+                 except: pass
+             if isinstance(game_date, datetime):
+                 game_date_str = game_date.strftime("%Y%m%d")
+                 
+        torvik_view = self.torvik_service.get_projection(team_a, team_b, date=game_date_str)
+        kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a, team_b)
+        
+        # 3. Features
+        mods_a = tf.get_tournament_modifiers(team_a)
+        mods_b = tf.get_tournament_modifiers(team_b)
+        
+        # 4. Math
+        fallback_used = False
+        reason_codes = []
+        risk_flags = []
+        
+        if not torvik_view or torvik_view.get('lean') == 'No Data':
+            fallback_used = True
+            from src.services.ncaam_tournament_service import SimulatorDataError
+            raise SimulatorDataError(f"Missing core data (Torvik) for {team_a} vs {team_b}. Halting simulation.")
+        else:
+            mu_base_spread = -(torvik_view.get('margin') or 0.0)
+            
+            # Verify Torvik actually returned a total
+            torvik_total = torvik_view.get('total')
+            if not torvik_total:
+                 from src.services.ncaam_tournament_service import SimulatorDataError
+                 raise SimulatorDataError(f"Torvik returned no total for {team_a} vs {team_b}")
+                 
+            mu_base_total = float(torvik_total)
+            
+            if kenpom_adj and kenpom_adj.get('spread_adj') is not None:
+                mu_kp_spread = -kenpom_adj['spread_adj']
+                mu_base_spread = (0.75 * mu_base_spread) + (0.25 * mu_kp_spread)
+                
+        # Modifiers (relative to team A perspective where negative points = team A favorite)
+        # Bounded modifier points: + is good for the team. We adjust spread (negative is good for A).
+        mod_a = mods_a.get('luck_adj_points', 0) + mods_a.get('continuity_adj_points', 0) + mods_a.get('turnover_adj_points', 0) + mods_a.get('q1_adj_points', 0)
+        mod_b = mods_b.get('luck_adj_points', 0) + mods_b.get('continuity_adj_points', 0) + mods_b.get('turnover_adj_points', 0) + mods_b.get('q1_adj_points', 0)
+        
+        mod_diff = mod_a - mod_b # positive = A is better by mod_diff.
+        mu_spread_final = mu_base_spread - mod_diff # therefore spread is lowered, making A more favored.
+        
+        # Market blending if available (and valid!)
+        market_data_used = False
+        if market_snapshot and market_snapshot.get('spread_home') is not None and market_snapshot.get('spread_home') != 0.0:
+            mkt_spread = float(market_snapshot['spread_home'])
+            if mkt_spread != 0.0 or market_snapshot.get('total') != 145.0:  # Ignore default fake markets
+                diff = mu_spread_final - mkt_spread
+                mu_spread_final = mkt_spread + (0.35 * diff) 
+                market_data_used = True
+                reason_codes.append("Market spread blended into final projection.")
+            
+        if market_snapshot and market_snapshot.get('total') is not None and market_snapshot.get('total') != 145.0:
+            mkt_total = float(market_snapshot['total'])
+            mu_base_total = mkt_total + (0.35 * (mu_base_total - mkt_total))
+            
+        # Variance
+        tempo_factor = 1.0
+        torvik_team_stats = self.torvik_service.get_matchup_team_stats(team_a, team_b, date=game_date_str)
+        if torvik_team_stats:
+             tempo = torvik_team_stats.get('game_tempo')
+             if tempo: tempo_factor = math.sqrt(tempo / 68.0)
+             
+        variance_mult = max(mods_a.get('variance_multiplier', 1.0), mods_b.get('variance_multiplier', 1.0))
+        sigma_spread = 10.5 * tempo_factor * variance_mult
+        
+        if mods_a.get('upset_risk_score', 0) > 40:
+             risk_flags.append(f"{team_a} high upset risk ({mods_a['upset_risk_score']})")
+        if mods_b.get('upset_risk_score', 0) > 40:
+             risk_flags.append(f"{team_b} high upset risk ({mods_b['upset_risk_score']})")
+             
+        z = (0.0 - mu_spread_final) / sigma_spread
+        win_prob_b = 0.5 * (1 + math.erf(z / math.sqrt(2)))
+        win_prob_a = 1.0 - win_prob_b
+        
+        winner = team_a if win_prob_a >= 0.5 else team_b
+        winner_side = 'team_a' if win_prob_a >= 0.5 else 'team_b'
+        
+        return {
+            'team_a': team_a,
+            'team_b': team_b,
+            'winner': winner,
+            'winner_side': winner_side,
+            'projected_spread_a': round(mu_spread_final, 2),
+            'projected_total': round(mu_base_total, 2),
+            'win_prob_a': round(win_prob_a * 100, 2),
+            'win_prob_b': round(win_prob_b * 100, 2),
+            'confidence_0_100': round(max(win_prob_a, win_prob_b) * 100, 2), 
+            'market_data_used': market_data_used,
+            'fallback_used': fallback_used,
+            'reason_codes': reason_codes,
+            'risk_flags': risk_flags,
+            'debug': {
+                 'sigma': sigma_spread,
+                 'tempo_factor': tempo_factor,
+                 'variance_mult': variance_mult,
+                 'mu_base_spread': mu_base_spread
+            }
+        }
+
     def analyze(self, event_id: str, market_snapshot: Optional[Dict] = None, event_context: Optional[Dict] = None, relax_gates: bool = False, persist: bool = True) -> Dict:
         """
         On-demand analysis for one game.

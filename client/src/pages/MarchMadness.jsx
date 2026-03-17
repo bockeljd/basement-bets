@@ -845,20 +845,24 @@ const MarchMadness = () => {
                 </div>
             )}
 
-            {/* ════ BRACKET TAB ════ */}
-            {activeTab === 'bracket' && (
+    {/* ════ BRACKET TAB ════ */}
+    {activeTab === 'bracket' && (
+        <div className="overflow-x-auto no-scrollbar">
+            <div className="min-w-[1200px]">
                 <BracketView
                     data={bracketData}
                     loading={loadingBracket}
                     onMatchupClick={handleMatchupClick}
                 />
-            )}
+            </div>
+        </div>
+    )}
         </div>
     );
 };
 
-/* ─── Matchup Card ─── */
-function MatchupCard({ m, onMatchupClick }) {
+/* ─── Matchup Card (Bracket Pod Style) ─── */
+function MatchupCard({ m, onMatchupClick, mirrored = false }) {
     if (!m) return null;
     const isWinnerA = m.winner === m.team_a;
     const isWinnerB = m.winner === m.team_b;
@@ -866,79 +870,137 @@ function MatchupCard({ m, onMatchupClick }) {
     return (
         <div
             onClick={() => onMatchupClick && onMatchupClick(m.team_a, m.team_b)}
-            className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-blue-500/50 hover:bg-slate-800/60 transition cursor-pointer group relative overflow-hidden shadow-lg backdrop-blur-sm"
+            className="group cursor-pointer relative"
         >
-            <div className="absolute top-0 right-0 p-1.5 opacity-0 group-hover:opacity-100 transition duration-300">
-                <Swords size={10} className="text-blue-400/50" />
+            <div className={`
+                bg-slate-900 border border-slate-800 rounded shadow-md 
+                hover:border-blue-500/50 hover:bg-slate-800/80 transition-all duration-300
+                flex flex-col overflow-hidden w-[180px]
+            `}>
+                {/* Team A Pod */}
+                <div className={`flex items-center gap-1.5 p-1.5 border-b border-slate-800/50 ${isWinnerA ? 'bg-blue-500/5' : ''}`}>
+                    {mirrored ? (
+                        <>
+                            <span className={`text-[10px] font-mono shrink-0 ${isWinnerA ? 'text-emerald-400' : 'text-slate-600'}`}>
+                                {m.win_prob_a}%
+                            </span>
+                            <span className={`text-[11px] font-black truncate flex-1 text-right ${isWinnerA ? 'text-white' : 'text-slate-500'}`} title={m.team_a}>
+                                {shortenTeamName(m.team_a)}
+                            </span>
+                            {m.seed_a && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded shrink-0">{m.seed_a}</span>}
+                        </>
+                    ) : (
+                        <>
+                            {m.seed_a && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded shrink-0">{m.seed_a}</span>}
+                            <span className={`text-[11px] font-black truncate flex-1 ${isWinnerA ? 'text-white' : 'text-slate-500'}`} title={m.team_a}>
+                                {shortenTeamName(m.team_a)}
+                            </span>
+                            <span className={`text-[10px] font-mono shrink-0 ${isWinnerA ? 'text-emerald-400' : 'text-slate-600'}`}>
+                                {m.win_prob_a}%
+                            </span>
+                        </>
+                    )}
+                </div>
+
+                {/* Team B Pod */}
+                <div className={`flex items-center gap-1.5 p-1.5 ${isWinnerB ? 'bg-blue-500/5' : ''}`}>
+                    {mirrored ? (
+                        <>
+                            <span className={`text-[10px] font-mono shrink-0 ${isWinnerB ? 'text-emerald-400' : 'text-slate-600'}`}>
+                                {m.win_prob_b}%
+                            </span>
+                            <span className={`text-[11px] font-black truncate flex-1 text-right ${isWinnerB ? 'text-white' : 'text-slate-500'}`} title={m.team_b}>
+                                {shortenTeamName(m.team_b)}
+                            </span>
+                            {m.seed_b && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded shrink-0">{m.seed_b}</span>}
+                        </>
+                    ) : (
+                        <>
+                            {m.seed_b && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded shrink-0">{m.seed_b}</span>}
+                            <span className={`text-[11px] font-black truncate flex-1 ${isWinnerB ? 'text-white' : 'text-slate-500'}`} title={m.team_b}>
+                                {shortenTeamName(m.team_b)}
+                            </span>
+                            <span className={`text-[10px] font-mono shrink-0 ${isWinnerB ? 'text-emerald-400' : 'text-slate-600'}`}>
+                                {m.win_prob_b}%
+                            </span>
+                        </>
+                    )}
+                </div>
             </div>
+            {/* Projected Winner Glow */}
+            <div className={`absolute -inset-0.5 rounded blur-[2px] opacity-0 group-hover:opacity-30 transition pointer-events-none bg-blue-500`} />
             
-            <div className="space-y-1.5">
-                {/* Team A */}
-                <div className="flex justify-between items-center gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                        {m.seed_a && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded py-0.5 shrink-0">{m.seed_a}</span>}
-                        <span 
-                            className={`text-[11px] font-black truncate ${isWinnerA ? 'text-white' : 'text-slate-500/80'}`}
-                            title={m.team_a}
-                        >
-                            {shortenTeamName(m.team_a)}
-                        </span>
-                        {isWinnerA && <span className="text-emerald-500 text-[8px] animate-pulse shrink-0">●</span>}
-                    </div>
-                    <span className={`text-[9px] font-bold font-mono shrink-0 ${isWinnerA ? 'text-emerald-400' : 'text-slate-600'}`}>
-                        {m.win_prob_a}%
-                    </span>
+            {/* Tooltip Hover Info */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition duration-300 pointer-events-none z-50 mt-4 shadow-2xl scale-95 group-hover:scale-100 bg-slate-950/95 backdrop-blur-md border border-blue-500/30 w-[240px] p-3 rounded-lg flex flex-col gap-2">
+                <div className="flex justify-between items-center text-[10px] font-bold uppercase text-slate-500 border-b border-slate-800 pb-1">
+                    <span>{m.team_a}</span>
+                    <span className="text-blue-400 font-mono">{(m.projected_spread_a > 0 ? '+' : '') + parseFloat(m.projected_spread_a).toFixed(1)}</span>
                 </div>
-
-                {/* Team B */}
-                <div className="flex justify-between items-center gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                        {m.seed_b && <span className="text-[9px] font-black text-slate-500 w-4.5 text-center bg-slate-800/50 rounded py-0.5 shrink-0">{m.seed_b}</span>}
-                        <span 
-                            className={`text-[11px] font-black truncate ${isWinnerB ? 'text-white' : 'text-slate-500/80'}`}
-                            title={m.team_b}
-                        >
-                            {shortenTeamName(m.team_b)}
-                        </span>
-                        {isWinnerB && <span className="text-emerald-500 text-[8px] animate-pulse shrink-0">●</span>}
-                    </div>
-                    <span className={`text-[9px] font-bold font-mono shrink-0 ${isWinnerB ? 'text-emerald-400' : 'text-slate-600'}`}>
-                        {m.win_prob_b}%
-                    </span>
+                <div className="flex justify-between items-center text-xs font-black">
+                    <span className="text-slate-400">Total: <span className="text-white">{parseFloat(m.projected_total).toFixed(1)}</span></span>
+                    <span className="text-slate-400">Conf: <span className="text-blue-400">{parseFloat(m.confidence_0_100).toFixed(0)}</span></span>
                 </div>
+                {m.reason_codes && m.reason_codes.length > 0 && (
+                    <div className="text-[9px] text-slate-300 space-y-1 mt-1">
+                        {m.reason_codes.slice(0, 3).map((r, i) => (
+                            <div key={i} className="flex gap-1.5 items-start">
+                                <div className="w-1 h-1 bg-blue-500 rounded-full mt-1.5 shrink-0" />
+                                <span className="leading-tight">{r}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
-
-            {m.spread != null && (
-                <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex justify-between items-center">
-                    <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Proj</span>
-                    <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-black text-blue-500">
-                            {shortenTeamName(m.spread < 0 ? m.team_a : m.team_b)} {m.spread < 0 ? '' : '+'}{Math.abs(m.spread).toFixed(1)}
-                        </span>
-                        <span className="text-[9px] font-black text-slate-600 border-l border-slate-800 pl-1.5">O/U {m.total?.toFixed(0)}</span>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
 
-/* ─── Round Section ─── */
-function RoundSection({ title, badge, badgeColor, matchups, onMatchupClick, defaultOpen = false }) {
-    const [open, setOpen] = React.useState(defaultOpen);
-    if (!matchups || matchups.length === 0) return null;
+/* ─── Region Tree ─── */
+function RegionTree({ name, region, onMatchupClick, mirrored = false }) {
+    if (!region) return null;
+
+    const rounds = [
+        { key: 'round_of_64', label: 'R64' },
+        { key: 'round_of_32', label: 'R32' },
+        { key: 'sweet_16', label: 'S16' },
+        { key: 'elite_8', label: 'E8' }
+    ];
+
+    if (mirrored) rounds.reverse();
+
     return (
-        <div>
-            <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2 mb-2 w-full text-left">
-                <span className="text-xs font-black text-slate-300 uppercase tracking-widest">{title}</span>
-                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-tighter ${badgeColor}`}>{badge}</span>
-                <span className="ml-auto text-slate-600">{open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</span>
-            </button>
-            {open && (
-                <div className="grid gap-2">
-                    {matchups.map((m, i) => <MatchupCard key={i} m={m} onMatchupClick={onMatchupClick} />)}
-                </div>
-            )}
+        <div className={`flex items-stretch gap-0 ${mirrored ? 'flex-row-reverse' : 'flex-row'}`}>
+            {rounds.map((round, rIndex) => {
+                const matchups = region[round.key] || [];
+                // Dynamic spacing based on round
+                const verticalGapClass = 
+                    round.key === 'round_of_64' ? 'gap-4' :
+                    round.key === 'round_of_32' ? 'gap-[72px]' :
+                    round.key === 'sweet_16' ? 'gap-[188px]' : 
+                    'gap-0';
+                
+                const paddingTop = 
+                    round.key === 'round_of_32' ? 'pt-[42px]' :
+                    round.key === 'sweet_16' ? 'pt-[100px]' :
+                    round.key === 'elite_8' ? 'pt-[216px]' :
+                    'pt-0';
+
+                return (
+                    <div key={round.key} className={`flex flex-col ${verticalGapClass} ${paddingTop} relative min-w-[200px]`}>
+                        {matchups.map((m, mIndex) => (
+                            <div key={mIndex} className="relative flex items-center">
+                                {/* Connector Lines Logic (Conceptual for now, using borders for the Tree look) */}
+                                <MatchupCard m={m} onMatchupClick={onMatchupClick} mirrored={mirrored} />
+                                
+                                {/* Horizontal connector towards next round */}
+                                {((!mirrored && round.key !== 'elite_8') || (mirrored && round.key !== 'elite_8')) && (
+                                    <div className={`absolute top-1/2 -translate-y-1/2 w-5 h-px bg-slate-700 ${mirrored ? '-left-5' : '-right-5'}`} />
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                );
+            })}
         </div>
     );
 }
@@ -952,137 +1014,89 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
     );
     if (!data || !data.regions) return <div className="p-12 text-center text-red-400 font-mono">Bracket data unavailable. Check back soon.</div>;
 
-    const regions = ['East', 'South', 'West', 'Midwest'];
     const champ = data.championship;
     const champion = data.champion;
 
     return (
-        <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 px-4">
 
-            {/* Champion Banner */}
-            {champion && (
-                <div className="relative overflow-hidden rounded-3xl border border-yellow-500/30 bg-gradient-to-br from-yellow-950/60 via-slate-900 to-slate-950 p-8 text-center shadow-[0_0_50px_-12px_rgba(234,179,8,0.3)] mx-auto max-w-2xl">
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
-                    <div className="relative">
-                        <div className="text-5xl mb-4 animate-bounce">🏆</div>
-                        <div className="text-xs font-black text-yellow-500 uppercase tracking-[0.4em] mb-2">2026 Predicted National Champion</div>
-                        <div className="text-4xl md:text-5xl font-black text-white mb-4 tracking-tighter drop-shadow-lg">{champion}</div>
-                        {champ && (
-                            <div className="flex flex-wrap justify-center gap-6 text-sm">
-                                <span className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50">Win Prob: <span className="font-black text-yellow-400">{Math.max(champ.win_prob_a, champ.win_prob_b)}%</span></span>
-                                <span className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50">Fair Spread: <span className="font-black text-white">{champ.spread > 0 ? '+' : ''}{champ.spread}</span></span>
-                                <span className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50">O/U: <span className="font-black text-white">{champ.total?.toFixed(1)}</span></span>
-                            </div>
-                        )}
-                        <p className="mt-6 text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-loose">
-                            Model Consensus | 10k Monte Carlo Trials | Market-Calibrated σ:{data.sigma_used || '10.5'}
-                        </p>
+            {/* Symmetrical Theater Layout */}
+            <div className="flex justify-center items-stretch gap-8">
+                
+                {/* Left Side: East & South */}
+                <div className="flex flex-col gap-20">
+                    <div className="space-y-4">
+                        <h2 className="text-xl font-black italic text-blue-500 border-l-4 border-blue-500 pl-3">EAST REGION</h2>
+                        <RegionTree name="East" region={data.regions['East']} onMatchupClick={onMatchupClick} mirrored={false} />
+                    </div>
+                    <div className="space-y-4">
+                        <h2 className="text-xl font-black italic text-emerald-500 border-l-4 border-emerald-500 pl-3">SOUTH REGION</h2>
+                        <RegionTree name="South" region={data.regions['South']} onMatchupClick={onMatchupClick} mirrored={false} />
                     </div>
                 </div>
-            )}
 
-            {/* Final Four */}
-            {data.final_four?.length > 0 && (
-                <div className="space-y-4">
-                    <div className="flex items-center justify-center gap-4">
-                        <div className="h-px bg-gradient-to-r from-transparent via-slate-800 to-transparent flex-1" />
-                        <div className="flex items-center gap-3">
-                            <span className="text-2xl font-black text-white italic tracking-tighter">Final Four</span>
-                            <span className="px-3 py-1 rounded-full bg-yellow-900/40 text-[10px] font-black text-yellow-400 uppercase tracking-widest border border-yellow-500/20">National Semifinals</span>
-                        </div>
-                        <div className="h-px bg-gradient-to-r from-transparent via-slate-800 to-transparent flex-1" />
-                    </div>
-                    <div className="grid md:grid-cols-2 gap-4 max-w-4xl mx-auto">
-                        {data.final_four.map((m, i) => (
-                            <div key={i} className="group relative">
-                                <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-500" />
-                                <MatchupCard m={m} onMatchupClick={onMatchupClick} />
+                {/* Centerpiece: Final Four, Champ, and Trophies */}
+                <div className="flex flex-col items-center justify-center min-w-[300px] gap-12">
+                    
+                    {/* Champion Banner */}
+                    {champion && (
+                        <div className="relative overflow-hidden rounded-3xl border-2 border-yellow-500/40 bg-gradient-to-br from-yellow-950/80 via-slate-900 to-slate-950 p-10 text-center shadow-[0_0_60px_-15px_rgba(234,179,8,0.5)] z-10 scale-110">
+                            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 bg-yellow-500/20 rounded-full blur-[100px] pointer-events-none" />
+                            <div className="relative">
+                                <Award className="mx-auto mb-4 text-yellow-500" size={48} />
+                                <div className="text-[10px] font-black text-yellow-500 uppercase tracking-[0.5em] mb-2 text-center">National Champion</div>
+                                <div className="text-4xl font-black text-white mb-4 tracking-tighter drop-shadow-2xl">{champion}</div>
+                                {champ && (
+                                    <div className="flex flex-col gap-2 text-xs font-bold text-slate-400">
+                                        <div className="flex items-center justify-center gap-4">
+                                            <span className="bg-slate-800/80 px-3 py-1 rounded-full">{Math.max(champ.win_prob_a, champ.win_prob_b)}% Win Prob</span>
+                                            <span className="bg-slate-800/80 px-3 py-1 rounded-full">{champ.projected_spread_a > 0 ? '+' : ''}{champ.projected_spread_a} Spread</span>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        ))}
+                        </div>
+                    )}
+
+                    {/* Final Four Convergence */}
+                    {data.final_four?.length > 0 && (
+                        <div className="space-y-6 w-full">
+                            <div className="flex flex-col items-center gap-2">
+                                <span className="text-3xl font-black text-white italic tracking-tighter uppercase">Final Four</span>
+                                <div className="h-0.5 w-32 bg-gradient-to-r from-transparent via-yellow-500 to-transparent" />
+                            </div>
+                            <div className="flex flex-col gap-4">
+                                {data.final_four.map((m, i) => (
+                                    <div key={i} className="relative">
+                                        {/* Connector Lines to Final Four */}
+                                        <div className="absolute top-1/2 -left-8 w-8 h-px bg-slate-600" />
+                                        <div className="absolute top-1/2 -right-8 w-8 h-px bg-slate-600" />
+                                        <MatchupCard m={m} onMatchupClick={onMatchupClick} />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-auto">
+                        Model Output: March 2026 Simulation
                     </div>
                 </div>
-            )}
 
-            {/* Regional Brackets Overhaul */}
-            <div className="grid 2xl:grid-cols-2 gap-8 md:gap-12">
-                {regions.map(name => {
-                    const region = data.regions[name];
-                    if (!region) return null;
-                    return (
-                        <div key={name} className="relative overflow-hidden rounded-[2rem] bg-slate-900/30 border border-slate-800/60 p-5 md:p-8 shadow-3xl">
-                            <div className="absolute top-0 right-0 p-12 opacity-[0.03] select-none">
-                                <span className="text-[12rem] font-black text-white leading-none">{name[0]}</span>
-                            </div>
-                            
-                            <div className="relative flex items-center justify-between gap-6 mb-8">
-                                <h3 className="text-2xl font-black text-white italic tracking-tighter flex items-center gap-3">
-                                    <span className="w-1.5 h-6 bg-blue-500 rounded-full" />
-                                    {name} Region
-                                </h3>
-                                <div className="hidden md:block h-px bg-gradient-to-r from-slate-800 to-transparent flex-1" />
-                            </div>
+                {/* Right Side: West & Midwest */}
+                <div className="flex flex-col gap-20">
+                    <div className="space-y-4">
+                        <h2 className="text-xl font-black italic text-rose-500 border-r-4 border-rose-500 pr-3 text-right">WEST REGION</h2>
+                        <RegionTree name="West" region={data.regions['West']} onMatchupClick={onMatchupClick} mirrored={true} />
+                    </div>
+                    <div className="space-y-4">
+                        <h2 className="text-xl font-black italic text-purple-500 border-r-4 border-purple-500 pr-3 text-right">MIDWEST REGION</h2>
+                        <RegionTree name="Midwest" region={data.regions['Midwest']} onMatchupClick={onMatchupClick} mirrored={true} />
+                    </div>
+                </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5 relative">
-                                {/* Round of 64 */}
-                                <div className="space-y-6">
-                                    <RoundSection 
-                                        title="Round of 64" 
-                                        badge="First Round" 
-                                        badgeColor="bg-slate-800/80 text-slate-500" 
-                                        matchups={region.round_of_64} 
-                                        onMatchupClick={onMatchupClick} 
-                                        defaultOpen={true} 
-                                    />
-                                </div>
-
-                                {/* Round of 32 */}
-                                <div className="space-y-6 flex flex-col pt-0 sm:pt-12">
-                                    <RoundSection 
-                                        title="Round of 32" 
-                                        badge="Second Round" 
-                                        badgeColor="bg-blue-900/30 text-blue-400" 
-                                        matchups={region.round_of_32} 
-                                        onMatchupClick={onMatchupClick} 
-                                        defaultOpen={true} 
-                                    />
-                                </div>
-
-                                {/* Sweet 16 */}
-                                <div className="space-y-6 flex flex-col pt-0 sm:pt-24">
-                                    <RoundSection 
-                                        title="Sweet 16" 
-                                        badge="Reg. Semi" 
-                                        badgeColor="bg-purple-900/30 text-purple-400" 
-                                        matchups={region.sweet_16} 
-                                        onMatchupClick={onMatchupClick} 
-                                        defaultOpen={true} 
-                                    />
-                                </div>
-
-                                {/* Elite 8 */}
-                                <div className="space-y-6 flex flex-col pt-0 sm:pt-40">
-                                    <RoundSection 
-                                        title="Elite 8" 
-                                        badge="Reg. Final" 
-                                        badgeColor="bg-rose-900/30 text-rose-400" 
-                                        matchups={region.elite_8} 
-                                        onMatchupClick={onMatchupClick} 
-                                        defaultOpen={true} 
-                                    />
-                                </div>
-                            </div>
-                            
-                            <div className="md:hidden flex justify-center gap-1 mt-4">
-                                {[1, 2, 3, 4].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-slate-800" />)}
-                            </div>
-                        </div>
-                    );
-                })}
             </div>
             
-            <div className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-widest pb-10">
-                Data calibrated via Torvik AdjEM & KenPom ratings • Updated {new Date(data.simulated_at).toLocaleDateString()}
-            </div>
         </div>
     );
 };
