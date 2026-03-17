@@ -129,6 +129,10 @@ class NCAAMTournamentPredictionService:
         """
         import random
         
+        if not seeds:
+            from src.services.bracket_simulator import SimulatorDataError
+            raise SimulatorDataError("No tournament seeds provided for simulation. Seed map is empty.")
+            
         # 1. Parsing and Play-In Identification
         # seeds is { "East": [ {"team_name": "...", "seed": 1}, ... ] }
         

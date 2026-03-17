@@ -78,5 +78,15 @@ class LiveBracketSimulator:
             reg = r['region']
             if reg not in seeds_by_region:
                 seeds_by_region[reg] = []
-            seeds_by_region[reg].append(dict(r))
+                
+            team_name = r['team_name']
+            # Production Hotfix: DB has legacy slash-combined play-ins (e.g. "Howard / Wagner")
+            # We split them into discrete entries so the canonical simulator treats them as the First Four
+            if " / " in team_name:
+                teams = team_name.split(" / ")
+                seeds_by_region[reg].append({"team_name": teams[0].strip(), "seed": r['seed'], "region": reg})
+                seeds_by_region[reg].append({"team_name": teams[1].strip(), "seed": r['seed'], "region": reg})
+            else:
+                seeds_by_region[reg].append(dict(r))
+                
         return seeds_by_region
