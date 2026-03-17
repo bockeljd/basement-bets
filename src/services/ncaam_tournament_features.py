@@ -215,7 +215,7 @@ class NCAAMTournamentFeatures:
             def _clean(d):
                 return {k: (str(v) if hasattr(v, 'isoformat') else v) for k, v in (d or {}).items()}
 
-            return {
+            res = {
                 'team_name':  team,
                 'kenpom':     _clean(kenpom),
                 'net':        _clean(net),
