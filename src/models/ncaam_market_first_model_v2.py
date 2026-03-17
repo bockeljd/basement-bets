@@ -70,6 +70,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
         self.news_service = NewsService()
         self.geo_service = GeoService()
 
+        from src.services.ncaam_tournament_features import NCAAMTournamentFeatures
+        self.tournament_features = NCAAMTournamentFeatures()
+
         self.manual_adjustments = manual_adjustments or {}
 
         # Set weights (defaults)
@@ -415,10 +418,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
         Uses Torvik, KenPom, and bounded modifiers.
         """
         from datetime import datetime
-        from src.services.ncaam_tournament_features import NCAAMTournamentFeatures
         import math
         
-        tf = NCAAMTournamentFeatures()
+        tf = self.tournament_features
         
         team_a_canon = standardize_team_name(team_a)
         team_b_canon = standardize_team_name(team_b)

@@ -118,7 +118,7 @@ class NCAAMTournamentFeatures:
             torvik['barthag'] = barthag
 
             # 4. Player stats
-            raw_players = self.kp_client.get_player_stats_for_team(team, limit=40)
+            raw_players = self.kp_client.get_player_stats_for_team(team, limit=40, conn=conn)
 
             def _player_minutes(p):
                 return self._parse_metric(p.get('metrics'), 'min', 'minute') or 0
@@ -140,7 +140,7 @@ class NCAAMTournamentFeatures:
                 })
 
             # 5. Team player aggregates
-            team_agg_row = self.kp_client.get_team_player_agg(team)
+            team_agg_row = self.kp_client.get_team_player_agg(team, conn=conn)
             team_agg = {}
             if team_agg_row:
                 team_agg = {k: v for k, v in {

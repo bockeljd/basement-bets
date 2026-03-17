@@ -30,7 +30,7 @@ class TorvikProjectionService:
             date = datetime.now().strftime("%Y%m%d")
             
         # 1. Official Projection Fetch (prefer cached DB ingest)
-        official_projs = self._fetch_official_from_db(date)
+        official_projs = self._fetch_official_from_db(date, conn=conn)
 
         # In backtests, avoid network calls; fall back to computed projections when DB cache missing.
         no_net = str(os.getenv('BACKTEST_NO_NETWORK', '')).strip() not in ('', '0', 'false', 'False')
@@ -53,23 +53,29 @@ class TorvikProjectionService:
         # 2. Heuristic Computation (The "Torvik thinks" backup)
         return self.compute_torvik_projection(home_team, away_team, date=date)
 
-    def _fetch_official_from_db(self, date_yyyymmdd: str) -> Optional[Dict]:
+    def _fetch_official_from_db(self, date_yyyymmdd: str, conn=None) -> Optional[Dict]:
         """Load official Torvik schedule JSON from DB if present."""
         if date_yyyymmdd in self._official_cache:
             return self._official_cache[date_yyyymmdd]
 
+        if conn:
+            return self._exec_fetch_official(conn, date_yyyymmdd)
+        else:
+            with get_db_connection() as c:
+                return self._exec_fetch_official(c, date_yyyymmdd)
+
+    def _exec_fetch_official(self, conn, date_yyyymmdd):
         try:
-            with get_db_connection() as conn:
-                row = _exec(conn, """
-                    SELECT payload_json
-                    FROM bt_daily_schedule_raw
-                    WHERE date = %s AND status = 'OK' AND payload_json IS NOT NULL
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, (date_yyyymmdd,)).fetchone()
-                if not row:
-                    return None
-                payload = row.get('payload_json') if isinstance(row, dict) else row[0]
+            row = _exec(conn, """
+                SELECT payload_json
+                FROM bt_daily_schedule_raw
+                WHERE date = %s AND status = 'OK' AND payload_json IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (date_yyyymmdd,)).fetchone()
+            if not row:
+                return None
+            payload = row.get('payload_json') if isinstance(row, dict) else row[0]
         except Exception:
             return None
 
@@ -255,10 +261,10 @@ class TorvikProjectionService:
             return None
 
         if conn:
-             return self._exec_metrics_query(conn, t, date, cache_key)
+            return self._exec_metrics_query(conn, t, date, cache_key)
         else:
-             with get_db_connection() as c:
-                  return self._exec_metrics_query(c, t, date, cache_key)
+            with get_db_connection() as c:
+                return self._exec_metrics_query(c, t, date, cache_key)
 
     def _exec_metrics_query(self, conn, t, date, cache_key):
         # Build query
@@ -286,17 +292,17 @@ class TorvikProjectionService:
         ORDER BY date DESC LIMIT 1
         """
         
-        with get_db_connection() as conn:
-            try:
-                row = _exec(conn, query_full, params).fetchone()
-            except Exception:
-                row = _exec(conn, query_min, params).fetchone()
-            if row:
-                res = dict(row)
-                self._metrics_cache[cache_key] = res
-                return res
-            self._metrics_cache[cache_key] = None
-            return None
+        try:
+            row = _exec(conn, query_full, params).fetchone()
+        except Exception:
+            row = _exec(conn, query_min, params).fetchone()
+            
+        if row:
+            res = dict(row)
+            self._metrics_cache[cache_key] = res
+            return res
+        self._metrics_cache[cache_key] = None
+        return None
 
 if __name__ == "__main__":
     svc = TorvikProjectionService()

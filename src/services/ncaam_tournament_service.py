@@ -2,7 +2,7 @@ import os
 import time
 import logging
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from pydantic import BaseModel, Field
 
 # --- Logging Setup ---
@@ -136,17 +136,48 @@ class NCAAMTournamentPredictionService:
             neutral_site=game_input.neutral_site
         )
 
-    def simulate_bracket(self, seeds: Dict[str, List[Dict[str, Any]]], simulations: int = 10000) -> TournamentBracketSimulation:
+    def preheat_cache(self, team_names: Set[str]) -> None:
         """
-        Simulate the entire tournament using Monte Carlo traversal.
+        Fetch all necessary data for the given teams upfront.
+        Ensures simulation hits 0 database queries during the MC loop.
+        Uses parallelism to overcome sequential DB latency.
         """
+        from concurrent.futures import ThreadPoolExecutor
+        
+        # We share the model's service instances so their internal caches are populated
+        def _heat_one(tname):
+            from src.database import get_db_connection
+            try:
+                with get_db_connection() as conn:
+                    # 1. Profile (Populates tf._profile_cache)
+                    tf = self.model.tournament_features
+                    tf.get_team_tournament_profile(tname, conn=conn)
+                    
+                    # 2. Torvik Metrics (Populates services._metrics_cache)
+                    self.model.torvik_service._get_latest_metrics(tname, conn=conn)
+                    
+                    # 3. KenPom Ratings (Populates kp_client cache)
+                    self.model.kenpom_client.get_team_rating(tname, conn=conn)
+            except Exception as e:
+                logging.error(f"Error preheating {tname}: {e}")
+
+        # Use 10 workers to balance speed and connection limits
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(_heat_one, team_names))
+
+    def simulate_bracket(self, seeds: Dict[str, List[Dict[str, Any]]], simulations: int = 2500) -> TournamentBracketSimulation:
+        """
+        High-performance bracket simulation.
+        1. Front-loads all DB reads.
+        2. Executes MC in memory.
+        """
+        import time
         import random
         start_time = time.time()
         
-        # 1. Parsing and Play-In Identification
-        base_regions = ["East", "South", "West", "Midwest"]
-        play_in_matchups = [] 
-        region_teams = {r: {} for r in base_regions} 
+        base_regions = ["East", "West", "South", "Midwest"]
+        region_teams = {r: {} for r in base_regions}
+        play_in_matchups = []
         all_team_names = set()
         
         for region, team_list in seeds.items():
@@ -166,31 +197,28 @@ class NCAAMTournamentPredictionService:
                 else:
                     region_teams[region][seed] = [tname]
 
-        # 2. Front-load Data Fetching
-        # We fetch all necessary data in one pass to minimize DB interaction during MC
-        _cache = {}
+        # 2. Exhaustive Front-load
         data_issues = []
         degraded_simulation = False
         fallback_count = 0
         affected_teams = set()
+        _shared_cache = {}
 
         from src.database import get_db_connection
         with get_db_connection() as conn:
-            # Pre-populate cache for all likely matchups? 
-            # Or just ensure the model uses a shared connection.
-            # We'll use the shared connection and the internal model cache.
+            # HEAT EVERYTHING (Parallel)
+            preheat_start = time.time()
+            self.preheat_cache(all_team_names)
+            preheat_duration = time.time() - preheat_start
+            logging.info(f"Preheated {len(all_team_names)} teams in {preheat_duration:.2f}s")
             
             def _get_game_result(target_a: str, target_b: str, round_name: str, conn=None) -> TournamentGamePrediction:
                 nonlocal degraded_simulation, fallback_count
                 k = tuple(sorted([target_a, target_b]))
-                if k not in _cache:
-                    gi = TournamentGameInput(
-                        team_a=target_a, 
-                        team_b=target_b, 
-                        round_index=0, 
-                        neutral_site=True
-                    )
+                if k not in _shared_cache:
+                    gi = TournamentGameInput(team_a=target_a, team_b=target_b, round_index=0, neutral_site=True)
                     try:
+                        # Shared connection is critical here to reuse preheated caches
                         res = self.predict_game(gi, conn=conn)
                     except Exception as e:
                         degraded_simulation = True
@@ -198,8 +226,7 @@ class NCAAMTournamentPredictionService:
                         affected_teams.add(target_a)
                         affected_teams.add(target_b)
                         
-                        # Better bounded prior: Seed-based baseline
-                        # Lookup seeds
+                        # Seed-based prior fallback
                         seed_a = 8
                         seed_b = 8
                         for r_name, r_seeds in region_teams.items():
@@ -207,19 +234,17 @@ class NCAAMTournamentPredictionService:
                                 if target_a in tnames: seed_a = s
                                 if target_b in tnames: seed_b = s
                         
-                        # 0.5 + (seed_b - seed_a) * 0.04 -> 1-seed vs 16-seed = 0.5 + 0.6 = 1.1 (clamped)
                         raw_prob_a = 0.5 + (seed_b - seed_a) * 0.04
                         prob_a = max(0.05, min(0.95, raw_prob_a)) * 100.0
                         
                         data_issues.append(TournamentDataIssue(
                             team=f"{target_a}/{target_b}",
                             issue_type="MISSING_DATA",
-                            description=f"Fallback used for {target_a} vs {target_b}. Error: {str(e)}"
+                            description=f"Fallback used. Missing Torvik/KenPom metrics. Error: {str(e)}"
                         ))
                         
                         res = TournamentGamePrediction(
-                            team_a=target_a,
-                            team_b=target_b,
+                            team_a=target_a, team_b=target_b,
                             winner=target_a if random.random() < (prob_a/100.0) else target_b,
                             winner_side="team_a",
                             projected_spread_a=-(seed_b - seed_a) * 2.0,
@@ -231,20 +256,19 @@ class NCAAMTournamentPredictionService:
                             fallback_used=True,
                             reason_codes=[f"Seed-based fallback prior used ({seed_a} vs {seed_b})."],
                             risk_flags=["MISSING_DATA", "DEGRADED_SIMULATION"],
-                            debug={"error": str(e), "seed_a": seed_a, "seed_b": seed_b},
                             neutral_site=True
                         )
-                    _cache[k] = res
-                    
-                cached = _cache[k]
+                    _shared_cache[k] = res
+                
+                cached = _shared_cache[k]
                 if cached.team_a == target_a:
                     return cached
                     
+                # Swap logic
                 swapped_k = (target_a, target_b, "swapped")
-                if swapped_k not in _cache:
-                    _cache[swapped_k] = TournamentGamePrediction(
-                        team_a=target_a,
-                        team_b=target_b,
+                if swapped_k not in _shared_cache:
+                    _shared_cache[swapped_k] = TournamentGamePrediction(
+                        team_a=target_a, team_b=target_b,
                         winner=cached.winner,
                         winner_side="team_a" if cached.winner == target_a else "team_b",
                         projected_spread_a=-cached.projected_spread_a,
@@ -256,9 +280,10 @@ class NCAAMTournamentPredictionService:
                         fallback_used=cached.fallback_used,
                         reason_codes=cached.reason_codes,
                         risk_flags=cached.risk_flags,
-                        debug=cached.debug
+                        debug=cached.debug,
+                        neutral_site=True
                     )
-                return _cache[swapped_k]
+                return _shared_cache[swapped_k]
 
             # 3. Deterministic Bracket Construction (Front-loads cache)
             first_four_det = []
