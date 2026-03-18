@@ -329,6 +329,74 @@ const MarchMadness = () => {
         (selectedTeam && selectedTeamB) ? emToWinPct(selectedTeam.adj_em, selectedTeamB.adj_em) : null,
         [selectedTeam, selectedTeamB]);
 
+    const bracketInsights = useMemo(() => {
+        if (!bracketData || !bracketData.regions) {
+            return { upsetMatches: [], darkHorseTeams: [] };
+        }
+        const roundLabels = {
+            round_of_64: 'Round of 64',
+            round_of_32: 'Round of 32',
+            sweet_16: 'Sweet 16',
+            elite_8: 'Elite 8'
+        };
+        const matches = [];
+        Object.entries(bracketData.regions).forEach(([regionName, rounds = {}]) => {
+            Object.entries(rounds).forEach(([roundKey, matchups = []]) => {
+                matchups.forEach((match, index) => {
+                    if (!match.team_a || !match.team_b) return;
+                    const winA = parseFloat(match.win_prob_a) || 0;
+                    const winB = parseFloat(match.win_prob_b) || 0;
+                    const favoriteSide = winA >= winB ? 'a' : 'b';
+                    const favoriteName = favoriteSide === 'a' ? match.team_a : match.team_b;
+                    const underdogName = favoriteSide === 'a' ? match.team_b : match.team_a;
+                    const favoriteSeed = Number(favoriteSide === 'a' ? match.seed_a : match.seed_b) || 0;
+                    const underdogSeed = Number(favoriteSide === 'a' ? match.seed_b : match.seed_a) || 0;
+                    const favoriteWinProb = favoriteSide === 'a' ? winA : winB;
+                    const underdogWinProb = favoriteSide === 'a' ? winB : winA;
+                    const seedDelta = Math.max(0, underdogSeed - favoriteSeed);
+                    const diff = Math.abs(winA - winB);
+                    const riskScore = (100 - favoriteWinProb) + seedDelta * 2 + (100 - diff) * 0.3;
+                    matches.push({
+                        id: `${regionName}-${roundKey}-${index}-${match.team_a}-${match.team_b}`,
+                        region: regionName,
+                        roundLabel: roundLabels[roundKey] || roundKey.replace(/_/g, ' '),
+                        favorite: favoriteName,
+                        underdog: underdogName,
+                        favoriteSeed,
+                        underdogSeed,
+                        favoriteWinProb: Math.round(favoriteWinProb),
+                        underdogWinProb: Math.round(underdogWinProb),
+                        seedDelta,
+                        winner: match.predicted_winner || match.winner,
+                        riskScore
+                    });
+                });
+            });
+        });
+        const filtered = matches.filter(m => m.favoriteWinProb >= 55);
+        filtered.sort((a, b) => b.riskScore - a.riskScore);
+        const upsetMatches = filtered.slice(0, 4);
+
+        const darkHorseTeams = (bracketData.round_advancement_probs || [])
+            .filter(team => (team.seed || 0) >= 5 && (team.champion_prob || 0) > 0)
+            .sort((a, b) => (b.champion_prob || 0) - (a.champion_prob || 0))
+            .slice(0, 3)
+            .map(team => {
+                const championProb = Number(team.champion_prob) || 0;
+                const finalFourProb = Number(team.final_four_prob) || 0;
+                return {
+                    team_name: team.team_name,
+                    seed: team.seed,
+                    region: team.region,
+                    champion_prob: championProb,
+                    final_four_prob: finalFourProb,
+                    note: `${finalFourProb.toFixed(1)}% Final Four · ${championProb.toFixed(1)}% Champion`
+                };
+            });
+
+        return { upsetMatches, darkHorseTeams };
+    }, [bracketData]);
+
     if (loading && !teams.length) return (
         <div className="p-8 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400 animate-pulse">
             <Cpu size={32} className="text-orange-500 animate-bounce" />
@@ -864,6 +932,7 @@ const MarchMadness = () => {
                     data={bracketData}
                     loading={loadingBracket}
                     onMatchupClick={handleMatchupClick}
+                    insights={bracketInsights}
                 />
             </div>
         </div>
@@ -1027,7 +1096,73 @@ function RegionTree({ name, region, onMatchupClick, mirrored = false }) {
     );
 }
 
-const BracketView = ({ data, loading, onMatchupClick }) => {
+const UpsetWatchlist = ({ items = [] }) => {
+    if (!items.length) return null;
+    return (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-purple-400">
+                    <AlertTriangle size={12} />
+                    Upset Watchlist
+                </div>
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Model picks</span>
+            </div>
+            <div className="space-y-2">
+                {items.map(item => (
+                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-black text-white">{item.underdog}</p>
+                                <p className="text-[11px] text-slate-500">{item.region} · {item.roundLabel}</p>
+                            </div>
+                            <div className="text-right text-sm font-black text-emerald-300">
+                                {item.underdogWinProb}% upset
+                                <div className="text-[10px] text-slate-500">Fav: #{item.favoriteSeed}</div>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[12px] text-slate-400">
+                            <span>Fav: {item.favorite} (#{item.favoriteSeed}) · {item.favoriteWinProb}%</span>
+                            <span>Seed gap: {item.seedDelta}</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const DarkHorseWatchlist = ({ items = [] }) => {
+    if (!items.length) return null;
+    return (
+        <div className="bg-slate-900 border border-yellow-500/30 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-yellow-400">
+                <Star size={12} />
+                Dark Horse Watch
+            </div>
+            <div className="space-y-2">
+                {items.map(item => {
+                    const champLabel = typeof item.champion_prob === 'number' ? `${item.champion_prob.toFixed(1)}%` : `${item.champion_prob}%`;
+                    return (
+                        <div key={item.team_name} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-black text-white">{item.team_name}</p>
+                                <p className="text-xs text-slate-400">Seed #{item.seed} · {item.region}</p>
+                                <p className="text-[11px] text-slate-500">{item.note}</p>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-lg font-black text-yellow-300">{champLabel}</div>
+                                <p className="text-[10px] text-slate-500">champion</p>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+const BracketView = ({ data, loading, onMatchupClick, insights = {} }) => {
+    const { upsetMatches = [], darkHorseTeams = [] } = insights;
     if (loading) return (
         <div className="p-12 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400">
             <RefreshCw size={32} className="text-orange-500 animate-spin" />
@@ -1055,6 +1190,15 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
                             {data.data_issues.length} Issues
                         </div>
                     )}
+                </div>
+            )}
+
+            {(upsetMatches.length > 0 || darkHorseTeams.length > 0) && (
+                <div className="max-w-5xl mx-auto px-4 space-y-4">
+                    <div className="grid md:grid-cols-2 gap-4">
+                        <UpsetWatchlist items={upsetMatches} />
+                        <DarkHorseWatchlist items={darkHorseTeams} />
+                    </div>
                 </div>
             )}
 
