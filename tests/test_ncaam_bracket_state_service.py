@@ -113,3 +113,48 @@ def test_live_status_overrides_projection(mock_load, mock_fetch, mock_service, b
 
     locked = mock_service.return_value.simulate_bracket.call_args[1]["locked_matchups"]
     assert not locked
+
+
+@patch("src.services.ncaam_bracket_state_service.NCAAMTournamentPredictionService")
+@patch.object(NCAAMBracketStateService, "_fetch_actual_events")
+@patch.object(NCAAMBracketStateService, "_load_seed_rows")
+def test_champion_trust_low_flag(mock_load, mock_fetch, mock_service, base_payload):
+    mock_load.return_value = _seed_rows()
+    mock_fetch.return_value = _final_event()
+
+    payload = base_payload.copy()
+    payload.update({
+        "degraded_simulation": True,
+        "data_issues": ["issue"] * 5,
+        "champion": "Duke Blue Devils",
+        "championship": {
+            "team_a": "Duke Blue Devils",
+            "team_b": "Siena Saints"
+        }
+    })
+
+    mock_sim = MagicMock()
+    mock_sim.model_dump.return_value = payload
+    mock_service.return_value.simulate_bracket.return_value = mock_sim
+
+    service = NCAAMBracketStateService()
+    result = service.build_bracket_payload()
+
+    assert result["champion_trust_low"] is True
+
+@patch.object(NCAAMBracketStateService, "_load_seed_rows")
+@patch.object(NCAAMBracketStateService, "_fetch_actual_events")
+def test_seed_lookup_alias_coverage(mock_fetch, mock_load):
+    mock_load.return_value = [
+        {
+            "team_name": "Lehigh / Prairie View A&M",
+            "seed": 16,
+            "region": "East"
+        }
+    ]
+    mock_fetch.return_value = []
+
+    service = NCAAMBracketStateService()
+    keys = service.seed_lookup.keys()
+    assert any("lehigh" in key.lower() for key in keys)
+    assert any(alias in key.lower() for key in keys for alias in ("prairie view am", "prairie view"))

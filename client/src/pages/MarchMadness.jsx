@@ -87,6 +87,20 @@ const shortenTeamName = (name) => {
     return n.trim();
 };
 
+return n.trim();
+};
+
+const formatProbability = (value) => {
+    if (value == null) return '—';
+    return `${Math.round(value)}%`;
+};
+
+const shouldShowChampion = (data) => {
+    if (!data?.champion) return false;
+    if (!data.degraded_simulation) return true;
+    return !(data.champion_trust_low ?? false);
+};
+
 // Circular gauge
 function Gauge({ score = 0, label, color = '#f97316', subLabel }) {
     const radius = 36; const circ = 2 * Math.PI * radius;
@@ -1027,6 +1041,7 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
 
     const champ = data.championship;
     const champion = data.champion;
+    const showChampion = shouldShowChampion(data);
 
     return (
         <div className="py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 px-4">
@@ -1065,7 +1080,7 @@ const BracketView = ({ data, loading, onMatchupClick }) => {
                 <div className="flex flex-col items-center justify-center min-w-[300px] gap-12">
                     
                     {/* Champion Banner */}
-                    {champion && (
+                    {showChampion && (
                         <div className="relative overflow-hidden rounded-3xl border-2 border-yellow-500/40 bg-gradient-to-br from-yellow-950/80 via-slate-900 to-slate-950 p-10 text-center shadow-[0_0_60px_-15px_rgba(234,179,8,0.5)] z-10 scale-110">
                             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 bg-yellow-500/20 rounded-full blur-[100px] pointer-events-none" />
                             <div className="relative">

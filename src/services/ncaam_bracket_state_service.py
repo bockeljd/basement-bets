@@ -293,6 +293,8 @@ class NCAAMBracketStateService:
         payload["updated_at"] = datetime.utcnow().isoformat()
         payload["model_version"] = payload.get("model_version", "tournament_ensemble_v1")
         self._apply_overrides(payload, override_map)
+        issue_count = len(payload.get("data_issues", []))
+        payload["champion_trust_low"] = bool(payload.get("degraded_simulation") and issue_count > 3)
         return payload
 
     def _apply_overrides(self, payload: Dict[str, Any], overrides: Dict[SlotKey, Dict[str, Any]]) -> None:
