@@ -505,8 +505,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
              risk_flags.append(f"{team_b} high upset risk ({mods_b['upset_risk_score']})")
              
         z = (0.0 - mu_spread_final) / sigma_spread
-        win_prob_b = 0.5 * (1 + math.erf(z / math.sqrt(2)))
-        win_prob_a = 1.0 - win_prob_b
+        # mu_spread_final is from Team A perspective (negative => Team A favored).
+        # P(Team A wins) = P(spread < 0) = CDF((0 - mu)/sigma).
+        win_prob_a = 0.5 * (1 + math.erf(z / math.sqrt(2)))
+        win_prob_b = 1.0 - win_prob_a
         
         winner = team_a if win_prob_a >= 0.5 else team_b
         winner_side = 'team_a' if win_prob_a >= 0.5 else 'team_b'
