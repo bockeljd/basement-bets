@@ -266,3 +266,75 @@ def test_overlay_match_remaps_win_probs_when_team_order_changes(mock_fetch, mock
     assert match['team_b'] == 'Siena Saints'
     assert match['win_prob_a'] == 98.7
     assert match['win_prob_b'] == 1.3
+
+
+@patch("src.services.ncaam_bracket_state_service.NCAAMTournamentPredictionService")
+@patch.object(NCAAMBracketStateService, "_fetch_actual_events")
+@patch.object(NCAAMBracketStateService, "_load_seed_rows")
+def test_actual_event_does_not_overwrite_wrong_slot(mock_load, mock_fetch, mock_service):
+    """If an actual event's team-pair does not exist in the simulated bracket, do not inject it."""
+    mock_load.return_value = [
+        {"team_name": "Kansas Jayhawks", "seed": 4, "region": "East"},
+        {"team_name": "UCF Knights", "seed": 10, "region": "East"},
+        {"team_name": "Duke Blue Devils", "seed": 1, "region": "East"},
+        {"team_name": "Ohio State Buckeyes", "seed": 8, "region": "East"},
+    ]
+
+    mock_fetch.return_value = [
+        {
+            "home_team": "Kansas Jayhawks",
+            "away_team": "UCF Knights",
+            "start_time": datetime.utcnow(),
+            "status": "final",
+            "final": True,
+            "home_score": 75,
+            "away_score": 81,
+        }
+    ]
+
+    payload = {
+        "season": "2025-26",
+        "regions": {
+            "East": {
+                "round_of_64": [
+                    {
+                        "team_a": "Duke Blue Devils",
+                        "team_b": "Ohio State Buckeyes",
+                        "winner": "Duke Blue Devils",
+                        "win_prob_a": 80.0,
+                        "win_prob_b": 20.0,
+                        "debug": {},
+                        "model_type": "tournament_ensemble_v1",
+                    }
+                ],
+                "elite_8": [
+                    {
+                        "team_a": "Duke Blue Devils",
+                        "team_b": "Ohio State Buckeyes",
+                        "winner": "Duke Blue Devils",
+                        "win_prob_a": 70.0,
+                        "win_prob_b": 30.0,
+                        "debug": {},
+                        "model_type": "tournament_ensemble_v1",
+                    }
+                ],
+            }
+        },
+        "first_four": [],
+        "final_four": [],
+        "championship": None,
+        "title_odds": {},
+        "round_advancement_probs": [],
+    }
+
+    mock_sim = MagicMock()
+    mock_sim.model_dump.return_value = payload
+    mock_service.return_value.simulate_bracket.return_value = mock_sim
+
+    service = NCAAMBracketStateService()
+    result = service.build_bracket_payload()
+
+    e8 = result["regions"]["East"]["elite_8"][0]
+    assert e8["team_a"] == "Duke Blue Devils"
+    assert e8["team_b"] == "Ohio State Buckeyes"
+    assert e8.get("status") != "final"
