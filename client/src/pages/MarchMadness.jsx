@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../api/axios';
+import { determineMatchFavorite } from '../utils/bracketTableUtils';
 import {
     Shield, Crosshair, Activity, AlertTriangle, Users, TrendingUp,
     Cpu, RefreshCw, Swords, Search, Target, Award, Star, Zap, Layout, ChevronDown, ChevronUp
@@ -1192,12 +1193,15 @@ const BracketTable = ({ data, roundLabels }) => {
     Object.entries(data.regions || {}).forEach(([region, rounds = {}]) => {
         Object.entries(roundLabels).forEach(([roundKey, label]) => {
             (rounds[roundKey] || []).forEach((match, idx) => {
+                const favoriteRow = determineMatchFavorite(match);
                 rows.push({
                     region,
                     round: label,
                     teamA: match.team_a,
                     teamB: match.team_b,
-                    favorite: match.predicted_winner || match.winner,
+                    favorite: favoriteRow.favoriteTeam,
+                    favoritePct: favoriteRow.favoritePct,
+                    dogPct: favoriteRow.dogPct,
                     winProbA: Number(match.win_prob_a) || 0,
                     winProbB: Number(match.win_prob_b) || 0,
                     key: `${region}-${roundKey}-${idx}-${match.team_a}-${match.team_b}`
@@ -1206,12 +1210,15 @@ const BracketTable = ({ data, roundLabels }) => {
         });
     });
     (data.final_four || []).forEach((match, idx) => {
+        const favoriteRow = determineMatchFavorite(match);
         rows.push({
             region: 'Final Four',
             round: 'Final Four',
             teamA: match.team_a,
             teamB: match.team_b,
-            favorite: match.predicted_winner || match.winner,
+            favorite: favoriteRow.favoriteTeam,
+            favoritePct: favoriteRow.favoritePct,
+            dogPct: favoriteRow.dogPct,
             winProbA: Number(match.win_prob_a) || 0,
             winProbB: Number(match.win_prob_b) || 0,
             key: `ff-${idx}-${match.team_a}-${match.team_b}`
@@ -1219,12 +1226,15 @@ const BracketTable = ({ data, roundLabels }) => {
     });
     if (data.championship) {
         const match = data.championship;
+        const favoriteRow = determineMatchFavorite(match);
         rows.push({
             region: 'Championship',
             round: 'Championship',
             teamA: match.team_a,
             teamB: match.team_b,
-            favorite: match.predicted_winner || match.winner,
+            favorite: favoriteRow.favoriteTeam,
+            favoritePct: favoriteRow.favoritePct,
+            dogPct: favoriteRow.dogPct,
             winProbA: Number(match.win_prob_a) || 0,
             winProbB: Number(match.win_prob_b) || 0,
             key: `champ-${match.team_a}-${match.team_b}`
@@ -1236,6 +1246,8 @@ const BracketTable = ({ data, roundLabels }) => {
                 teamA: data.champion,
                 teamB: '',
                 favorite: data.champion,
+                favoritePct: favoriteRow.favoritePct,
+                dogPct: favoriteRow.dogPct,
                 winProbA: Number(match.win_prob_a) || 0,
                 winProbB: 0,
                 key: `champ-text-${data.champion}`
@@ -1271,8 +1283,8 @@ const BracketTable = ({ data, roundLabels }) => {
                                 <td className="py-2 pr-3">{row.teamA}</td>
                                 <td className="py-2 pr-3">{row.teamB}</td>
                                 <td className="py-2 pr-3 text-emerald-400">{row.favorite}</td>
-                                <td className="py-2 pr-3 text-right text-slate-200">{formatPercent(row.winProbA)}</td>
-                                <td className="py-2 pr-3 text-right text-slate-400">{formatPercent(row.winProbB)}</td>
+                                <td className="py-2 pr-3 text-right text-slate-200">{formatPercent(row.favoritePct)}</td>
+                                <td className="py-2 pr-3 text-right text-slate-400">{formatPercent(row.dogPct)}</td>
                             </tr>
                         ))}
                     </tbody>
