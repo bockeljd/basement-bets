@@ -51,6 +51,7 @@ def standardize_team_name(team_name: str) -> str:
         "kansas st": "Kansas St.",
         "michigan st": "Michigan St.",
         "wright st": "Wright St.",
+        "mcneese": "McNeese St.",
     }
     
     # Remove parenthesis content (e.g., "Queens (N.C.)" -> "Queens")
