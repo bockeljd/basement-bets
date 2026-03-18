@@ -6,9 +6,10 @@ from src.services.ncaam_bracket_state_service import NCAAMBracketStateService
 
 router = APIRouter()
 
-# Local memory cache for ultra-fast hits (10s TTL)
+# Local memory cache for ultra-fast hits (seconds)
 _LOCAL_CACHE = {"data": None, "expiry": 0}
-LOCAL_TTL = 10
+LOCAL_TTL = 180
+DB_CACHE_TTL = 180
 
 
 def _get_db_cache():
@@ -17,7 +18,7 @@ def _get_db_cache():
         with get_db_connection() as conn:
             row = _exec(conn, "SELECT data_json FROM ncaam_bracket_cache WHERE season = '2025-26'").fetchone()
             if row:
-                return row['data_json']
+                return {"data": row['data_json'], "updated_at": row['updated_at']}
     except Exception as e:
         print(f"[bracket-api] Cache read error: {e}")
     return None
@@ -80,9 +81,11 @@ async def get_2026_bracket(request: Request, refresh: bool = False):
     if not refresh:
         cached = _get_db_cache()
         if cached:
-            _LOCAL_CACHE["data"] = cached
-            _LOCAL_CACHE["expiry"] = current_time + LOCAL_TTL
-            return cached
+            cache_age = current_time - cached["updated_at"].timestamp()
+            if cache_age < DB_CACHE_TTL:
+                _LOCAL_CACHE["data"] = cached["data"]
+                _LOCAL_CACHE["expiry"] = current_time + LOCAL_TTL
+                return cached["data"]
 
     # 3. Live Simulation (Compute)
     print("[bracket-api] Cache miss or refresh requested. Starting actual-first pipeline...")
