@@ -300,13 +300,32 @@ class NCAAMTournamentPredictionService:
                     )
                 return _shared_cache[swapped_k]
 
+            def _resolve_locked_winner(ta: str, tb: str) -> Optional[str]:
+                norm_key = self._normalize_match_key(ta, tb)
+                if norm_key not in locked_map:
+                    return None
+                locked = locked_map[norm_key]
+                winner = locked.get("winner", ta)
+                if winner not in (ta, tb):
+                    winner = ta if standardize_team_name(winner) == standardize_team_name(ta) else tb
+                return winner
+
+            def _get_game_result_with_lock(ta: str, tb: str, rd: str, conn=None):
+                """Return prediction object, but force winner if matchup is locked."""
+                pred = _get_game_result(ta, tb, rd, conn=conn)
+                locked_w = _resolve_locked_winner(ta, tb)
+                if locked_w:
+                    pred.winner = locked_w
+                    pred.winner_side = 'team_a' if locked_w == ta else 'team_b'
+                return pred
+
             # 3. Deterministic Bracket Construction (Front-loads cache)
             first_four_det = []
             det_region_teams = {r: {} for r in base_regions}
             for region, sdict in region_teams.items():
                 for seed, lst in sdict.items():
                     if len(lst) == 2:
-                        pred = _get_game_result(lst[0], lst[1], "First Four", conn=conn)
+                        pred = _get_game_result_with_lock(lst[0], lst[1], "First Four", conn=conn)
                         first_four_det.append(pred)
                         det_region_teams[region][seed] = pred.winner
                     else:
@@ -319,30 +338,30 @@ class NCAAMTournamentPredictionService:
                 tm = det_region_teams[region]
                 r64 = []
                 for (s1, s2) in base_pairings:
-                    if s1 in tm and s2 in tm: r64.append(_get_game_result(tm[s1], tm[s2], "R64", conn=conn))
+                    if s1 in tm and s2 in tm: r64.append(_get_game_result_with_lock(tm[s1], tm[s2], "R64", conn=conn))
                 r32 = []
                 for i in range(0, len(r64), 2):
-                    if i+1 < len(r64): r32.append(_get_game_result(r64[i].winner, r64[i+1].winner, "R32", conn=conn))
+                    if i+1 < len(r64): r32.append(_get_game_result_with_lock(r64[i].winner, r64[i+1].winner, "R32", conn=conn))
                 s16 = []
                 for i in range(0, len(r32), 2):
-                    if i+1 < len(r32): s16.append(_get_game_result(r32[i].winner, r32[i+1].winner, "S16", conn=conn))
+                    if i+1 < len(r32): s16.append(_get_game_result_with_lock(r32[i].winner, r32[i+1].winner, "S16", conn=conn))
                 e8 = []
                 for i in range(0, len(s16), 2):
-                    if i+1 < len(s16): 
-                        e8.append(_get_game_result(s16[i].winner, s16[i+1].winner, "E8", conn=conn))
+                    if i+1 < len(s16):
+                        e8.append(_get_game_result_with_lock(s16[i].winner, s16[i+1].winner, "E8", conn=conn))
                         e8_winners_det[region] = e8[-1].winner
                 det_regions[region] = {"round_of_64": r64, "round_of_32": r32, "sweet_16": s16, "elite_8": e8}
 
             final_four_det = []
             if "East" in e8_winners_det and "West" in e8_winners_det:
-                 final_four_det.append(_get_game_result(e8_winners_det["East"], e8_winners_det["West"], "FF", conn=conn))
+                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["East"], e8_winners_det["West"], "FF", conn=conn))
             if "South" in e8_winners_det and "Midwest" in e8_winners_det:
-                 final_four_det.append(_get_game_result(e8_winners_det["South"], e8_winners_det["Midwest"], "FF", conn=conn))
+                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["South"], e8_winners_det["Midwest"], "FF", conn=conn))
             
             championship_det = None
             champion_det = None
             if len(final_four_det) == 2:
-                 championship_det = _get_game_result(final_four_det[0].winner, final_four_det[1].winner, "NCG", conn=conn)
+                 championship_det = _get_game_result_with_lock(final_four_det[0].winner, final_four_det[1].winner, "NCG", conn=conn)
                  champion_det = championship_det.winner
 
         # 4. In-Memory MC Simulation Loop
@@ -356,14 +375,10 @@ class NCAAMTournamentPredictionService:
                     }
 
         def _sim_matchup(ta: str, tb: str, rd: str) -> str:
-            norm_key = self._normalize_match_key(ta, tb)
-            if norm_key in locked_map:
-                locked = locked_map[norm_key]
-                winner = locked.get("winner", ta)
-                if winner not in (ta, tb):
-                    winner = ta if standardize_team_name(winner) == standardize_team_name(ta) else tb
-                return winner
-            pred = _get_game_result(ta, tb, rd) # Hits memory cache
+            locked_w = _resolve_locked_winner(ta, tb)
+            if locked_w:
+                return locked_w
+            pred = _get_game_result(ta, tb, rd)  # Hits memory cache
             return ta if random.random() < (pred.win_prob_a / 100.0) else tb
 
         for _ in range(simulations):
