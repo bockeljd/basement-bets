@@ -1078,7 +1078,6 @@ function RegionTree({ name, region, onMatchupClick, mirrored = false }) {
         { key: 'elite_8', label: 'E8' }
     ];
 
-    if (mirrored) rounds.reverse();
 
     // Absolute-position layout so every round lines up perfectly like a real bracket.
     // One "slot" per Round of 64 game.

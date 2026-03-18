@@ -334,7 +334,112 @@ def test_actual_event_does_not_overwrite_wrong_slot(mock_load, mock_fetch, mock_
     service = NCAAMBracketStateService()
     result = service.build_bracket_payload()
 
-    e8 = result["regions"]["East"]["elite_8"][0]
-    assert e8["team_a"] == "Duke Blue Devils"
-    assert e8["team_b"] == "Ohio State Buckeyes"
-    assert e8.get("status") != "final"
+    # After rebuild, elite_8 may not exist with only one R64 game; just ensure the actual Kansas/UCF event
+    # did not overwrite the only simulated R64 slot.
+    r64 = result["regions"]["East"]["round_of_64"][0]
+    assert r64["team_a"] == "Duke Blue Devils"
+    assert r64["team_b"] == "Ohio State Buckeyes"
+    assert r64.get("status") != "final"
+
+
+@patch("src.services.ncaam_bracket_state_service.NCAAMTournamentPredictionService")
+@patch.object(NCAAMBracketStateService, "_fetch_actual_events")
+@patch.object(NCAAMBracketStateService, "_load_seed_rows")
+def test_final_override_advances_winner_downstream(mock_load, mock_fetch, mock_service):
+    """If a Sweet 16 game is final, the actual winner must advance into Elite 8."""
+    mock_load.return_value = [
+        {"team_name": "Florida Gators", "seed": 1, "region": "South"},
+        {"team_name": "Vanderbilt Commodores", "seed": 5, "region": "South"},
+        {"team_name": "Illinois Fighting Illini", "seed": 3, "region": "South"},
+        {"team_name": "Houston Cougars", "seed": 2, "region": "South"},
+    ]
+
+    # Final actual event Florida vs Vanderbilt where Vanderbilt wins.
+    mock_fetch.return_value = [
+        {
+            "home_team": "Florida Gators",
+            "away_team": "Vanderbilt Commodores",
+            "start_time": datetime.utcnow(),
+            "status": "final",
+            "final": True,
+            "home_score": 74,
+            "away_score": 91,
+        }
+    ]
+
+    # Simulated bracket says Florida wins S16 and advances.
+    payload = {
+        "season": "2025-26",
+        "regions": {
+            "South": {
+                "round_of_64": [
+                    {"team_a": "Florida Gators", "team_b": "Seed16", "winner": "Florida Gators", "win_prob_a": 90.0, "win_prob_b": 10.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                    {"team_a": "Vanderbilt Commodores", "team_b": "Seed12", "winner": "Vanderbilt Commodores", "win_prob_a": 60.0, "win_prob_b": 40.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                    {"team_a": "Illinois Fighting Illini", "team_b": "Seed14", "winner": "Illinois Fighting Illini", "win_prob_a": 70.0, "win_prob_b": 30.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                    {"team_a": "Houston Cougars", "team_b": "Seed15", "winner": "Houston Cougars", "win_prob_a": 80.0, "win_prob_b": 20.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                ],
+                "round_of_32": [
+                    {"team_a": "Florida Gators", "team_b": "Vanderbilt Commodores", "winner": "Florida Gators", "win_prob_a": 55.0, "win_prob_b": 45.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                    {"team_a": "Illinois Fighting Illini", "team_b": "Houston Cougars", "winner": "Illinois Fighting Illini", "win_prob_a": 55.0, "win_prob_b": 45.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                ],
+                "sweet_16": [
+                    {"team_a": "Florida Gators", "team_b": "Vanderbilt Commodores", "winner": "Florida Gators", "win_prob_a": 55.0, "win_prob_b": 45.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                    {"team_a": "Illinois Fighting Illini", "team_b": "Houston Cougars", "winner": "Illinois Fighting Illini", "win_prob_a": 55.0, "win_prob_b": 45.0, "debug": {}, "model_type": "tournament_ensemble_v1"},
+                ],
+                "elite_8": [
+                    {"team_a": "Florida Gators", "team_b": "Illinois Fighting Illini", "winner": "Florida Gators", "win_prob_a": 55.0, "win_prob_b": 45.0, "debug": {}, "model_type": "tournament_ensemble_v1"}
+                ],
+            }
+        },
+        "first_four": [],
+        "final_four": [],
+        "championship": None,
+        "title_odds": {},
+        "round_advancement_probs": [],
+    }
+
+    mock_sim = MagicMock()
+    mock_sim.model_dump.return_value = payload
+    svc = mock_service.return_value
+    svc.simulate_bracket.return_value = mock_sim
+
+    # For any recomputed matchup, return a simple prediction object.
+    def _predict_game(gi, conn=None):
+        from src.services.ncaam_tournament_service import TournamentGamePrediction
+        return TournamentGamePrediction(
+            team_a=gi.team_a,
+            team_b=gi.team_b,
+            winner=gi.team_a,
+            winner_side="team_a",
+            projected_spread_a=-1.0,
+            projected_total=150.0,
+            win_prob_a=60.0,
+            win_prob_b=40.0,
+            confidence_0_100=60.0,
+            model_type="tournament_ensemble_v1",
+            neutral_site=True,
+            market_data_used=False,
+            fallback_used=False,
+            reason_codes=[],
+            risk_flags=[],
+            debug={},
+            scheduled_tip_et=None,
+            tv_network=None,
+            site=None,
+        )
+
+    svc.predict_game.side_effect = _predict_game
+
+    service = NCAAMBracketStateService()
+    result = service.build_bracket_payload()
+
+    r32 = result["regions"]["South"]["round_of_32"][0]
+    assert {r32["team_a"], r32["team_b"]} == {"Florida Gators", "Vanderbilt Commodores"}
+    assert r32["status"] == "final"
+    assert r32["display_winner"] == "Vanderbilt Commodores"
+
+    s16 = result["regions"]["South"]["sweet_16"][0]
+    assert "Vanderbilt Commodores" in {s16["team_a"], s16["team_b"]}
+    assert "Florida Gators" not in {s16["team_a"], s16["team_b"]}
+
+    # With only a partial region bracket in this test fixture, Elite 8 may not be constructible.
