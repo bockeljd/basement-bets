@@ -87,9 +87,6 @@ const shortenTeamName = (name) => {
     return n.trim();
 };
 
-return n.trim();
-};
-
 const formatProbability = (value) => {
     if (value == null) return '—';
     return `${Math.round(value)}%`;
