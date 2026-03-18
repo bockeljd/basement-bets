@@ -938,7 +938,7 @@ const MarchMadness = () => {
                             onClick={() => setBracketMode(option)}
                             className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketMode === option ? 'bg-orange-500 text-slate-900 border-orange-500' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
                         >
-                            {option === 'theater' ? 'Bracket Theater' : 'Quick Table'}
+                            {option === 'theater' ? 'Bracket' : 'Quick Table'}
                         </button>
                     ))}
                 </div>
@@ -1085,20 +1085,21 @@ function RegionTree({ name, region, onMatchupClick, mirrored = false }) {
             {rounds.map((round, rIndex) => {
                 const matchups = region[round.key] || [];
                 // Dynamic spacing based on round
+                // spacing tuned to mimic a traditional bracket: tight outer round, progressively larger gaps inward
                 const verticalGapClass = 
-                    round.key === 'round_of_64' ? 'gap-4' :
-                    round.key === 'round_of_32' ? 'gap-[72px]' :
-                    round.key === 'sweet_16' ? 'gap-[188px]' : 
+                    round.key === 'round_of_64' ? 'gap-3' :
+                    round.key === 'round_of_32' ? 'gap-10' :
+                    round.key === 'sweet_16' ? 'gap-24' : 
                     'gap-0';
                 
                 const paddingTop = 
-                    round.key === 'round_of_32' ? 'pt-[42px]' :
-                    round.key === 'sweet_16' ? 'pt-[100px]' :
-                    round.key === 'elite_8' ? 'pt-[216px]' :
+                    round.key === 'round_of_32' ? 'pt-6' :
+                    round.key === 'sweet_16' ? 'pt-14' :
+                    round.key === 'elite_8' ? 'pt-32' :
                     'pt-0';
 
                 return (
-                    <div key={round.key} className={`flex flex-col ${verticalGapClass} ${paddingTop} relative min-w-[200px]`}>
+                    <div key={round.key} className={`flex flex-col ${verticalGapClass} ${paddingTop} relative min-w-[180px]`}>
                         {matchups.map((m, mIndex) => (
                             <div key={mIndex} className="relative flex items-center">
                                 {/* Connector Lines Logic (Conceptual for now, using borders for the Tree look) */}
@@ -1338,81 +1339,77 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
                 </div>
             )}
 
-            {/* Symmetrical Theater Layout */}
-            <div className="flex justify-center items-stretch gap-8">
-                
-                {/* Left Side: East & South */}
-                <div className="flex flex-col gap-20">
-                    <div className="space-y-4">
-                        <h2 className="text-xl font-black italic text-blue-500 border-l-4 border-blue-500 pl-3">EAST REGION</h2>
+            {/* Bracket Layout (2x2 regions + center Final Four) */}
+            <div className="max-w-[1800px] mx-auto">
+                <div className="grid grid-cols-[1fr_auto_1fr] grid-rows-2 gap-x-10 gap-y-14 items-start">
+
+                    {/* Top-left: East */}
+                    <div className="space-y-3">
+                        <h2 className="text-base md:text-lg font-black italic text-blue-500 border-l-4 border-blue-500 pl-3 tracking-wide">EAST</h2>
                         <RegionTree name="East" region={data.regions['East']} onMatchupClick={onMatchupClick} mirrored={false} />
                     </div>
-                    <div className="space-y-4">
-                        <h2 className="text-xl font-black italic text-emerald-500 border-l-4 border-emerald-500 pl-3">SOUTH REGION</h2>
-                        <RegionTree name="South" region={data.regions['South']} onMatchupClick={onMatchupClick} mirrored={false} />
-                    </div>
-                </div>
 
-                {/* Centerpiece: Final Four, Champ, and Trophies */}
-                <div className="flex flex-col items-center justify-center min-w-[300px] gap-12">
-                    
-                    {/* Champion Banner */}
-                    {showChampion && (
-                        <div className="relative overflow-hidden rounded-3xl border-2 border-yellow-500/40 bg-gradient-to-br from-yellow-950/80 via-slate-900 to-slate-950 p-10 text-center shadow-[0_0_60px_-15px_rgba(234,179,8,0.5)] z-10 scale-110">
-                            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 bg-yellow-500/20 rounded-full blur-[100px] pointer-events-none" />
-                            <div className="relative">
-                                <Award className="mx-auto mb-4 text-yellow-500" size={48} />
-                                <div className="text-[10px] font-black text-yellow-500 uppercase tracking-[0.5em] mb-2 text-center">National Champion</div>
-                                <div className="text-4xl font-black text-white mb-4 tracking-tighter drop-shadow-2xl">{champion}</div>
-                                {champ && (
-                                    <div className="flex flex-col gap-2 text-xs font-bold text-slate-400">
-                                        <div className="flex items-center justify-center gap-4">
-                                            <span className="bg-slate-800/80 px-3 py-1 rounded-full">{Math.max(champ.win_prob_a, champ.win_prob_b)}% Win Prob</span>
-                                            <span className="bg-slate-800/80 px-3 py-1 rounded-full">{champ.projected_spread_a > 0 ? '+' : ''}{champ.projected_spread_a} Spread</span>
+                    {/* Center: Final Four + Champion (spans both rows) */}
+                    <div className="row-span-2 flex flex-col items-center justify-center min-w-[280px] gap-10 pt-2">
+                        {showChampion && (
+                            <div className="relative overflow-hidden rounded-3xl border-2 border-yellow-500/40 bg-gradient-to-br from-yellow-950/80 via-slate-900 to-slate-950 p-8 text-center shadow-[0_0_60px_-15px_rgba(234,179,8,0.5)] z-10">
+                                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-72 h-72 bg-yellow-500/20 rounded-full blur-[90px] pointer-events-none" />
+                                <div className="relative">
+                                    <Award className="mx-auto mb-3 text-yellow-500" size={40} />
+                                    <div className="text-[10px] font-black text-yellow-500 uppercase tracking-[0.45em] mb-2 text-center">Champion</div>
+                                    <div className="text-3xl font-black text-white mb-3 tracking-tighter drop-shadow-2xl">{champion}</div>
+                                    {champ && (
+                                        <div className="flex items-center justify-center gap-3 text-[11px] font-bold text-slate-400">
+                                            <span className="bg-slate-800/80 px-3 py-1 rounded-full">{Math.max(champ.win_prob_a, champ.win_prob_b)}% Win</span>
+                                            <span className="bg-slate-800/80 px-3 py-1 rounded-full">{champ.projected_spread_a > 0 ? '+' : ''}{champ.projected_spread_a}</span>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {/* Final Four Convergence */}
-                    {data.final_four?.length > 0 && (
-                        <div className="space-y-6 w-full">
-                            <div className="flex flex-col items-center gap-2">
-                                <span className="text-3xl font-black text-white italic tracking-tighter uppercase">Final Four</span>
-                                <div className="h-0.5 w-32 bg-gradient-to-r from-transparent via-yellow-500 to-transparent" />
+                        {data.final_four?.length > 0 && (
+                            <div className="space-y-5 w-full">
+                                <div className="flex flex-col items-center gap-2">
+                                    <span className="text-2xl font-black text-white italic tracking-tight uppercase">Final Four</span>
+                                    <div className="h-0.5 w-28 bg-gradient-to-r from-transparent via-yellow-500 to-transparent" />
+                                </div>
+                                <div className="flex flex-col gap-4">
+                                    {data.final_four.map((m, i) => (
+                                        <div key={i} className="relative flex items-center justify-center">
+                                            <div className="absolute top-1/2 -left-10 w-10 h-px bg-slate-700" />
+                                            <div className="absolute top-1/2 -right-10 w-10 h-px bg-slate-700" />
+                                            <MatchupCard m={m} onMatchupClick={onMatchupClick} />
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-4">
-                                {data.final_four.map((m, i) => (
-                                    <div key={i} className="relative">
-                                        {/* Connector Lines to Final Four */}
-                                        <div className="absolute top-1/2 -left-8 w-8 h-px bg-slate-600" />
-                                        <div className="absolute top-1/2 -right-8 w-8 h-px bg-slate-600" />
-                                        <MatchupCard m={m} onMatchupClick={onMatchupClick} />
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
+                        )}
 
-                    <div className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-auto">
-                        Model Output: March 2026 Simulation
+                        <div className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-widest">
+                            Model Output • 2026
+                        </div>
                     </div>
-                </div>
 
-                {/* Right Side: West & Midwest */}
-                <div className="flex flex-col gap-20">
-                    <div className="space-y-4">
-                        <h2 className="text-xl font-black italic text-rose-500 border-r-4 border-rose-500 pr-3 text-right">WEST REGION</h2>
+                    {/* Top-right: West */}
+                    <div className="space-y-3">
+                        <h2 className="text-base md:text-lg font-black italic text-rose-500 border-r-4 border-rose-500 pr-3 text-right tracking-wide">WEST</h2>
                         <RegionTree name="West" region={data.regions['West']} onMatchupClick={onMatchupClick} mirrored={true} />
                     </div>
-                    <div className="space-y-4">
-                        <h2 className="text-xl font-black italic text-purple-500 border-r-4 border-purple-500 pr-3 text-right">MIDWEST REGION</h2>
+
+                    {/* Bottom-left: South */}
+                    <div className="space-y-3">
+                        <h2 className="text-base md:text-lg font-black italic text-emerald-500 border-l-4 border-emerald-500 pl-3 tracking-wide">SOUTH</h2>
+                        <RegionTree name="South" region={data.regions['South']} onMatchupClick={onMatchupClick} mirrored={false} />
+                    </div>
+
+                    {/* Bottom-right: Midwest */}
+                    <div className="space-y-3">
+                        <h2 className="text-base md:text-lg font-black italic text-purple-500 border-r-4 border-purple-500 pr-3 text-right tracking-wide">MIDWEST</h2>
                         <RegionTree name="Midwest" region={data.regions['Midwest']} onMatchupClick={onMatchupClick} mirrored={true} />
                     </div>
-                </div>
 
+                </div>
             </div>
             
         </div>
