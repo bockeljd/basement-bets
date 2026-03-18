@@ -926,16 +926,32 @@ const MarchMadness = () => {
 
     {/* ════ BRACKET TAB ════ */}
     {activeTab === 'bracket' && (
-        <div className="overflow-x-auto no-scrollbar">
-            <div className="min-w-[1200px]">
-                <BracketView
-                    data={bracketData}
-                    loading={loadingBracket}
-                    onMatchupClick={handleMatchupClick}
-                    insights={bracketInsights}
-                />
+        <>
+            {bracketData && (
+                <div className="flex justify-center gap-2 py-2">
+                    {['theater', 'table'].map(option => (
+                        <button
+                            key={option}
+                            onClick={() => setBracketMode(option)}
+                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketMode === option ? 'bg-orange-500 text-slate-900 border-orange-500' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
+                        >
+                            {option === 'theater' ? 'Bracket Theater' : 'Quick Table'}
+                        </button>
+                    ))}
+                </div>
+            )}
+            <div className={`overflow-x-auto no-scrollbar ${bracketMode === 'table' ? 'min-w-full' : ''}`}>
+                <div className={bracketMode === 'table' ? '' : 'min-w-[1200px]'}>
+                    <BracketView
+                        data={bracketData}
+                        loading={loadingBracket}
+                        onMatchupClick={handleMatchupClick}
+                        insights={bracketInsights}
+                        mode={bracketMode}
+                    />
+                </div>
             </div>
-        </div>
+        </>
     )}
         </div>
     );
@@ -1161,8 +1177,112 @@ const DarkHorseWatchlist = ({ items = [] }) => {
     );
 };
 
-const BracketView = ({ data, loading, onMatchupClick, insights = {} }) => {
+const ROUND_LABELS = {
+    round_of_64: 'Round of 64',
+    round_of_32: 'Round of 32',
+    sweet_16: 'Sweet 16',
+    elite_8: 'Elite 8'
+};
+
+const BracketTable = ({ data, roundLabels }) => {
+    if (!data) return null;
+    const rows = [];
+    Object.entries(data.regions || {}).forEach(([region, rounds = {}]) => {
+        Object.entries(roundLabels).forEach(([roundKey, label]) => {
+            (rounds[roundKey] || []).forEach((match, idx) => {
+                rows.push({
+                    region,
+                    round: label,
+                    teamA: match.team_a,
+                    teamB: match.team_b,
+                    favorite: match.predicted_winner || match.winner,
+                    winProbA: Number(match.win_prob_a) || 0,
+                    winProbB: Number(match.win_prob_b) || 0,
+                    key: `${region}-${roundKey}-${idx}-${match.team_a}-${match.team_b}`
+                });
+            });
+        });
+    });
+    (data.final_four || []).forEach((match, idx) => {
+        rows.push({
+            region: 'Final Four',
+            round: 'Final Four',
+            teamA: match.team_a,
+            teamB: match.team_b,
+            favorite: match.predicted_winner || match.winner,
+            winProbA: Number(match.win_prob_a) || 0,
+            winProbB: Number(match.win_prob_b) || 0,
+            key: `ff-${idx}-${match.team_a}-${match.team_b}`
+        });
+    });
+    if (data.championship) {
+        const match = data.championship;
+        rows.push({
+            region: 'Championship',
+            round: 'Championship',
+            teamA: match.team_a,
+            teamB: match.team_b,
+            favorite: match.predicted_winner || match.winner,
+            winProbA: Number(match.win_prob_a) || 0,
+            winProbB: Number(match.win_prob_b) || 0,
+            key: `champ-${match.team_a}-${match.team_b}`
+        });
+        if (data.champion) {
+            rows.push({
+                region: 'Champion',
+                round: 'Outcome',
+                teamA: data.champion,
+                teamB: '',
+                favorite: data.champion,
+                winProbA: Number(match.win_prob_a) || 0,
+                winProbB: 0,
+                key: `champ-text-${data.champion}`
+            });
+        }
+    }
+    const formatPercent = (value) => value ? `${value.toFixed(1)}%` : '—';
+    if (!rows.length) return <div className="text-center text-slate-500 text-sm py-6">Bracket table not available yet.</div>;
+    return (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg text-xs text-slate-300">
+            <div className="flex items-center justify-between mb-3">
+                <div className="text-[11px] uppercase tracking-[0.4em] text-slate-500">Bracket Table</div>
+                <div className="text-[10px] text-slate-400">Sorted by region & round</div>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                    <thead>
+                        <tr className="text-[10px] uppercase text-slate-500 tracking-[0.4em] border-b border-slate-800">
+                            <th className="pb-2 pr-3">Region</th>
+                            <th className="pb-2 pr-3">Round</th>
+                            <th className="pb-2 pr-3">Team A</th>
+                            <th className="pb-2 pr-3">Team B</th>
+                            <th className="pb-2 pr-3">Favorite</th>
+                            <th className="pb-2 pr-3 text-right">Fav %</th>
+                            <th className="pb-2 pr-3 text-right">Dog %</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                        {rows.map((row) => (
+                            <tr key={row.key} className="hover:bg-slate-800/40 transition">
+                                <td className="py-2 pr-3 font-bold text-white">{row.region}</td>
+                                <td className="py-2 pr-3 text-slate-400">{row.round}</td>
+                                <td className="py-2 pr-3">{row.teamA}</td>
+                                <td className="py-2 pr-3">{row.teamB}</td>
+                                <td className="py-2 pr-3 text-emerald-400">{row.favorite}</td>
+                                <td className="py-2 pr-3 text-right text-slate-200">{formatPercent(row.winProbA)}</td>
+                                <td className="py-2 pr-3 text-right text-slate-400">{formatPercent(row.winProbB)}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'theater' }) => {
     const { upsetMatches = [], darkHorseTeams = [] } = insights;
+    if (mode === 'table') return <BracketTable data={data} roundLabels={ROUND_LABELS} />;
     if (loading) return (
         <div className="p-12 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400">
             <RefreshCw size={32} className="text-orange-500 animate-spin" />
