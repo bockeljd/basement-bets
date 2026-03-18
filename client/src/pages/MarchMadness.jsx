@@ -217,6 +217,8 @@ const MarchMadness = () => {
     const [bracketData, setBracketData] = useState(null);
     const [loadingBracket, setLoadingBracket] = useState(false);
 
+    const [bracketMode, setBracketMode] = useState('theater');
+
     useEffect(() => { fetchTeams(); }, []);
 
     const fetchTeams = async () => {
