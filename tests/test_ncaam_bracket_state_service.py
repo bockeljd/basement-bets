@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.services.ncaam_bracket_state_service import NCAAMBracketStateService
+from src.services.ncaam_bracket_state_service import NCAAMBracketStateService, BracketGameStatus
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_live_status_overrides_projection(mock_load, mock_fetch, mock_service, b
 
     match = result["regions"]["East"]["round_of_64"][0]
     assert match["status"] == "live"
-    assert match["winner_source"] == "live"
+    assert match["winner_source"] == "projection"
     assert match["actual_score_a"] == 42
     assert match["actual_score_b"] == 41
 
@@ -158,3 +158,80 @@ def test_seed_lookup_alias_coverage(mock_fetch, mock_load):
     keys = service.seed_lookup.keys()
     assert any("lehigh" in key.lower() for key in keys)
     assert any(alias in key.lower() for key in keys for alias in ("prairie view am", "prairie view"))
+
+
+def test_collect_override_data_does_not_set_actual_for_scheduled():
+    service = NCAAMBracketStateService()
+    event = {
+        'home_team': 'Duke Blue Devils',
+        'away_team': 'Siena Saints',
+        'home_score': None,
+        'away_score': None
+    }
+    data = service._collect_override_data(
+        event, ('East', 'round_of_64', 0), 'Duke Blue Devils', 'Siena Saints', 1, 16,
+        BracketGameStatus.SCHEDULED, None
+    )
+    assert data['actual_winner'] is None
+
+
+def test_collect_override_data_record_actual_for_final():
+    service = NCAAMBracketStateService()
+    event = {
+        'home_team': 'Duke Blue Devils',
+        'away_team': 'Siena Saints',
+        'home_score': 80,
+        'away_score': 70
+    }
+    data = service._collect_override_data(
+        event, ('East', 'round_of_64', 0), 'Duke Blue Devils', 'Siena Saints', 1, 16,
+        BracketGameStatus.FINAL, None
+    )
+    assert data['actual_winner'] == 'Duke Blue Devils'
+
+
+@patch.object(NCAAMBracketStateService, '_load_seed_rows')
+@patch.object(NCAAMBracketStateService, '_fetch_actual_events')
+def test_overlay_match_uses_actual_for_final(mock_fetch, mock_load):
+    mock_load.return_value = []
+    mock_fetch.return_value = []
+    service = NCAAMBracketStateService()
+    match = {'winner': 'Siena Saints', 'predicted_winner': 'Siena Saints'}
+    override = {
+        'team_a': 'Duke Blue Devils',
+        'team_b': 'Siena Saints',
+        'seed_a': 1,
+        'seed_b': 16,
+        'status': BracketGameStatus.FINAL,
+        'score_a': 80,
+        'score_b': 70,
+        'actual_winner': 'Duke Blue Devils',
+        'slot_key': ('East', 'round_of_64', 0)
+    }
+    service._overlay_match(match, override)
+    assert match['display_winner'] == 'Duke Blue Devils'
+    assert match['winner_source'] == 'final'
+
+
+@patch.object(NCAAMBracketStateService, '_load_seed_rows')
+@patch.object(NCAAMBracketStateService, '_fetch_actual_events')
+def test_overlay_match_keeps_projection_for_scheduled(mock_fetch, mock_load):
+    mock_load.return_value = []
+    mock_fetch.return_value = []
+    service = NCAAMBracketStateService()
+    match = {'winner': 'Siena Saints', 'predicted_winner': 'Duke Blue Devils'}
+    override = {
+        'team_a': 'Duke Blue Devils',
+        'team_b': 'Siena Saints',
+        'seed_a': 1,
+        'seed_b': 16,
+        'status': BracketGameStatus.SCHEDULED,
+        'score_a': None,
+        'score_b': None,
+        'actual_winner': None,
+        'slot_key': ('East', 'round_of_64', 0)
+    }
+    service._overlay_match(match, override)
+    assert match['display_winner'] == 'Siena Saints'
+    assert match['winner_source'] == 'projection'
+

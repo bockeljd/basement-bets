@@ -211,6 +211,9 @@ class NCAAMBracketStateService:
         score_a = int(score_map.get(left_team)) if score_map.get(left_team) is not None else None
         score_b = int(score_map.get(right_team)) if score_map.get(right_team) is not None else None
         winner = left_team if (score_a if score_a is not None else 0) >= (score_b if score_b is not None else 0) else right_team
+        actual_winner = None
+        if score_a is not None and score_b is not None and status == BracketGameStatus.FINAL:
+            actual_winner = winner
         return {
             "slot_key": slot_key,
             "team_a": left_team,
@@ -220,7 +223,7 @@ class NCAAMBracketStateService:
             "score_a": score_a,
             "score_b": score_b,
             "status": status,
-            "actual_winner": winner,
+            "actual_winner": actual_winner,
             "scheduled_tip_et": tip_et,
             "tv_network": None,
             "site": None
@@ -331,8 +334,18 @@ class NCAAMBracketStateService:
             match["scheduled_tip_et"] = override.get("scheduled_tip_et") or match.get("scheduled_tip_et")
             match["tv_network"] = override.get("tv_network") or match.get("tv_network")
             match["site"] = override.get("site") or match.get("site")
-            match["display_winner"] = override["actual_winner"]
-            match["winner_source"] = override["status"]
+            match["display_winner"] = match.get("predicted_winner")
+            match["winner_source"] = "projection"
+            if match["status"] == BracketGameStatus.FINAL and override["actual_winner"]:
+                match["display_winner"] = override["actual_winner"]
+                match["winner_source"] = "final"
+            elif match["status"] == BracketGameStatus.LIVE:
+                if override["actual_winner"]:
+                    match["display_winner"] = override["actual_winner"]
+                    match["winner_source"] = "live"
+            elif match["status"] == BracketGameStatus.SCHEDULED:
+                match["display_winner"] = match.get("predicted_winner")
+                match["winner_source"] = "projection"
         else:
             match["status"] = match.get("status") or BracketGameStatus.SCHEDULED
             match["display_winner"] = match.get("predicted_winner")

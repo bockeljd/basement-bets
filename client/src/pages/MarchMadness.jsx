@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../api/axios';
-import { determineMatchFavorite } from '../utils/bracketTableUtils';
+import { resolveBracketFavorite } from '../utils/bracketTableRows';
 import {
     Shield, Crosshair, Activity, AlertTriangle, Users, TrendingUp,
     Cpu, RefreshCw, Swords, Search, Target, Award, Star, Zap, Layout, ChevronDown, ChevronUp
@@ -963,8 +963,10 @@ const MarchMadness = () => {
 /* ─── Matchup Card (Bracket Pod Style) ─── */
 function MatchupCard({ m, onMatchupClick, mirrored = false }) {
     if (!m) return null;
-    const isWinnerA = m.winner === m.team_a;
-    const isWinnerB = m.winner === m.team_b;
+    const displayWinner = m.display_winner || m.winner;
+    const winnerSource = m.winner_source || 'projection';
+    const isWinnerA = displayWinner === m.team_a;
+    const isWinnerB = displayWinner === m.team_b;
 
     return (
         <div
@@ -1193,15 +1195,15 @@ const BracketTable = ({ data, roundLabels }) => {
     Object.entries(data.regions || {}).forEach(([region, rounds = {}]) => {
         Object.entries(roundLabels).forEach(([roundKey, label]) => {
             (rounds[roundKey] || []).forEach((match, idx) => {
-                const favoriteRow = determineMatchFavorite(match);
+                const resolvedFavorite = resolveBracketFavorite(match);
                 rows.push({
                     region,
                     round: label,
                     teamA: match.team_a,
                     teamB: match.team_b,
-                    favorite: favoriteRow.favoriteTeam,
-                    favoritePct: favoriteRow.favoritePct,
-                    dogPct: favoriteRow.dogPct,
+                    favorite: resolvedFavorite.favoriteTeam,
+                    favoritePct: resolvedFavorite.favoritePct,
+                    dogPct: resolvedFavorite.dogPct,
                     winProbA: Number(match.win_prob_a) || 0,
                     winProbB: Number(match.win_prob_b) || 0,
                     key: `${region}-${roundKey}-${idx}-${match.team_a}-${match.team_b}`
@@ -1210,15 +1212,15 @@ const BracketTable = ({ data, roundLabels }) => {
         });
     });
     (data.final_four || []).forEach((match, idx) => {
-        const favoriteRow = determineMatchFavorite(match);
+        const resolvedFavorite = resolveBracketFavorite(match);
         rows.push({
             region: 'Final Four',
             round: 'Final Four',
             teamA: match.team_a,
             teamB: match.team_b,
-            favorite: favoriteRow.favoriteTeam,
-            favoritePct: favoriteRow.favoritePct,
-            dogPct: favoriteRow.dogPct,
+            favorite: resolvedFavorite.favoriteTeam,
+            favoritePct: resolvedFavorite.favoritePct,
+            dogPct: resolvedFavorite.dogPct,
             winProbA: Number(match.win_prob_a) || 0,
             winProbB: Number(match.win_prob_b) || 0,
             key: `ff-${idx}-${match.team_a}-${match.team_b}`
@@ -1226,15 +1228,15 @@ const BracketTable = ({ data, roundLabels }) => {
     });
     if (data.championship) {
         const match = data.championship;
-        const favoriteRow = determineMatchFavorite(match);
+        const resolvedFavorite = resolveBracketFavorite(match);
         rows.push({
             region: 'Championship',
             round: 'Championship',
             teamA: match.team_a,
             teamB: match.team_b,
-            favorite: favoriteRow.favoriteTeam,
-            favoritePct: favoriteRow.favoritePct,
-            dogPct: favoriteRow.dogPct,
+            favorite: resolvedFavorite.favoriteTeam,
+            favoritePct: resolvedFavorite.favoritePct,
+            dogPct: resolvedFavorite.dogPct,
             winProbA: Number(match.win_prob_a) || 0,
             winProbB: Number(match.win_prob_b) || 0,
             key: `champ-${match.team_a}-${match.team_b}`
@@ -1246,8 +1248,8 @@ const BracketTable = ({ data, roundLabels }) => {
                 teamA: data.champion,
                 teamB: '',
                 favorite: data.champion,
-                favoritePct: favoriteRow.favoritePct,
-                dogPct: favoriteRow.dogPct,
+                favoritePct: resolvedFavorite.favoritePct,
+                dogPct: resolvedFavorite.dogPct,
                 winProbA: Number(match.win_prob_a) || 0,
                 winProbB: 0,
                 key: `champ-text-${data.champion}`
