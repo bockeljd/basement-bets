@@ -1312,21 +1312,24 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
     const champion = data.champion;
     const showChampion = shouldShowChampion(data);
 
+    const issueCount = Array.isArray(data.data_issues) ? data.data_issues.length : 0;
+    const showDegradedBanner = Boolean(data.degraded_simulation && issueCount > 0);
+
     return (
         <div className="py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 px-4">
-            
-            {data.degraded_simulation && (
-                <div className="max-w-4xl mx-auto bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center gap-4 text-amber-200">
-                    <AlertTriangle size={24} className="shrink-0 text-amber-500" />
-                    <div>
-                        <div className="text-sm font-bold uppercase tracking-tight">Degraded Simulation Mode</div>
-                        <p className="text-xs opacity-80">This bracket contains matchups with missing performance data (e.g. invalid team mappings or new D1 teams). Seed-based priors were used for those specific games. Look for the <AlertTriangle size={10} className="inline mx-0.5" /> icon on affected matchups.</p>
-                    </div>
-                    {data.data_issues && data.data_issues.length > 0 && (
-                        <div className="ml-auto text-[10px] font-mono bg-amber-500/20 px-2 py-1 rounded">
-                            {data.data_issues.length} Issues
+
+            {showDegradedBanner && (
+                <div className="max-w-5xl mx-auto">
+                    <div className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 text-amber-200">
+                        <div className="flex items-center gap-2">
+                            <AlertTriangle size={16} className="shrink-0 text-amber-500" />
+                            <div className="text-xs font-bold uppercase tracking-wide">Degraded data</div>
+                            <div className="text-[11px] text-amber-200/80">Some games are using seed-based priors due to missing team mappings/metrics.</div>
                         </div>
-                    )}
+                        <div className="text-[10px] font-mono bg-amber-500/20 px-2 py-1 rounded shrink-0">
+                            {issueCount} issues
+                        </div>
+                    </div>
                 </div>
             )}
 
