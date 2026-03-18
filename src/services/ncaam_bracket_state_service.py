@@ -18,6 +18,7 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 SlotKey = Tuple[Optional[str], str, int]
+PairKey = Tuple[str, str]
 
 LIVE_STATUS_TOKENS = {
     "IN_PROGRESS", "LIVE", "HALFTIME", "Q1", "Q2", "Q3", "Q4", "FIRST_HALF", "SECOND_HALF"
@@ -91,6 +92,10 @@ def _format_tip_et(start_time: Optional[datetime]) -> Optional[str]:
     except Exception:
         est = start_time
     return est.strftime("%Y-%m-%d %H:%M")
+
+
+def _pair_key(team_a: str, team_b: str) -> PairKey:
+    return tuple(sorted([standardize_team_name(team_a), standardize_team_name(team_b)]))
 
 
 class NCAAMBracketStateService:
@@ -235,7 +240,7 @@ class NCAAMBracketStateService:
             for region, teams in self.region_seeds.items()
         }
 
-        override_map: Dict[SlotKey, Dict[str, Any]] = {}
+        override_by_pair: Dict[PairKey, Dict[str, Any]] = {}
         locked_matchups: List[Dict[str, Any]] = []
 
         events = self._fetch_actual_events()
@@ -246,59 +251,71 @@ class NCAAMBracketStateService:
             away_std = standardize_team_name(away)
             if home_std not in self.seed_lookup or away_std not in self.seed_lookup:
                 continue
+
             home_info = self.seed_lookup[home_std]
             away_info = self.seed_lookup[away_std]
+
+            # Use canonical seed/raw names so we match simulated bracket team strings.
+            home_raw = home_info.get("raw") or home
+            away_raw = away_info.get("raw") or away
+
             status = _normalize_status(event.get("status"), bool(event.get("final")))
             tip_et = _format_tip_et(event.get("start_time"))
 
-            if home_info["region"] == away_info["region"]:
-                region = home_info["region"]
-                match = self._match_round_slot(region, home_info["seed"], away_info["seed"])
-                if not match:
-                    continue
-                round_name, slot_idx, home_is_left = match
-                if home_is_left:
-                    left_team, right_team = home, away
-                    left_seed, right_seed = home_info["seed"], away_info["seed"]
-                else:
-                    left_team, right_team = away, home
-                    left_seed, right_seed = away_info["seed"], home_info["seed"]
-                key: SlotKey = (region, round_name, slot_idx)
-            else:
-                pair_key = self._assign_final_four_slot((home_info["region"], away_info["region"]))
-                if pair_key is not None:
-                    key = (None, "final_four", pair_key)
-                    if home_info["region"] == 'East' or home_info["region"] == 'South':
-                        left_team, right_team = home, away
-                        left_seed, right_seed = home_info["seed"], away_info["seed"]
-                    else:
-                        left_team, right_team = away, home
-                        left_seed, right_seed = away_info["seed"], home_info["seed"]
-                else:
-                    key = (None, "championship", 0)
-                    left_team, right_team = home, away
-                    left_seed, right_seed = home_info["seed"], away_info["seed"]
-            override_map[key] = self._collect_override_data(
-                event, key, left_team, right_team, left_seed, right_seed, status, tip_et
+            pair: PairKey = _pair_key(home_raw, away_raw)
+
+            # Collect override data but do NOT attempt to assign it to a bracket slot yet.
+            # Slot assignment happens after simulation by matching simulated matchup teams.
+            override_by_pair[pair] = self._collect_override_data(
+                event,
+                (None, "unknown", 0),
+                home_raw,
+                away_raw,
+                home_info.get("seed"),
+                away_info.get("seed"),
+                status,
+                tip_et,
             )
-            if status == BracketGameStatus.FINAL:
+
+            if status == BracketGameStatus.FINAL and override_by_pair[pair].get("actual_winner"):
                 locked_matchups.append({
-                    "team_a": left_team,
-                    "team_b": right_team,
-                    "winner": override_map[key]["actual_winner"]
+                    "team_a": home_raw,
+                    "team_b": away_raw,
+                    "winner": override_by_pair[pair]["actual_winner"],
                 })
 
         prediction_service = NCAAMTournamentPredictionService()
         simulation = prediction_service.simulate_bracket(seeded_payload, simulations=2500, locked_matchups=locked_matchups)
         payload = simulation.model_dump()
-        payload["v"] = "6-actual-first"
+        payload["v"] = "7-actual-first-pair-match"
         payload["seed_metadata"] = get_seed_source_metadata()
         payload["updated_at"] = datetime.utcnow().isoformat()
         payload["model_version"] = payload.get("model_version", "tournament_ensemble_v1")
-        self._apply_overrides(payload, override_map)
+
+        overrides_by_slot: Dict[SlotKey, Dict[str, Any]] = {}
+        for slot_key, match in self._iter_all_matches(payload):
+            pair = _pair_key(match.get("team_a", ""), match.get("team_b", ""))
+            if pair in override_by_pair:
+                ov = dict(override_by_pair[pair])
+                ov["slot_key"] = slot_key
+                overrides_by_slot[slot_key] = ov
+
+        self._apply_overrides(payload, overrides_by_slot)
         issue_count = len(payload.get("data_issues", []))
         payload["champion_trust_low"] = bool(payload.get("degraded_simulation") and issue_count > 3)
         return payload
+
+    def _iter_all_matches(self, payload: Dict[str, Any]):
+        """Yield (SlotKey, match_dict) for every match in the payload."""
+        for region, rounds in payload.get("regions", {}).items():
+            for round_name, matches in rounds.items():
+                for idx, match in enumerate(matches):
+                    yield (region, round_name, idx), match
+        for idx, match in enumerate(payload.get("final_four", []) or []):
+            yield (None, "final_four", idx), match
+        champ = payload.get("championship")
+        if champ:
+            yield (None, "championship", 0), champ
 
     def _apply_overrides(self, payload: Dict[str, Any], overrides: Dict[SlotKey, Dict[str, Any]]) -> None:
         for region, rounds in payload.get("regions", {}).items():
