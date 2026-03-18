@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from src.database import get_db_connection, _exec
 from src.services.ncaam_bracket_seed_loader import get_seed_source_metadata, load_manual_bracket_seeds
-from src.services.ncaam_tournament_service import NCAAMTournamentPredictionService
+from src.services.ncaam_tournament_service import NCAAMTournamentPredictionService, TournamentGameInput
 from src.utils.naming import standardize_team_name
 
 logger = logging.getLogger("basement_bets.ncaam_bracket_state")
@@ -96,6 +96,12 @@ def _format_tip_et(start_time: Optional[datetime]) -> Optional[str]:
 
 def _pair_key(team_a: str, team_b: str) -> PairKey:
     return tuple(sorted([standardize_team_name(team_a), standardize_team_name(team_b)]))
+
+
+def _seed_for_team(seed_lookup: Dict[str, Dict[str, Any]], team_name: str) -> Optional[int]:
+    key = standardize_team_name(team_name)
+    info = seed_lookup.get(key)
+    return info.get("seed") if info else None
 
 
 class NCAAMBracketStateService:
@@ -301,6 +307,8 @@ class NCAAMBracketStateService:
                 overrides_by_slot[slot_key] = ov
 
         self._apply_overrides(payload, overrides_by_slot)
+        # Rebuild deterministic downstream rounds so actual winners advance consistently
+        self._rebuild_after_actuals(payload, prediction_service, override_by_pair)
         issue_count = len(payload.get("data_issues", []))
         payload["champion_trust_low"] = bool(payload.get("degraded_simulation") and issue_count > 3)
         return payload
@@ -317,6 +325,64 @@ class NCAAMBracketStateService:
         if champ:
             yield (None, "championship", 0), champ
 
+
+    def _rebuild_region_rounds(self, payload: Dict[str, Any], region: str, prediction_service: NCAAMTournamentPredictionService, override_by_pair: Dict[PairKey, Dict[str, Any]]) -> None:
+        """Recompute downstream rounds so that actual winners advance consistently."""
+        rounds = payload.get("regions", {}).get(region, {})
+        if not rounds:
+            return
+
+        def _winner_for(match: Dict[str, Any]) -> Optional[str]:
+            return match.get("display_winner") or match.get("predicted_winner") or match.get("winner")
+
+        def _project_match(team_a: str, team_b: str) -> Dict[str, Any]:
+            gi = TournamentGameInput(team_a=team_a, team_b=team_b, round_index=0, region=region, neutral_site=True)
+            pred = prediction_service.predict_game(gi, conn=None)
+            d = pred.model_dump()
+            d["seed_a"] = _seed_for_team(self.seed_lookup, team_a)
+            d["seed_b"] = _seed_for_team(self.seed_lookup, team_b)
+            return d
+
+        order = ["round_of_64", "round_of_32", "sweet_16", "elite_8"]
+        for idx in range(1, len(order)):
+            prev_round = order[idx - 1]
+            cur_round = order[idx]
+
+            prev_matches = rounds.get(prev_round) or []
+            prev_winners = [_winner_for(m) for m in prev_matches]
+            if any(w is None for w in prev_winners):
+                continue
+
+            new_matches: List[Dict[str, Any]] = []
+            for i in range(0, len(prev_winners), 2):
+                if i + 1 >= len(prev_winners):
+                    continue
+                ta = prev_winners[i]
+                tb = prev_winners[i + 1]
+
+                new_m = _project_match(ta, tb)
+
+                pair = _pair_key(ta, tb)
+                if pair in override_by_pair:
+                    ov = dict(override_by_pair[pair])
+                    ov["team_a"] = ta
+                    ov["team_b"] = tb
+                    ov["seed_a"] = _seed_for_team(self.seed_lookup, ta)
+                    ov["seed_b"] = _seed_for_team(self.seed_lookup, tb)
+                    ov["slot_key"] = (region, cur_round, len(new_matches))
+                    self._overlay_match(new_m, ov)
+                else:
+                    self._overlay_match(new_m, None)
+
+                new_matches.append(new_m)
+
+            rounds[cur_round] = new_matches
+
+        payload["regions"][region] = rounds
+
+    def _rebuild_after_actuals(self, payload: Dict[str, Any], prediction_service: NCAAMTournamentPredictionService, override_by_pair: Dict[PairKey, Dict[str, Any]]) -> None:
+        for region in ["East", "West", "South", "Midwest"]:
+            self._rebuild_region_rounds(payload, region, prediction_service, override_by_pair)
     def _apply_overrides(self, payload: Dict[str, Any], overrides: Dict[SlotKey, Dict[str, Any]]) -> None:
         for region, rounds in payload.get("regions", {}).items():
             for round_name, matches in rounds.items():
