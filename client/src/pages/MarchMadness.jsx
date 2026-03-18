@@ -1080,37 +1080,55 @@ function RegionTree({ name, region, onMatchupClick, mirrored = false }) {
 
     if (mirrored) rounds.reverse();
 
+    // Absolute-position layout so every round lines up perfectly like a real bracket.
+    // One "slot" per Round of 64 game.
+    const SLOT_H = 56; // px
+    const SLOT_GAP = 12; // px
+    const SLOT_PITCH = SLOT_H + SLOT_GAP;
+
+    const roundLayout = {
+        round_of_64: { step: 1, offset: 0 },
+        round_of_32: { step: 2, offset: 0.5 },
+        sweet_16: { step: 4, offset: 1.5 },
+        elite_8: { step: 8, offset: 3.5 }
+    };
+
+    // 8 games in the Round of 64.
+    const regionHeight = (8 - 1) * SLOT_PITCH + SLOT_H;
+
     return (
         <div className={`flex items-stretch gap-0 ${mirrored ? 'flex-row-reverse' : 'flex-row'}`}>
-            {rounds.map((round, rIndex) => {
+            {rounds.map((round) => {
                 const matchups = region[round.key] || [];
-                // Dynamic spacing based on round
-                // spacing tuned to mimic a traditional bracket: tight outer round, progressively larger gaps inward
-                const verticalGapClass = 
-                    round.key === 'round_of_64' ? 'gap-3' :
-                    round.key === 'round_of_32' ? 'gap-10' :
-                    round.key === 'sweet_16' ? 'gap-24' : 
-                    'gap-0';
-                
-                const paddingTop = 
-                    round.key === 'round_of_32' ? 'pt-6' :
-                    round.key === 'sweet_16' ? 'pt-14' :
-                    round.key === 'elite_8' ? 'pt-32' :
-                    'pt-0';
+                const layout = roundLayout[round.key] || { step: 1, offset: 0 };
 
                 return (
-                    <div key={round.key} className={`flex flex-col ${verticalGapClass} ${paddingTop} relative min-w-[180px]`}>
-                        {matchups.map((m, mIndex) => (
-                            <div key={mIndex} className="relative flex items-center">
-                                {/* Connector Lines Logic (Conceptual for now, using borders for the Tree look) */}
-                                <MatchupCard m={m} onMatchupClick={onMatchupClick} mirrored={mirrored} />
-                                
-                                {/* Horizontal connector towards next round */}
-                                {((!mirrored && round.key !== 'elite_8') || (mirrored && round.key !== 'elite_8')) && (
-                                    <div className={`absolute top-1/2 -translate-y-1/2 w-5 h-px bg-slate-700 ${mirrored ? '-left-5' : '-right-5'}`} />
-                                )}
-                            </div>
-                        ))}
+                    <div
+                        key={round.key}
+                        className="relative min-w-[190px]"
+                        style={{ height: regionHeight }}
+                    >
+                        {matchups.map((m, mIndex) => {
+                            const top = (layout.offset * SLOT_PITCH) + (mIndex * layout.step * SLOT_PITCH);
+                            return (
+                                <div
+                                    key={mIndex}
+                                    className="absolute left-0 right-0"
+                                    style={{ top }}
+                                >
+                                    <div className="relative flex items-center">
+                                        <MatchupCard m={m} onMatchupClick={onMatchupClick} mirrored={mirrored} />
+
+                                        {/* Horizontal connector towards next round */}
+                                        {round.key !== 'elite_8' && (
+                                            <div
+                                                className={`absolute top-1/2 -translate-y-1/2 w-5 h-px bg-slate-700 ${mirrored ? '-left-5' : '-right-5'}`}
+                                            />
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 );
             })}
