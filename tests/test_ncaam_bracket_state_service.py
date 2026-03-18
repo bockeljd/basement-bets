@@ -235,3 +235,34 @@ def test_overlay_match_keeps_projection_for_scheduled(mock_fetch, mock_load):
     assert match['display_winner'] == 'Siena Saints'
     assert match['winner_source'] == 'projection'
 
+
+
+@patch.object(NCAAMBracketStateService, '_load_seed_rows')
+@patch.object(NCAAMBracketStateService, '_fetch_actual_events')
+def test_overlay_match_remaps_win_probs_when_team_order_changes(mock_fetch, mock_load):
+    mock_load.return_value = []
+    mock_fetch.return_value = []
+    service = NCAAMBracketStateService()
+    match = {
+        'team_a': 'Siena Saints',
+        'team_b': 'Duke Blue Devils',
+        'winner': 'Siena Saints',
+        'win_prob_a': 1.3,
+        'win_prob_b': 98.7
+    }
+    override = {
+        'team_a': 'Duke Blue Devils',
+        'team_b': 'Siena Saints',
+        'seed_a': 1,
+        'seed_b': 16,
+        'status': BracketGameStatus.SCHEDULED,
+        'score_a': None,
+        'score_b': None,
+        'actual_winner': None,
+        'slot_key': ('East', 'round_of_64', 0)
+    }
+    service._overlay_match(match, override)
+    assert match['team_a'] == 'Duke Blue Devils'
+    assert match['team_b'] == 'Siena Saints'
+    assert match['win_prob_a'] == 98.7
+    assert match['win_prob_b'] == 1.3

@@ -323,8 +323,22 @@ class NCAAMBracketStateService:
         match["projection_source"] = f"model:{match.get('model_type', 'tournament_ensemble_v1')}"
 
         if override:
+            # If we reorder/rename team_a/team_b using overrides, remap win_prob_* so probabilities follow the team names
+            old_team_a = match.get('team_a')
+            old_team_b = match.get('team_b')
+            old_win_prob_a = match.get('win_prob_a')
+            old_win_prob_b = match.get('win_prob_b')
+            old_pred_win_prob_a = match.get('predicted_win_prob_a')
+            old_pred_win_prob_b = match.get('predicted_win_prob_b')
+            prob_by_team = {old_team_a: old_win_prob_a, old_team_b: old_win_prob_b}
+            pred_prob_by_team = {old_team_a: old_pred_win_prob_a, old_team_b: old_pred_win_prob_b}
             match["team_a"] = override["team_a"]
             match["team_b"] = override["team_b"]
+            # Remap probabilities to follow the overridden team ordering
+            match["win_prob_a"] = prob_by_team.get(override["team_a"], old_win_prob_a)
+            match["win_prob_b"] = prob_by_team.get(override["team_b"], old_win_prob_b)
+            match["predicted_win_prob_a"] = pred_prob_by_team.get(override["team_a"], old_pred_win_prob_a)
+            match["predicted_win_prob_b"] = pred_prob_by_team.get(override["team_b"], old_pred_win_prob_b)
             match["seed_a"] = override["seed_a"]
             match["seed_b"] = override["seed_b"]
             match["status"] = override["status"]
