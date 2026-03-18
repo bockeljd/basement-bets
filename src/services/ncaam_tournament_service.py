@@ -2,8 +2,10 @@ import os
 import time
 import logging
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, Tuple
 from pydantic import BaseModel, Field
+
+from src.utils.naming import standardize_team_name
 
 # --- Logging Setup ---
 logger = logging.getLogger("basement_bets.ncaam_tournament")
@@ -136,6 +138,9 @@ class NCAAMTournamentPredictionService:
             neutral_site=game_input.neutral_site
         )
 
+    def _normalize_match_key(self, team_a: str, team_b: str) -> Tuple[str, str]:
+        return tuple(sorted([standardize_team_name(team_a), standardize_team_name(team_b)]))
+
     def preheat_cache(self, team_names: Set[str]) -> None:
         """
         Fetch all necessary data for the given teams upfront.
@@ -165,7 +170,12 @@ class NCAAMTournamentPredictionService:
         with ThreadPoolExecutor(max_workers=10) as executor:
             list(executor.map(_heat_one, team_names))
 
-    def simulate_bracket(self, seeds: Dict[str, List[Dict[str, Any]]], simulations: int = 2500) -> TournamentBracketSimulation:
+    def simulate_bracket(
+        self,
+        seeds: Dict[str, List[Dict[str, Any]]],
+        simulations: int = 2500,
+        locked_matchups: Optional[List[Dict[str, Any]]] = None
+    ) -> TournamentBracketSimulation:
         """
         High-performance bracket simulation.
         1. Front-loads all DB reads.
@@ -179,6 +189,11 @@ class NCAAMTournamentPredictionService:
         region_teams = {r: {} for r in base_regions}
         play_in_matchups = []
         all_team_names = set()
+        locked_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        if locked_matchups:
+            for locked in locked_matchups:
+                key = self._normalize_match_key(locked.get("team_a", ""), locked.get("team_b", ""))
+                locked_map[key] = locked
         
         for region, team_list in seeds.items():
             if region not in base_regions: continue
@@ -341,6 +356,13 @@ class NCAAMTournamentPredictionService:
                     }
 
         def _sim_matchup(ta: str, tb: str, rd: str) -> str:
+            norm_key = self._normalize_match_key(ta, tb)
+            if norm_key in locked_map:
+                locked = locked_map[norm_key]
+                winner = locked.get("winner", ta)
+                if winner not in (ta, tb):
+                    winner = ta if standardize_team_name(winner) == standardize_team_name(ta) else tb
+                return winner
             pred = _get_game_result(ta, tb, rd) # Hits memory cache
             return ta if random.random() < (pred.win_prob_a / 100.0) else tb
 
