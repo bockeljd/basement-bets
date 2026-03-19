@@ -519,12 +519,10 @@ class NCAAMTournamentPredictionService:
             pred = _get_game_result(ta, tb, rd)  # Hits memory cache
             return ta if random.random() < (pred.win_prob_a / 100.0) else tb
 
-        # Track the most common full bracket observed across MC.
-        # We only retain an example for the best signature to keep memory bounded.
-        bracket_path_counts: Dict[Tuple[str, ...], int] = {}
-        best_sig: Optional[Tuple[str, ...]] = None
-        best_sig_count = 0
-        best_sig_example: Optional[Dict[str, Any]] = None
+        # Track Round-of-64 slot winner frequencies.
+        # Using full-bracket "mode" is not stable with limited sims (almost all full brackets are unique).
+        # Instead: choose the modal winner per R64 slot, then deterministically project downstream rounds.
+        r64_slot_counts: Dict[str, List[Dict[str, int]]] = {r: [dict() for _ in range(len(base_pairings))] for r in base_regions}
 
         for _ in range(simulations):
             mc_region_teams = {r: {} for r in base_regions}
@@ -535,132 +533,70 @@ class NCAAMTournamentPredictionService:
                     else:
                         mc_region_teams[region][seed] = lst[0]
 
-            signature: List[str] = []
-            sim_regions: Dict[str, Dict[str, List[Dict[str, Any]]]] = {r: {} for r in base_regions}
-
             e8_winners = {}
             for region in base_regions:
                 tm = mc_region_teams[region]
 
-                # R64
+                # R64 (also update expected upset/slot frequencies)
                 r64_w = []
-                r64_matches = []
-                for (s1, s2) in base_pairings:
+                for slot_idx, (s1, s2) in enumerate(base_pairings):
                     if s1 in tm and s2 in tm:
                         pred = _get_game_result(tm[s1], tm[s2], "R64")
                         w = tm[s1] if random.random() < (pred.win_prob_a / 100.0) else tm[s2]
                         r64_w.append(w)
-                        signature.append(w)
-                        dd = pred.model_dump()
-                        dd['winner'] = w
-                        dd['winner_side'] = 'team_a' if w == dd.get('team_a') else 'team_b'
-                        r64_matches.append(dd)
+                        r64_slot_counts[region][slot_idx][w] = r64_slot_counts[region][slot_idx].get(w, 0) + 1
                 for w in r64_w:
                     advancements[w]['R32'] += 1
-                sim_regions[region]['round_of_64'] = r64_matches
 
                 # R32
                 r32_w = []
-                r32_matches = []
                 for i in range(0, len(r64_w), 2):
                     if i + 1 < len(r64_w):
                         pred = _get_game_result(r64_w[i], r64_w[i + 1], "R32")
                         w = r64_w[i] if random.random() < (pred.win_prob_a / 100.0) else r64_w[i + 1]
                         r32_w.append(w)
-                        signature.append(w)
-                        dd = pred.model_dump()
-                        dd['winner'] = w
-                        dd['winner_side'] = 'team_a' if w == dd.get('team_a') else 'team_b'
-                        r32_matches.append(dd)
                 for w in r32_w:
                     advancements[w]['S16'] += 1
-                sim_regions[region]['round_of_32'] = r32_matches
 
                 # S16
                 s16_w = []
-                s16_matches = []
                 for i in range(0, len(r32_w), 2):
                     if i + 1 < len(r32_w):
                         pred = _get_game_result(r32_w[i], r32_w[i + 1], "S16")
                         w = r32_w[i] if random.random() < (pred.win_prob_a / 100.0) else r32_w[i + 1]
                         s16_w.append(w)
-                        signature.append(w)
-                        dd = pred.model_dump()
-                        dd['winner'] = w
-                        dd['winner_side'] = 'team_a' if w == dd.get('team_a') else 'team_b'
-                        s16_matches.append(dd)
                 for w in s16_w:
                     advancements[w]['E8'] += 1
-                sim_regions[region]['sweet_16'] = s16_matches
 
                 # E8
                 e8_w = []
-                e8_matches = []
                 for i in range(0, len(s16_w), 2):
                     if i + 1 < len(s16_w):
                         pred = _get_game_result(s16_w[i], s16_w[i + 1], "E8")
                         w = s16_w[i] if random.random() < (pred.win_prob_a / 100.0) else s16_w[i + 1]
                         e8_w.append(w)
-                        signature.append(w)
-                        dd = pred.model_dump()
-                        dd['winner'] = w
-                        dd['winner_side'] = 'team_a' if w == dd.get('team_a') else 'team_b'
-                        e8_matches.append(dd)
                 for w in e8_w:
                     advancements[w]['FF'] += 1
-                sim_regions[region]['elite_8'] = e8_matches
                 if e8_w:
                     e8_winners[region] = e8_w[0]
 
-            # Final Four + Championship
-            sim_final_four = []
+            # Final Four + Championship counts
             ff_w = []
             if "East" in e8_winners and "West" in e8_winners:
                 pred = _get_game_result(e8_winners["East"], e8_winners["West"], "FF")
                 w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
                 ff_w.append(w)
-                signature.append(w)
-                dd = pred.model_dump()
-                dd['winner'] = w
-                dd['winner_side'] = 'team_a' if w == dd.get('team_a') else 'team_b'
-                sim_final_four.append(dd)
                 advancements[w]['NCG'] += 1
             if "South" in e8_winners and "Midwest" in e8_winners:
                 pred = _get_game_result(e8_winners["South"], e8_winners["Midwest"], "FF")
                 w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
                 ff_w.append(w)
-                signature.append(w)
-                dd = pred.model_dump()
-                dd['winner'] = w
-                dd['winner_side'] = 'team_a' if w == dd.get('team_a') else 'team_b'
-                sim_final_four.append(dd)
                 advancements[w]['NCG'] += 1
 
-            sim_championship = None
-            sim_champion = None
             if len(ff_w) == 2:
                 pred = _get_game_result(ff_w[0], ff_w[1], "NCG")
                 w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
-                signature.append(w)
-                dd = pred.model_dump()
-                dd['winner'] = w
-                dd['winner_side'] = 'team_a' if w == dd.get('team_a') else 'team_b'
-                sim_championship = dd
-                sim_champion = w
                 advancements[w]['CHAMP'] += 1
-
-            sig = tuple(signature)
-            c = bracket_path_counts.get(sig, 0) + 1
-            bracket_path_counts[sig] = c
-            if c > best_sig_count:
-                best_sig_count = c
-                best_sig = sig
-                best_sig_example = {
-                    'regions': sim_regions,
-                    'final_four': sim_final_four,
-                    'championship': sim_championship,
-                    'champion': sim_champion,
-                }
 
         duration = time.time() - start_time
         logger.info(f"Bracket simulation completed: {simulations} iterations in {duration:.2f}s. Fallbacks: {fallback_count}. Degraded: {degraded_simulation}")
@@ -682,12 +618,88 @@ class NCAAMTournamentPredictionService:
         ]
         adv_probs.sort(key=lambda x: x.champion_prob, reverse=True)
             
-        # "Perfect" dashboard uses the most common full bracket observed in Monte Carlo.
-        most_likely = best_sig_example or {
-            "regions": {r: {k: [m.model_dump() for m in v] for k, v in rounds.items()} for r, rounds in det_regions.items()},
-            "final_four": [m.model_dump() for m in final_four_det],
-            "championship": championship_det.model_dump() if championship_det else None,
-            "champion": champion_det,
+        # Build a "perfect bracket" view: modal winner per Round-of-64 slot, then deterministically project downstream.
+        most_likely_regions: Dict[str, Dict[str, List[Dict[str, Any]]]] = {r: {} for r in base_regions}
+        most_likely_ff: List[Dict[str, Any]] = []
+        most_likely_championship: Optional[Dict[str, Any]] = None
+        most_likely_champion: Optional[str] = None
+
+        try:
+            # Reconstruct region teams (with play-in resolved deterministically)
+            ml_region_teams = {r: {} for r in base_regions}
+            for region in base_regions:
+                for seed, lst in region_teams[region].items():
+                    if len(lst) == 2:
+                        pred = _get_game_result_with_lock(lst[0], lst[1], "First Four", conn=conn)
+                        ml_region_teams[region][seed] = pred.winner
+                    else:
+                        ml_region_teams[region][seed] = lst[0]
+
+            e8_winners_ml = {}
+            for region in base_regions:
+                tm = ml_region_teams[region]
+
+                # modal R64 winners
+                r64_winners = []
+                r64_matches = []
+                for slot_idx, (s1, s2) in enumerate(base_pairings):
+                    if s1 not in tm or s2 not in tm:
+                        continue
+                    pred = _get_game_result_with_lock(tm[s1], tm[s2], "R64", conn=conn)
+                    counts = r64_slot_counts.get(region, [dict() for _ in range(len(base_pairings))])[slot_idx]
+                    if counts:
+                        modal = max(counts.items(), key=lambda kv: kv[1])[0]
+                    else:
+                        modal = pred.winner
+                    # force winner to modal
+                    pred.winner = modal
+                    pred.winner_side = 'team_a' if modal == pred.team_a else 'team_b'
+                    r64_winners.append(modal)
+                    r64_matches.append(pred.model_dump())
+                most_likely_regions[region]['round_of_64'] = r64_matches
+
+                # downstream rounds: deterministic winner from model given the modal entrants
+                def _det_round(prev: List[str], rd: str) -> Tuple[List[str], List[Dict[str, Any]]]:
+                    out_w = []
+                    out_m = []
+                    for i in range(0, len(prev), 2):
+                        if i + 1 >= len(prev):
+                            continue
+                        pred = _get_game_result_with_lock(prev[i], prev[i + 1], rd, conn=conn)
+                        out_w.append(pred.winner)
+                        out_m.append(pred.model_dump())
+                    return out_w, out_m
+
+                r32_w, r32_m = _det_round(r64_winners, "R32")
+                most_likely_regions[region]['round_of_32'] = r32_m
+                s16_w, s16_m = _det_round(r32_w, "S16")
+                most_likely_regions[region]['sweet_16'] = s16_m
+                e8_w, e8_m = _det_round(s16_w, "E8")
+                most_likely_regions[region]['elite_8'] = e8_m
+                if e8_w:
+                    e8_winners_ml[region] = e8_w[0]
+
+            if "East" in e8_winners_ml and "West" in e8_winners_ml:
+                pred = _get_game_result_with_lock(e8_winners_ml["East"], e8_winners_ml["West"], "FF", conn=conn)
+                most_likely_ff.append(pred.model_dump())
+            if "South" in e8_winners_ml and "Midwest" in e8_winners_ml:
+                pred = _get_game_result_with_lock(e8_winners_ml["South"], e8_winners_ml["Midwest"], "FF", conn=conn)
+                most_likely_ff.append(pred.model_dump())
+
+            if len(most_likely_ff) == 2:
+                ta = most_likely_ff[0].get('winner')
+                tb = most_likely_ff[1].get('winner')
+                pred = _get_game_result_with_lock(ta, tb, "NCG", conn=conn)
+                most_likely_championship = pred.model_dump()
+                most_likely_champion = pred.winner
+        except Exception as e:
+            logger.warning(f"Failed to build most_likely_bracket (falling back to deterministic): {e}")
+
+        most_likely = {
+            "regions": most_likely_regions if most_likely_regions else {r: {k: [m.model_dump() for m in v] for k, v in rounds.items()} for r, rounds in det_regions.items()},
+            "final_four": most_likely_ff or [m.model_dump() for m in final_four_det],
+            "championship": most_likely_championship or (championship_det.model_dump() if championship_det else None),
+            "champion": most_likely_champion or champion_det,
         }
 
         return TournamentBracketSimulation(
