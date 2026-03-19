@@ -51,8 +51,8 @@ REGIONAL_ROUND_SPECS = {
 }
 
 FINAL_FOUR_PAIRS = [
-    ({"East", "West"}, 0),
-    ({"South", "Midwest"}, 1)
+    ({"East", "South"}, 0),
+    ({"West", "Midwest"}, 1)
 ]
 
 ET_ZONE = ZoneInfo("America/New_York")

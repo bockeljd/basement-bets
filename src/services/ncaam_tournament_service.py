@@ -491,10 +491,10 @@ class NCAAMTournamentPredictionService:
                 det_regions[region] = {"round_of_64": r64, "round_of_32": r32, "sweet_16": s16, "elite_8": e8}
 
             final_four_det = []
-            if "East" in e8_winners_det and "West" in e8_winners_det:
-                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["East"], e8_winners_det["West"], "FF", conn=conn))
-            if "South" in e8_winners_det and "Midwest" in e8_winners_det:
-                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["South"], e8_winners_det["Midwest"], "FF", conn=conn))
+            if "East" in e8_winners_det and "South" in e8_winners_det:
+                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["East"], e8_winners_det["South"], "FF", conn=conn))
+            if "West" in e8_winners_det and "Midwest" in e8_winners_det:
+                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["West"], e8_winners_det["Midwest"], "FF", conn=conn))
             
             championship_det = None
             champion_det = None
@@ -582,13 +582,13 @@ class NCAAMTournamentPredictionService:
 
             # Final Four + Championship counts
             ff_w = []
-            if "East" in e8_winners and "West" in e8_winners:
-                pred = _get_game_result(e8_winners["East"], e8_winners["West"], "FF")
+            if "East" in e8_winners and "South" in e8_winners:
+                pred = _get_game_result(e8_winners["East"], e8_winners["South"], "FF")
                 w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
                 ff_w.append(w)
                 advancements[w]['NCG'] += 1
-            if "South" in e8_winners and "Midwest" in e8_winners:
-                pred = _get_game_result(e8_winners["South"], e8_winners["Midwest"], "FF")
+            if "West" in e8_winners and "Midwest" in e8_winners:
+                pred = _get_game_result(e8_winners["West"], e8_winners["Midwest"], "FF")
                 w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
                 ff_w.append(w)
                 advancements[w]['NCG'] += 1
@@ -679,11 +679,11 @@ class NCAAMTournamentPredictionService:
                 if e8_w:
                     e8_winners_ml[region] = e8_w[0]
 
-            if "East" in e8_winners_ml and "West" in e8_winners_ml:
-                pred = _get_game_result_with_lock(e8_winners_ml["East"], e8_winners_ml["West"], "FF", conn=conn)
+            if "East" in e8_winners_ml and "South" in e8_winners_ml:
+                pred = _get_game_result_with_lock(e8_winners_ml["East"], e8_winners_ml["South"], "FF", conn=conn)
                 most_likely_ff.append(pred.model_dump())
-            if "South" in e8_winners_ml and "Midwest" in e8_winners_ml:
-                pred = _get_game_result_with_lock(e8_winners_ml["South"], e8_winners_ml["Midwest"], "FF", conn=conn)
+            if "West" in e8_winners_ml and "Midwest" in e8_winners_ml:
+                pred = _get_game_result_with_lock(e8_winners_ml["West"], e8_winners_ml["Midwest"], "FF", conn=conn)
                 most_likely_ff.append(pred.model_dump())
 
             if len(most_likely_ff) == 2:
