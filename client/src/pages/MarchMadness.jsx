@@ -1301,9 +1301,9 @@ function RegionTree({ name, region, onMatchupClick, mirrored = false }) {
 const UpsetWatchlist = ({ items = [] }) => {
     if (!items.length) return null;
     return (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2 shadow-lg">
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-purple-400">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.35em] text-purple-400">
                     <AlertTriangle size={12} />
                     Upset watch (all rounds)
                 </div>
@@ -1311,11 +1311,11 @@ const UpsetWatchlist = ({ items = [] }) => {
             </div>
             <div className="space-y-2">
                 {items.map(item => (
-                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-2">
+                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2 space-y-1">
                         <div className="flex items-center justify-between gap-3">
                             <div>
-                                <p className="text-sm font-black text-white">{item.underdog}</p>
-                                <p className="text-[11px] text-slate-500">{item.region} · {item.roundLabel}</p>
+                                <p className="text-[13px] font-black text-white leading-tight">{item.underdog}</p>
+                                <p className="text-[10px] text-slate-500">{item.region} · {item.roundLabel}</p>
                             </div>
                             <div className="text-right text-sm font-black text-emerald-300">
                                 {item.underdogWinProb}% upset
@@ -1336,9 +1336,9 @@ const UpsetWatchlist = ({ items = [] }) => {
 const ExpectedUpsetsWidget = ({ expectedUpsets }) => {
     if (expectedUpsets == null) return null;
     return (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-lg">
             <div className="flex items-center justify-between">
-                <div className="text-[11px] font-bold uppercase tracking-[0.4em] text-slate-400 flex items-center gap-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400 flex items-center gap-2">
                     <Zap size={12} />
                     Expected upsets (R64)
                 </div>
@@ -1346,8 +1346,8 @@ const ExpectedUpsetsWidget = ({ expectedUpsets }) => {
                     {expectedUpsets.toFixed(1)}
                 </div>
             </div>
-            <div className="mt-2 text-[11px] text-slate-500 leading-snug">
-                Sum of all Round of 64 underdog win probabilities (rough estimate of how many first-round upsets to expect).
+            <div className="mt-1 text-[10px] text-slate-500 leading-snug">
+                Sum of Round of 64 underdog win probabilities.
             </div>
         </div>
     );
@@ -1356,9 +1356,9 @@ const ExpectedUpsetsWidget = ({ expectedUpsets }) => {
 const UpsetCandidates = ({ items = [] }) => {
     if (!items.length) return null;
     return (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2 shadow-lg">
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-slate-400">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
                     <AlertTriangle size={12} />
                     R64 upset candidates
                 </div>
@@ -1367,10 +1367,10 @@ const UpsetCandidates = ({ items = [] }) => {
             <div className="text-[10px] text-slate-600 -mt-1">First-round only (helps you pick a few realistic early upsets).</div>
             <div className="space-y-2">
                 {items.map(item => (
-                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-3">
+                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-center justify-between gap-2">
                         <div>
-                            <p className="text-sm font-black text-white">#{item.underdogSeed} {item.underdog}</p>
-                            <p className="text-[11px] text-slate-500">vs #{item.favoriteSeed} {item.favorite} · {item.region}</p>
+                            <p className="text-[13px] font-black text-white leading-tight">#{item.underdogSeed} {item.underdog}</p>
+                            <p className="text-[10px] text-slate-500">vs #{item.favoriteSeed} {item.favorite} · {item.region}</p>
                         </div>
                         <div className="text-right">
                             <div className="text-sm font-black text-emerald-300 tabular-nums">{item.underdogWinProb}%</div>
@@ -1386,8 +1386,8 @@ const UpsetCandidates = ({ items = [] }) => {
 const DarkHorseWatchlist = ({ items = [] }) => {
     if (!items.length) return null;
     return (
-        <div className="bg-slate-900 border border-yellow-500/30 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-yellow-400">
+        <div className="bg-slate-900 border border-yellow-500/30 rounded-2xl p-3 space-y-2">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.35em] text-yellow-400">
                 <Star size={12} />
                 Dark Horse Watch
             </div>
@@ -1395,11 +1395,11 @@ const DarkHorseWatchlist = ({ items = [] }) => {
                 {items.map(item => {
                     const champLabel = typeof item.champion_prob === 'number' ? `${item.champion_prob.toFixed(1)}%` : `${item.champion_prob}%`;
                     return (
-                        <div key={item.team_name} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-3">
+                        <div key={item.team_name} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-center justify-between gap-2">
                             <div>
-                                <p className="text-sm font-black text-white">{item.team_name}</p>
-                                <p className="text-xs text-slate-400">Seed #{item.seed} · {item.region}</p>
-                                <p className="text-[11px] text-slate-500">{item.note}</p>
+                                <p className="text-[13px] font-black text-white leading-tight">{item.team_name}</p>
+                                <p className="text-[10px] text-slate-400">Seed #{item.seed} · {item.region}</p>
+                                <p className="text-[10px] text-slate-500">{item.note}</p>
                             </div>
                             <div className="text-right">
                                 <div className="text-lg font-black text-yellow-300">{champLabel}</div>
