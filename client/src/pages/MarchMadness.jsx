@@ -1298,118 +1298,137 @@ function RegionTree({ name, region, onMatchupClick, mirrored = false }) {
     );
 }
 
+const BracketTile = ({ title, subtitle, accent = 'text-slate-300', icon, children }) => {
+    return (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-lg w-full h-[220px] flex flex-col overflow-hidden">
+            <div className="px-3 py-2 border-b border-slate-800/60 flex items-center justify-between gap-3">
+                <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.32em] ${accent}`}>
+                    {icon}
+                    <span className="whitespace-nowrap">{title}</span>
+                </div>
+                {subtitle && (
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
+                        {subtitle}
+                    </span>
+                )}
+            </div>
+            <div className="p-3 flex-1 overflow-y-auto">
+                {children}
+            </div>
+        </div>
+    );
+};
+
 const UpsetWatchlist = ({ items = [] }) => {
     if (!items.length) return null;
     return (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2 shadow-lg">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.35em] text-purple-400">
-                    <AlertTriangle size={12} />
-                    Upset watch (all rounds)
-                </div>
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Highest upset probability</span>
-            </div>
+        <BracketTile
+            title="Upset watch"
+            subtitle="All rounds"
+            accent="text-purple-400"
+            icon={<AlertTriangle size={12} />}
+        >
             <div className="space-y-2">
                 {items.map(item => (
-                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2 space-y-1">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <p className="text-[13px] font-black text-white leading-tight">{item.underdog}</p>
+                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <p className="text-[13px] font-black text-white leading-tight truncate">{item.underdog}</p>
                                 <p className="text-[10px] text-slate-500">{item.region} · {item.roundLabel}</p>
+                                <p className="text-[10px] text-slate-400 mt-1 truncate">Fav: {item.favorite} (#{item.favoriteSeed})</p>
                             </div>
-                            <div className="text-right text-sm font-black text-emerald-300">
-                                {item.underdogWinProb}% upset
-                                <div className="text-[10px] text-slate-500">Fav: #{item.favoriteSeed}</div>
+                            <div className="text-right shrink-0">
+                                <div className="text-[13px] font-black text-emerald-300 tabular-nums">{item.underdogWinProb}%</div>
+                                <div className="text-[10px] text-slate-500">underdog win</div>
                             </div>
-                        </div>
-                        <div className="flex items-center justify-between text-[12px] text-slate-400">
-                            <span>Fav: {item.favorite} (#{item.favoriteSeed}) · {item.favoriteWinProb}%</span>
-                            <span>Seed gap: {item.seedDelta}</span>
                         </div>
                     </div>
                 ))}
             </div>
-        </div>
+        </BracketTile>
     );
 };
 
 const ExpectedUpsetsWidget = ({ expectedUpsets }) => {
     if (expectedUpsets == null) return null;
     return (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-lg">
+        <BracketTile
+            title="Expected upsets"
+            subtitle="R64"
+            accent="text-orange-300"
+            icon={<Zap size={12} />}
+        >
             <div className="flex items-center justify-between">
-                <div className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400 flex items-center gap-2">
-                    <Zap size={12} />
-                    Expected upsets (R64)
-                </div>
-                <div className="text-xl font-black text-orange-300 tabular-nums">
+                <div className="text-[10px] text-slate-400">Sum of underdog win probs</div>
+                <div className="text-2xl font-black text-orange-300 tabular-nums">
                     {expectedUpsets.toFixed(1)}
                 </div>
             </div>
-            <div className="mt-1 text-[10px] text-slate-500 leading-snug">
-                Sum of Round of 64 underdog win probabilities.
+            <div className="mt-3 bg-slate-950 border border-slate-800 rounded-xl p-2">
+                <div className="text-[10px] text-slate-500">Interpretation</div>
+                <div className="text-[11px] text-slate-300 leading-snug">
+                    Roughly how many first-round upsets the model expects on average.
+                </div>
             </div>
-        </div>
+        </BracketTile>
     );
 };
 
 const UpsetCandidates = ({ items = [] }) => {
     if (!items.length) return null;
     return (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2 shadow-lg">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">
-                    <AlertTriangle size={12} />
-                    R64 upset candidates
-                </div>
-                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Underdog ≥ 35%</span>
-            </div>
-            <div className="text-[10px] text-slate-600 -mt-1">First-round only (helps you pick a few realistic early upsets).</div>
+        <BracketTile
+            title="Upset candidates"
+            subtitle="R64 ≥ 35%"
+            accent="text-slate-300"
+            icon={<AlertTriangle size={12} />}
+        >
             <div className="space-y-2">
                 {items.map(item => (
-                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-center justify-between gap-2">
-                        <div>
-                            <p className="text-[13px] font-black text-white leading-tight">#{item.underdogSeed} {item.underdog}</p>
-                            <p className="text-[10px] text-slate-500">vs #{item.favoriteSeed} {item.favorite} · {item.region}</p>
+                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="text-[13px] font-black text-white leading-tight truncate">#{item.underdogSeed} {item.underdog}</p>
+                            <p className="text-[10px] text-slate-500 truncate">vs #{item.favoriteSeed} {item.favorite} · {item.region}</p>
                         </div>
-                        <div className="text-right">
-                            <div className="text-sm font-black text-emerald-300 tabular-nums">{item.underdogWinProb}%</div>
-                            <div className="text-[10px] text-slate-500">underdog win</div>
+                        <div className="text-right shrink-0">
+                            <div className="text-[13px] font-black text-emerald-300 tabular-nums">{item.underdogWinProb}%</div>
+                            <div className="text-[10px] text-slate-500">underdog</div>
                         </div>
                     </div>
                 ))}
             </div>
-        </div>
+        </BracketTile>
     );
 };
 
 const DarkHorseWatchlist = ({ items = [] }) => {
     if (!items.length) return null;
     return (
-        <div className="bg-slate-900 border border-yellow-500/30 rounded-2xl p-3 space-y-2">
-            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.35em] text-yellow-400">
-                <Star size={12} />
-                Dark Horse Watch
-            </div>
+        <BracketTile
+            title="Dark horses"
+            subtitle="Title equity"
+            accent="text-yellow-400"
+            icon={<Star size={12} />}
+        >
             <div className="space-y-2">
                 {items.map(item => {
                     const champLabel = typeof item.champion_prob === 'number' ? `${item.champion_prob.toFixed(1)}%` : `${item.champion_prob}%`;
                     return (
-                        <div key={item.team_name} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-center justify-between gap-2">
-                            <div>
-                                <p className="text-[13px] font-black text-white leading-tight">{item.team_name}</p>
+                        <div key={item.team_name} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <p className="text-[13px] font-black text-white leading-tight truncate">{item.team_name}</p>
                                 <p className="text-[10px] text-slate-400">Seed #{item.seed} · {item.region}</p>
-                                <p className="text-[10px] text-slate-500">{item.note}</p>
+                                <p className="text-[10px] text-slate-500 truncate">{item.note}</p>
                             </div>
-                            <div className="text-right">
-                                <div className="text-lg font-black text-yellow-300">{champLabel}</div>
+                            <div className="text-right shrink-0">
+                                <div className="text-[13px] font-black text-yellow-300 tabular-nums">{champLabel}</div>
                                 <p className="text-[10px] text-slate-500">champion</p>
                             </div>
                         </div>
                     );
                 })}
             </div>
-        </div>
+        </BracketTile>
     );
 };
 
