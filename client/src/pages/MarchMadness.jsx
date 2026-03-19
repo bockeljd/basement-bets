@@ -1312,8 +1312,33 @@ const BracketTile = ({ title, subtitle, accent = 'text-slate-300', icon, childre
                     </span>
                 )}
             </div>
-            <div className="p-3 flex-1 overflow-y-auto">
+            <div className="p-2.5 flex-1 overflow-y-auto">
                 {children}
+            </div>
+        </div>
+    );
+};
+
+const TileRow = ({
+    title,
+    sub,
+    meta,
+    value,
+    valueLabel,
+    valueClass = 'text-emerald-300',
+}) => {
+    return (
+        <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 hover:border-slate-700 hover:bg-slate-900/40 transition">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="text-[13px] font-black text-white leading-tight truncate">{title}</div>
+                    {sub && <div className="text-[10px] text-slate-500 truncate">{sub}</div>}
+                    {meta && <div className="text-[10px] text-slate-400 mt-1 truncate">{meta}</div>}
+                </div>
+                <div className="text-right shrink-0">
+                    <div className={`text-[13px] font-black tabular-nums ${valueClass}`}>{value}</div>
+                    {valueLabel && <div className="text-[10px] text-slate-500">{valueLabel}</div>}
+                </div>
             </div>
         </div>
     );
@@ -1330,19 +1355,15 @@ const UpsetWatchlist = ({ items = [] }) => {
         >
             <div className="space-y-2">
                 {items.map(item => (
-                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2">
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                                <p className="text-[13px] font-black text-white leading-tight truncate">{item.underdog}</p>
-                                <p className="text-[10px] text-slate-500">{item.region} · {item.roundLabel}</p>
-                                <p className="text-[10px] text-slate-400 mt-1 truncate">Fav: {item.favorite} (#{item.favoriteSeed})</p>
-                            </div>
-                            <div className="text-right shrink-0">
-                                <div className="text-[13px] font-black text-emerald-300 tabular-nums">{item.underdogWinProb}%</div>
-                                <div className="text-[10px] text-slate-500">underdog win</div>
-                            </div>
-                        </div>
-                    </div>
+                    <TileRow
+                        key={item.id}
+                        title={item.underdog}
+                        sub={`${item.region} · ${item.roundLabel}`}
+                        meta={`Fav: ${item.favorite} (#${item.favoriteSeed})`}
+                        value={`${item.underdogWinProb}%`}
+                        valueLabel="underdog win"
+                        valueClass="text-emerald-300"
+                    />
                 ))}
             </div>
         </BracketTile>
@@ -1358,16 +1379,17 @@ const ExpectedUpsetsWidget = ({ expectedUpsets }) => {
             accent="text-orange-300"
             icon={<Zap size={12} />}
         >
-            <div className="flex items-center justify-between">
-                <div className="text-[10px] text-slate-400">Sum of underdog win probs</div>
-                <div className="text-2xl font-black text-orange-300 tabular-nums">
-                    {expectedUpsets.toFixed(1)}
-                </div>
-            </div>
-            <div className="mt-3 bg-slate-950 border border-slate-800 rounded-xl p-2">
-                <div className="text-[10px] text-slate-500">Interpretation</div>
-                <div className="text-[11px] text-slate-300 leading-snug">
-                    Roughly how many first-round upsets the model expects on average.
+            <div className="space-y-2">
+                <TileRow
+                    title="Sum of underdog win probs"
+                    sub="Round of 64 only"
+                    value={expectedUpsets.toFixed(1)}
+                    valueLabel="expected upsets"
+                    valueClass="text-orange-300"
+                />
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">How to use</div>
+                    <div className="text-[11px] text-slate-300 leading-snug mt-1">If it says 6.2, think “about 6 first-round upsets” on average.</div>
                 </div>
             </div>
         </BracketTile>
@@ -1385,16 +1407,14 @@ const UpsetCandidates = ({ items = [] }) => {
         >
             <div className="space-y-2">
                 {items.map(item => (
-                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            <p className="text-[13px] font-black text-white leading-tight truncate">#{item.underdogSeed} {item.underdog}</p>
-                            <p className="text-[10px] text-slate-500 truncate">vs #{item.favoriteSeed} {item.favorite} · {item.region}</p>
-                        </div>
-                        <div className="text-right shrink-0">
-                            <div className="text-[13px] font-black text-emerald-300 tabular-nums">{item.underdogWinProb}%</div>
-                            <div className="text-[10px] text-slate-500">underdog</div>
-                        </div>
-                    </div>
+                    <TileRow
+                        key={item.id}
+                        title={`#${item.underdogSeed} ${item.underdog}`}
+                        sub={`vs #${item.favoriteSeed} ${item.favorite} · ${item.region}`}
+                        value={`${item.underdogWinProb}%`}
+                        valueLabel="underdog"
+                        valueClass="text-emerald-300"
+                    />
                 ))}
             </div>
         </BracketTile>
@@ -1414,17 +1434,15 @@ const DarkHorseWatchlist = ({ items = [] }) => {
                 {items.map(item => {
                     const champLabel = typeof item.champion_prob === 'number' ? `${item.champion_prob.toFixed(1)}%` : `${item.champion_prob}%`;
                     return (
-                        <div key={item.team_name} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                                <p className="text-[13px] font-black text-white leading-tight truncate">{item.team_name}</p>
-                                <p className="text-[10px] text-slate-400">Seed #{item.seed} · {item.region}</p>
-                                <p className="text-[10px] text-slate-500 truncate">{item.note}</p>
-                            </div>
-                            <div className="text-right shrink-0">
-                                <div className="text-[13px] font-black text-yellow-300 tabular-nums">{champLabel}</div>
-                                <p className="text-[10px] text-slate-500">champion</p>
-                            </div>
-                        </div>
+                        <TileRow
+                            key={item.team_name}
+                            title={item.team_name}
+                            sub={`Seed #${item.seed} · ${item.region}`}
+                            meta={item.note}
+                            value={champLabel}
+                            valueLabel="champion"
+                            valueClass="text-yellow-300"
+                        />
                     );
                 })}
             </div>
