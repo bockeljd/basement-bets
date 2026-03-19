@@ -438,6 +438,45 @@ class NCAAMMarketFirstModelV2(BaseModel):
                  
         torvik_view = self.torvik_service.get_projection(team_a_canon, team_b_canon, date=game_date_str, conn=conn)
         kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn)
+
+        # Team style + player facts for narratives (best-effort)
+        kp_a = None
+        kp_b = None
+        try:
+            kp_a = self.kenpom_client.get_team_rating(team_a_canon, conn=conn) or None
+        except Exception:
+            kp_a = None
+        try:
+            kp_b = self.kenpom_client.get_team_rating(team_b_canon, conn=conn) or None
+        except Exception:
+            kp_b = None
+
+        kp_players_a = []
+        kp_players_b = []
+        try:
+            kp_players_a = self.kenpom_client.get_player_stats_for_team(team_a_canon, limit=12) or []
+        except Exception:
+            kp_players_a = []
+        try:
+            kp_players_b = self.kenpom_client.get_player_stats_for_team(team_b_canon, limit=12) or []
+        except Exception:
+            kp_players_b = []
+
+        # News/injury context (best-effort; include up to 2 source URLs)
+        news_summary = None
+        news_has_injury = None
+        news_top_urls = []
+        try:
+            ctx = self.news_service.fetch_game_context(team_a, team_b)
+            news_has_injury = bool(ctx.get('has_injury_news'))
+            news_summary = self.news_service.summarize_impact(ctx)
+            for a in (ctx.get('home_news') or [])[:1] + (ctx.get('away_news') or [])[:1]:
+                if a.get('url'):
+                    news_top_urls.append(a['url'])
+        except Exception:
+            news_summary = None
+            news_has_injury = None
+            news_top_urls = []
         
         # 3. Features
         mods_a = tf.get_tournament_modifiers(team_a_canon, conn=conn)
@@ -531,7 +570,42 @@ class NCAAMMarketFirstModelV2(BaseModel):
                  'sigma': sigma_spread,
                  'tempo_factor': tempo_factor,
                  'variance_mult': variance_mult,
-                 'mu_base_spread': mu_base_spread
+                 'mu_base_spread': mu_base_spread,
+                 'mu_spread_final': mu_spread_final,
+                 'mu_total_final': mu_base_total,
+                 'kenpom_spread_adj': (kenpom_adj.get('spread_adj') if kenpom_adj else None),
+                 'modifier_points_a': mod_a,
+                 'modifier_points_b': mod_b,
+                 'modifier_points_diff_a_minus_b': mod_diff,
+                 'upset_risk_a': mods_a.get('upset_risk_score', None),
+                 'upset_risk_b': mods_b.get('upset_risk_score', None),
+                 'market_data_used': market_data_used,
+
+                 'kp_team_a': {
+                     'adj_o': (kp_a.get('adj_o') if isinstance(kp_a, dict) else None),
+                     'adj_d': (kp_a.get('adj_d') if isinstance(kp_a, dict) else None),
+                     'adj_t': (kp_a.get('adj_t') if isinstance(kp_a, dict) else None),
+                     'rank': (kp_a.get('rank') if isinstance(kp_a, dict) else None),
+                 } if kp_a else None,
+                 'kp_team_b': {
+                     'adj_o': (kp_b.get('adj_o') if isinstance(kp_b, dict) else None),
+                     'adj_d': (kp_b.get('adj_d') if isinstance(kp_b, dict) else None),
+                     'adj_t': (kp_b.get('adj_t') if isinstance(kp_b, dict) else None),
+                     'rank': (kp_b.get('rank') if isinstance(kp_b, dict) else None),
+                 } if kp_b else None,
+
+                 'kp_key_players_a': [
+                     {'name': p.get('name'), 'ppg': p.get('ppg'), 'usg': p.get('usg')}
+                     for p in (kp_players_a or [])[:2]
+                 ] if kp_players_a else [],
+                 'kp_key_players_b': [
+                     {'name': p.get('name'), 'ppg': p.get('ppg'), 'usg': p.get('usg')}
+                     for p in (kp_players_b or [])[:2]
+                 ] if kp_players_b else [],
+
+                 'news_summary': news_summary,
+                 'news_has_injury': news_has_injury,
+                 'news_urls': news_top_urls
             }
         }
 

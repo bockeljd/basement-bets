@@ -93,6 +93,13 @@ const formatProbability = (value) => {
     return `${Math.round(value)}%`;
 };
 
+const formatTimestamp = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
+
 const shouldShowChampion = (data) => {
     if (!data?.champion) return false;
     if (!data.degraded_simulation) return true;
@@ -219,6 +226,12 @@ const MarchMadness = () => {
     const [loadingBracket, setLoadingBracket] = useState(false);
 
     const [bracketMode, setBracketMode] = useState('theater');
+    const [bracketLocked, setBracketLocked] = useState(() => {
+        try { return localStorage.getItem('bb_bracket_locked') === '1'; } catch { return false; }
+    });
+    const [bracketDashboard, setBracketDashboard] = useState(() => {
+        try { return localStorage.getItem('bb_bracket_dashboard') || 'chalk'; } catch { return 'chalk'; }
+    });
 
     useEffect(() => { fetchTeams(); }, []);
 
@@ -297,11 +310,27 @@ const MarchMadness = () => {
         if (activeTab === 'darkhorse' && dhProfiles.length === 0) fetchDarkHorse();
     }, [activeTab]);
 
-    const fetchBracket = async () => {
+    const fetchBracket = async ({ force = false } = {}) => {
+        // Locked mode: keep whatever is on-screen until user explicitly refreshes.
+        if (bracketLocked && !force) {
+            try {
+                const cached = localStorage.getItem('bb_bracket_locked_payload');
+                if (cached) {
+                    setBracketData(JSON.parse(cached));
+                    return;
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
         setLoadingBracket(true);
         try {
             const res = await api.get('/api/ncaam/bracket/2026');
             setBracketData(res.data);
+            if (bracketLocked) {
+                try { localStorage.setItem('bb_bracket_locked_payload', JSON.stringify(res.data)); } catch { /* ignore */ }
+            }
         } catch (e) {
             console.error('Bracket fetch error', e);
         } finally {
@@ -312,6 +341,17 @@ const MarchMadness = () => {
     useEffect(() => {
         if (activeTab === 'bracket' && !bracketData) fetchBracket();
     }, [activeTab]);
+
+    useEffect(() => {
+        try { localStorage.setItem('bb_bracket_locked', bracketLocked ? '1' : '0'); } catch { /* ignore */ }
+        if (bracketLocked && bracketData) {
+            try { localStorage.setItem('bb_bracket_locked_payload', JSON.stringify(bracketData)); } catch { /* ignore */ }
+        }
+    }, [bracketLocked]);
+
+    useEffect(() => {
+        try { localStorage.setItem('bb_bracket_dashboard', bracketDashboard); } catch { /* ignore */ }
+    }, [bracketDashboard]);
 
     const handleMatchupClick = (teamA, teamB) => {
         const tA = teams.find(t => t.team_name === teamA || teamA.includes(t.team_name) || t.team_name.includes(teamA));
@@ -332,9 +372,17 @@ const MarchMadness = () => {
         (selectedTeam && selectedTeamB) ? emToWinPct(selectedTeam.adj_em, selectedTeamB.adj_em) : null,
         [selectedTeam, selectedTeamB]);
 
+    const bracketViewData = useMemo(() => {
+        if (!bracketData) return null;
+        if (bracketDashboard === 'perfect' && bracketData.most_likely_bracket?.regions) {
+            return { ...bracketData, ...bracketData.most_likely_bracket, dashboard_mode: 'perfect' };
+        }
+        return { ...bracketData, dashboard_mode: 'chalk' };
+    }, [bracketData, bracketDashboard]);
+
     const bracketInsights = useMemo(() => {
-        if (!bracketData || !bracketData.regions) {
-            return { upsetMatches: [], darkHorseTeams: [] };
+        if (!bracketViewData || !bracketViewData.regions) {
+            return { upsetMatches: [], darkHorseTeams: [], upsetCandidates: [], expectedUpsets: null };
         }
         const roundLabels = {
             round_of_64: 'Round of 64',
@@ -343,7 +391,11 @@ const MarchMadness = () => {
             elite_8: 'Elite 8'
         };
         const matches = [];
-        Object.entries(bracketData.regions).forEach(([regionName, rounds = {}]) => {
+        const seedMap = Object.fromEntries((bracketViewData.round_advancement_probs || []).map(t => [t.team_name, t.seed]));
+        const upsetCandidates = [];
+        let expectedUpsets = 0;
+
+        Object.entries(bracketViewData.regions).forEach(([regionName, rounds = {}]) => {
             Object.entries(rounds).forEach(([roundKey, matchups = []]) => {
                 matchups.forEach((match, index) => {
                     if (!match.team_a || !match.team_b) return;
@@ -352,8 +404,12 @@ const MarchMadness = () => {
                     const favoriteSide = winA >= winB ? 'a' : 'b';
                     const favoriteName = favoriteSide === 'a' ? match.team_a : match.team_b;
                     const underdogName = favoriteSide === 'a' ? match.team_b : match.team_a;
-                    const favoriteSeed = Number(favoriteSide === 'a' ? match.seed_a : match.seed_b) || 0;
-                    const underdogSeed = Number(favoriteSide === 'a' ? match.seed_b : match.seed_a) || 0;
+
+                    const seedA = Number(match.seed_a || seedMap[match.team_a] || 0) || 0;
+                    const seedB = Number(match.seed_b || seedMap[match.team_b] || 0) || 0;
+                    const favoriteSeed = Number(favoriteSide === 'a' ? seedA : seedB) || 0;
+                    const underdogSeed = Number(favoriteSide === 'a' ? seedB : seedA) || 0;
+
                     const favoriteWinProb = favoriteSide === 'a' ? winA : winB;
                     const underdogWinProb = favoriteSide === 'a' ? winB : winA;
                     const seedDelta = Math.max(0, underdogSeed - favoriteSeed);
@@ -373,6 +429,22 @@ const MarchMadness = () => {
                         winner: match.predicted_winner || match.winner,
                         riskScore
                     });
+
+                    if (roundKey === 'round_of_64' && favoriteSeed && underdogSeed) {
+                        expectedUpsets += (underdogWinProb / 100.0);
+                        if (underdogWinProb >= 35) {
+                            upsetCandidates.push({
+                                id: `${regionName}-r64-${index}-${underdogName}`,
+                                region: regionName,
+                                favorite: favoriteName,
+                                underdog: underdogName,
+                                favoriteSeed,
+                                underdogSeed,
+                                underdogWinProb: Math.round(underdogWinProb),
+                                favoriteWinProb: Math.round(favoriteWinProb)
+                            });
+                        }
+                    }
                 });
             });
         });
@@ -380,7 +452,9 @@ const MarchMadness = () => {
         filtered.sort((a, b) => b.riskScore - a.riskScore);
         const upsetMatches = filtered.slice(0, 4);
 
-        const darkHorseTeams = (bracketData.round_advancement_probs || [])
+        upsetCandidates.sort((a, b) => (b.underdogWinProb - a.underdogWinProb) || ((b.underdogSeed - b.favoriteSeed) - (a.underdogSeed - a.favoriteSeed)));
+
+        const darkHorseTeams = (bracketViewData.round_advancement_probs || [])
             .filter(team => (team.seed || 0) >= 5 && (team.champion_prob || 0) > 0)
             .sort((a, b) => (b.champion_prob || 0) - (a.champion_prob || 0))
             .slice(0, 3)
@@ -397,8 +471,13 @@ const MarchMadness = () => {
                 };
             });
 
-        return { upsetMatches, darkHorseTeams };
-    }, [bracketData]);
+        return {
+            upsetMatches,
+            darkHorseTeams,
+            upsetCandidates: upsetCandidates.slice(0, 8),
+            expectedUpsets: Math.round(expectedUpsets * 10) / 10
+        };
+    }, [bracketViewData]);
 
     if (loading && !teams.length) return (
         <div className="p-8 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400 animate-pulse">
@@ -473,7 +552,7 @@ const MarchMadness = () => {
                 <button
                     onClick={() => {
                         if (activeTab === 'darkhorse') fetchDarkHorse();
-                        else if (activeTab === 'bracket') fetchBracket();
+                        else if (activeTab === 'bracket') fetchBracket({ force: true });
                         else if (activeTab === 'matchup') { fetchMatchup(); fetchDeepProfile(selectedTeam.team_name, setDeepA, setLoadingDeepA); fetchDeepProfile(selectedTeamB?.team_name, setDeepB, setLoadingDeepB); }
                         else fetchDeepProfile(selectedTeam.team_name, setDeepA, setLoadingDeepA);
                     }}
@@ -931,22 +1010,52 @@ const MarchMadness = () => {
     {activeTab === 'bracket' && (
         <>
             {bracketData && (
-                <div className="flex justify-center gap-2 py-2">
-                    {['theater', 'table'].map(option => (
+                <div className="flex flex-col items-center gap-2 py-2">
+                    <div className="flex justify-center gap-2 flex-wrap">
+                        {['theater', 'table'].map(option => (
+                            <button
+                                key={option}
+                                onClick={() => setBracketMode(option)}
+                                className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketMode === option ? 'bg-orange-500 text-slate-900 border-orange-500' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
+                            >
+                                {option === 'theater' ? 'Bracket' : 'Quick Table'}
+                            </button>
+                        ))}
+
                         <button
-                            key={option}
-                            onClick={() => setBracketMode(option)}
-                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketMode === option ? 'bg-orange-500 text-slate-900 border-orange-500' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
+                            onClick={() => setBracketDashboard('chalk')}
+                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketDashboard === 'chalk' ? 'bg-slate-200 text-slate-900 border-slate-200' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
+                            title="Chalk dashboard"
                         >
-                            {option === 'theater' ? 'Bracket' : 'Quick Table'}
+                            Chalk
                         </button>
-                    ))}
+                        <button
+                            onClick={() => setBracketDashboard('perfect')}
+                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketDashboard === 'perfect' ? 'bg-purple-500/20 text-purple-200 border-purple-500/50' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
+                            title="Perfect bracket dashboard"
+                        >
+                            Perfect
+                        </button>
+
+                        <button
+                            onClick={() => setBracketLocked(v => !v)}
+                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketLocked ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
+                            title={bracketLocked ? 'Locked: will not refetch until you refresh manually (freezes Chalk/Perfect)' : 'Unlocked: uses latest cached bracket snapshot'}
+                        >
+                            {bracketLocked ? 'Locked' : 'Unlocked'}
+                        </button>
+                    </div>
+
+                    <div className="text-[10px] text-slate-500 font-mono">
+                        Last updated: <span className="text-slate-300">{formatTimestamp(bracketData.updated_at || bracketData.simulated_at)}</span>
+                        {bracketLocked && <span className="ml-2 text-emerald-400">(frozen)</span>}
+                    </div>
                 </div>
             )}
             <div className={`overflow-x-auto no-scrollbar ${bracketMode === 'table' ? 'min-w-full' : ''}`}>
                 <div className={bracketMode === 'table' ? '' : 'min-w-[1200px]'}>
                     <BracketView
-                        data={bracketData}
+                        data={bracketViewData || bracketData}
                         loading={loadingBracket}
                         onMatchupClick={handleMatchupClick}
                         insights={bracketInsights}
@@ -1044,7 +1153,7 @@ function MatchupCard({ m, onMatchupClick, mirrored = false }) {
                 </div>
                 <div className="flex justify-between items-center text-xs font-black">
                     <span className="text-slate-400">Total: <span className="text-white">{parseFloat(m.projected_total).toFixed(1)}</span></span>
-                    <span className="text-slate-400">Conf: <span className="text-blue-400">{parseFloat(m.confidence_0_100).toFixed(0)}</span></span>
+                    <span className="text-slate-400">Conf: <span className="text-blue-400">{parseFloat(m.confidence_0_100).toFixed(0)}%</span></span>
                 </div>
                 {m.fallback_used && (
                     <div className="bg-amber-500/10 border border-amber-500/30 rounded p-1.5 text-[9px] text-amber-200 flex items-start gap-1.5">
@@ -1052,6 +1161,31 @@ function MatchupCard({ m, onMatchupClick, mirrored = false }) {
                         <span><strong>Data Issue:</strong> Missing core metrics. Model reverted to seed-based prior.</span>
                     </div>
                 )}
+                {m.narrative && (
+                    <div className="text-[9px] text-slate-200 mt-1 leading-snug">
+                        <span className="text-slate-500 uppercase font-bold tracking-wider">Why:</span>{' '}
+                        <span className="text-slate-200">{m.narrative}</span>
+                    </div>
+                )}
+
+                {Array.isArray(m?.projection_debug?.news_urls) && m.projection_debug.news_urls.length > 0 && (
+                    <div className="mt-1 text-[9px] text-slate-300">
+                        <span className="text-slate-500 uppercase font-bold tracking-wider">Sources:</span>{' '}
+                        {m.projection_debug.news_urls.slice(0, 2).map((u, i) => (
+                            <a
+                                key={u}
+                                href={u}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-300 hover:text-blue-200 underline break-all"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                {i === 0 ? 'Link' : 'Link ' + (i + 1)}
+                            </a>
+                        )).reduce((acc, el, i) => (i === 0 ? [el] : [...acc, <span key={`sep-${i}`} className="text-slate-600"> · </span>, el]), [])}
+                    </div>
+                )}
+
                 {m.reason_codes && m.reason_codes.length > 0 && (
                     <div className="text-[9px] text-slate-300 space-y-1 mt-1">
                         {m.reason_codes.slice(0, 3).map((r, i) => (
@@ -1162,6 +1296,55 @@ const UpsetWatchlist = ({ items = [] }) => {
                         <div className="flex items-center justify-between text-[12px] text-slate-400">
                             <span>Fav: {item.favorite} (#{item.favoriteSeed}) · {item.favoriteWinProb}%</span>
                             <span>Seed gap: {item.seedDelta}</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const ExpectedUpsetsWidget = ({ expectedUpsets }) => {
+    if (expectedUpsets == null) return null;
+    return (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg">
+            <div className="flex items-center justify-between">
+                <div className="text-[11px] font-bold uppercase tracking-[0.4em] text-slate-400 flex items-center gap-2">
+                    <Zap size={12} />
+                    Expected upsets (R64)
+                </div>
+                <div className="text-xl font-black text-orange-300 tabular-nums">
+                    {expectedUpsets.toFixed(1)}
+                </div>
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500 leading-snug">
+                Sum of all Round of 64 underdog win probabilities (rough estimate of how many first-round upsets to expect).
+            </div>
+        </div>
+    );
+};
+
+const UpsetCandidates = ({ items = [] }) => {
+    if (!items.length) return null;
+    return (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-slate-400">
+                    <AlertTriangle size={12} />
+                    Upset candidates
+                </div>
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Underdog ≥ 35%</span>
+            </div>
+            <div className="space-y-2">
+                {items.map(item => (
+                    <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-3">
+                        <div>
+                            <p className="text-sm font-black text-white">#{item.underdogSeed} {item.underdog}</p>
+                            <p className="text-[11px] text-slate-500">vs #{item.favoriteSeed} {item.favorite} · {item.region}</p>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-sm font-black text-emerald-300 tabular-nums">{item.underdogWinProb}%</div>
+                            <div className="text-[10px] text-slate-500">underdog win</div>
                         </div>
                     </div>
                 ))}
@@ -1315,7 +1498,7 @@ const BracketTable = ({ data, roundLabels }) => {
 };
 
 const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'theater' }) => {
-    const { upsetMatches = [], darkHorseTeams = [] } = insights;
+    const { upsetMatches = [], darkHorseTeams = [], upsetCandidates = [], expectedUpsets = null } = insights;
     if (mode === 'table') return <BracketTable data={data} roundLabels={ROUND_LABELS} />;
     if (loading) return (
         <div className="p-12 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400">
@@ -1350,11 +1533,15 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
                 </div>
             )}
 
-            {(upsetMatches.length > 0 || darkHorseTeams.length > 0) && (
+            {(upsetMatches.length > 0 || darkHorseTeams.length > 0 || upsetCandidates.length > 0 || expectedUpsets != null) && (
                 <div className="max-w-5xl mx-auto px-4 space-y-4">
                     <div className="grid md:grid-cols-2 gap-4">
                         <UpsetWatchlist items={upsetMatches} />
                         <DarkHorseWatchlist items={darkHorseTeams} />
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-4">
+                        <ExpectedUpsetsWidget expectedUpsets={expectedUpsets} />
+                        <UpsetCandidates items={upsetCandidates} />
                     </div>
                 </div>
             )}

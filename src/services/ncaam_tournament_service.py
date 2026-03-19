@@ -42,6 +42,10 @@ class TournamentGamePrediction(BaseModel):
     win_prob_a: float
     win_prob_b: float
     confidence_0_100: float
+
+    # Human-readable explanation for UI (2-3 short sentences).
+    narrative: Optional[str] = None
+
     model_type: str = "tournament_ensemble_v1"
     neutral_site: bool = True
     market_data_used: bool = False
@@ -78,6 +82,11 @@ class TournamentBracketSimulation(BaseModel):
     final_four: List[TournamentGamePrediction]
     championship: Optional[TournamentGamePrediction] = None
     champion: Optional[str] = None
+
+    # A second bracket view intended for "perfect bracket" attempts.
+    # Backend should populate it with a deterministic max-likelihood path.
+    most_likely_bracket: Optional[Dict[str, Any]] = None
+
     title_odds: Dict[str, float] = Field(default_factory=dict)
     round_advancement_probs: List[TournamentTeamAdvancement] = Field(default_factory=list)
     degraded_simulation: bool = False
@@ -88,6 +97,134 @@ class TournamentBracketSimulation(BaseModel):
 class SimulatorDataError(Exception):
     """Raised when critical data for simulation is missing."""
     pass
+
+
+def _build_narrative(res: Dict[str, Any]) -> str:
+    """Generate a 2-3 sentence narrative with concrete matchup facts.
+
+    Uses best-effort KenPom team metrics + key players + news flags when available.
+    Never throws.
+    """
+
+    def _f(d: Any, k: str) -> Optional[float]:
+        try:
+            if not isinstance(d, dict):
+                return None
+            v = d.get(k)
+            return float(v) if v is not None else None
+        except Exception:
+            return None
+
+    try:
+        team_a = res.get('team_a')
+        team_b = res.get('team_b')
+        winner = res.get('winner')
+        win_a = float(res.get('win_prob_a') or 0)
+        win_b = float(res.get('win_prob_b') or 0)
+        conf = float(res.get('confidence_0_100') or max(win_a, win_b))
+        spread_a = res.get('projected_spread_a')
+        total = res.get('projected_total')
+        dbg = res.get('debug') or {}
+        fallback = bool(res.get('fallback_used'))
+
+        winner_prob = win_a if winner == team_a else win_b
+
+        # implied margin from team_a spread
+        margin = None
+        try:
+            if spread_a is not None:
+                sa = float(spread_a)
+                margin = abs((-sa) if winner == team_a else (sa))
+        except Exception:
+            margin = None
+
+        sents: List[str] = []
+
+        # 1) core prediction sentence
+        try:
+            if margin is not None and total is not None:
+                sents.append(
+                    f"{winner} is projected to advance as about a {margin:.1f}-point favorite on a neutral court "
+                    f"({winner_prob:.0f}% win; confidence {conf:.0f}%), with an expected total of {float(total):.1f}."
+                )
+            elif margin is not None:
+                sents.append(
+                    f"{winner} is projected to advance as about a {margin:.1f}-point favorite on a neutral court "
+                    f"({winner_prob:.0f}% win; confidence {conf:.0f}%)."
+                )
+            else:
+                sents.append(f"{winner} is projected to advance ({winner_prob:.0f}% win; confidence {conf:.0f}%).")
+        except Exception:
+            sents.append(f"{winner} is projected to advance ({winner_prob:.0f}% win; confidence {conf:.0f}%).")
+
+        # 2) style matchup (KenPom team metrics in debug)
+        kp_a = dbg.get('kp_team_a')
+        kp_b = dbg.get('kp_team_b')
+        a_off, a_def = _f(kp_a, 'adj_o'), _f(kp_a, 'adj_d')
+        b_off, b_def = _f(kp_b, 'adj_o'), _f(kp_b, 'adj_d')
+        if a_off is not None and a_def is not None and b_off is not None and b_def is not None:
+            if winner == team_a:
+                sents.append(
+                    f"Matchup-wise, {team_a}'s offense (AdjO {a_off:.1f}) tests {team_b}'s defense (AdjD {b_def:.1f}), "
+                    f"and {team_a}'s defense (AdjD {a_def:.1f}) can pressure {team_b}'s offense (AdjO {b_off:.1f})."
+                )
+            else:
+                sents.append(
+                    f"Matchup-wise, {team_b}'s offense (AdjO {b_off:.1f}) tests {team_a}'s defense (AdjD {a_def:.1f}), "
+                    f"and {team_b}'s defense (AdjD {b_def:.1f}) can disrupt {team_a}'s offense (AdjO {a_off:.1f})."
+                )
+
+        # 3) players + news notes (semicolon separated)
+        tail: List[str] = []
+        players = dbg.get('kp_key_players_a') if winner == team_a else dbg.get('kp_key_players_b')
+        if isinstance(players, list) and players:
+            bits = []
+            for p in players[:2]:
+                if not isinstance(p, dict):
+                    continue
+                nm = p.get('name')
+                if not nm:
+                    continue
+                frag = nm
+                try:
+                    if p.get('ppg') is not None:
+                        frag += f" ({float(p['ppg']):.1f} ppg)"
+                    if p.get('usg') is not None:
+                        frag += f" on {float(p['usg']):.0f}% usage"
+                except Exception:
+                    pass
+                bits.append(frag)
+            if bits:
+                tail.append("Key creators: " + ", ".join(bits))
+
+        if dbg.get('news_summary'):
+            if dbg.get('news_has_injury'):
+                tail.append(f"Injury/lineup headlines flagged ({dbg.get('news_summary')}); check sources before locking")
+            else:
+                tail.append(str(dbg.get('news_summary')))
+
+        mod_diff = dbg.get('modifier_points_diff_a_minus_b')
+        try:
+            if mod_diff is not None and abs(float(mod_diff)) >= 1.0:
+                if winner == team_a and float(mod_diff) > 0:
+                    tail.append(f"Situational modifiers favor {team_a} by about {float(mod_diff):+.1f} pts")
+                elif winner == team_b and float(mod_diff) < 0:
+                    tail.append(f"Situational modifiers favor {team_b} by about {(-float(mod_diff)):+.1f} pts")
+        except Exception:
+            pass
+
+        if fallback:
+            tail.append("Data note: seed-based fallback used (missing a core metric feed)")
+
+        if tail:
+            sents.append("; ".join(tail) + ".")
+
+        sents = [s.strip() for s in sents if s and s.strip()]
+        return " ".join([s.rstrip('.') + '.' for s in sents[:3]])
+
+    except Exception:
+        return ""
+
 
 class NCAAMTournamentPredictionService:
     """
@@ -130,6 +267,7 @@ class NCAAMTournamentPredictionService:
             win_prob_a=res['win_prob_a'],
             win_prob_b=res['win_prob_b'],
             confidence_0_100=res['confidence_0_100'],
+            narrative=_build_narrative(res),
             market_data_used=res['market_data_used'],
             fallback_used=res['fallback_used'],
             reason_codes=res['reason_codes'],
@@ -440,6 +578,13 @@ class NCAAMTournamentPredictionService:
         ]
         adv_probs.sort(key=lambda x: x.champion_prob, reverse=True)
             
+        most_likely = {
+            "regions": {r: {k: [m.model_dump() for m in v] for k, v in rounds.items()} for r, rounds in det_regions.items()},
+            "final_four": [m.model_dump() for m in final_four_det],
+            "championship": championship_det.model_dump() if championship_det else None,
+            "champion": champion_det,
+        }
+
         return TournamentBracketSimulation(
             season="2025-26",
             simulated_at=datetime.now().isoformat(),
@@ -449,6 +594,7 @@ class NCAAMTournamentPredictionService:
             final_four=final_four_det,
             championship=championship_det,
             champion=champion_det,
+            most_likely_bracket=most_likely,
             title_odds={a.team_name: a.champion_prob for a in adv_probs if a.champion_prob > 0.0},
             round_advancement_probs=adv_probs,
             degraded_simulation=degraded_simulation,
