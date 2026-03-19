@@ -27,6 +27,7 @@ function emToWinPct(emA, emB) {
 
 // Smart Name Shortening for high-density bracket view
 const shortenTeamName = (name) => {
+
     if (!name) return "";
     let n = name;
     // Common long names
@@ -104,6 +105,49 @@ const shouldShowChampion = (data) => {
     if (!data?.champion) return false;
     if (!data.degraded_simulation) return true;
     return !(data.champion_trust_low ?? false);
+};
+
+// Match bracket team strings to tournament teams list robustly
+const normalizeTeamKey = (name) => {
+    if (!name) return '';
+    let n = String(name).trim();
+    // remove parenthesis content
+    n = n.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+    // strip common mascots at end
+    const mascots = [
+        'Blue Devils','Saints','Buckeyes','Horned Frogs','Red Storm','Panthers','Jayhawks','Lancers','Cardinals','Bulls','Spartans','Bison','Bruins',
+        'Knights','Huskies','Paladins','Gators','Hawkeyes','Commodores','Cowboys','Cornhuskers','Trojans','Tar Heels','Rams','Fighting Illini','Quakers',
+        'Gaels','Aggies','Cougars','Vandals','Wildcats','Sharks','Badgers','Razorbacks','Rainbow Warriors','Bulldogs','Owls','Hurricanes','Tigers',
+        'Boilermakers','Royals','Wolverines','Billikens','Red Raiders','Zips','Crimson Tide','Pride','Volunteers','Cavaliers','Raiders','Broncos','Cyclones',
+        'Mountain Hawks','Bravehearts'
+    ];
+    for (const m of mascots) {
+        n = n.replace(new RegExp(`\\s+${m}$`, 'i'), '').trim();
+    }
+    n = n.replace(/\./g, '').toLowerCase();
+
+    const aliases = {
+        'uconn': 'connecticut',
+        'unc': 'north carolina',
+        'st johns': "st john's",
+        'saint marys': "saint mary's",
+        'st marys': "saint mary's",
+        'miami fl': 'miami',
+        'nc st': 'nc state',
+        'utah st': 'utah state',
+        'michigan st': 'michigan state',
+        'ohio st': 'ohio state',
+        'wright st': 'wright state',
+        'kennesaw st': 'kennesaw state',
+        'liu': 'long island',
+        'mcneese': 'mcneese state',
+        'tamu': 'texas a&m',
+    };
+
+    if (aliases[n]) n = aliases[n];
+    // normalize punctuation/whitespace
+    n = n.replace(/[^a-z0-9\s']/g, '').replace(/\s+/g, ' ').trim();
+    return n;
 };
 
 // Circular gauge
@@ -350,12 +394,23 @@ const MarchMadness = () => {
     // (dashboard mode removed)
 
     const handleMatchupClick = (teamA, teamB) => {
-        const tA = teams.find(t => t.team_name === teamA || teamA.includes(t.team_name) || t.team_name.includes(teamA));
-        const tB = teams.find(t => t.team_name === teamB || teamB.includes(t.team_name) || t.team_name.includes(teamB));
+        const map = new Map();
+        (teams || []).forEach(t => {
+            map.set(normalizeTeamKey(t.team_name), t);
+        });
+
+        const keyA = normalizeTeamKey(teamA);
+        const keyB = normalizeTeamKey(teamB);
+
+        const tA = map.get(keyA) || teams.find(t => t.team_name === teamA);
+        const tB = map.get(keyB) || teams.find(t => t.team_name === teamB);
+
         if (tA) setSelectedTeam(tA);
         if (tB) setSelectedTeamB(tB);
+
         setActiveTab('matchup');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Ensure deep profile fetches after state update
+        setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0);
     };
 
     const filteredTeams = useMemo(() => {
@@ -1250,9 +1305,9 @@ const UpsetWatchlist = ({ items = [] }) => {
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-purple-400">
                     <AlertTriangle size={12} />
-                    Upset Watchlist
+                    Upset watch (all rounds)
                 </div>
-                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Model picks</span>
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Highest upset probability</span>
             </div>
             <div className="space-y-2">
                 {items.map(item => (
@@ -1305,10 +1360,11 @@ const UpsetCandidates = ({ items = [] }) => {
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.4em] text-slate-400">
                     <AlertTriangle size={12} />
-                    Upset candidates
+                    R64 upset candidates
                 </div>
                 <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Underdog ≥ 35%</span>
             </div>
+            <div className="text-[10px] text-slate-600 -mt-1">First-round only (helps you pick a few realistic early upsets).</div>
             <div className="space-y-2">
                 {items.map(item => (
                     <div key={item.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-3">
@@ -1509,11 +1565,11 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
 
             {(upsetMatches.length > 0 || darkHorseTeams.length > 0 || upsetCandidates.length > 0 || expectedUpsets != null) && (
                 <div className="max-w-5xl mx-auto px-4 space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                        <UpsetWatchlist items={upsetMatches} />
-                        <DarkHorseWatchlist items={darkHorseTeams} />
-                        <ExpectedUpsetsWidget expectedUpsets={expectedUpsets} />
-                        <UpsetCandidates items={upsetCandidates} />
+                    <div className="flex gap-3 overflow-x-auto no-scrollbar flex-nowrap pb-1">
+                        <div className="min-w-[260px] w-[260px] shrink-0"><UpsetWatchlist items={upsetMatches} /></div>
+                        <div className="min-w-[260px] w-[260px] shrink-0"><DarkHorseWatchlist items={darkHorseTeams} /></div>
+                        <div className="min-w-[260px] w-[260px] shrink-0"><ExpectedUpsetsWidget expectedUpsets={expectedUpsets} /></div>
+                        <div className="min-w-[260px] w-[260px] shrink-0"><UpsetCandidates items={upsetCandidates} /></div>
                     </div>
                 </div>
             )}
