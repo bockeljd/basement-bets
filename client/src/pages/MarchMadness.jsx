@@ -229,9 +229,7 @@ const MarchMadness = () => {
     const [bracketLocked, setBracketLocked] = useState(() => {
         try { return localStorage.getItem('bb_bracket_locked') === '1'; } catch { return false; }
     });
-    const [bracketDashboard, setBracketDashboard] = useState(() => {
-        try { return localStorage.getItem('bb_bracket_dashboard') || 'chalk'; } catch { return 'chalk'; }
-    });
+    // Note: removed Chalk vs Perfect dashboard toggle (was redundant / confusing).
 
     useEffect(() => { fetchTeams(); }, []);
 
@@ -349,9 +347,7 @@ const MarchMadness = () => {
         }
     }, [bracketLocked]);
 
-    useEffect(() => {
-        try { localStorage.setItem('bb_bracket_dashboard', bracketDashboard); } catch { /* ignore */ }
-    }, [bracketDashboard]);
+    // (dashboard mode removed)
 
     const handleMatchupClick = (teamA, teamB) => {
         const tA = teams.find(t => t.team_name === teamA || teamA.includes(t.team_name) || t.team_name.includes(teamA));
@@ -372,16 +368,8 @@ const MarchMadness = () => {
         (selectedTeam && selectedTeamB) ? emToWinPct(selectedTeam.adj_em, selectedTeamB.adj_em) : null,
         [selectedTeam, selectedTeamB]);
 
-    const bracketViewData = useMemo(() => {
-        if (!bracketData) return null;
-        if (bracketDashboard === 'perfect' && bracketData.most_likely_bracket?.regions) {
-            return { ...bracketData, ...bracketData.most_likely_bracket, dashboard_mode: 'perfect' };
-        }
-        return { ...bracketData, dashboard_mode: 'chalk' };
-    }, [bracketData, bracketDashboard]);
-
     const bracketInsights = useMemo(() => {
-        if (!bracketViewData || !bracketViewData.regions) {
+        if (!bracketData || !bracketData.regions) {
             return { upsetMatches: [], darkHorseTeams: [], upsetCandidates: [], expectedUpsets: null };
         }
         const roundLabels = {
@@ -391,11 +379,11 @@ const MarchMadness = () => {
             elite_8: 'Elite 8'
         };
         const matches = [];
-        const seedMap = Object.fromEntries((bracketViewData.round_advancement_probs || []).map(t => [t.team_name, t.seed]));
+        const seedMap = Object.fromEntries((bracketData.round_advancement_probs || []).map(t => [t.team_name, t.seed]));
         const upsetCandidates = [];
         let expectedUpsets = 0;
 
-        Object.entries(bracketViewData.regions).forEach(([regionName, rounds = {}]) => {
+        Object.entries(bracketData.regions).forEach(([regionName, rounds = {}]) => {
             Object.entries(rounds).forEach(([roundKey, matchups = []]) => {
                 matchups.forEach((match, index) => {
                     if (!match.team_a || !match.team_b) return;
@@ -454,7 +442,7 @@ const MarchMadness = () => {
 
         upsetCandidates.sort((a, b) => (b.underdogWinProb - a.underdogWinProb) || ((b.underdogSeed - b.favoriteSeed) - (a.underdogSeed - a.favoriteSeed)));
 
-        const darkHorseTeams = (bracketViewData.round_advancement_probs || [])
+        const darkHorseTeams = (bracketData.round_advancement_probs || [])
             .filter(team => (team.seed || 0) >= 5 && (team.champion_prob || 0) > 0)
             .sort((a, b) => (b.champion_prob || 0) - (a.champion_prob || 0))
             .slice(0, 3)
@@ -477,7 +465,7 @@ const MarchMadness = () => {
             upsetCandidates: upsetCandidates.slice(0, 8),
             expectedUpsets: Math.round(expectedUpsets * 10) / 10
         };
-    }, [bracketViewData]);
+    }, [bracketData]);
 
     if (loading && !teams.length) return (
         <div className="p-8 flex flex-col items-center justify-center min-h-[400px] gap-3 text-slate-400 animate-pulse">
@@ -1022,21 +1010,7 @@ const MarchMadness = () => {
                             </button>
                         ))}
 
-                        <button
-                            onClick={() => setBracketDashboard('chalk')}
-                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketDashboard === 'chalk' ? 'bg-slate-200 text-slate-900 border-slate-200' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
-                            title="Chalk dashboard"
-                        >
-                            Chalk
-                        </button>
-                        <button
-                            onClick={() => setBracketDashboard('perfect')}
-                            className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketDashboard === 'perfect' ? 'bg-purple-500/20 text-purple-200 border-purple-500/50' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
-                            title="Perfect bracket dashboard"
-                        >
-                            Perfect
-                        </button>
-
+                        {/* Chalk vs Perfect toggle removed (redundant/confusing) */}
                         <button
                             onClick={() => setBracketLocked(v => !v)}
                             className={`px-3 py-1 text-xs font-semibold rounded-full border transition ${bracketLocked ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'}`}
@@ -1055,7 +1029,7 @@ const MarchMadness = () => {
             <div className={`overflow-x-auto no-scrollbar ${bracketMode === 'table' ? 'min-w-full' : ''}`}>
                 <div className={bracketMode === 'table' ? '' : 'min-w-[1200px]'}>
                     <BracketView
-                        data={bracketViewData || bracketData}
+                        data={bracketData}
                         loading={loadingBracket}
                         onMatchupClick={handleMatchupClick}
                         insights={bracketInsights}
@@ -1516,7 +1490,7 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
     const showDegradedBanner = Boolean(data.degraded_simulation && issueCount > 0);
 
     return (
-        <div className="py-8 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700 px-4">
+        <div className="py-4 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700 px-3">
 
             {showDegradedBanner && (
                 <div className="max-w-5xl mx-auto">
@@ -1535,11 +1509,9 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
 
             {(upsetMatches.length > 0 || darkHorseTeams.length > 0 || upsetCandidates.length > 0 || expectedUpsets != null) && (
                 <div className="max-w-5xl mx-auto px-4 space-y-4">
-                    <div className="grid md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                         <UpsetWatchlist items={upsetMatches} />
                         <DarkHorseWatchlist items={darkHorseTeams} />
-                    </div>
-                    <div className="grid md:grid-cols-2 gap-4">
                         <ExpectedUpsetsWidget expectedUpsets={expectedUpsets} />
                         <UpsetCandidates items={upsetCandidates} />
                     </div>
