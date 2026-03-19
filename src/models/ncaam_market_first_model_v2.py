@@ -493,19 +493,34 @@ class NCAAMMarketFirstModelV2(BaseModel):
             raise SimulatorDataError(f"Missing core data (Torvik) for {team_a_canon} vs {team_b_canon}. Halting simulation.")
         else:
             mu_base_spread = -(torvik_view.get('margin') or 0.0)
-            
+
             # Verify Torvik actually returned a total
             torvik_total = torvik_view.get('total')
             if not torvik_total:
                  from src.services.ncaam_tournament_service import SimulatorDataError
                  raise SimulatorDataError(f"Torvik returned no total for {team_a} vs {team_b}")
-                 
+
             mu_base_total = float(torvik_total)
-            
+
+            # KenPom adjustment (if available)
             if kenpom_adj and kenpom_adj.get('spread_adj') is not None:
                 mu_kp_spread = -kenpom_adj['spread_adj']
                 mu_base_spread = (0.75 * mu_base_spread) + (0.25 * mu_kp_spread)
-                
+
+            # Sanity blend: if Torvik spread is wildly inconsistent with KenPom team strength, pull back.
+            # This prevents absurd outcomes like 1-seeds becoming huge underdogs due to a bad mapping/projection.
+            try:
+                if isinstance(kp_a, dict) and isinstance(kp_b, dict):
+                    em_a = float(kp_a.get('adj_o') or 0) - float(kp_a.get('adj_d') or 0)
+                    em_b = float(kp_b.get('adj_o') or 0) - float(kp_b.get('adj_d') or 0)
+                    kp_margin_a = em_a - em_b  # positive => A better
+                    mu_kp_from_em = -kp_margin_a  # negative => A favored
+                    if abs(mu_base_spread - mu_kp_from_em) >= 12.0:
+                        # heavy blend toward the more stable KP-derived line
+                        mu_base_spread = (0.40 * mu_base_spread) + (0.60 * mu_kp_from_em)
+                        risk_flags.append("Projection sanity blend applied (Torvik vs KenPom disagreement).")
+            except Exception:
+                pass
         # Modifiers (relative to team A perspective where negative points = team A favorite)
         # Bounded modifier points: + is good for the team. We adjust spread (negative is good for A).
         mod_a = mods_a.get('luck_adj_points', 0) + mods_a.get('continuity_adj_points', 0) + mods_a.get('turnover_adj_points', 0) + mods_a.get('q1_adj_points', 0)
