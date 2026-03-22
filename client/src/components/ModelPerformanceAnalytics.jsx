@@ -9,30 +9,39 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const [hoverConfIdx, setHoverConfIdx] = useState(null);
     const [hoverTop6Idx, setHoverTop6Idx] = useState(null);
 
-    // History analytics restricted to Spreads and Totals
-    // to give an accurate, blended win-rate representation (excluding high-variance ML/Parlays)
+    // History analytics now includes ALL recommended bets (previously restricted to Top 6)
+    // to give a comprehensive view of model performance across the entire slate.
     const filteredToAll = (() => {
-        const classify = (h) => {
-            const mt = String(h?.market_type || h?.market || h?.bet_type || '').toUpperCase();
-            const isParlay = Boolean(h?.is_parlay) || String(h?.bet_type || '').toLowerCase().includes('parlay');
-            if (isParlay) return 'PARLAY';
-            if (mt.includes('SPREAD')) return 'SPREAD';
-            if (mt.includes('TOTAL')) return 'TOTAL';
-            if (mt.includes('MONEYLINE') || mt === 'ML') return 'MONEYLINE';
-            return mt || 'OTHER';
-        };
-        return history
-            .filter(h => h.id || h.prediction_id)
-            .filter(h => {
-                const c = classify(h);
-                return c === 'SPREAD' || c === 'TOTAL';
-            });
+        return history.filter(h => h.id || h.prediction_id); 
     })();
+
+    const classify = (h) => {
+        const mt = String(h?.market_type || h?.market || h?.bet_type || '').toUpperCase();
+        const isParlay = Boolean(h?.is_parlay) || String(h?.bet_type || '').toLowerCase().includes('parlay');
+        if (isParlay) return 'PARLAY';
+        if (mt.includes('SPREAD')) return 'SPREAD';
+        if (mt.includes('TOTAL')) return 'TOTAL';
+        if (mt.includes('MONEYLINE') || mt === 'ML') return 'MONEYLINE';
+        return mt || 'OTHER';
+    };
 
     const graded = filteredToAll.filter(h => isGradedOutcome(h.graded_result || h.outcome || h.result));
     const wins = graded.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
     const losses = graded.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
     const pushes = graded.filter(h => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
+
+    // Isolate Spreads and Totals specifically for the generic "Overall" tile to preserve the 50/50 win rate proxy
+    const stGraded = graded.filter(h => classify(h) === 'SPREAD' || classify(h) === 'TOTAL');
+    const stWins = stGraded.filter(h => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
+    const stLosses = stGraded.filter(h => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
+    const stPushes = stGraded.filter(h => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
+    
+    const stWinRate = stGraded.length > 0 ? (stWins / (stWins + stLosses) * 100) : 0;
+    const stRoi = (() => {
+        if (stGraded.length === 0) return 0;
+        const totalRoi = stGraded.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0);
+        return (totalRoi / stGraded.length) * 100;
+    })();
     
     const winRate = graded.length > 0 ? (wins / (wins + losses) * 100) : 0;
     
@@ -271,26 +280,29 @@ const ModelPerformanceAnalytics = ({ history }) => {
         const series = {};
         for (const b of bands) series[b] = [];
 
+        const seriesTop6 = [];
         for (const key of dayKeys) {
             const rows = byDay[key] || [];
+            
+            // Dynamically rank by EV to find Top 6 (avoids issues with missing static rank from some endpoints)
+            const sortedRows = rows.slice().sort((a, b) => {
+                const aEv = parseFloat(a.ev_per_unit || a.ev || 0);
+                const bEv = parseFloat(b.ev_per_unit || b.ev || 0);
+                return bEv - aEv;
+            });
+            const top6Picks = sortedRows.slice(0, 6);
+
             for (const b of bands) {
-                const xs = rows.filter(r => getConfidenceBucket(r) === b);
+                const xs = top6Picks.filter(r => getConfidenceBucket(r) === b);
                 const w = xs.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
                 const l = xs.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
                 const decided = w + l;
                 const wr = decided > 0 ? (w / decided * 100) : null;
                 series[b].push(wr);
             }
-        }
 
-        const seriesTop6 = [];
-        for (const key of dayKeys) {
-            const rows = byDay[key] || [];
-            // Use locked-in ranks 1-6 for the "Top 6" series chart
-            const rankedPicks = rows.filter(r => r.rank >= 1 && r.rank <= 6);
-
-            const w = rankedPicks.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
-            const l = rankedPicks.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
+            const w = top6Picks.filter(r => isWinOutcome(r.graded_result || r.outcome || r.result)).length;
+            const l = top6Picks.filter(r => isLossOutcome(r.graded_result || r.outcome || r.result)).length;
             const decided = w + l;
             const wr = decided > 0 ? (w / decided * 100) : null;
             seriesTop6.push(wr);
@@ -678,23 +690,23 @@ const ModelPerformanceAnalytics = ({ history }) => {
                     <div className="space-y-2">
                         <div className="flex justify-between">
                             <span className="text-slate-400">Record:</span>
-                            <span className="text-white font-bold">{wins}-{losses}-{pushes}</span>
+                            <span className="text-white font-bold">{stWins}-{stLosses}-{stPushes}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-400">Win Rate:</span>
-                            <span className={`font-bold ${winRate >= 55 ? 'text-green-400' : winRate >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                {winRate.toFixed(1)}%
+                            <span className={`font-bold ${stWinRate >= 52.4 ? 'text-green-400' : stWinRate >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                {stWinRate.toFixed(1)}%
                             </span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-400">ROI:</span>
-                            <span className={`font-bold ${roi >= 5 ? 'text-green-400' : roi >= 0 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                {roi >= 0 ? '+' : ''}{roi.toFixed(1)}%
+                            <span className={`font-bold ${stRoi >= 5 ? 'text-green-400' : stRoi >= 0 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                {stRoi >= 0 ? '+' : ''}{stRoi.toFixed(1)}%
                             </span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-400">Total Bets:</span>
-                            <span className="text-white font-bold">{graded.length}</span>
+                            <span className="text-white font-bold">{stGraded.length}</span>
                         </div>
                     </div>
 
