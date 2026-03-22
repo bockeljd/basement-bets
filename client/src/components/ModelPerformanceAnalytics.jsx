@@ -9,10 +9,24 @@ const ModelPerformanceAnalytics = ({ history }) => {
     const [hoverConfIdx, setHoverConfIdx] = useState(null);
     const [hoverTop6Idx, setHoverTop6Idx] = useState(null);
 
-    // History analytics now includes ALL recommended bets (previously restricted to Top 6)
-    // to give a comprehensive view of model performance across the entire slate.
+    // History analytics restricted to Spreads and Totals
+    // to give an accurate, blended win-rate representation (excluding high-variance ML/Parlays)
     const filteredToAll = (() => {
-        return history.filter(h => h.id || h.prediction_id); 
+        const classify = (h) => {
+            const mt = String(h?.market_type || h?.market || h?.bet_type || '').toUpperCase();
+            const isParlay = Boolean(h?.is_parlay) || String(h?.bet_type || '').toLowerCase().includes('parlay');
+            if (isParlay) return 'PARLAY';
+            if (mt.includes('SPREAD')) return 'SPREAD';
+            if (mt.includes('TOTAL')) return 'TOTAL';
+            if (mt.includes('MONEYLINE') || mt === 'ML') return 'MONEYLINE';
+            return mt || 'OTHER';
+        };
+        return history
+            .filter(h => h.id || h.prediction_id)
+            .filter(h => {
+                const c = classify(h);
+                return c === 'SPREAD' || c === 'TOTAL';
+            });
     })();
 
     const graded = filteredToAll.filter(h => isGradedOutcome(h.graded_result || h.outcome || h.result));
