@@ -654,8 +654,8 @@ export default function Picks() {
             );
           })()}
           {(() => {
-            const total = hasReco ? (recoStraight || []).length + (recoMlParlay || []).length : (yesterdaySlate || []).length;
-            const decided = hasReco ? (recoStraight || []).filter(h => isGradedOutcome(h.outcome)).length : gradedYesterdayStraight.length + gradedYesterdayMlParlay.length;
+            const total = hasReco ? (recoStraight || []).length : (recoYesterdayStraight || []).length;
+            const decided = hasReco ? (recoStraight || []).filter(h => isGradedOutcome(h.outcome)).length : gradedYesterdayStraight.length;
             const pending = total - decided;
 
             if (total === 0) {
@@ -708,62 +708,6 @@ export default function Picks() {
           )}
         </div>
 
-        {/* Yesterday graded results — Moneyline & Parlays */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-2">
-            <BarChart3 size={18} className="text-blue-300" />
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Moneyline & Parlays</div>
-            <div className="ml-auto flex items-center gap-2">
-              <div className="text-xs text-slate-500">{yesterdayEt}</div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-6 text-sm">
-            <div>
-              <div className="text-slate-400 text-xs">Record</div>
-              <div className="text-white font-black">{(hasReco ? yRecoRecordMlParlay.w : yRecordMlParlay.w)}-{(hasReco ? yRecoRecordMlParlay.l : yRecordMlParlay.l)}-{(hasReco ? yRecoRecordMlParlay.p : yRecordMlParlay.p)}</div>
-            </div>
-            <div>
-              <div className="text-slate-400 text-xs">Win rate</div>
-              <div className="text-white font-black">{(hasReco ? yRecoRecordMlParlay.decided : yRecordMlParlay.decided) ? `${(hasReco ? yRecoRecordMlParlay.winRate : yRecordMlParlay.winRate).toFixed(1)}%` : '—'}</div>
-            </div>
-            <div>
-              <div className="text-slate-400 text-xs">Graded picks</div>
-              <div className="text-white font-black">{hasReco ? recoMlParlay.length : gradedYesterdayMlParlay.length}</div>
-            </div>
-          </div>
-
-          {gradedYesterdayMlParlay.length > 0 && (
-            <div className="mt-4 space-y-2">
-              {(() => {
-                const getEv = (h) => {
-                  const ev = Number(h?.ev_per_unit ?? h?.ev);
-                  return Number.isFinite(ev) ? ev : 0;
-                };
-                const base = (hasReco ? (recoMlParlay || []) : (recoYesterdayMlParlay || []));
-                const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
-                return rows.map((h, idx) => {
-                  const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();
-                  const cls = out === 'WON' || out === 'WIN' ? 'text-green-300' : out === 'LOST' || out === 'LOSS' ? 'text-red-300' : out === 'PUSH' ? 'text-slate-300' : 'text-slate-500';
-                  return (
-                    <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950/20">
-                      <div className="min-w-0">
-                        <div className="text-xs font-black text-slate-100 whitespace-normal break-words leading-snug">
-                          <span className="text-slate-400 mr-2">#{h.rank || idx + 1}</span>
-                          {h.sport || '—'} • {(h.away_team && h.home_team) ? `${h.away_team} @ ${h.home_team}` : (h.matchup || '—')}
-                        </div>
-                        <div className="text-xs text-slate-400 whitespace-normal break-words leading-snug">{h.market_type || h.bet_type || '—'} • {h.selection || '—'}</div>
-                      </div>
-                      <div className={`text-xs font-mono font-black ${isWinOutcome(h.graded_result || h.outcome || h.result) ? 'text-green-300' : isLossOutcome(h.graded_result || h.outcome || h.result) ? 'text-red-300' : 'text-slate-500'}`}>
-                        {normalizeOutcome(h.graded_result || h.outcome || h.result) || 'PENDING'}
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
-              {((hasReco ? recoMlParlay.length : gradedYesterdayMlParlay.length) > 6) && <div className="text-[11px] text-slate-500">Showing first 6.</div>}
-            </div>
-          )}
-        </div>
 
         {/* Top 6 recommended: win% by rank */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
