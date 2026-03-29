@@ -5012,6 +5012,269 @@ async def trigger_build_daily_top_picks(
         print(f"[JOB ERROR] build_daily_top_picks failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ─── MLB Routes ────────────────────────────────────────────────────────────────
+
+@app.get("/api/mlb/slate")
+async def get_mlb_slate(date: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """
+    Fetch today's MLB slate: schedule with probable pitchers + Action Network odds.
+    Used by the MLB tab to show today's games and model recommendations.
+    """
+    try:
+        from src.services.mlb_service import MLBService
+        from datetime import date as date_mod
+        import datetime as dt_mod
+
+        svc = MLBService()
+
+        if not date:
+            date_str = date_mod.today().strftime("%Y-%m-%d")
+            date_an = date_mod.today().strftime("%Y%m%d")
+        else:
+            date_str = date
+            date_an = date.replace("-", "")
+
+        # Get schedule with probable pitchers
+        schedule = svc.get_schedule(date_str)
+
+        # Get odds from Action Network
+        odds_list = svc.fetch_mlb_odds_action_network([date_an])
+
+        # Build odds lookup by home team
+        odds_map = {}
+        for g in odds_list:
+            home = (g.get("home_team") or "").strip()
+            if home:
+                odds_map[home] = g
+            key = f"{(g.get('away_team') or '').strip()} @ {home}"
+            if key:
+                odds_map[key] = g
+
+        games = []
+        for g in schedule:
+            home = g.get("home_team", "")
+            away = g.get("away_team", "")
+            matchup_key = f"{away} @ {home}"
+            odds = odds_map.get(matchup_key) or odds_map.get(home) or {}
+
+            hp = g.get("home_pitcher") or {}
+            ap = g.get("away_pitcher") or {}
+
+            games.append({
+                "game_pk": g.get("game_pk"),
+                "game_date": g.get("game_date"),
+                "status": g.get("status"),
+                "home_team": home,
+                "away_team": away,
+                "home_pitcher": hp.get("name") if hp else None,
+                "away_pitcher": ap.get("name") if ap else None,
+                "home_pitcher_id": hp.get("id") if hp else None,
+                "away_pitcher_id": ap.get("id") if ap else None,
+                "moneyline_home": odds.get("home_money_line"),
+                "moneyline_away": odds.get("away_money_line"),
+                "spread_home": odds.get("home_spread"),
+                "spread_away": odds.get("away_spread"),
+                "total": odds.get("total_score"),
+                "over_odds": odds.get("over_odds"),
+                "under_odds": odds.get("under_odds"),
+                "has_odds": bool(odds),
+                "action_network_id": odds.get("game_id"),
+            })
+
+        return {
+            "date": date_str,
+            "games": games,
+            "total_games": len(games),
+            "games_with_odds": sum(1 for g in games if g["has_odds"]),
+        }
+    except Exception as e:
+        print(f"[MLB API] Slate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/mlb/predictions")
+async def get_mlb_predictions(date: Optional[str] = None, lookback_days: int = 30, user: dict = Depends(get_current_user)):
+    """
+    Fetch stored MLB model predictions from model_predictions table.
+    These flow into the Model Performance tab (same table as NCAAM picks).
+    """
+    try:
+        from src.database import fetch_model_history
+        from datetime import date as date_mod
+
+        if not date:
+            date_str = date_mod.today().strftime("%Y-%m-%d")
+        else:
+            date_str = date
+
+        user_id = user.get("sub")
+        rows = fetch_model_history(
+            user_id=user_id,
+            recommended_only=False,
+            limit=500,
+            lookback_days=lookback_days,
+        )
+
+        # Filter to MLB only
+        mlb_rows = []
+        for r in rows:
+            row = dict(r)
+            sport = (row.get("sport") or row.get("league") or "").upper()
+            event_id = (row.get("event_id") or "")
+            if sport == "MLB" or "mlb:" in str(event_id).lower():
+                mlb_rows.append(row)
+
+        return {"predictions": mlb_rows, "count": len(mlb_rows)}
+    except Exception as e:
+        print(f"[MLB API] Predictions fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/api/jobs/run_mlb_predictions", methods=["GET", "POST"])
+async def trigger_run_mlb_predictions(
+    request: Request,
+    date: Optional[str] = None,
+    authorized: bool = Depends(verify_cron_secret),
+):
+    """
+    Cron/manual: Run MLB betting model for today's slate and store picks in model_predictions.
+
+    Schedule: Run at 11:00 AM ET daily (after lineups are set).
+    Manual trigger: POST /api/jobs/run_mlb_predictions
+
+    Returns picks suitable for the MLB tab and Model Performance tracking.
+    """
+    import time
+    start_t = time.time()
+
+    try:
+        from src.models.mlb_model import MLBModel
+        from src.database import insert_model_prediction
+        from datetime import date as date_mod
+        import datetime as dt_mod
+        import json
+
+        if not date:
+            date_str = date_mod.today().strftime("%Y-%m-%d")
+        else:
+            date_str = date
+
+        print(f"[MLB JOB] Running predictions for {date_str}")
+        model = MLBModel()
+        results = model.analyze_todays_slate(date_str)
+
+        stored = 0
+        skipped = 0
+
+        for result in results:
+            if not result.get("is_actionable"):
+                skipped += 1
+                continue
+
+            home = result.get("home_team", "")
+            away = result.get("away_team", "")
+            event_id = result.get("event_id", f"mlb:{date_str}:{away}@{home}")
+            game_time = result.get("game_time")
+
+            # Upsert the event into events table (insert_model_prediction requires FK)
+            try:
+                from src.database import insert_event
+                event_start = None
+                if game_time:
+                    try:
+                        from datetime import timezone as tz_mod
+                        event_start = dt_mod.datetime.fromisoformat(str(game_time).replace("Z", "+00:00"))
+                        if event_start.tzinfo is None:
+                            event_start = event_start.replace(tzinfo=tz_mod.utc)
+                    except Exception:
+                        event_start = None
+                insert_event({
+                    "id": event_id,
+                    "sport_key": "mlb",
+                    "league": "MLB",
+                    "home_team": home,
+                    "away_team": away,
+                    "start_time": event_start,
+                    "status": "scheduled",
+                })
+            except Exception as e:
+                print(f"[MLB JOB] Failed to upsert event {event_id}: {e}")
+                continue
+
+            for i, rec in enumerate(result.get("recommendations", [])):
+                ev = float(rec.get("ev_per_unit") or 0)
+                if ev < 0.02:
+                    continue
+
+                confidence_raw = rec.get("confidence", "LOW")
+                confidence_int = {"HIGH": 85, "MEDIUM": 65, "LOW": 45}.get(confidence_raw, 50)
+
+                doc = {
+                    "event_id": event_id,
+                    "user_id": None,
+                    "analyzed_at": dt_mod.datetime.utcnow().isoformat() + "Z",
+                    "market_type": rec.get("market_type"),
+                    "pick": rec.get("pick"),
+                    "selection": rec.get("selection"),
+                    "bet_line": rec.get("line"),
+                    "bet_price": rec.get("price"),
+                    "book": "actionnetwork",
+                    "mu_market": result.get("market", {}).get("spread_home") or 0,
+                    "mu_final": result.get("model", {}).get("fair_spread") or 0,
+                    "sigma": model.SIGMA_MARGIN,
+                    "win_prob": rec.get("prob"),
+                    "ev_per_unit": ev,
+                    "confidence_0_100": confidence_int,
+                    "rank": i + 1,
+                    "inputs_json": json.dumps({
+                        "home_sp": result.get("pitching_matchup", {}).get("home_sp", {}).get("name"),
+                        "away_sp": result.get("pitching_matchup", {}).get("away_sp", {}).get("name"),
+                        "park_factor": result.get("context", {}).get("park_factor_runs"),
+                        "weather": result.get("context", {}).get("weather", {}).get("impact_summary"),
+                        "proj_total": result.get("projections", {}).get("total_runs"),
+                        "market_total": result.get("market", {}).get("total"),
+                    }),
+                    "outputs_json": json.dumps({
+                        "fair_spread": result.get("model", {}).get("fair_spread"),
+                        "fair_total": result.get("model", {}).get("fair_total"),
+                        "prob_home_win": result.get("model", {}).get("prob_home_win"),
+                        "prob_over": result.get("model", {}).get("prob_over"),
+                        "nrfi_prob": result.get("nrfi", {}).get("p_nrfi"),
+                    }),
+                    "narrative_json": json.dumps({
+                        "headline": result.get("headline"),
+                        "pitching_matchup": {
+                            "home": result.get("pitching_matchup", {}).get("home_sp", {}).get("name"),
+                            "away": result.get("pitching_matchup", {}).get("away_sp", {}).get("name"),
+                        },
+                        "context": result.get("context", {}),
+                    }),
+                    "model_version": result.get("model_version", MLBModel.VERSION),
+                }
+
+                try:
+                    insert_model_prediction(doc)
+                    stored += 1
+                except Exception as e:
+                    print(f"[MLB JOB] Failed to store prediction: {e}")
+
+        elapsed = time.time() - start_t
+        print(f"[MLB JOB] Done in {elapsed:.1f}s — {stored} picks stored, {skipped} games skipped")
+
+        return {
+            "status": "ok",
+            "date": date_str,
+            "games_analyzed": len(results),
+            "picks_stored": stored,
+            "games_skipped": skipped,
+            "elapsed_seconds": round(elapsed, 1),
+        }
+
+    except Exception as e:
+        print(f"[MLB JOB ERROR] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.api_route("/api/jobs/run_council_today", methods=["GET", "POST"])
 async def trigger_run_council_today(
     request: Request,

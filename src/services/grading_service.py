@@ -32,8 +32,9 @@ class GradingService:
         print("[GRADING] Starting grading process...")
 
         # 1) Update Game Results (Ingest latest finals)
-        # NOTE: We currently grade NCAAM using Action Network as the source of truth.
-        active_leagues = ['NCAAM']
+        # NOTE: We grade NCAAM using Action Network as the source of truth.
+        # MLB uses MLB Stats API for final scores.
+        active_leagues = ['NCAAM', 'MLB']
         for league in active_leagues:
             self._ingest_latest_scores(league)
 
@@ -174,6 +175,49 @@ class GradingService:
                     print(f"[GRADING] Action Network v2 error fetching NCAAM {date_str}: {e}")
 
             print(f"[GRADING] Upserted {count} NCAAM finals from Action Network v2")
+
+        # --- MLB: Ingest from MLB Stats API ---
+        if league == 'MLB':
+            try:
+                from src.services.mlb_service import MLBService
+                mlb_svc = MLBService()
+
+                backfill_days_mlb = int(os.getenv('GRADING_FINALS_BACKFILL_DAYS', '3'))
+                mlb_count = 0
+
+                for d in range(0, backfill_days_mlb + 1):
+                    dt = datetime.now() - timedelta(days=d)
+                    date_str = dt.strftime("%Y-%m-%d")
+                    finals = mlb_svc.get_final_scores(date_str)
+
+                    for g in finals:
+                        event_id = f"action:mlb:{g.get('game_pk', '')}"
+                        h_score = g.get('home_score')
+                        a_score = g.get('away_score')
+                        if h_score is None or a_score is None:
+                            continue
+
+                        # Store 1st-inning data for NRFI grading
+                        linescore = g.get('linescore', {})
+                        innings = linescore.get('innings', [])
+                        first_inn_away = 0
+                        first_inn_home = 0
+                        if innings:
+                            first_inn_away = innings[0].get('away', {}).get('runs', 0) or 0
+                            first_inn_home = innings[0].get('home', {}).get('runs', 0) or 0
+
+                        upsert_game_result({
+                            "event_id": event_id,
+                            "home_score": int(h_score),
+                            "away_score": int(a_score),
+                            "final": True,
+                            "period": "FINAL",
+                        })
+                        mlb_count += 1
+
+                print(f"[GRADING] Upserted {mlb_count} MLB finals from MLB Stats API")
+            except Exception as e:
+                print(f"[GRADING] MLB score ingestion error: {e}")
 
         # 2) ESPN fallback (DISABLED)
         return
@@ -395,7 +439,7 @@ class GradingService:
         # Guardrails: ignore placeholder/auto predictions so they don't clog Pending.
         if not pick or str(pick).upper() == 'NONE':
             return 'VOID'
-        if market not in ('SPREAD', 'TOTAL', 'MONEYLINE'):
+        if market not in ('SPREAD', 'TOTAL', 'MONEYLINE', 'NRFI', 'PARLAY'):
             return 'VOID'
         
         h_score = row['home_score']
@@ -440,9 +484,38 @@ class GradingService:
                 outcome = 'WON' if a_score > h_score else 'LOST'
             else:
                 return 'VOID'
+
         elif market == 'PARLAY':
             outcome = self._grade_parlay(row['selection'])
-            
+
+        elif market == 'NRFI':
+            # NRFI grading: check if 0 runs scored in the 1st inning
+            # Requires 1st-inning linescore data from MLB Stats API.
+            try:
+                event_id = row.get('event_id', '')
+                # Extract game_pk from event_id (format: action:mlb:{game_pk})
+                game_pk = None
+                if 'mlb:' in str(event_id):
+                    parts = str(event_id).split(':')
+                    game_pk = parts[-1] if parts else None
+
+                if game_pk:
+                    from src.services.mlb_service import MLBService
+                    mlb_svc = MLBService()
+                    first_inn = mlb_svc.get_first_inning_scores(int(game_pk))
+                    if first_inn:
+                        if str(pick).upper() == 'NRFI':
+                            outcome = 'WON' if first_inn['nrfi'] else 'LOST'
+                        elif str(pick).upper() == 'YRFI':
+                            outcome = 'WON' if not first_inn['nrfi'] else 'LOST'
+                    else:
+                        outcome = 'PENDING'  # Can't grade without linescore
+                else:
+                    outcome = 'PENDING'
+            except Exception as e:
+                print(f"[GRADING] NRFI grading error: {e}")
+                outcome = 'PENDING'
+
         return outcome
 
     def _grade_parlay(self, selection: str) -> str:
