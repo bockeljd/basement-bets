@@ -11,6 +11,7 @@ import Picks from './pages/Picks';
 import Bankroll from './pages/Bankroll';
 import AgentCouncil from './pages/AgentCouncil';
 import MarchMadness from './pages/MarchMadness';
+import MLB from './pages/MLB';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
 import TransactionView from './components/TransactionView';
 import ManualAddBetModal from './components/ManualAddBetModal';
@@ -119,7 +120,7 @@ const LogoIcon = ({ className }) => (
 );
 
 function App() {
-    const [page, setPage] = useState('today'); // today | model | actuals | council | march
+    const [page, setPage] = useState('today'); // today | model | actuals | council | march | mlb
 
     // Actuals sub-tabs
     const [actualsTab, setActualsTab] = useState('transactions'); // transactions | performance | bankroll
@@ -203,7 +204,7 @@ function App() {
         setIsSyncing(true);
         try {
             // Sync all active leagues
-            const leagues = ['NFL', 'NCAAM', 'NCAAF', 'EPL'];
+            const leagues = ['NFL', 'NCAAM', 'NCAAF', 'EPL', 'MLB'];
             for (const league of leagues) {
                 await api.post(`/api/jobs/ingest_results/${league}`);
             }
@@ -487,6 +488,14 @@ function App() {
                                     <span className="hidden sm:inline">March Madness</span>
                                     <span className="sm:hidden">March Madness</span>
                                 </button>
+                                <button
+                                    onClick={() => setPage('mlb')}
+                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'mlb' ? 'bg-teal-700/60 text-white shadow-sm ring-1 ring-teal-400/30' : 'text-teal-400/70 hover:text-teal-200 hover:bg-teal-900/20'}`}
+                                >
+                                    <span className="text-[16px]">⚾</span>
+                                    <span className="hidden sm:inline">MLB</span>
+                                    <span className="sm:hidden">MLB</span>
+                                </button>
                             </div>
 
                             <button
@@ -607,6 +616,8 @@ function App() {
                         <AgentCouncil />
                     ) : page === 'march' ? (
                         <MarchMadness />
+                    ) : page === 'mlb' ? (
+                        <MLB />
                     ) : (
                         <>
                             {actualsTab === 'transactions' ? (

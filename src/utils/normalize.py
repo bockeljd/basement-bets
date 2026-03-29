@@ -15,7 +15,13 @@ def normalize_market(market: str) -> str:
         
     if m in ('TOTALS', 'TOTAL', 'OVER/UNDER', 'OU', 'O/U'):
         return 'TOTAL'
-        
+
+    if m in ('NRFI', 'NO RUN FIRST INNING', 'H2H_1ST_1_INNINGS', 'FIRST_INNING'):
+        return 'NRFI'
+
+    if m in ('YRFI', 'YES RUN FIRST INNING'):
+        return 'NRFI'  # Same market type, pick determines side
+
     return m
 
 def normalize_provider(provider: str) -> str:

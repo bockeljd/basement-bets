@@ -12,3 +12,7 @@ python-dateutil
 # lxml, numpy, pandas, scikit-learn, scipy are TOO LARGE for Vercel.
 # Only use pure python or small libs for deployment.
 # Historical data/ is excluded via .vercelignore.
+
+# MLB Model (local development only — too big for Vercel)
+# Install separately: pip install pybaseball
+# pybaseball  # FanGraphs + Statcast data (requires pandas/numpy)

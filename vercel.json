@@ -57,6 +57,10 @@
         {
             "path": "/api/jobs/lock_morning_slate",
             "schedule": "0 13 * * *"
+        },
+        {
+            "path": "/api/jobs/run_mlb_predictions",
+            "schedule": "0 15 * * *"
         }
     ]
 }
