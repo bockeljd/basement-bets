@@ -88,7 +88,7 @@ class MLBService:
         }
 
         try:
-            resp = requests.get(url, params=params, timeout=15)
+            resp = requests.get(url, params=params, timeout=8)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -209,7 +209,7 @@ class MLBService:
         }
 
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params=params, timeout=8)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -258,20 +258,9 @@ class MLBService:
     def calculate_pitcher_rating(self, stats: Dict) -> Dict:
         """
         Calculate a composite pitcher quality rating from raw stats.
-
-        Produces a single "pitcher_runs_per_9" estimate that feeds the
-        run projection engine.
-
-        Blend:
-        - FIP (40%) — most predictive of future ERA
-        - ERA (25%) — actual results (useful with enough IP)
-        - xERA proxy via K-BB% (20%) — contact quality proxy
-        - Recent WHIP trend (15%) — baserunner management
-
-        When pybaseball is available, we use FIP/xERA directly.
-        Otherwise, we approximate FIP from K, BB, HR, IP (MLB Stats API data).
+        Always returns a dict — never raises.
         """
-        if not stats:
+        if not stats or not isinstance(stats, dict):
             return {"runs_per_9": self.LEAGUE_AVG_ERA, "tier": "UNKNOWN", "confidence": 0.0}
 
         era = stats.get("era") or self.LEAGUE_AVG_ERA
@@ -396,7 +385,7 @@ class MLBService:
             "season": season,
         }
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params=params, timeout=8)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -512,13 +501,14 @@ class MLBService:
                      platoon_adj: float = 0.0) -> Dict:
         """
         Project runs scored by one team (one side of the game).
-
-        Core formula:
-            Base Runs = League Avg * (Team Batting / Avg) * (League Avg / Pitcher Quality)
-            Adjusted = Base * Park Factor + Weather + Platoon + Bullpen
-
-        The interaction approach: offense interacts with opposing pitching.
+        Always returns a dict — never raises.
         """
+        # Defensive: ensure inputs are dicts
+        if not pitcher_rating or not isinstance(pitcher_rating, dict):
+            pitcher_rating = {"runs_per_9": self.LEAGUE_AVG_ERA}
+        if not opposing_batting or not isinstance(opposing_batting, dict):
+            opposing_batting = {"runs_per_game": self.LEAGUE_AVG_RUNS_PER_GAME}
+
         league_avg_rpg = self.LEAGUE_AVG_RUNS_PER_GAME  # 4.40
 
         # Offensive strength relative to league

@@ -190,8 +190,12 @@ class MLBModel(BaseModel):
         altitude_adj = self.ballpark.get_altitude_adjustment(home_team)
 
         # 7. Weather
-        weather_data = self.weather.get_game_weather(home_team, game_time)
-        weather_total_adj = weather_data.get("total_adjustment", 0.0) if weather_data else 0.0
+        try:
+            weather_data = self.weather.get_game_weather(home_team, game_time)
+        except Exception as e:
+            print(f"[MLB] Weather error for {home_team}: {e}")
+            weather_data = None
+        weather_total_adj = (weather_data or {}).get("total_adjustment", 0.0)
 
         # 8. Platoon adjustments
         home_sp_throws = home_sp_stats.get("throws") if home_sp_stats else None
@@ -291,13 +295,23 @@ class MLBModel(BaseModel):
 
         # ── NRFI Analysis ──────────────────────────────────────
 
-        nrfi_result = self.nrfi_service.calculate_nrfi_probability(
-            home_pitcher_id=home_pitcher_id,
-            away_pitcher_id=away_pitcher_id,
-            home_team=home_team,
-            away_team=away_team,
-            park_factor=park_factor_runs,
-        )
+        try:
+            nrfi_result = self.nrfi_service.calculate_nrfi_probability(
+                home_pitcher_id=home_pitcher_id,
+                away_pitcher_id=away_pitcher_id,
+                home_team=home_team,
+                away_team=away_team,
+                park_factor=park_factor_runs,
+            )
+        except Exception as e:
+            print(f"[MLB] NRFI error for {away_team} @ {home_team}: {e}")
+            nrfi_result = {
+                "p_nrfi": self.nrfi_service.LEAGUE_AVG_NRFI_RATE,
+                "p_yrfi": 1 - self.nrfi_service.LEAGUE_AVG_NRFI_RATE,
+                "p_no_run_top": 0.72,
+                "p_no_run_bottom": 0.72,
+                "confidence": 0.0,
+            }
 
         # ── Generate Recommendations ──────────────────────────
 
@@ -548,8 +562,8 @@ class MLBModel(BaseModel):
                     })
 
         # 4. NRFI
-        nrfi = kwargs.get("nrfi_result", {})
-        p_nrfi = nrfi.get("p_nrfi", 0.52)
+        nrfi = kwargs.get("nrfi_result") or {}
+        p_nrfi = nrfi.get("p_nrfi", 0.52) if isinstance(nrfi, dict) else 0.52
 
         # Compare to implied probability (if we have NRFI odds)
         nrfi_market_price = market_snapshot.get("nrfi_price")
