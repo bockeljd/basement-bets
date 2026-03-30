@@ -193,27 +193,58 @@ class MLBService:
         """
         Fetch season pitching stats from MLB Stats API.
 
-        This is the lightweight alternative when pybaseball is not available.
-        Returns basic stats: ERA, WHIP, K/9, BB/9, IP, W, L, etc.
+        On Opening Day / early season, current-year stats may be empty.
+        Automatically falls back to prior-year stats when current year has < 5 IP.
         """
         if season is None:
             season = datetime.date.today().year
 
+        result = self._fetch_pitcher_stats_for_season(player_id, season)
+
+        # Auto-fallback to prior year if current season has insufficient innings
+        ip = (result or {}).get("innings_pitched")
+        if not result or ip is None or (ip is not None and float(ip) < 5):
+            prior = self._fetch_pitcher_stats_for_season(player_id, season - 1)
+            if prior:
+                if not result:
+                    print(f"[MLB] {player_id}: No {season} stats — using {season-1}")
+                    result = prior
+                    result["season"] = season - 1
+                    result["season_note"] = f"Prior year ({season-1}) — current season has no data"
+                else:
+                    # Blend: mostly prior year weighted by IP
+                    curr_ip = float(ip or 0)
+                    prior_ip = float(prior.get("innings_pitched") or 0)
+                    if prior_ip > 0:
+                        w_curr = curr_ip / (curr_ip + prior_ip)
+                        w_prior = 1.0 - w_curr
+                        def _blend(k, fallback):
+                            a = result.get(k) or 0
+                            b = prior.get(k) or 0
+                            return round(w_curr * a + w_prior * b, 4) if (a or b) else fallback
+                        result["era"] = _blend("era", None)
+                        result["whip"] = _blend("whip", None)
+                        result["k_per_9"] = _blend("k_per_9", None)
+                        result["bb_per_9"] = _blend("bb_per_9", None)
+                        result["season_note"] = f"Blended {season}({curr_ip:.0f}IP) + {season-1}({prior_ip:.0f}IP)"
+                        print(f"[MLB] {result.get('name','?')}: blending {season}({curr_ip:.0f}IP) + {season-1}({prior_ip:.0f}IP)")
+        return result
+
+    def _fetch_pitcher_stats_for_season(self, player_id: int, season: int) -> Optional[Dict]:
+        """Internal: fetch raw pitcher stats for one specific season."""
         cache_key = f"pitcher:{player_id}:{season}"
         if cache_key in self._pitcher_cache:
             return self._pitcher_cache[cache_key]
 
         url = f"{self.STATS_API_BASE}/people/{player_id}"
-        params = {
-            "hydrate": f"stats(group=[pitching],type=[season],season={season})",
-        }
+        params = {"hydrate": f"stats(group=[pitching],type=[season],season={season})"}
 
         try:
             resp = requests.get(url, params=params, timeout=8)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            print(f"[MLB] Player stats API error for {player_id}: {e}")
+            print(f"[MLB] Player stats API error for {player_id} ({season}): {e}")
             return None
 
         people = data.get("people", [])
@@ -221,14 +252,13 @@ class MLBService:
             return None
 
         person = people[0]
-        stats_groups = person.get("stats", [])
-
-        for group in stats_groups:
+        for group in person.get("stats", []):
             splits = group.get("splits", [])
             if splits:
                 stat = splits[0].get("stat", {})
                 result = {
                     "player_id": player_id,
+                    "season": season,
                     "name": person.get("fullName"),
                     "throws": person.get("pitchHand", {}).get("code"),  # L or R
                     "era": self._safe_float(stat.get("era")),
@@ -334,19 +364,13 @@ class MLBService:
 
     # ── Team Batting Rating ────────────────────────────────────
 
-    def get_team_batting_rating(self, team_name: str, season: int = None) -> Dict:
+    def get_team_batting_rating(self, team_name: str, season: int = None) -> Optional[Dict]:
         """
-        Get team offensive quality rating.
+        Get team offensive quality rating from MLB Stats API.
 
-        When pybaseball is available, pulls wOBA, wRC+, ISO, K%, BB%.
-        Otherwise, returns league-average defaults.
-
-        Returns runs_per_game estimate for this team's offense.
+        Auto-falls back to prior year when current season has < 5 games played.
+        Returns None if no real data is available (don't use league averages).
         """
-        # TODO: When pybaseball is available, use:
-        # batting_stats(season) filtered by team
-        # For now, use MLB Stats API team stats endpoint
-
         if season is None:
             season = datetime.date.today().year
 
@@ -354,58 +378,74 @@ class MLBService:
         if cache_key in self._team_cache:
             return self._team_cache[cache_key]
 
-        # Try MLB Stats API team stats
         team_id = self._resolve_team_id(team_name)
-        if team_id:
-            stats = self._fetch_team_batting_stats(team_id, season)
-            if stats:
-                self._team_cache[cache_key] = stats
-                return stats
+        if not team_id:
+            print(f"[MLB] Cannot resolve team ID for '{team_name}'")
+            return None
 
-        # Fallback: league average
-        return {
-            "runs_per_game": self.LEAGUE_AVG_RUNS_PER_GAME,
-            "wrc_plus": 100,
-            "obp": 0.320,
-            "slg": 0.410,
-            "iso": 0.160,
-            "k_pct": 0.220,
-            "bb_pct": 0.085,
-            "woba": self.LEAGUE_AVG_WOBA,
-            "tier": "UNKNOWN",
-            "confidence": 0.3,
-        }
+        # Try current season first
+        stats = self._fetch_team_batting_stats(team_id, season)
+
+        # Auto-fallback to prior year if current season is too thin (< 5 games)
+        games = (stats or {}).get("games", 0)
+        if not stats or games < 5:
+            prior = self._fetch_team_batting_stats(team_id, season - 1)
+            if prior:
+                if not stats:
+                    print(f"[MLB] {team_name}: No {season} team stats — using {season-1}")
+                    stats = prior
+                    stats["season"] = season - 1
+                    stats["season_note"] = f"Prior year ({season-1})"
+                else:
+                    # Early season: weight by games played
+                    curr_games = stats.get("games", 0)
+                    prior_games = prior.get("games", 162)
+                    w_curr = curr_games / (curr_games + prior_games)
+                    w_prior = 1.0 - w_curr
+                    blended_rpg = w_curr * stats["runs_per_game"] + w_prior * prior["runs_per_game"]
+                    stats["runs_per_game"] = round(blended_rpg, 2)
+                    stats["obp"] = round(w_curr * stats["obp"] + w_prior * prior["obp"], 3)
+                    stats["slg"] = round(w_curr * stats["slg"] + w_prior * prior["slg"], 3)
+                    stats["season_note"] = f"Blended {season}({curr_games}G) + {season-1}({prior_games}G)"
+                    print(f"[MLB] {team_name}: blending {season}({curr_games}G) + {season-1}({prior_games}G)")
+
+        if not stats:
+            print(f"[MLB] No team batting data for {team_name} ({season} or {season-1})")
+            return None
+
+        self._team_cache[cache_key] = stats
+        return stats
 
     def _fetch_team_batting_stats(self, team_id: int, season: int) -> Optional[Dict]:
-        """Fetch team batting stats from MLB Stats API."""
+        """Fetch team batting stats from MLB Stats API for a specific season."""
         url = f"{self.STATS_API_BASE}/teams/{team_id}/stats"
-        params = {
-            "stats": "season",
-            "group": "hitting",
-            "season": season,
-        }
+        params = {"stats": "season", "group": "hitting", "season": season}
         try:
             resp = requests.get(url, params=params, timeout=8)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            print(f"[MLB] Team batting stats error for {team_id}: {e}")
+            print(f"[MLB] Team batting stats error for {team_id} ({season}): {e}")
             return None
 
         for group in data.get("stats", []):
             splits = group.get("splits", [])
             if splits:
                 stat = splits[0].get("stat", {})
-                games = stat.get("gamesPlayed", 1) or 1
+                games = stat.get("gamesPlayed", 0)
                 runs = stat.get("runs", 0)
-                rpg = runs / games if games > 0 else self.LEAGUE_AVG_RUNS_PER_GAME
 
-                obp = self._safe_float(stat.get("obp")) or 0.320
-                slg = self._safe_float(stat.get("slg")) or 0.410
-                avg = self._safe_float(stat.get("avg")) or 0.250
-                iso = slg - avg if slg and avg else 0.160
+                # Not enough games to be meaningful
+                if games < 1:
+                    return None
 
-                # Tier classification
+                rpg = runs / games
+
+                obp = self._safe_float(stat.get("obp"))
+                slg = self._safe_float(stat.get("slg"))
+                avg = self._safe_float(stat.get("avg"))
+                iso = (slg - avg) if (slg and avg) else None
+
                 if rpg >= 5.2:
                     tier = "ELITE"
                 elif rpg >= 4.6:
@@ -418,15 +458,16 @@ class MLBService:
                     tier = "WEAK"
 
                 return {
+                    "season": season,
                     "runs_per_game": round(rpg, 2),
-                    "obp": round(obp, 3),
-                    "slg": round(slg, 3),
-                    "avg": round(avg, 3),
-                    "iso": round(iso, 3),
+                    "obp": round(obp, 3) if obp else None,
+                    "slg": round(slg, 3) if slg else None,
+                    "avg": round(avg, 3) if avg else None,
+                    "iso": round(iso, 3) if iso else None,
                     "runs": runs,
                     "games": games,
                     "tier": tier,
-                    "confidence": min(1.0, games / 60),  # Confident after ~60 games
+                    "confidence": min(1.0, games / 81),  # Confident after half-season
                 }
         return None
 
@@ -501,13 +542,14 @@ class MLBService:
                      platoon_adj: float = 0.0) -> Dict:
         """
         Project runs scored by one team (one side of the game).
-        Always returns a dict — never raises.
+
+        Raises ValueError if critical inputs are missing — caller should
+        skip this game rather than generate a recommendation with fake data.
         """
-        # Defensive: ensure inputs are dicts
         if not pitcher_rating or not isinstance(pitcher_rating, dict):
-            pitcher_rating = {"runs_per_9": self.LEAGUE_AVG_ERA}
+            raise ValueError("project_runs: pitcher_rating is None — no real pitcher data")
         if not opposing_batting or not isinstance(opposing_batting, dict):
-            opposing_batting = {"runs_per_game": self.LEAGUE_AVG_RUNS_PER_GAME}
+            raise ValueError("project_runs: opposing_batting is None — no real team batting data")
 
         league_avg_rpg = self.LEAGUE_AVG_RUNS_PER_GAME  # 4.40
 

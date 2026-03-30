@@ -214,24 +214,37 @@ class MLBModel(BaseModel):
         # ── Run Projections ────────────────────────────────────
 
         # Home team runs = how well home offense hits vs away SP
-        home_runs_proj = self.mlb_service.project_runs(
-            pitcher_rating=away_sp_rating,       # Away SP pitching against Home offense
-            opposing_batting=home_batting,         # Home team batting
-            park_factor_runs=park_factor_runs,
-            weather_adjustment=weather_total_adj,
-            bullpen_rating=away_bullpen,
-            platoon_adj=platoon_home,
-        )
-
         # Away team runs = how well away offense hits vs home SP
-        away_runs_proj = self.mlb_service.project_runs(
-            pitcher_rating=home_sp_rating,       # Home SP pitching against Away offense
-            opposing_batting=away_batting,         # Away team batting
-            park_factor_runs=park_factor_runs,
-            weather_adjustment=weather_total_adj,
-            bullpen_rating=home_bullpen,
-            platoon_adj=platoon_away + travel_adj,
-        )
+        # Both raise ValueError if real data is unavailable — skip this game.
+        try:
+            home_runs_proj = self.mlb_service.project_runs(
+                pitcher_rating=away_sp_rating,
+                opposing_batting=home_batting,
+                park_factor_runs=park_factor_runs,
+                weather_adjustment=weather_total_adj,
+                bullpen_rating=away_bullpen,
+                platoon_adj=platoon_home,
+            )
+            away_runs_proj = self.mlb_service.project_runs(
+                pitcher_rating=home_sp_rating,
+                opposing_batting=away_batting,
+                park_factor_runs=park_factor_runs,
+                weather_adjustment=weather_total_adj,
+                bullpen_rating=home_bullpen,
+                platoon_adj=platoon_away + travel_adj,
+            )
+        except ValueError as e:
+            print(f"[MLB] Skipping {away_team} @ {home_team}: {e}")
+            return {
+                "event_id": event_id,
+                "home_team": home_team,
+                "away_team": away_team,
+                "headline": "Insufficient Data",
+                "recommendation": "Pass",
+                "is_actionable": False,
+                "rationale": [str(e)],
+                "recommendations": [],
+            }
 
         proj_home_runs = home_runs_proj["projected_runs"]
         proj_away_runs = away_runs_proj["projected_runs"]
