@@ -111,15 +111,20 @@ class MLBNRFIService:
         # team 1st-inning scoring rates. For now, adjust based on team
         # overall offensive strength.
         team_batting = self.mlb_service.get_team_batting_rating(team_name, season)
-        rpg = team_batting.get("runs_per_game", MLBService.LEAGUE_AVG_RUNS_PER_GAME)
 
-        # Rough approximation: better offenses score more in the 1st inning
-        # Teams scoring ~5.0 RPG have ~32% 1st-inning scoring rate
-        # Teams scoring ~3.5 RPG have ~24% 1st-inning scoring rate
-        ratio = rpg / MLBService.LEAGUE_AVG_RUNS_PER_GAME
-        result["scoring_pct"] = round(self.LEAGUE_AVG_1ST_INN_SCORING_PCT * ratio, 3)
-        result["avg_runs_1st"] = round(0.40 * ratio, 2)
-        result["confidence"] = team_batting.get("confidence", 0.3)
+        if team_batting is None:
+            # No real data — return default, don't generate NRFI edge for this team
+            result["confidence"] = 0.0
+        else:
+            rpg = team_batting.get("runs_per_game", MLBService.LEAGUE_AVG_RUNS_PER_GAME)
+            # Rough approximation: better offenses score more in the 1st inning
+            # Teams scoring ~5.0 RPG have ~32% 1st-inning scoring rate
+            # Teams scoring ~3.5 RPG have ~24% 1st-inning scoring rate
+            ratio = rpg / MLBService.LEAGUE_AVG_RUNS_PER_GAME
+            result["scoring_pct"] = round(self.LEAGUE_AVG_1ST_INN_SCORING_PCT * ratio, 3)
+            result["avg_runs_1st"] = round(0.40 * ratio, 2)
+            result["confidence"] = team_batting.get("confidence", 0.3)
+            result["season_note"] = team_batting.get("season_note")
 
         self._cache[cache_key] = result
         return result
