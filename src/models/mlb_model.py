@@ -74,11 +74,12 @@ class MLBModel(BaseModel):
     # Edge thresholds (minimum edge to recommend a bet)
     MIN_EDGE_SPREAD = 0.3     # 0.3 runs on run line
     MIN_EDGE_TOTAL = 0.4      # 0.4 runs on total
-    MIN_EDGE_ML_PROB = 0.04   # 4% probability edge on moneyline
+    MIN_EDGE_ML_PROB = 0.06   # 6% probability edge on moneyline
     MIN_EDGE_NRFI_PROB = 0.06 # 6% probability edge on NRFI
 
     # EV threshold (minimum expected value per unit to recommend)
-    MIN_EV_PER_UNIT = 0.02
+    MIN_EV_PER_UNIT = 0.05
+    MAX_ML_PRICE = -165       # Don't recommend ML picks shorter than -165
 
     # Caps on how far model can deviate from market
     CAP_MARGIN = 1.5   # Max ±1.5 runs from market spread
@@ -177,12 +178,26 @@ class MLBModel(BaseModel):
         home_sp_stats = self.mlb_service.get_pitcher_season_stats(home_pitcher_id) if home_pitcher_id else None
         away_sp_stats = self.mlb_service.get_pitcher_season_stats(away_pitcher_id) if away_pitcher_id else None
 
-        home_sp_rating = self.mlb_service.calculate_pitcher_rating(home_sp_stats)
-        away_sp_rating = self.mlb_service.calculate_pitcher_rating(away_sp_stats)
+        home_sp_recent = self.mlb_service.get_pitcher_recent_form(home_pitcher_id) if home_pitcher_id else None
+        away_sp_recent = self.mlb_service.get_pitcher_recent_form(away_pitcher_id) if away_pitcher_id else None
+
+        home_sp_splits = self.mlb_service.get_pitcher_home_away_splits(home_pitcher_id) if home_pitcher_id else None
+        away_sp_splits = self.mlb_service.get_pitcher_home_away_splits(away_pitcher_id) if away_pitcher_id else None
+
+        home_sp_rating = self.mlb_service.calculate_pitcher_rating(
+            stats=home_sp_stats, recent_form=home_sp_recent, ha_splits=home_sp_splits, is_home=True
+        )
+        away_sp_rating = self.mlb_service.calculate_pitcher_rating(
+            stats=away_sp_stats, recent_form=away_sp_recent, ha_splits=away_sp_splits, is_home=False
+        )
 
         # 5. Get team batting ratings
         home_batting = self.mlb_service.get_team_batting_rating(home_team)
         away_batting = self.mlb_service.get_team_batting_rating(away_team)
+
+        # Data confidence (min model inputs required to be fully confident)
+        home_data_conf = min(home_sp_rating.get("confidence", 0.0), (home_batting or {}).get("confidence", 0.0))
+        away_data_conf = min(away_sp_rating.get("confidence", 0.0), (away_batting or {}).get("confidence", 0.0))
 
         # 6. Park factors
         park_factor_runs = self.ballpark.get_park_factor_runs(home_team)
@@ -351,6 +366,8 @@ class MLBModel(BaseModel):
             market_snapshot=market_snapshot,
             has_spread=has_spread,
             has_total=has_total,
+            home_data_conf=home_data_conf,
+            away_data_conf=away_data_conf,
         )
 
         # ── Bell Curves ────────────────────────────────────────
@@ -510,38 +527,43 @@ class MLBModel(BaseModel):
         ml_edge_away = kwargs["ml_edge_away"]
         ml_home_price = kwargs["ml_home_price"]
         ml_away_price = kwargs["ml_away_price"]
+        home_conf = kwargs.get("home_data_conf", 0.0)
+        away_conf = kwargs.get("away_data_conf", 0.0)
 
+        # ML filtering: good edge + profitable vig + solid data confidence
         if ml_edge_home > self.MIN_EDGE_ML_PROB and ml_home_price:
-            ev = self._calculate_ev(kwargs["prob_home_win"], ml_home_price)
-            if ev >= self.MIN_EV_PER_UNIT:
-                recs.append({
-                    "market_type": "MONEYLINE",
-                    "pick": home_team,
-                    "side": "HOME",
-                    "line": None,
-                    "price": ml_home_price,
-                    "prob": round(kwargs["prob_home_win"], 4),
-                    "edge": round(ml_edge_home, 4),
-                    "ev_per_unit": round(ev, 4),
-                    "selection": f"{home_team} ML ({ml_home_price:+d})" if isinstance(ml_home_price, int) else f"{home_team} ML",
-                    "confidence": "HIGH" if ml_edge_home > 0.08 else "MEDIUM" if ml_edge_home > 0.05 else "LOW",
-                })
+            if home_conf >= 0.5 and (isinstance(ml_home_price, int) and ml_home_price >= self.MAX_ML_PRICE):
+                ev = self._calculate_ev(kwargs["prob_home_win"], ml_home_price)
+                if ev >= self.MIN_EV_PER_UNIT:
+                    recs.append({
+                        "market_type": "MONEYLINE",
+                        "pick": home_team,
+                        "side": "HOME",
+                        "line": None,
+                        "price": ml_home_price,
+                        "prob": round(kwargs["prob_home_win"], 4),
+                        "edge": round(ml_edge_home, 4),
+                        "ev_per_unit": round(ev, 4),
+                        "selection": f"{home_team} ML ({ml_home_price:+d})" if isinstance(ml_home_price, int) else f"{home_team} ML",
+                        "confidence": "HIGH" if ml_edge_home > 0.10 else "MEDIUM" if ml_edge_home > 0.07 else "LOW",
+                    })
 
         if ml_edge_away > self.MIN_EDGE_ML_PROB and ml_away_price:
-            ev = self._calculate_ev(kwargs["prob_away_win"], ml_away_price)
-            if ev >= self.MIN_EV_PER_UNIT:
-                recs.append({
-                    "market_type": "MONEYLINE",
-                    "pick": away_team,
-                    "side": "AWAY",
-                    "line": None,
-                    "price": ml_away_price,
-                    "prob": round(kwargs["prob_away_win"], 4),
-                    "edge": round(ml_edge_away, 4),
-                    "ev_per_unit": round(ev, 4),
-                    "selection": f"{away_team} ML ({ml_away_price:+d})" if isinstance(ml_away_price, int) else f"{away_team} ML",
-                    "confidence": "HIGH" if ml_edge_away > 0.08 else "MEDIUM" if ml_edge_away > 0.05 else "LOW",
-                })
+            if away_conf >= 0.5 and (isinstance(ml_away_price, int) and ml_away_price >= self.MAX_ML_PRICE):
+                ev = self._calculate_ev(kwargs["prob_away_win"], ml_away_price)
+                if ev >= self.MIN_EV_PER_UNIT:
+                    recs.append({
+                        "market_type": "MONEYLINE",
+                        "pick": away_team,
+                        "side": "AWAY",
+                        "line": None,
+                        "price": ml_away_price,
+                        "prob": round(kwargs["prob_away_win"], 4),
+                        "edge": round(ml_edge_away, 4),
+                        "ev_per_unit": round(ev, 4),
+                        "selection": f"{away_team} ML ({ml_away_price:+d})" if isinstance(ml_away_price, int) else f"{away_team} ML",
+                        "confidence": "HIGH" if ml_edge_away > 0.10 else "MEDIUM" if ml_edge_away > 0.07 else "LOW",
+                    })
 
         # 3. Total (Over/Under)
         if kwargs.get("has_total"):

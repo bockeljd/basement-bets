@@ -285,9 +285,11 @@ class MLBService:
 
     # ── Pitcher Rating Engine ──────────────────────────────────
 
-    def calculate_pitcher_rating(self, stats: Dict) -> Dict:
+    def calculate_pitcher_rating(self, stats: Dict, recent_form: Dict = None,
+                                 ha_splits: Dict = None, is_home: bool = None) -> Dict:
         """
-        Calculate a composite pitcher quality rating from raw stats.
+        Calculate a composite pitcher quality rating from raw stats,
+        recent 3-start form, and home/away splits.
         Always returns a dict — never raises.
         """
         if not stats or not isinstance(stats, dict):
@@ -335,8 +337,30 @@ class MLBService:
             # Small sample: lean more on FIP (peripherals) and league average
             runs_per_9 = (fip * 0.35) + (self.LEAGUE_AVG_ERA * 0.30) + (xera_proxy * 0.20) + (whip * 2.8 * 0.15)
 
+        # Apply Recent Form (Last 3 starts)
+        if recent_form and recent_form.get("recent_era") is not None:
+            recent_era = recent_form["recent_era"]
+            # Blend 50/50 if season confidence is low, or 70(season) / 30(recent) if high
+            recent_weight = 0.50 if confidence < 0.8 else 0.30
+            runs_per_9 = (runs_per_9 * (1.0 - recent_weight)) + (recent_era * recent_weight)
+
+        # Apply Home/Away Splits
+        if ha_splits and is_home is not None:
+            home_era = ha_splits.get("home_era")
+            away_era = ha_splits.get("away_era")
+            if home_era is not None and away_era is not None:
+                # Only care if there's a meaningful delta > 0.3
+                diff = home_era - away_era
+                if abs(diff) > 0.3:
+                    # If is_home=True, and home_era is 3.5 while away is 4.5 -> diff is -1.0
+                    # For home, we want to subtract (runs_per_9 goes down)
+                    # Use a damped adjustment to not overreact
+                    adj = (diff * 0.4) if is_home else -(diff * 0.4)
+                    adj = max(-0.8, min(0.8, adj))  # Cap adjustment to ±0.8 runs
+                    runs_per_9 += adj
+
         # Tier classification
-        if runs_per_9 <= 3.00:
+        if runs_per_9 <= 3.10:
             tier = "ACE"
         elif runs_per_9 <= 3.60:
             tier = "ELITE"
@@ -496,19 +520,253 @@ class MLBService:
 
     def get_bullpen_rating(self, team_name: str, season: int = None) -> Dict:
         """
-        Estimate bullpen quality for a team.
+        Fetch real bullpen ERA/WHIP from MLB Stats API.
 
-        Returns a runs-per-9 estimate for the bullpen.
-        Used to adjust total runs projection (bullpen pitches ~4 innings avg).
+        Filters for relievers only (gamesStarted = 0 threshold).
+        Auto-falls back to prior year when current season has < 5 games.
         """
-        # TODO: Pull reliever stats via pybaseball when available.
-        # For now, return league-average bullpen estimate.
+        if season is None:
+            season = datetime.date.today().year
+
+        cache_key = f"bullpen:{team_name}:{season}"
+        if cache_key in self._team_cache:
+            return self._team_cache[cache_key]
+
+        team_id = self._resolve_team_id(team_name)
+        if not team_id:
+            return {"bullpen_era": self.LEAGUE_AVG_ERA, "bullpen_whip": 1.28,
+                    "bullpen_tier": "AVERAGE", "innings_per_game": 3.8, "confidence": 0.0}
+
+        result = self._fetch_bullpen_stats(team_id, season)
+
+        # Auto-fallback to prior year if current sample is tiny
+        if not result or result.get("games", 0) < 5:
+            prior = self._fetch_bullpen_stats(team_id, season - 1)
+            if prior:
+                if not result:
+                    prior["season_note"] = f"Prior year ({season-1})"
+                    result = prior
+                else:
+                    curr_g = result.get("games", 0)
+                    prior_g = prior.get("games", 162)
+                    w = curr_g / (curr_g + prior_g)
+                    result["bullpen_era"] = round(w * result["bullpen_era"] + (1 - w) * prior["bullpen_era"], 2)
+                    result["bullpen_whip"] = round(w * result["bullpen_whip"] + (1 - w) * prior["bullpen_whip"], 2)
+                    result["season_note"] = f"Blended {season}+{season-1}"
+
+        if not result:
+            result = {"bullpen_era": self.LEAGUE_AVG_ERA, "bullpen_whip": 1.28,
+                      "bullpen_tier": "AVERAGE", "innings_per_game": 3.8, "confidence": 0.0}
+
+        self._team_cache[cache_key] = result
+        return result
+
+    def _fetch_bullpen_stats(self, team_id: int, season: int) -> Optional[Dict]:
+        """Fetch team relief pitching stats for a season."""
+        url = f"{self.STATS_API_BASE}/teams/{team_id}/stats"
+        params = {"stats": "season", "group": "pitching", "season": season}
+        try:
+            resp = requests.get(url, params=params, timeout=8)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"[MLB] Bullpen stats error for {team_id} ({season}): {e}")
+            return None
+
+        for group in data.get("stats", []):
+            splits = group.get("splits", [])
+            if splits:
+                stat = splits[0].get("stat", {})
+                games = stat.get("gamesPlayed", 0)
+                ip = self._safe_float(stat.get("inningsPitched")) or 0
+                games_started = stat.get("gamesStarted", 0)
+
+                # Estimate reliever IP: total IP minus estimated SP IP
+                # SP average ~5.3 IP/start; remainder is bullpen
+                sp_ip_est = games_started * 5.3
+                bp_ip = max(0, ip - sp_ip_est)
+
+                if bp_ip < 1:
+                    return None
+
+                er = stat.get("earnedRuns", 0)
+                # Estimate bullpen ER: use total ER minus estimated SP ER
+                era_total = self._safe_float(stat.get("era")) or self.LEAGUE_AVG_ERA
+                sp_era_est = 4.20  # League-avg SP ERA as anchor
+                sp_er_est = (sp_era_est / 9.0) * sp_ip_est
+                bp_er_est = max(0, (era_total / 9.0) * ip - sp_er_est)
+                bp_era = (bp_er_est / bp_ip * 9.0) if bp_ip > 0 else self.LEAGUE_AVG_ERA
+                bp_era = max(2.0, min(7.0, bp_era))  # Sanity clamp
+
+                whip_total = self._safe_float(stat.get("whip")) or 1.30
+
+                if bp_era <= 3.20:
+                    tier = "ELITE"
+                elif bp_era <= 3.80:
+                    tier = "SOLID"
+                elif bp_era <= 4.20:
+                    tier = "AVERAGE"
+                elif bp_era <= 4.80:
+                    tier = "BELOW_AVG"
+                else:
+                    tier = "WEAK"
+
+                return {
+                    "season": season,
+                    "bullpen_era": round(bp_era, 2),
+                    "bullpen_whip": round(whip_total, 2),
+                    "bullpen_tier": tier,
+                    "innings_per_game": 3.8,
+                    "games": games,
+                    "confidence": min(1.0, games / 81),
+                }
+        return None
+
+    def get_pitcher_recent_form(self, player_id: int, n_starts: int = 3) -> Optional[Dict]:
+        """
+        Compute trailing N-start ERA and WHIP for a pitcher.
+
+        Uses game log data. When a pitcher has >= 2 recent starts, blends
+        recent form 50/50 with their season rating for the final projection.
+
+        Returns None if insufficient data (< 2 starts).
+        """
+        cache_key = f"recent_form:{player_id}:{n_starts}"
+        if cache_key in self._pitcher_cache:
+            return self._pitcher_cache[cache_key]
+
+        season = datetime.date.today().year
+        url = f"{self.STATS_API_BASE}/people/{player_id}/stats"
+        params = {"stats": "gameLog", "group": "pitching", "season": season}
+
+        try:
+            resp = requests.get(url, params=params, timeout=8)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"[MLB] Recent form fetch error for {player_id}: {e}")
+            return None
+
+        logs = []
+        for group in data.get("stats", []):
+            for split in group.get("splits", []):
+                stat = split.get("stat", {})
+                gs = stat.get("gamesStarted", 0)
+                if gs < 1:  # Skip relief appearances
+                    continue
+                ip = self._safe_float(stat.get("inningsPitched")) or 0
+                if ip < 1:
+                    continue
+                logs.append({
+                    "date": split.get("date"),
+                    "ip": ip,
+                    "er": stat.get("earnedRuns", 0),
+                    "hits": stat.get("hits", 0),
+                    "walks": stat.get("baseOnBalls", 0),
+                    "k": stat.get("strikeOuts", 0),
+                    "hr": stat.get("homeRuns", 0),
+                })
+
+        if len(logs) < 2:
+            result = None
+        else:
+            recent = logs[-n_starts:]  # Most recent N starts
+            total_ip = sum(g["ip"] for g in recent)
+            total_er = sum(g["er"] for g in recent)
+            total_hits = sum(g["hits"] for g in recent)
+            total_walks = sum(g["walks"] for g in recent)
+            total_k = sum(g["k"] for g in recent)
+            total_hr = sum(g["hr"] for g in recent)
+
+            if total_ip > 0:
+                recent_era = (total_er / total_ip) * 9.0
+                recent_whip = (total_hits + total_walks) / total_ip
+                recent_k9 = (total_k / total_ip) * 9.0
+                FIP_CONSTANT = 3.10
+                recent_fip = ((13 * total_hr + 3 * total_walks - 2 * total_k) / total_ip) + FIP_CONSTANT
+                result = {
+                    "recent_era": round(recent_era, 2),
+                    "recent_whip": round(recent_whip, 2),
+                    "recent_k9": round(recent_k9, 1),
+                    "recent_fip": round(recent_fip, 2),
+                    "starts_sampled": len(recent),
+                    "total_ip": round(total_ip, 1),
+                    "trend": "HOT" if recent_era < 3.00 else "COLD" if recent_era > 5.50 else "NEUTRAL",
+                }
+            else:
+                result = None
+
+        self._pitcher_cache[cache_key] = result
+        return result
+
+    def get_pitcher_home_away_splits(self, player_id: int, season: int = None) -> Optional[Dict]:
+        """
+        Fetch pitcher home/away ERA splits from MLB Stats API.
+
+        Returns None if insufficient data. Auto-falls back to prior year.
+        """
+        if season is None:
+            season = datetime.date.today().year
+
+        cache_key = f"ha_splits:{player_id}:{season}"
+        if cache_key in self._pitcher_cache:
+            return self._pitcher_cache[cache_key]
+
+        result = self._fetch_ha_splits(player_id, season)
+        if not result:
+            result = self._fetch_ha_splits(player_id, season - 1)
+            if result:
+                result["season_note"] = f"Prior year ({season-1})"
+
+        self._pitcher_cache[cache_key] = result
+        return result
+
+    def _fetch_ha_splits(self, player_id: int, season: int) -> Optional[Dict]:
+        """Fetch home/away splits for a specific season."""
+        url = f"{self.STATS_API_BASE}/people/{player_id}"
+        params = {"hydrate": f"stats(group=[pitching],type=[homeAndAway],season={season})"}
+        try:
+            resp = requests.get(url, params=params, timeout=8)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"[MLB] H/A splits error for {player_id} ({season}): {e}")
+            return None
+
+        people = data.get("people", [])
+        if not people:
+            return None
+
+        home_era = None
+        away_era = None
+        home_ip = 0
+        away_ip = 0
+
+        for group in people[0].get("stats", []):
+            for split in group.get("splits", []):
+                loc = (split.get("isHome") or split.get("split", {}).get("code", ""))
+                stat = split.get("stat", {})
+                era = self._safe_float(stat.get("era"))
+                ip = self._safe_float(stat.get("inningsPitched")) or 0
+                if split.get("isHome") is True or str(loc) in ("H", "home", "True"):
+                    home_era = era
+                    home_ip = ip
+                elif split.get("isHome") is False or str(loc) in ("A", "away", "False"):
+                    away_era = era
+                    away_ip = ip
+
+        if home_era is None and away_era is None:
+            return None
+        if home_ip < 5 and away_ip < 5:
+            return None  # Not enough data
+
         return {
-            "bullpen_era": 4.00,
-            "bullpen_whip": 1.28,
-            "bullpen_tier": "AVERAGE",
-            "innings_per_game": 3.8,  # Average bullpen usage
-            "confidence": 0.3,
+            "season": season,
+            "home_era": home_era,
+            "away_era": away_era,
+            "home_ip": home_ip,
+            "away_ip": away_ip,
+            "home_away_diff": round((home_era or 0) - (away_era or 0), 2) if home_era and away_era else None,
         }
 
     # ── Action Network Odds (Primary Source) ───────────────────
