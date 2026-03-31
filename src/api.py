@@ -84,12 +84,7 @@ async def check_access_key(request: Request, call_next):
             "/api/ncaam/top-picks",
             "/api/ncaam/bracket/2026",
             "/api/ncaam/bracket/2026/debug",
-            "/api/data-health",
         }
-
-        # Agent Council UI endpoints should be readable without a password.
-        if request.url.path.startswith("/api/v1/council"):
-            return await call_next(request)
 
         if request.url.path in public_paths:
             return await call_next(request)
@@ -5275,102 +5270,7 @@ async def trigger_run_mlb_predictions(
         print(f"[MLB JOB ERROR] {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.api_route("/api/jobs/run_council_today", methods=["GET", "POST"])
-async def trigger_run_council_today(
-    request: Request,
-    date: Optional[str] = None,
-    mode: str = "agents",
-    authorized: bool = Depends(verify_cron_secret),
-):
-    """Cron/manual: Runs the Agent Council on today's actionable top picks."""
-    if not settings.GEMINI_API_KEY:
-        error_msg = "GEMINI_API_KEY missing. Please add to Vercel Dashboard and REDEPLOY."
-        print(f"[JOB ERROR] {error_msg}")
-        raise HTTPException(status_code=401, detail=error_msg)
 
-    try:
-        if mode == "agents":
-            from src.agents.orchestrator import DecisionOrchestrator
-            from src.agents.event_ops_agent import EventOpsAgent
-            from src.agents.market_data_agent import MarketDataAgent
-            from src.agents.pricing_agent_ncaam import PricingAgentNCAAM
-            from src.agents.edge_ev_agent import EdgeEVAgent
-            from src.agents.risk_manager_agent import RiskManagerAgent
-            from src.agents.bet_builder_agent import BetBuilderAgent
-            from src.agents.journal_agent import JournalAgent
-            from src.agents.research_agent import ResearchAgent
-            from src.agents.memory_agent import MemoryAgent
-            from src.agents.oracle_agent import OracleAgent
-
-            try:
-                orchestrator = DecisionOrchestrator(league="NCAAM", model_version="agent_v1")
-                orchestrator.run_pipeline(
-                    event_ops_agent=EventOpsAgent(),
-                    market_data_agent=MarketDataAgent(),
-                    pricing_agent=PricingAgentNCAAM(),
-                    edge_ev_agent=EdgeEVAgent(),
-                    risk_manager_agent=RiskManagerAgent(),
-                    bet_builder_agent=BetBuilderAgent(),
-                    research_agent=ResearchAgent(),
-                    memory_agent=MemoryAgent(),
-                    oracle_agent=OracleAgent(),
-                    journal_agent=JournalAgent(),
-                    parameters={"mode": "manual_trigger", "date": date}
-                )
-                print(f"[JOB SUCCESS] DecisionOrchestrator completed for date={date or 'today'}")
-                return {
-                    "status": "success",
-                    "message": "Full Agent Orchestrator job completed."
-                }
-            except Exception as e:
-                print(f"[JOB ERROR] DecisionOrchestrator failed: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
-
-        else:
-            from src.scripts.run_council_today import main as run_council
-            
-            try:
-                run_council()
-                print(f"[JOB SUCCESS] Agent Council completed for date={date or 'today'}")
-                return {
-                    "status": "success",
-                    "message": "Agent Council job completed."
-                }
-            except Exception as e:
-                print(f"[JOB ERROR] run_council_today failed: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        print(f"[JOB ERROR] run_council_today failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-    """Cron/manual: grade model_predictions using local game_results.
-
-    Default mode is **fast/bounded** to avoid Vercel function timeouts.
-
-    Params:
-    - fast: if true, uses bounded defaults
-    - backfill_days: results/CLV lookback window
-    - max_clv_rows: max CLV updates per run
-    - max_grade_rows: max outcome grades per run
-    - skip_clv: skip CLV step (outcome-only)
-    """
-    try:
-        from src.services.grading_service import GradingService
-        svc = GradingService()
-        if fast:
-            res = svc.grade_predictions(backfill_days=backfill_days, max_clv_rows=max_clv_rows, max_grade_rows=max_grade_rows, skip_clv=skip_clv)
-        else:
-            # Unbounded legacy behavior (use carefully)
-            res = svc.grade_predictions(backfill_days=10, max_clv_rows=2000, max_grade_rows=5000, skip_clv=skip_clv)
-        return {
-            "status": "success",
-            "message": "Prediction grading completed",
-            "results": res
-        }
-    except Exception as e:
-        print(f"[JOB ERROR] Prediction grading failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/reports/model-health")
 async def get_model_health_report(request: Request):
@@ -5807,74 +5707,6 @@ def get_performance_reports(date: Optional[str] = None):
             mapped['summary'] = json.loads(r['summary_json'])
             reports.append(mapped)
         return reports
-
-@app.get("/api/v1/council")
-def get_council_debate(event_id: Optional[str] = None):
-    """Fetches the latest Agent Council debate and Oracle prediction for a specific game."""
-    if not event_id:
-        return {"status": "error", "message": "event_id query parameter is required."}
-    from src.database import get_db_connection, _exec
-    import json
-    with get_db_connection() as conn:
-        # Search the latest decision run that includes narrative for this event.
-        # Since council_narrative is a JSON object keyed by event_id, we can check if that key exists.
-        query = """
-        SELECT run_id, council_narrative->%s AS narrative
-        FROM decision_runs
-        WHERE jsonb_exists(council_narrative, %s)
-        ORDER BY created_at DESC LIMIT 1
-        """
-        row = _exec(conn, query, (event_id, event_id)).fetchone()
-
-        run_id = None
-        narrative = None
-        if row is not None:
-            try:
-                run_id = row.get('run_id')
-                narrative = row.get('narrative')
-            except Exception:
-                try:
-                    run_id = row[0]
-                    narrative = row[1]
-                except Exception:
-                    pass
-
-        if narrative:
-            try:
-                if isinstance(narrative, str):
-                    narrative = json.loads(narrative)
-                
-                # Fetch traces for this run
-                traces = []
-                if run_id:
-                    trace_query = "SELECT agent_name, task_description, details, timestamp FROM agent_traces WHERE run_id = %s ORDER BY timestamp ASC"
-                    trace_rows = _exec(conn, trace_query, (run_id,)).fetchall()
-                    for t in trace_rows:
-                        item = dict(t)
-                        if item.get('details') and isinstance(item['details'], str):
-                            item['details'] = json.loads(item['details'])
-                        item['timestamp'] = item['timestamp'].isoformat() if hasattr(item['timestamp'], 'isoformat') else str(item['timestamp'])
-                        traces.append(item)
-                
-                return {
-                    "status": "success", 
-                    "data": {
-                        "narrative": narrative,
-                        "traces": traces
-                    }
-                }
-            except Exception as e:
-                return {"status": "error", "message": f"Failed to parse council data: {e}"}
-                
-        return {"status": "error", "message": "No council debate found for this event."}
-
-@app.get("/api/v1/council/memories")
-def get_agent_memories(limit: int = 10):
-    """Fetches recent lessons learned by the agents for display in the UI."""
-    from src.database import get_db_connection, _exec
-    with get_db_connection() as conn:
-        rows = _exec(conn, "SELECT id, team_a, team_b, context, lesson, timestamp FROM agent_memories ORDER BY timestamp DESC LIMIT %s", (limit,)).fetchall()
-        return {"status": "success", "data": [dict(r) for r in rows]}
 
 
 def _dk_queue_auth(request: Request) -> bool:

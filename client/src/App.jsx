@@ -9,7 +9,6 @@ import { TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, DollarSign, Act
 import Research from './pages/Research';
 import Picks from './pages/Picks';
 import Bankroll from './pages/Bankroll';
-import AgentCouncil from './pages/AgentCouncil';
 import MarchMadness from './pages/MarchMadness';
 import MLB from './pages/MLB';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
@@ -473,14 +472,6 @@ function App() {
                                 </button>
                                 {/* Bankroll moved under Actuals */}
                                 <button
-                                    onClick={() => setPage('council')}
-                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'council' ? 'bg-blue-900/40 text-blue-100 shadow-sm ring-1 ring-blue-500/50' : 'text-blue-400/70 hover:text-blue-200 hover:bg-blue-900/20'}`}
-                                >
-                                    <Search size={18} />
-                                    <span className="hidden sm:inline">Agent Council</span>
-                                    <span className="sm:hidden">Council</span>
-                                </button>
-                                <button
                                     onClick={() => setPage('march')}
                                     className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'march' ? 'bg-orange-600/80 text-white shadow-sm ring-1 ring-orange-400/30' : 'text-orange-400/70 hover:text-orange-200 hover:bg-orange-900/20'}`}
                                 >
@@ -612,8 +603,6 @@ function App() {
                         />
                     ) : page === 'model' ? (
                         <Picks />
-                    ) : page === 'council' ? (
-                        <AgentCouncil />
                     ) : page === 'march' ? (
                         <MarchMadness />
                     ) : page === 'mlb' ? (
