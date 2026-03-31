@@ -18,8 +18,8 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
     const [error, setError] = useState(null);
 
     // (Balances removed from this page; tracked in Performance)
-    // Research tab focuses on board-backed leagues
-    const [leagueFilter, setLeagueFilter] = useState('NCAAM');
+    // Research tab focuses on board-backed leagues (transitioned to MLB for the new season)
+    const [leagueFilter, setLeagueFilter] = useState('MLB');
     // Date Filtering
     // Always drive date selection in America/New_York so it matches backend queries.
     const getTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -83,7 +83,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
 
         try {
             // Fetch board
-            const [boardRes, topPicksRes, healthRes, matchupRes] = await Promise.all([
+            const [boardRes, topPicksRes, healthRes, matchupRes, mlbRes] = await Promise.all([
                 api.get('/api/board', { params: boardParams }),
                 (leagueFilter === 'NCAAM'
                     ? api.get('/api/ncaam/top-picks', { params: topPicksParams })
@@ -96,6 +96,11 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                     ? api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate } })
                         .catch((e) => ({ data: { matchups: [] } }))
                     : Promise.resolve({ data: { matchups: [] } })
+                ),
+                (leagueFilter === 'MLB'
+                    ? api.get('/api/mlb/predictions', { params: { lookback_days: BOARD_DAYS_DEFAULT } })
+                        .catch((e) => ({ data: { predictions: [] } }))
+                    : Promise.resolve({ data: { predictions: [] } })
                 )
             ]);
 
@@ -124,19 +129,19 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                 } catch (e) { }
 
                 const tp = topPicksRes?.data?.picks || null;
-                if (tp && typeof tp === 'object') {
-                    const mapped = {};
-                    const mappedByKey = {};
+                const mapped = {};
+                const mappedByKey = {};
 
-                    const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
-                    const makeKey = (dayEt, away, home) => {
-                        const d = String(dayEt || '').slice(0, 10);
-                        const a = norm(away);
-                        const h = norm(home);
-                        if (!d || !a || !h) return null;
-                        return `${d}|${a}|${h}`;
-                    };
+                const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+                const makeKey = (dayEt, away, home) => {
+                    const d = String(dayEt || '').slice(0, 10);
+                    const a = norm(away);
+                    const h = norm(home);
+                    if (!d || !a || !h) return null;
+                    return `${d}|${a}|${h}`;
+                };
 
+                if (leagueFilter === 'NCAAM' && tp && typeof tp === 'object') {
                     Object.keys(tp).forEach((eid) => {
                         const recObj = {
                             rec: tp[eid]?.rec,
@@ -155,9 +160,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                         if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
                     });
 
-                    setRowTopPicks(mapped);
-                    setRowTopPicksByKey(mappedByKey);
-
                     const nGames = Object.keys(tp).length;
                     const vals = Object.values(tp);
                     const nWith = vals.filter((x) => x && x.rec).length;
@@ -172,14 +174,82 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                         server: serverStats || null,
                         errors: topPicksRes?.data?.errors || [],
                     });
-                    // Default board sub-tab to "Recommended" if we have at least one pick.
-                    if (Object.keys(mapped).length > 0) {
-                        setBoardTab('recommended');
-                    }
+                } else if (leagueFilter === 'MLB' && mlbRes?.data?.predictions) {
+                    const preds = mlbRes.data.predictions || [];
+                    
+                    // Deduplicate predictions: only keep the newest prediction per game + market
+                    const latestPredsMap = new Map();
+                    preds.forEach(p => {
+                        const key = `${p.away_team || ''}_${p.home_team || ''}_${(p.market_type || '').toUpperCase()}`;
+                        if (!latestPredsMap.has(key)) {
+                            latestPredsMap.set(key, p);
+                        } else {
+                            const existing = latestPredsMap.get(key);
+                            const existingTime = existing.analyzed_at ? new Date(existing.analyzed_at).getTime() : 0;
+                            const newTime = p.analyzed_at ? new Date(p.analyzed_at).getTime() : 0;
+                            if (newTime > existingTime) {
+                                latestPredsMap.set(key, p);
+                            }
+                        }
+                    });
+                    
+                    const deduplicatedPreds = Array.from(latestPredsMap.values());
+                    
+                    let actionableCount = 0;
+                    deduplicatedPreds.forEach((p) => {
+                        // Create a fake event ID so it renders in the board rows natively
+                        const fakeEid = `mlb-${p.id}`;
+                        const confVal = Number(p.confidence_0_100 || 0);
+                        const confLabel = confVal >= 75 ? 'HIGH' : confVal >= 50 ? 'MEDIUM' : 'LOW';
+                        
+                        // Treat the prediction as actionable if it has an EV advantage
+                        const isActionable = true;
+                        if (isActionable) actionableCount++;
+
+                        const recObj = {
+                            rec: {
+                                bet_type: String(p.market_type || 'MONEYLINE').toUpperCase(),
+                                selection: p.selection,
+                                market_line: null, 
+                                price: null, // the frontend falls back gracefully
+                                confidence: confLabel,
+                                edge: `${(Number(p.ev_per_unit || 0) * 100).toFixed(1)}%`
+                            },
+                            analyzedAt: p.analyzed_at,
+                            isActionable: isActionable,
+                            reason: 'MLB Core Model',
+                            source: 'MLB Analytics',
+                            event: {
+                                home_team: p.home_team || 'Home',
+                                away_team: p.away_team || 'Away',
+                                start_time: p.analyzed_at, 
+                                day_et: p.day_et,
+                                sport: 'MLB'
+                            }
+                        };
+                        mapped[fakeEid] = recObj;
+                        const k = makeKey(p.day_et, p.away_team, p.home_team);
+                        if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
+                    });
+                    
+                    setTopPicksStats({
+                        games: deduplicatedPreds.length,
+                        withPick: deduplicatedPreds.length,
+                        actionable: actionableCount,
+                        noBet: 0,
+                        server: null,
+                        errors: [],
+                    });
                 } else {
-                    setRowTopPicks({});
-                    setRowTopPicksByKey({});
                     setTopPicksStats({ games: 0, withPick: 0, server: null, errors: [] });
+                }
+
+                setRowTopPicks(mapped);
+                setRowTopPicksByKey(mappedByKey);
+
+                // Default board sub-tab to "Recommended" if we have at least one pick.
+                if (Object.keys(mapped).length > 0) {
+                    setBoardTab('recommended');
                 }
             } catch (e) { }
 
@@ -862,7 +932,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                         away_team: ev?.away_team || '',
                                                         start_time: ev?.start_time || null,
                                                         day_et: ev?.day_et || selectedDate,
-                                                        sport: 'NCAAM',
+                                                        sport: ev?.sport || 'NCAAM',
                                                     };
                                                     return { edge, top: meta.rec, meta };
                                                 })
@@ -915,8 +985,8 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                             <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
                                                                 <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
                                                                     <div className="flex items-center gap-2">
-                                                                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black">{i + 1}</span>
-                                                                        <span className="text-xs font-bold text-slate-300">NCAAM Pick</span>
+                                                                        <span className={`flex items-center justify-center w-5 h-5 rounded-full ${edge.sport === 'MLB' ? 'bg-teal-500' : 'bg-emerald-500'} text-slate-950 text-[10px] font-black`}>{i + 1}</span>
+                                                                        <span className="text-xs font-bold text-slate-300">{edge.sport} Pick</span>
                                                                     </div>
                                                                     <div className="flex items-center gap-1 bg-green-500/10 px-2 py-1 rounded-md border border-green-500/20">
                                                                         <TrendingUp size={12} className="text-green-400" />
@@ -954,12 +1024,14 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                                     >
                                                                         Add
                                                                     </button>
-                                                                    <button
-                                                                        onClick={() => analyzeGame(edge)}
-                                                                        className="flex-1 py-1.5 rounded-lg bg-slate-800/40 hover:bg-slate-700/40 text-slate-300 text-[10px] font-black border border-slate-700/50 transition-colors uppercase tracking-widest"
-                                                                    >
-                                                                        Details
-                                                                    </button>
+                                                                    {edge.sport === 'NCAAM' && (
+                                                                        <button
+                                                                            onClick={() => analyzeGame(edge)}
+                                                                            className="flex-1 py-1.5 rounded-lg bg-slate-800/40 hover:bg-slate-700/40 text-slate-300 text-[10px] font-black border border-slate-700/50 transition-colors uppercase tracking-widest"
+                                                                        >
+                                                                            Details
+                                                                        </button>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         );
@@ -1196,12 +1268,14 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                                                         >
                                                                                             Add
                                                                                         </button>
-                                                                                        <button
-                                                                                            onClick={() => analyzeGame(edge)}
-                                                                                            className="px-3 py-1 bg-slate-800/60 text-slate-200 hover:bg-slate-800 border border-slate-700 rounded text-xs font-bold transition-colors"
-                                                                                        >
-                                                                                            Details
-                                                                                        </button>
+                                                                                        {edge.sport === 'NCAAM' && (
+                                                                                            <button
+                                                                                                onClick={() => analyzeGame(edge)}
+                                                                                                className="px-3 py-1 bg-slate-800/60 text-slate-200 hover:bg-slate-800 border border-slate-700 rounded text-xs font-bold transition-colors"
+                                                                                            >
+                                                                                                Details
+                                                                                            </button>
+                                                                                        )}
                                                                                     </div>
                                                                                 </div>
                                                                             );
