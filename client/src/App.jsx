@@ -9,9 +9,6 @@ import { TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, DollarSign, Act
 import Research from './pages/Research';
 import Picks from './pages/Picks';
 import Bankroll from './pages/Bankroll';
-import AgentCouncil from './pages/AgentCouncil';
-import MarchMadness from './pages/MarchMadness';
-import MLB from './pages/MLB';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
 import TransactionView from './components/TransactionView';
 import ManualAddBetModal from './components/ManualAddBetModal';
@@ -472,30 +469,6 @@ function App() {
                                     <span className="sm:hidden">Actuals</span>
                                 </button>
                                 {/* Bankroll moved under Actuals */}
-                                <button
-                                    onClick={() => setPage('council')}
-                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'council' ? 'bg-blue-900/40 text-blue-100 shadow-sm ring-1 ring-blue-500/50' : 'text-blue-400/70 hover:text-blue-200 hover:bg-blue-900/20'}`}
-                                >
-                                    <Search size={18} />
-                                    <span className="hidden sm:inline">Agent Council</span>
-                                    <span className="sm:hidden">Council</span>
-                                </button>
-                                <button
-                                    onClick={() => setPage('march')}
-                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'march' ? 'bg-orange-600/80 text-white shadow-sm ring-1 ring-orange-400/30' : 'text-orange-400/70 hover:text-orange-200 hover:bg-orange-900/20'}`}
-                                >
-                                    <span className="text-[16px]">🏀</span>
-                                    <span className="hidden sm:inline">March Madness</span>
-                                    <span className="sm:hidden">March Madness</span>
-                                </button>
-                                <button
-                                    onClick={() => setPage('mlb')}
-                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'mlb' ? 'bg-teal-700/60 text-white shadow-sm ring-1 ring-teal-400/30' : 'text-teal-400/70 hover:text-teal-200 hover:bg-teal-900/20'}`}
-                                >
-                                    <span className="text-[16px]">⚾</span>
-                                    <span className="hidden sm:inline">MLB</span>
-                                    <span className="sm:hidden">MLB</span>
-                                </button>
                             </div>
 
                             <button
@@ -612,12 +585,6 @@ function App() {
                         />
                     ) : page === 'model' ? (
                         <Picks />
-                    ) : page === 'council' ? (
-                        <AgentCouncil />
-                    ) : page === 'march' ? (
-                        <MarchMadness />
-                    ) : page === 'mlb' ? (
-                        <MLB />
                     ) : (
                         <>
                             {actualsTab === 'transactions' ? (
