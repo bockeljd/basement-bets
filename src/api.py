@@ -5228,12 +5228,12 @@ async def trigger_run_mlb_predictions(
                     "confidence_0_100": confidence_int,
                     "rank": i + 1,
                     "inputs_json": json.dumps({
-                        "home_sp": result.get("pitching_matchup", {}).get("home_sp", {}).get("name"),
-                        "away_sp": result.get("pitching_matchup", {}).get("away_sp", {}).get("name"),
-                        "park_factor": result.get("context", {}).get("park_factor_runs"),
-                        "weather": result.get("context", {}).get("weather", {}).get("impact_summary"),
-                        "proj_total": result.get("projections", {}).get("total_runs"),
-                        "market_total": result.get("market", {}).get("total"),
+                        "home_sp": (result.get("pitching_matchup") or {}).get("home_sp", {}).get("name"),
+                        "away_sp": (result.get("pitching_matchup") or {}).get("away_sp", {}).get("name"),
+                        "park_factor": (result.get("context") or {}).get("park_factor_runs"),
+                        "weather": ((result.get("context") or {}).get("weather") or {}).get("impact_summary"),
+                        "proj_total": (result.get("projections") or {}).get("total_runs"),
+                        "market_total": (result.get("market") or {}).get("total"),
                     }),
                     "outputs_json": json.dumps({
                         "fair_spread": result.get("model", {}).get("fair_spread"),
@@ -5245,8 +5245,8 @@ async def trigger_run_mlb_predictions(
                     "narrative_json": json.dumps({
                         "headline": result.get("headline"),
                         "pitching_matchup": {
-                            "home": result.get("pitching_matchup", {}).get("home_sp", {}).get("name"),
-                            "away": result.get("pitching_matchup", {}).get("away_sp", {}).get("name"),
+                            "home": (result.get("pitching_matchup") or {}).get("home_sp", {}).get("name"),
+                            "away": (result.get("pitching_matchup") or {}).get("away_sp", {}).get("name"),
                         },
                         "context": result.get("context", {}),
                     }),

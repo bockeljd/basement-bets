@@ -1,0 +1,31 @@
+name: MLB Daily Predictions
+
+on:
+  schedule:
+    # 15:00 UTC is ~11:00 AM ET (or 10:00 AM ET during EDT)
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: mlb-daily-jobs
+  cancel-in-progress: true
+
+jobs:
+  run-mlb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Trigger MLB Predictions
+        env:
+          BASEMENT_BETS_URL: ${{ secrets.BASEMENT_BETS_URL }}
+          BASEMENT_CRON_SECRET: ${{ secrets.BASEMENT_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          url="${BASEMENT_BETS_URL%/}/api/jobs/run_mlb_predictions"
+
+          echo "Triggering MLB Predictions: ${url}"
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${BASEMENT_CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --fail-with-body "${url}"
