@@ -2238,7 +2238,7 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
         raise HTTPException(status_code=400, detail="league is required")
 
     league = league.upper().strip()
-    if league not in {"NCAAM", "NFL", "EPL"}:
+    if league not in {"NCAAM", "NFL", "EPL", "MLB"}:
         raise HTTPException(status_code=400, detail=f"Unsupported league: {league}")
 
     if not date:

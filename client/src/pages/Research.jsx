@@ -18,8 +18,8 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
     const [error, setError] = useState(null);
 
     // (Balances removed from this page; tracked in Performance)
-    // Research tab focuses on board-backed leagues (transitioned to MLB for the new season)
-    const [leagueFilter, setLeagueFilter] = useState('MLB');
+    // Research tab focuses on board-backed leagues
+    const [leagueFilter, setLeagueFilter] = useState('NCAAM');
     // Date Filtering
     // Always drive date selection in America/New_York so it matches backend queries.
     const getTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
