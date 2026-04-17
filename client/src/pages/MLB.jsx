@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/axios';
-import { RefreshCw, Activity, BarChart3, TrendingUp, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { RefreshCw, Activity, BarChart3, TrendingUp, ArrowUpDown, ChevronUp, ChevronDown, CheckCircle } from 'lucide-react';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, Cell, LabelList
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, Cell, LabelList, LineChart, Line as ReLine
 } from 'recharts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -15,6 +15,22 @@ const fmtOdds = (v) => {
 };
 const fmtPct = (v, digits = 1) => (v === null || v === undefined ? '—' : `${(Number(v) * 100).toFixed(digits)}%`);
 const fmtRun = (v, digits = 1) => (v === null || v === undefined ? '—' : Number(v).toFixed(digits));
+
+// ROI Math
+const payoutPerUnitFromAmericanOdds = (price) => {
+  const p = parseFloat(price);
+  if (isNaN(p)) return 0.90909; 
+  if (p === 0) return 1.0;
+  if (p > 0) return p / 100;
+  return 100 / Math.abs(p);
+};
+
+const roiPerUnit = (outcome, price) => {
+  const o = String(outcome || '').toUpperCase();
+  if (o === 'WON' || o === 'WIN') return payoutPerUnitFromAmericanOdds(price);
+  if (o === 'LOST' || o === 'LOSS') return -1.0;
+  return 0.0;
+};
 
 const OUTCOME_STYLE = {
   WON: 'text-emerald-400 font-black',
@@ -117,6 +133,8 @@ function PredictionRow({ pred, idx }) {
   const ev = Number(pred.ev_per_unit || pred.ev || 0);
   const conf = Number(pred.confidence_0_100 || 0);
   const confLabel = conf >= 75 ? 'HIGH' : conf >= 50 ? 'MEDIUM' : 'LOW';
+  
+  const profit = roiPerUnit(pred.graded_result || pred.outcome || pred.result, pred.bet_line || pred.market_line || pred.odds);
 
   // Parse narrative_json for pitching matchup
   let narrative = {};
@@ -154,6 +172,9 @@ function PredictionRow({ pred, idx }) {
         <span className={`text-xs font-black ${CONFIDENCE_COLOR[confLabel] || 'text-slate-400'}`}>{confLabel}</span>
       </td>
       <td className={`py-3 px-4 text-xs ${outCls}`}>{outcome}</td>
+      <td className={`py-3 px-4 text-xs font-mono font-bold ${profit > 0 ? 'text-emerald-400' : profit < 0 ? 'text-red-400' : 'text-slate-500'}`}>
+        {outcome === 'PENDING' ? '—' : (profit > 0 ? `+${profit.toFixed(2)}` : profit.toFixed(2))}
+      </td>
       <td className="py-3 px-4 text-[10px] text-slate-500 max-w-[200px]">
         {inputs.weather || '—'}
       </td>
@@ -168,6 +189,7 @@ export default function MLB() {
   const [predictions, setPredictions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isGrading, setIsGrading] = useState(false);
   const [err, setErr] = useState(null);
   const [activeTab, setActiveTab] = useState('today'); // today | history
   const [sortConfig, setSortConfig] = useState({ key: 'analyzed_at', direction: 'desc' });
@@ -202,6 +224,18 @@ export default function MLB() {
     }
   };
 
+  const gradeResults = async () => {
+    setIsGrading(true);
+    try {
+      await api.post('/api/research/grade');
+      await load();
+    } catch (e) {
+      setErr(e?.response?.data?.detail || 'Failed to grade results');
+    } finally {
+      setIsGrading(false);
+    }
+  };
+
   useEffect(() => { load(); }, []);
 
   const games = slate?.games || [];
@@ -232,9 +266,15 @@ export default function MLB() {
     const wins = graded.filter(p => ['WON', 'WIN'].includes(String(p.graded_result || p.outcome || p.result || '').toUpperCase())).length;
     const losses = graded.filter(p => ['LOST', 'LOSS'].includes(String(p.graded_result || p.outcome || p.result || '').toUpperCase())).length;
     const pushes = graded.filter(p => String(p.graded_result || p.outcome || p.result || '').toUpperCase() === 'PUSH').length;
+    
+    // Calculate total profit
+    const netUnits = predictions.reduce((acc, p) => acc + roiPerUnit(p.graded_result || p.outcome || p.result, p.bet_line || p.market_line || p.odds), 0);
+    
     const decided = wins + losses;
     const winRate = decided > 0 ? (wins / decided) * 100 : null;
-    return { wins, losses, pushes, decided, winRate, total: predictions.length };
+    const roi = decided > 0 ? (netUnits / decided) * 100 : null;
+    
+    return { wins, losses, pushes, decided, winRate, netUnits, roi, total: predictions.length };
   }, [predictions]);
 
   // Market breakdown chart
@@ -288,6 +328,18 @@ export default function MLB() {
             Refresh
           </button>
           <button
+            onClick={gradeResults}
+            disabled={isGrading || loading}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center gap-2 ${
+              isGrading 
+                ? 'bg-slate-800 text-slate-500 border border-slate-700/40' 
+                : 'bg-blue-600/20 hover:bg-blue-600/30 border border-blue-600/30 text-blue-300'
+            }`}
+          >
+            <CheckCircle size={15} className={isGrading ? 'animate-pulse' : ''} />
+            {isGrading ? 'Grading…' : 'Grade Recent Results'}
+          </button>
+          <button
             onClick={runModel}
             disabled={isRunning}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-2 ${
@@ -321,9 +373,16 @@ export default function MLB() {
           accent={recordStats.winRate !== null ? (recordStats.winRate >= 52.4 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-400'}
         />
         <StatTile
-          label="Today's Games"
-          value={totalGames}
-          sub={`${gamesWithOdds} with odds`}
+          label="Profit (Units)"
+          value={recordStats.decided > 0 ? (recordStats.netUnits > 0 ? `+${recordStats.netUnits.toFixed(2)}` : recordStats.netUnits.toFixed(2)) : '—'}
+          sub={`${recordStats.decided} decided picks`}
+          accent={recordStats.netUnits > 0 ? 'text-emerald-400' : recordStats.netUnits < 0 ? 'text-red-400' : 'text-slate-400'}
+        />
+        <StatTile
+          label="ROI %"
+          value={recordStats.roi !== null ? `${recordStats.roi.toFixed(1)}%` : '—'}
+          sub="per unit wagered"
+          accent={recordStats.roi > 0 ? 'text-emerald-400' : recordStats.roi < 0 ? 'text-red-400' : 'text-slate-400'}
         />
         <StatTile
           label="Today's Picks"
@@ -470,6 +529,7 @@ export default function MLB() {
                       { key: 'ev_per_unit', label: 'EV' },
                       { key: 'confidence_0_100', label: 'Conf' },
                       { key: 'graded_result', label: 'Result' },
+                      { key: null, label: 'Profit' },
                       { key: null, label: 'Context' },
                     ].map((col, i) => (
                       <th
