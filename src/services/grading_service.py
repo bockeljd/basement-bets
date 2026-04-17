@@ -176,36 +176,32 @@ class GradingService:
 
             print(f"[GRADING] Upserted {count} NCAAM finals from Action Network v2")
 
-        # --- MLB: Ingest from MLB Stats API ---
+        # --- MLB: Ingest from Action Network (Aligns IDs with Predictions) ---
         if league == 'MLB':
             try:
-                from src.services.mlb_service import MLBService
-                mlb_svc = MLBService()
-
-                backfill_days_mlb = int(os.getenv('GRADING_FINALS_BACKFILL_DAYS', '3'))
+                from src.action_network import get_todays_games
                 mlb_count = 0
-
-                for d in range(0, backfill_days_mlb + 1):
-                    dt = datetime.now() - timedelta(days=d)
-                    date_str = dt.strftime("%Y-%m-%d")
-                    finals = mlb_svc.get_final_scores(date_str)
-
-                    for g in finals:
-                        event_id = f"action:mlb:{g.get('game_pk', '')}"
+                
+                # Fetch multiple days to catch late games or doubleheaders
+                for date_str in dates:
+                    print(f"[GRADING] Fetching MLB scores from Action Network for {date_str}...")
+                    games = get_todays_games('mlb', [date_str])
+                    
+                    for g in games:
+                        # Extract the outcome data
+                        event_id = f"action:mlb:{g.get('id')}"
                         h_score = g.get('home_score')
                         a_score = g.get('away_score')
+                        status = (g.get('status') or '').lower()
+                        
+                        # Only ingest if it's finished
+                        if status not in ('complete', 'completed', 'final'):
+                            continue
+                            
                         if h_score is None or a_score is None:
                             continue
 
-                        # Store 1st-inning data for NRFI grading
-                        linescore = g.get('linescore', {})
-                        innings = linescore.get('innings', [])
-                        first_inn_away = 0
-                        first_inn_home = 0
-                        if innings:
-                            first_inn_away = innings[0].get('away', {}).get('runs', 0) or 0
-                            first_inn_home = innings[0].get('home', {}).get('runs', 0) or 0
-
+                        # Upsert the result using the Action Network ID
                         upsert_game_result({
                             "event_id": event_id,
                             "home_score": int(h_score),
@@ -214,10 +210,10 @@ class GradingService:
                             "period": "FINAL",
                         })
                         mlb_count += 1
-
-                print(f"[GRADING] Upserted {mlb_count} MLB finals from MLB Stats API")
+                        
+                print(f"[GRADING] Upserted {mlb_count} MLB finals from Action Network")
             except Exception as e:
-                print(f"[GRADING] MLB score ingestion error: {e}")
+                print(f"[GRADING] MLB Action Network ingestion error: {e}")
 
         # 2) ESPN fallback (DISABLED)
         return
@@ -498,6 +494,24 @@ class GradingService:
                 if 'mlb:' in str(event_id):
                     parts = str(event_id).split(':')
                     game_pk = parts[-1] if parts else None
+
+                if not game_pk or not str(game_pk).isdigit() or len(str(game_pk)) < 5:
+                    # Resolve game_pk via team matching
+                    from src.services.mlb_service import MLBService
+                    mlb_svc = MLBService()
+                    # Use the start_time from the row
+                    start_time = row.get('start_time')
+                    if start_time:
+                        date_str = start_time.strftime("%Y-%m-%d")
+                        schedule = mlb_svc.get_schedule(date_str)
+                        home_norm = standardize_team_name(str(row.get('home_team', ''))).lower()
+                        away_norm = standardize_team_name(str(row.get('away_team', ''))).lower()
+                        for g in schedule:
+                            g_home = standardize_team_name(g.get('home_team', '')).lower()
+                            g_away = standardize_team_name(g.get('away_team', '')).lower()
+                            if (home_norm in g_home or g_home in home_norm) and (away_norm in g_away or g_away in away_norm):
+                                game_pk = g.get('game_pk')
+                                break
 
                 if game_pk:
                     from src.services.mlb_service import MLBService
