@@ -8,6 +8,9 @@ import {
   normalizeOutcome, isGradedOutcome, isWinOutcome, isLossOutcome,
   toEtDay, getPerformanceDay, roiPerUnit, getNumericConfidence, getConfidenceBucket
 } from '../utils/modelPerformance';
+import { getCurrentEtYear } from '../utils/ncaamSeason';
+
+const CURRENT_ET_YEAR = getCurrentEtYear();
 
 export default function Picks() {
   const [history, setHistory] = useState([]);
@@ -35,7 +38,7 @@ export default function Picks() {
     setErr(null);
     try {
       // Primary source: recommended model history (all leagues)
-      // Pull enough lookback to include all 2026 YTD.
+      // Pull enough lookback to include full YTD performance.
       const res = await api.get('/api/research/history', { params: { limit: 20000, lookback_days: 400 } });
       let rows = res.data || [];
 
@@ -190,7 +193,8 @@ export default function Picks() {
 
   const top6RankPerformance = useMemo(() => {
     // Compute win% by rank for the daily Top 6 recommended picks (ranked by EV/u).
-    // Only include 2026 YTD.
+    // Filter to current ET calendar year YTD.
+    const currentEtYearPrefix = `${CURRENT_ET_YEAR}-`;
     const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
     const isW = (r) => r === 'WON' || r === 'WIN';
     const isL = (r) => r === 'LOST' || r === 'LOSS';
@@ -217,7 +221,7 @@ export default function Picks() {
     (graded || []).forEach((h) => {
       const day = ymd(h);
       if (!day) return;
-      if (!String(day).startsWith('2026-')) return;
+      if (!String(day).startsWith(currentEtYearPrefix)) return;
       const res = h.graded_result || h.outcome || h.result;
       if (!isGradedOutcome(res)) return;
       const e = ev(h);
@@ -712,7 +716,7 @@ export default function Picks() {
         {/* Top 6 recommended: win% by rank */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-end justify-between gap-3 mb-2">
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 6 recommended (2026 YTD) — win% by rank</div>
+            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 6 recommended ({CURRENT_ET_YEAR} YTD) — win% by rank</div>
             <div className="text-[11px] text-slate-500">Avg: {top6RankPerformance?.avg !== null && top6RankPerformance?.avg !== undefined ? `${top6RankPerformance.avg.toFixed(1)}%` : '—'}</div>
           </div>
           <div className="h-[220px]">

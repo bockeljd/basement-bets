@@ -122,7 +122,7 @@ class DataQualityAgent(BaseAgent):
 
                         init_bt_team_metrics_db()
                         client = BartTorvikClient()
-                        client.get_efficiency_ratings(year=2026)
+                        client.get_efficiency_ratings()
                         actions_taken.append('ingest_torvik')
                     except Exception as e:
                         actions_recommended.append(f"Torvik ingest failed: {e}")

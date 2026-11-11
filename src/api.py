@@ -77,11 +77,17 @@ async def check_access_key(request: Request, call_next):
             return await call_next(request)
 
         # Allow public diagnostic endpoints + read-only UI endpoints
+        from src.utils.ncaam_season import current_ncaam_season_end_year
+        active_bracket_year = current_ncaam_season_end_year()
         public_paths = {
             "/api/version",
             "/api/health",
             "/api/board",
             "/api/ncaam/top-picks",
+            "/api/ncaam/bracket/current",
+            "/api/ncaam/bracket/current/debug",
+            f"/api/ncaam/bracket/{active_bracket_year}",
+            f"/api/ncaam/bracket/{active_bracket_year}/debug",
             "/api/ncaam/bracket/2026",
             "/api/ncaam/bracket/2026/debug",
         }
@@ -122,33 +128,35 @@ def get_version():
 
 
 @app.get("/api/edge/ncaab/recommendations")
-def edge_ncaab_recommendations(date: Optional[str] = None, season: int = 2026):
+def edge_ncaab_recommendations(date: Optional[str] = None, season: Optional[int] = None):
     """On-demand NCAAB edge-engine recommendations.
 
     Secured by the same /api auth middleware.
 
     Query params:
       - date: YYYY-MM-DD (America/New_York). Defaults to today (ET).
-      - season: season_end_year (default 2026).
+      - season: season_end_year (defaults to current NCAAM season).
 
     Returns:
       { generated_at, date, season_end_year, config, picks[] }
     """
     from src.services.edge_engine_ncaab import recommend_for_date
     from src.database import get_db_connection, _exec
+    from src.utils.ncaam_season import current_ncaam_season_end_year
 
     if not date:
         with get_db_connection() as conn:
             date = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
 
+    default_season = current_ncaam_season_end_year()
     try:
         # Clamp/fallback season to avoid empty UI if an artifact isn't present on deploy.
         try:
-            season_i = int(season)
+            season_i = int(season) if season is not None else default_season
         except Exception:
-            season_i = 2026
+            season_i = default_season
         if season_i < 2026:
-            season_i = 2026
+            season_i = default_season
         return recommend_for_date(date_et=date, season_end_year=season_i)
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -2142,7 +2150,7 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
             
             init_bt_team_metrics_db()
             client = BartTorvikClient()
-            ratings = client.get_efficiency_ratings(year=2026)
+            ratings = client.get_efficiency_ratings()
             
             if ratings:
                 # Update State
@@ -3275,11 +3283,12 @@ async def get_tournament_teams(request: Request, limit: int = 80, generate: bool
             # Fetch seeds for the current tournament
             seeds_map = {}
             try:
+                from src.utils.ncaam_season import current_ncaam_season_short
                 srows = _exec(conn, """
                     SELECT team_name, seed, region
                     FROM ncaam_tournament_seeds
-                    WHERE season = '2025-26'
-                """).fetchall()
+                    WHERE season = %s
+                """, (current_ncaam_season_short(),)).fetchall()
                 from src.utils.naming import standardize_team_name
                 for sr in srows:
                     sn = standardize_team_name(sr['team_name'].split(' / ')[0].split(' - ')[0]) # Handle play-ins
@@ -5496,13 +5505,21 @@ async def debug_event_result(event_id: str, authorized: bool = Depends(verify_cr
         }
 
 
+def _correlation_cache_target(season: Optional[str] = None):
+    from src.utils.ncaam_season import format_ncaam_season_long, parse_ncaam_season_end_year
+
+    season_year = parse_ncaam_season_end_year(season)
+    season_long = format_ncaam_season_long(season_year)
+    return season_long, f"data/correlation_cache_{season_long.replace('-', '_')}.json"
+
+
 @app.get("/api/ncaam/correlations/summary")
-def get_correlation_summary(season: str = "2025-2026"):
+def get_correlation_summary(season: Optional[str] = None):
     """
     Returns the full correlation matrix (cached).
     """
     import json
-    cache_file = "data/correlation_cache_2025_2026.json"
+    season_long, cache_file = _correlation_cache_target(season)
     
     if os.path.exists(cache_file):
         with open(cache_file, "r") as f:
@@ -5515,7 +5532,7 @@ def get_correlation_summary(season: str = "2025-2026"):
     df = engine.build_archetype_bins(df)
     metrics = engine.compute_metrics(df)
     return {
-        "metadata": {"type": "live_compute", "season": season, "games_count": len(df)},
+        "metadata": {"type": "live_compute", "season": season_long, "games_count": len(df)},
         "archetypes": metrics
     }
 
@@ -5599,7 +5616,7 @@ def get_game_correlation(event_id: str):
     # For speed, load summary (or implement granular lookup)
     # Using Summary Endpoint Logic reuse
     import json
-    cache_file = "data/correlation_cache_2025_2026.json"
+    _, cache_file = _correlation_cache_target()
     correlations = None
     
     if os.path.exists(cache_file):

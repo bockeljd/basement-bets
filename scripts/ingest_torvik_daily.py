@@ -21,7 +21,7 @@ def main():
     #   upsert_team_metrics(metrics_payload) is called inside get_efficiency_ratings.
     # So we just need to call the method.
     
-    ratings = client.get_efficiency_ratings(year=2026)
+    ratings = client.get_efficiency_ratings()
     
     if ratings:
         print(f"[Ingest] Successfully ingested {len(ratings)} teams.")

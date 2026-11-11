@@ -1,16 +1,26 @@
 import json
+import os
 import ssl
+import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+from src.utils.ncaam_season import current_ncaam_season_end_year, current_ncaam_season_long
+
 API_URL = "https://basement-bets.vercel.app/api/ncaam/history"
 API_KEY = "Xavier"
 
-OUTPUT_PATH = Path("data/correlation_summary_2025_2026.json")
+_SEASON_YEAR = current_ncaam_season_end_year()
+_SEASON_RANGE = current_ncaam_season_long()
+OUTPUT_PATH = Path(f"data/correlation_summary_{_SEASON_RANGE.replace('-', '_')}.json")
 
-SEASON_START = datetime(2025, 10, 1)
-SEASON_END = datetime(2026, 6, 30, 23, 59, 59)
+SEASON_START = datetime(_SEASON_YEAR - 1, 10, 1)
+SEASON_END = datetime(_SEASON_YEAR, 6, 30, 23, 59, 59)
 
 
 def in_season(dt_str: str) -> bool:
@@ -104,7 +114,7 @@ def main():
 
     summary = {
         "total_analyzed": len(categorized),
-        "season_range": "2025-2026",
+        "season_range": _SEASON_RANGE,
         "metrics": {},
     }
 

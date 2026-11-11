@@ -15,6 +15,11 @@ except ImportError:
 
 from src.database import get_db_connection, _exec
 from src.services.kenpom_client import KenPomClient
+from src.utils.ncaam_season import (
+    current_ncaam_season_end_year,
+    current_ncaam_season_long,
+    current_ncaam_season_short,
+)
 
 class ProfileGeneratorService:
     """
@@ -96,9 +101,11 @@ class ProfileGeneratorService:
 
             row = _exec(conn, "SELECT profile_json, updated_at FROM ncaam_team_profiles WHERE team_name = %s", (team_name,)).fetchone()
             if row:
-                # Cache for 24 hours
+                # Cache for 24 hours within the active season
                 if (datetime.now() - row['updated_at']).total_seconds() < 86400:
-                    return row['profile_json']
+                    cached_profile = row['profile_json']
+                    if isinstance(cached_profile, dict) and cached_profile.get("season") == current_ncaam_season_short():
+                        return cached_profile
         return None
 
     def save_cached_profile(self, team_name: str, profile: dict):
@@ -127,6 +134,7 @@ class ProfileGeneratorService:
         
         # 3. Build Resume & Stats Block (Factual from DB)
         profile = {
+            "season": current_ncaam_season_short(),
             "team_name": raw_data["net"]["team_name"] if raw_data.get("net") else team_name,
             "kenpom_rank": raw_data["kenpom"]["rank"] if raw_data.get("kenpom") else None,
             "net": raw_data["net"]["rank"] if raw_data.get("net") else None,
@@ -157,14 +165,16 @@ class ProfileGeneratorService:
         # Pull real player stats if available (sorted by playing time/rank)
         real_players = []
         
-        # Load from our offline static master repo First (guarantees 2026 accuracy and 100% uptime)
-        try:
-            with open("data/static/master_rosters_2026.json", "r") as f:
-                master_data = json.load(f)
-                if team_name in master_data:
-                    real_players = master_data[team_name]
-        except Exception as e:
-            pass
+        # Only load static master rosters matching the active season so prior-season rosters never leak.
+        static_roster_path = f"data/static/master_rosters_{current_ncaam_season_end_year()}.json"
+        if os.path.exists(static_roster_path):
+            try:
+                with open(static_roster_path, "r") as f:
+                    master_data = json.load(f)
+                    if team_name in master_data:
+                        real_players = master_data[team_name]
+            except Exception:
+                pass
 
         if not real_players:
             import logging
@@ -187,14 +197,14 @@ class ProfileGeneratorService:
         prompt = f"""
         You are a sharp, analytical college basketball betting scout.
         
-        Season context: 2025-26 Season (Current)
+        Season context: {current_ncaam_season_short()} Season (Current)
         Team: {team_name}
         Current Profile: {json.dumps(profile["metrics"])}
         NET/Quads: {json.dumps(profile["resume"])}
         Available Real Player Stats: {json.dumps(real_players)}
         
         Task:
-        1. Process the 'Available Real Player Stats' for the EXCLUSIVE context of the 2025-26 season. For the top 6 players found, use their REAL names and metrics. Include their position, a completely factual current descriptive role for the 2025-2026 season, and factual current season per-game stats. If specific per-game stats are missing, estimate them based on their advanced profile, but KEEP NAMES FACTUAL.
+        1. Process the 'Available Real Player Stats' for the EXCLUSIVE context of the {current_ncaam_season_short()} season. For the top 6 players found, use their REAL names and metrics. Include their position, a completely factual current descriptive role for the {current_ncaam_season_long()} season, and factual current season per-game stats. If specific per-game stats are missing, estimate them based on their advanced profile, but KEEP NAMES FACTUAL.
         2. Generate a 'narrative' object containing a 2-sentence scout summary, an array of exactly 3 bullet points for 'offense' (e.g., scheme, pace, strengths), an array of exactly 3 bullet points for 'defense' (e.g., coverage type, rim protection), and a 1-sentence 'upsetFlags' highlighting an exact schematic vulnerability.
         
         Output MUST be pure JSON fitting this strict schema:
@@ -321,7 +331,7 @@ class ProfileGeneratorService:
         prompt = f"""
         You are a sharp, analytical college basketball betting scout.
         
-        Task: Provide a detailed, tactical head-to-head analysis between Team A ({team_a}) and Team B ({team_b}) for the 2025-26 season.
+        Task: Provide a detailed, tactical head-to-head analysis between Team A ({team_a}) and Team B ({team_b}) for the {current_ncaam_season_short()} season.
         
         Team A Profile: {json.dumps(profile_a.get('metrics', {}))} - NET: {profile_a.get('net')}
         Team A Tactics: {json.dumps(profile_a.get('narrative', {}))}

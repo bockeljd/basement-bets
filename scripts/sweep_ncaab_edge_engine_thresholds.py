@@ -170,8 +170,10 @@ def run_backtest_with_cache(day_cache, min_ev: float, max_units_day: int, max_un
 
 
 def main() -> int:
+    from src.utils.ncaam_season import current_ncaam_season_end_year
+
     ap = argparse.ArgumentParser()
-    ap.add_argument('--season', type=int, default=2026)
+    ap.add_argument('--season', type=int, default=current_ncaam_season_end_year())
     ap.add_argument('--steps', type=int, default=400)
     ap.add_argument('--lr', type=float, default=0.05)
     ap.add_argument('--l2', type=float, default=0.5)

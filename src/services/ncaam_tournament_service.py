@@ -312,7 +312,8 @@ class NCAAMTournamentPredictionService:
         self,
         seeds: Dict[str, List[Dict[str, Any]]],
         simulations: int = 2500,
-        locked_matchups: Optional[List[Dict[str, Any]]] = None
+        locked_matchups: Optional[List[Dict[str, Any]]] = None,
+        season: Optional[str] = None,
     ) -> TournamentBracketSimulation:
         """
         High-performance bracket simulation.
@@ -702,8 +703,12 @@ class NCAAMTournamentPredictionService:
             "champion": most_likely_champion or champion_det,
         }
 
+        if season is None:
+            from src.utils.ncaam_season import current_ncaam_season_short
+            season = current_ncaam_season_short()
+
         return TournamentBracketSimulation(
-            season="2025-26",
+            season=season,
             simulated_at=datetime.now().isoformat(),
             model_version="tournament_ensemble_v1",
             regions=det_regions,

@@ -8,6 +8,7 @@ data/snapshots/
 !package.json
 !package-lock.json
 !requirements.txt
+!src/services/model_params/*.json
 
 # Local debug files
 debug_dk.html

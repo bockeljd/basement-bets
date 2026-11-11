@@ -77,11 +77,14 @@ class BartTorvikClient:
             print(f"  [TORVIK] Fetch Error: {e}")
             return {}
 
-    def get_efficiency_ratings(self, year: int = 2026):
+    def get_efficiency_ratings(self, year: int = None):
         """
-        Fetches 2026_team_results.json for efficiency metrics.
-        Returns dict and optionally optionally persists to DB.
+        Fetches {year}_team_results.json for efficiency metrics (defaults to current NCAAM season).
+        Returns dict and optionally persists to DB.
         """
+        if year is None:
+            from src.utils.ncaam_season import current_ncaam_season_end_year
+            year = current_ncaam_season_end_year()
         url = f"{self.BASE_URL}/{year}_team_results.json"
         print(f"  [TORVIK] Fetching Efficiency Ratings from {url}...")
         

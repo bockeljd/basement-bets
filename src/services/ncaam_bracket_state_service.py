@@ -6,7 +6,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from src.database import get_db_connection, _exec
-from src.services.ncaam_bracket_seed_loader import get_seed_source_metadata, load_manual_bracket_seeds
+from src.services.ncaam_bracket_seed_loader import (
+    build_projected_bracket_seeds,
+    get_seed_source_metadata,
+    load_manual_bracket_seeds,
+)
+from src.utils.ncaam_season import current_ncaam_season_short, parse_ncaam_season_end_year
 from src.services.ncaam_tournament_service import NCAAMTournamentPredictionService, TournamentGameInput
 from src.utils.naming import standardize_team_name
 
@@ -105,8 +110,9 @@ def _seed_for_team(seed_lookup: Dict[str, Dict[str, Any]], team_name: str) -> Op
 
 
 class NCAAMBracketStateService:
-    def __init__(self, season: str = "2025-26"):
-        self.season = season
+    def __init__(self, season: Optional[str] = None):
+        self.season = season or current_ncaam_season_short()
+        self.seed_source = "manual_bracket_data"
         self.seed_rows = self._load_seed_rows()
         self.seed_lookup = self._build_seed_lookup(self.seed_rows)
         self.region_seeds = self._group_seeds_by_region()
@@ -121,15 +127,31 @@ class NCAAMBracketStateService:
             """, (self.season,)).fetchall()
 
         if rows:
+            self.seed_source = "manual_bracket_data"
             return [dict(r) for r in rows]
 
-        logger.warning("Bracket seeds missing; falling back to manual loader.")
+        logger.warning("Bracket seeds missing in DB for %s; checking manual loader.", self.season)
         manual = load_manual_bracket_seeds(self.season)
-        expanded = []
-        for region, entries in manual.items():
-            for entry in entries:
-                expanded.append({"team_name": entry["team_name"], "seed": entry["seed"], "region": region})
-        return expanded
+        if manual:
+            self.seed_source = "manual_bracket_data"
+            expanded = []
+            for region, entries in manual.items():
+                for entry in entries:
+                    expanded.append({"team_name": entry["team_name"], "seed": entry["seed"], "region": region})
+            return expanded
+
+        projected = build_projected_bracket_seeds()
+        if projected:
+            logger.info("Using projected rankings field for %s.", self.season)
+            self.seed_source = "projected_ratings"
+            expanded = []
+            for region, entries in projected.items():
+                for entry in entries:
+                    expanded.append({"team_name": entry["team_name"], "seed": entry["seed"], "region": region})
+            return expanded
+
+        self.seed_source = "preseason_unseeded"
+        return []
 
     def _build_seed_lookup(self, rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         lookup: Dict[str, Dict[str, Any]] = {}
@@ -172,15 +194,21 @@ class NCAAMBracketStateService:
         }
 
     def _fetch_actual_events(self) -> List[Dict[str, Any]]:
+        if getattr(self, "seed_source", "manual_bracket_data") in {"projected_ratings", "preseason_unseeded"}:
+            return []
+        end_year = parse_ncaam_season_end_year(self.season)
+        tourney_start = f"{end_year}-03-10"
+        tourney_end = f"{end_year}-04-20"
         with get_db_connection() as conn:
             rows = _exec(conn, """
                 SELECT e.id, e.home_team, e.away_team, e.start_time, e.status, gr.home_score, gr.away_score, gr.final
                 FROM events e
                 LEFT JOIN game_results gr ON gr.event_id = e.id
                 WHERE e.league = 'NCAAM'
-                  AND e.start_time >= NOW() - INTERVAL '90 days'
+                  AND e.start_time >= %s::timestamp
+                  AND e.start_time < %s::timestamp
                 ORDER BY e.start_time ASC
-            """).fetchall()
+            """, (tourney_start, tourney_end)).fetchall()
         return [dict(r) for r in rows]
 
     def _normalize_match_key(self, home: str, away: str) -> Tuple[str, str]:
@@ -245,6 +273,23 @@ class NCAAMBracketStateService:
             region: [{"team_name": w["team_name"], "seed": w["seed"]} for w in teams]
             for region, teams in self.region_seeds.items()
         }
+        if not seeded_payload:
+            return {
+                "season": self.season,
+                "regions": {},
+                "first_four": [],
+                "final_four": [],
+                "championship": None,
+                "most_likely_bracket": None,
+                "title_odds": {},
+                "round_advancement_probs": [],
+                "seed_metadata": get_seed_source_metadata(season=self.season, source="preseason_unseeded"),
+                "degraded_simulation": False,
+                "data_issues": [],
+                "status": "preseason",
+                "updated_at": datetime.utcnow().isoformat(),
+                "v": "7-actual-first-pair-match",
+            }
 
         override_by_pair: Dict[PairKey, Dict[str, Any]] = {}
         locked_matchups: List[Dict[str, Any]] = []
@@ -291,10 +336,18 @@ class NCAAMBracketStateService:
                 })
 
         prediction_service = NCAAMTournamentPredictionService()
-        simulation = prediction_service.simulate_bracket(seeded_payload, simulations=2500, locked_matchups=locked_matchups)
+        simulation = prediction_service.simulate_bracket(
+            seeded_payload,
+            simulations=2500,
+            locked_matchups=locked_matchups,
+            season=self.season,
+        )
         payload = simulation.model_dump()
         payload["v"] = "7-actual-first-pair-match"
-        payload["seed_metadata"] = get_seed_source_metadata()
+        payload["seed_metadata"] = get_seed_source_metadata(
+            season=self.season,
+            source=getattr(self, "seed_source", "manual_bracket_data"),
+        )
         payload["updated_at"] = datetime.utcnow().isoformat()
         payload["model_version"] = payload.get("model_version", "tournament_ensemble_v1")
 
@@ -454,7 +507,10 @@ class NCAAMBracketStateService:
         match["draw_hint"] = override["slot_key"] if override else None
 
     def get_seed_metadata(self) -> Dict[str, Any]:
-        return get_seed_source_metadata()
+        return get_seed_source_metadata(
+            season=self.season,
+            source=getattr(self, "seed_source", "manual_bracket_data"),
+        )
 
     def get_region_seeds(self) -> Dict[str, List[Dict[str, Any]]]:
         return self.region_seeds

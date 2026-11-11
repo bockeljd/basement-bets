@@ -63,19 +63,30 @@ class LiveBracketSimulator:
         res = self.service.simulate_bracket(seeds, simulations=self.simulations)
         return res.model_dump()
 
-    def get_seeds_from_db(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Fetch seeds from ncaam_tournament_seeds table."""
+    def get_seeds_from_db(self, season: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch seeds from ncaam_tournament_seeds table for the target/current season."""
+        if season is None:
+            from src.utils.ncaam_season import current_ncaam_season_short
+            season = current_ncaam_season_short()
         with get_db_connection() as conn:
             rows = _exec(conn, """
                 SELECT team_name, seed, region
                 FROM ncaam_tournament_seeds
-                WHERE season = '2025-26'
+                WHERE season = %s
                 ORDER BY region, seed
-            """).fetchall()
+            """, (season,)).fetchall()
             
         if not rows:
-            print("[Simulator] WARNING: No seeds found in DB for 2025-26. Using hardcoded fallback.")
-            return HARDCODED_2026_SEEDS
+            if season == "2025-26":
+                print("[Simulator] WARNING: No seeds found in DB for 2025-26. Using hardcoded fallback.")
+                return HARDCODED_2026_SEEDS
+            from src.services.ncaam_bracket_seed_loader import build_projected_bracket_seeds
+            projected = build_projected_bracket_seeds()
+            if projected:
+                print(f"[Simulator] Using projected rankings field for {season} (no official DB seeds yet).")
+                return projected
+            print(f"[Simulator] WARNING: No seeds or projected rankings available for {season}.")
+            return {}
 
         seeds_by_region = {}
         split_count = 0

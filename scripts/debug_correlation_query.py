@@ -4,24 +4,26 @@ import sys
 sys.path.append(os.getcwd())
 import pandas as pd
 from src.database import get_db_connection
+from src.utils.ncaam_season import ncaam_season_date_bounds
 
 def debug_query():
     print("Debugging Query Steps...")
+    season_start, season_end = ncaam_season_date_bounds()
     
     with get_db_connection() as conn:
         # 1. Check Events in Range
         q1 = """
         SELECT COUNT(*) FROM events e
-        WHERE e.start_time >= '2025-11-01' AND e.start_time < '2026-05-01'
+        WHERE e.start_time >= %(start)s AND e.start_time < %(end)s
           AND (e.league = 'NCAAM' OR e.league = 'ncaab')
         """
-        c1 = pd.read_sql_query(q1, conn).iloc[0, 0]
+        c1 = pd.read_sql_query(q1, conn, params={"start": season_start, "end": season_end}).iloc[0, 0]
         print(f"1. Events in Range: {c1}")
         
         # 2. Check Results Joined
         q2 = q1.replace("FROM events e", "FROM events e JOIN game_results gr ON e.id = gr.event_id")
         q2 += " AND gr.final = TRUE"
-        c2 = pd.read_sql_query(q2, conn).iloc[0, 0]
+        c2 = pd.read_sql_query(q2, conn, params={"start": season_start, "end": season_end}).iloc[0, 0]
         print(f"2. + Final Results: {c2}")
         
         # 3. Check Odds Subquery (Sample)
@@ -30,10 +32,10 @@ def debug_query():
         SELECT e.id, e.start_time, e.home_team 
         FROM events e 
         JOIN game_results gr ON e.id = gr.event_id
-        WHERE e.start_time >= '2025-11-01' AND (e.league = 'NCAAM') AND gr.final = TRUE
+        WHERE e.start_time >= %(start)s AND (e.league = 'NCAAM') AND gr.final = TRUE
         LIMIT 1
         """
-        sample = pd.read_sql_query(q3, conn)
+        sample = pd.read_sql_query(q3, conn, params={"start": season_start})
         if not sample.empty:
             eid = sample.iloc[0]['id']
             start = sample.iloc[0]['start_time']

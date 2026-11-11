@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../api/axios';
 import { resolveBracketFavorite } from '../utils/bracketTableRows';
+import { getCurrentNcaamBracketYear } from '../utils/ncaamSeason';
 import {
     Shield, Crosshair, Activity, AlertTriangle, Users, TrendingUp,
     Cpu, RefreshCw, Swords, Search, Target, Award, Star, Zap, Layout, ChevronDown, ChevronUp
@@ -18,6 +19,10 @@ const getColorEff = (v, isDefensive = false) => {
         if (n < 100) return 'text-red-400'; return 'text-slate-300';
     }
 };
+
+const BRACKET_SEASON_YEAR = getCurrentNcaamBracketYear();
+const BRACKET_LOCK_KEY = `bb_bracket_locked_${BRACKET_SEASON_YEAR}`;
+const BRACKET_LOCK_PAYLOAD_KEY = `bb_bracket_locked_payload_${BRACKET_SEASON_YEAR}`;
 
 // Logistic win-probability from AdjEM diff
 function emToWinPct(emA, emB) {
@@ -271,7 +276,7 @@ const MarchMadness = () => {
 
     const [bracketMode, setBracketMode] = useState('theater');
     const [bracketLocked, setBracketLocked] = useState(() => {
-        try { return localStorage.getItem('bb_bracket_locked') === '1'; } catch { return false; }
+        try { return localStorage.getItem(BRACKET_LOCK_KEY) === '1'; } catch { return false; }
     });
     // Note: removed Chalk vs Perfect dashboard toggle (was redundant / confusing).
 
@@ -356,7 +361,7 @@ const MarchMadness = () => {
         // Locked mode: keep whatever is on-screen until user explicitly refreshes.
         if (bracketLocked && !force) {
             try {
-                const cached = localStorage.getItem('bb_bracket_locked_payload');
+                const cached = localStorage.getItem(BRACKET_LOCK_PAYLOAD_KEY);
                 if (cached) {
                     setBracketData(JSON.parse(cached));
                     return;
@@ -368,10 +373,10 @@ const MarchMadness = () => {
 
         setLoadingBracket(true);
         try {
-            const res = await api.get('/api/ncaam/bracket/2026');
+            const res = await api.get('/api/ncaam/bracket/current');
             setBracketData(res.data);
             if (bracketLocked) {
-                try { localStorage.setItem('bb_bracket_locked_payload', JSON.stringify(res.data)); } catch { /* ignore */ }
+                try { localStorage.setItem(BRACKET_LOCK_PAYLOAD_KEY, JSON.stringify(res.data)); } catch { /* ignore */ }
             }
         } catch (e) {
             console.error('Bracket fetch error', e);
@@ -385,9 +390,9 @@ const MarchMadness = () => {
     }, [activeTab]);
 
     useEffect(() => {
-        try { localStorage.setItem('bb_bracket_locked', bracketLocked ? '1' : '0'); } catch { /* ignore */ }
+        try { localStorage.setItem(BRACKET_LOCK_KEY, bracketLocked ? '1' : '0'); } catch { /* ignore */ }
         if (bracketLocked && bracketData) {
-            try { localStorage.setItem('bb_bracket_locked_payload', JSON.stringify(bracketData)); } catch { /* ignore */ }
+            try { localStorage.setItem(BRACKET_LOCK_PAYLOAD_KEY, JSON.stringify(bracketData)); } catch { /* ignore */ }
         }
     }, [bracketLocked]);
 
@@ -572,7 +577,7 @@ const MarchMadness = () => {
                         </button>
                         <button onClick={() => setActiveTab('bracket')}
                             className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 transition ${activeTab === 'bracket' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>
-                            <Layout size={12} /> Bracket 2026
+                            <Layout size={12} /> Bracket {BRACKET_SEASON_YEAR}
                         </button>
                     </div>
 
@@ -1573,7 +1578,16 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
             <span className="font-bold tracking-widest uppercase text-xs">Computing Tournament Projections…</span>
         </div>
     );
-    if (!data || !data.regions) return <div className="p-12 text-center text-red-400 font-mono">Bracket data unavailable. Check back soon.</div>;
+    if (!data || !data.regions || Object.keys(data.regions).length === 0) {
+        const isPreseason = data?.status === 'preseason' || data?.seed_metadata?.source === 'preseason_unseeded';
+        return (
+            <div className={`p-12 text-center font-mono ${isPreseason ? 'text-slate-300' : 'text-red-400'}`}>
+                {isPreseason
+                    ? (data?.seed_metadata?.note || `Official ${BRACKET_SEASON_YEAR} NCAA Tournament bracket is not yet announced.`)
+                    : 'Bracket data unavailable. Check back soon.'}
+            </div>
+        );
+    }
 
     const champ = data.championship;
     const champion = data.champion;
@@ -1659,7 +1673,7 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
                         )}
 
                         <div className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-widest">
-                            Model Output • 2026
+                            Model Output • {data?.season || BRACKET_SEASON_YEAR}
                         </div>
                     </div>
 

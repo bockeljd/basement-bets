@@ -585,8 +585,10 @@ def standardize_apply(X: np.ndarray, mu: np.ndarray, sd: np.ndarray) -> np.ndarr
 
 
 def main() -> int:
+    from src.utils.ncaam_season import current_ncaam_season_end_year
+
     ap = argparse.ArgumentParser()
-    ap.add_argument('--season', type=int, default=2026)
+    ap.add_argument('--season', type=int, default=current_ncaam_season_end_year())
     ap.add_argument('--steps', type=int, default=1200)
     ap.add_argument('--lr', type=float, default=0.05)
     ap.add_argument('--l2', type=float, default=0.5)

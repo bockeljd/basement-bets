@@ -9,14 +9,16 @@ from datetime import datetime
 sys.path.append(os.getcwd())
 
 from src.services.correlation.ncaam_correlation_engine import NCAAMCorrelationEngine
+from src.utils.ncaam_season import current_ncaam_season_long
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CACHE_FILE = "data/correlation_cache_2025_2026.json"
 
 def build_cache():
-    logger.info("Starting Correlation Cache Build (2025-2026)...")
+    season_long = current_ncaam_season_long()
+    cache_file = f"data/correlation_cache_{season_long.replace('-', '_')}.json"
+    logger.info(f"Starting Correlation Cache Build ({season_long})...")
     
     engine = NCAAMCorrelationEngine()
     
@@ -36,16 +38,16 @@ def build_cache():
     output = {
         "metadata": {
             "generated_at": datetime.now().isoformat(),
-            "season": "2025-2026",
+            "season": season_long,
             "games_count": len(df)
         },
         "archetypes": metrics
     }
     
-    with open(CACHE_FILE, "w") as f:
+    with open(cache_file, "w") as f:
         json.dump(output, f, indent=2)
         
-    logger.info(f"Cache saved to {CACHE_FILE}")
+    logger.info(f"Cache saved to {cache_file}")
 
 if __name__ == "__main__":
     build_cache()

@@ -56,9 +56,11 @@ def debug_query():
         LIMIT 10
     """
     
-    print("Running Debug Query...")
+    from src.utils.ncaam_season import ncaam_season_date_bounds
+    season_start, season_end = ncaam_season_date_bounds()
+    print(f"Running Debug Query ({season_start} to {season_end})...")
     with get_db_connection() as conn:
-        df = pd.read_sql_query(query, conn, params={"start": '2025-11-01', "end": '2026-05-01'})
+        df = pd.read_sql_query(query, conn, params={"start": season_start, "end": season_end})
         
     if df.empty:
         print("DF is EMPTY! Events/Results Join failing?")

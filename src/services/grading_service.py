@@ -571,8 +571,9 @@ class GradingService:
                                 FROM game_results gr
                                 JOIN events e ON gr.event_id = e.id
                                 WHERE (e.home_team ILIKE %s OR e.away_team ILIKE %s)
-                                  AND e.start_time::date = '2026-03-14'
+                                  AND e.start_time >= (NOW() - INTERVAL '14 days')
                                   AND gr.final = TRUE
+                                ORDER BY e.start_time DESC
                                 LIMIT 1
                             """
                             # Heuristic: find a name in the leg string that isn't 'OVER' or 'UNDER'
@@ -613,8 +614,9 @@ class GradingService:
                                 FROM game_results gr
                                 JOIN events e ON gr.event_id = e.id
                                 WHERE (e.home_team ILIKE %s OR e.away_team ILIKE %s)
-                                  AND e.start_time::date = '2026-03-14'
+                                  AND e.start_time >= (NOW() - INTERVAL '14 days')
                                   AND gr.final = TRUE
+                                ORDER BY e.start_time DESC
                                 LIMIT 1
                             """
                             r_game = _exec(conn, search_q, (f"%{team_query}%", f"%{team_query}%")).fetchone()

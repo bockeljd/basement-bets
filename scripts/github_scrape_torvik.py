@@ -30,10 +30,22 @@ def get_db_connection():
             conn.close()
 
 
-def fetch_team_results(year: int = 2026):
+def _default_torvik_year() -> int:
+    import os
+    import sys
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from src.utils.ncaam_season import current_ncaam_season_end_year
+    return current_ncaam_season_end_year()
+
+
+def fetch_team_results(year: int = None):
     """
-    Fetch from 2026_team_results.json (works without anti-bot block).
+    Fetch from {year}_team_results.json (works without anti-bot block).
     """
+    if year is None:
+        year = _default_torvik_year()
     url = f"https://barttorvik.com/{year}_team_results.json"
     print(f"[FETCH] Getting {url}")
     
@@ -149,7 +161,7 @@ def main():
     print("[OK] Database URL configured")
     
     # Fetch from team_results.json
-    teams = fetch_team_results(year=2026)
+    teams = fetch_team_results(year=_default_torvik_year())
     
     if not teams:
         print("[WARNING] Could not fetch team data")

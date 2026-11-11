@@ -207,26 +207,39 @@ def compute_torvik_margin_total(conn, cache: dict, home_bt: str, away_bt: str, d
 # Model params loading
 # ----------------------------
 
-def load_config(season_end_year: int) -> Dict[str, Any]:
+def load_config(season_end_year: Optional[int] = None) -> Dict[str, Any]:
+    if season_end_year is None:
+        from src.utils.ncaam_season import current_ncaam_season_end_year
+        season_end_year = current_ncaam_season_end_year()
+    candidates = [int(season_end_year)]
+    if int(season_end_year) != 2026:
+        candidates.append(2026)
+
     # Prefer bundled params (ships with serverless function), fallback to repo data/.
-    p1 = os.path.join(BUNDLED_PARAMS_DIR, f'ncaab_edge_engine_config_{season_end_year}.json')
-    p2 = os.path.join(REPO_ROOT, 'data', 'model_params', f'ncaab_edge_engine_config_{season_end_year}.json')
-    path = p1 if os.path.exists(p1) else p2
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Missing config: {path}. Run sweep+config to generate it.")
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    for s in candidates:
+        p1 = os.path.join(BUNDLED_PARAMS_DIR, f'ncaab_edge_engine_config_{s}.json')
+        p2 = os.path.join(REPO_ROOT, 'data', 'model_params', f'ncaab_edge_engine_config_{s}.json')
+        path = p1 if os.path.exists(p1) else p2
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+
+    missing_path = os.path.join(REPO_ROOT, 'data', 'model_params', f'ncaab_edge_engine_config_{season_end_year}.json')
+    raise FileNotFoundError(f"Missing config: {missing_path}. Run sweep+config to generate it.")
 
 
-def load_models(season_end_year: int) -> Dict[str, Dict[str, Any]]:
+def load_models(season_end_year: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
     """Load pre-trained residual models from JSON.
 
     File schema: data/model_params/ncaab_edge_model_season_<season>.json
     Keys: spread/total/ml
 
     Serverless robustness:
-    - If requested season artifact is missing, fall back to 2026 (current season baseline).
+    - If requested season artifact is missing, fall back to 2026 baseline.
     """
+    if season_end_year is None:
+        from src.utils.ncaam_season import current_ncaam_season_end_year
+        season_end_year = current_ncaam_season_end_year()
     candidates = [int(season_end_year)]
     if int(season_end_year) != 2026:
         candidates.append(2026)
@@ -336,7 +349,10 @@ def bet_narrative(kind: str, g: Any, p_model: float, p_market: float, ev: float,
     }
 
 
-def recommend_for_date(date_et: str, season_end_year: int = 2026) -> Dict[str, Any]:
+def recommend_for_date(date_et: str, season_end_year: Optional[int] = None) -> Dict[str, Any]:
+    if season_end_year is None:
+        from src.utils.ncaam_season import current_ncaam_season_end_year
+        season_end_year = current_ncaam_season_end_year()
     cfg = load_config(season_end_year)
     min_ev = float(cfg['learned']['min_ev'])
     max_units_day = int(cfg['constraints']['max_units_day'])

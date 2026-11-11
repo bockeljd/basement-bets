@@ -28,9 +28,11 @@ class ResearchAgent(BaseAgent):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) width/1920",
         }
         
+        from src.utils.ncaam_season import current_ncaam_calendar_year
+        search_year = current_ncaam_calendar_year()
         batch_citations = {}
         for ev in events:
-            query = f"{ev.away_team} vs {ev.home_team} basketball news injuries 2026"
+            query = f"{ev.away_team} vs {ev.home_team} basketball news injuries {search_year}"
             self.log_trace(f"Searching DuckDuckGo for {ev.away_team} vs {ev.home_team}", {"query": query})
             try:
                 resp = requests.post(search_url, data={"q": query}, headers=headers, timeout=10)

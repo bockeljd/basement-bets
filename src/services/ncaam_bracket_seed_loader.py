@@ -46,8 +46,59 @@ _MANUAL_2026_BRACKET = {
     ]
 }
 
-def load_manual_bracket_seeds(season: str = "2025-26") -> Dict[str, List[Dict[str, object]]]:
-    """Return the frozen manual bracket seed list for a season."""
+def _snake_seed_teams(team_names: List[str]) -> Dict[str, List[Dict[str, object]]]:
+    """Arrange 64 ranked teams in standard NCAA 1..16 S-curve order across 4 regions."""
+    regions = ["South", "East", "West", "Midwest"]
+    grouped: Dict[str, List[Dict[str, object]]] = {r: [] for r in regions}
+    for idx, team in enumerate(team_names[:64]):
+        seed_num = (idx // 4) + 1
+        pos_in_band = idx % 4
+        # Snake alternate every seed line: L->R on odd seeds, R->L on even seeds
+        region = regions[pos_in_band] if seed_num % 2 == 1 else regions[3 - pos_in_band]
+        grouped[region].append({"seed": seed_num, "team_name": team})
+    return grouped
+
+
+def build_projected_bracket_seeds(limit: int = 64) -> Dict[str, List[Dict[str, object]]]:
+    """Build a projected 64-team tournament field from live season ratings when official seeds aren't set."""
+    try:
+        from src.database import get_db_connection, _exec
+        with get_db_connection() as conn:
+            rows = _exec(conn, """
+                SELECT team_name
+                FROM kenpom_team_ratings_daily
+                WHERE asof_date = (SELECT MAX(asof_date) FROM kenpom_team_ratings_daily)
+                ORDER BY rank ASC
+                LIMIT %s
+            """, (int(limit),)).fetchall()
+            if not rows or len(rows) < 64:
+                rows = _exec(conn, """
+                    SELECT team_name
+                    FROM kenpom_ratings
+                    ORDER BY rank ASC
+                    LIMIT %s
+                """, (int(limit),)).fetchall()
+            if not rows or len(rows) < 64:
+                rows = _exec(conn, """
+                    SELECT team_text AS team_name
+                    FROM bt_team_metrics_daily
+                    WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
+                    ORDER BY (adj_off - adj_def) DESC
+                    LIMIT %s
+                """, (int(limit),)).fetchall()
+        teams = [r["team_name"] for r in (rows or []) if r and r.get("team_name")]
+        if len(teams) < 64:
+            return {}
+        return _snake_seed_teams(teams)
+    except Exception:
+        return {}
+
+
+def load_manual_bracket_seeds(season: str = None) -> Dict[str, List[Dict[str, object]]]:
+    """Return the frozen manual bracket seed list for historical seasons where defined."""
+    if season is None:
+        from src.utils.ncaam_season import current_ncaam_season_short
+        season = current_ncaam_season_short()
     if season != "2025-26":
         return {}
 
@@ -60,11 +111,31 @@ def load_manual_bracket_seeds(season: str = "2025-26") -> Dict[str, List[Dict[st
     }
 
 
-def get_seed_source_metadata() -> Dict[str, object]:
-    """Metadata describing the current manual seed feed."""
+def get_seed_source_metadata(season: str = None, source: str = None) -> Dict[str, object]:
+    """Metadata describing the bracket seed feed."""
+    if season is None:
+        from src.utils.ncaam_season import current_ncaam_season_short
+        season = current_ncaam_season_short()
+
+    if source == "projected_ratings":
+        return {
+            "season": season,
+            "source": "projected_ratings",
+            "projected": True,
+            "note": f"Projected 64-team field from live {season} rankings (official NCAA bracket announced Selection Sunday).",
+            "path": "src/services/ncaam_bracket_seed_loader.py",
+        }
+    if source == "preseason_unseeded":
+        return {
+            "season": season,
+            "source": "preseason_unseeded",
+            "projected": False,
+            "note": f"Official {season} NCAA Tournament bracket is not yet announced.",
+            "path": "src/services/ncaam_bracket_seed_loader.py",
+        }
     return {
-        "season": "2025-26",
+        "season": season,
         "source": "manual_bracket_data",
-        "note": "Manual entry derived from the published 2026 bracket. Update when an official NCAA/ESPN feed is available.",
-        "path": "src/services/ncaam_bracket_seed_loader.py"
+        "note": f"Manual/DB bracket seed entry for {season}.",
+        "path": "src/services/ncaam_bracket_seed_loader.py",
     }

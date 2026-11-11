@@ -13,19 +13,21 @@ sys.path.insert(0, '.')
 
 from datetime import datetime
 from src.services.barttorvik import BartTorvikClient
+from src.utils.ncaam_season import current_ncaam_season_end_year
 
 def main():
+    season_year = current_ncaam_season_end_year()
     print("=" * 50)
-    print("Torvik Database Populator")
+    print(f"Torvik Database Populator (Season {season_year})")
     print(f"Time: {datetime.now().isoformat()}")
     print("=" * 50)
     
     client = BartTorvikClient()
     
     print("\n[STEP 1] Fetching efficiency ratings...")
-    print("(This uses 2026_team_results.json and auto-persists to DB)\n")
+    print(f"(This uses {season_year}_team_results.json and auto-persists to DB)\n")
     
-    ratings = client.get_efficiency_ratings(year=2026)
+    ratings = client.get_efficiency_ratings(year=season_year)
     
     if ratings:
         print("=" * 50)

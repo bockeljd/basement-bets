@@ -5,6 +5,7 @@ from src.services.ncaam_tournament_service import (
     TournamentGameInput,
     SimulatorDataError
 )
+from src.utils.ncaam_season import current_ncaam_season_short
 
 @pytest.fixture
 def mock_analyze():
@@ -120,7 +121,7 @@ def test_simulate_bracket_playin_resolution(mock_analyze):
     # Needs to be flat 64 (or 68 if play in), let's just test single region properly
     res = service.simulate_bracket(seeds, simulations=10)
     
-    assert res.season == "2025-26"
+    assert res.season == current_ncaam_season_short()
     assert "East" in res.regions
     assert "South" in res.regions
     

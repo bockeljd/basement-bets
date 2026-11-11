@@ -15,14 +15,15 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.services.espn_ncaa_client import ESPNNCAAClient
 from src.database import get_db_connection, _exec
+from src.utils.ncaam_season import ncaam_season_date_bounds
 
 def scrape_season_schedule():
-    """Scrape entire NCAAM season (Nov 1 - Mar 31)"""
+    """Scrape entire NCAAM season (Nov 1 - present)"""
     
     espn_client = ESPNNCAAClient()
     
-    # NCAAM season: November 2025 - March 2026
-    start_date = datetime(2025, 11, 1)
+    season_start_iso, _ = ncaam_season_date_bounds()
+    start_date = datetime.strptime(season_start_iso, "%Y-%m-%d")
     end_date = datetime.now()  # Up to today
     
     print(f"[SCHEDULE] Scraping from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")

@@ -13,12 +13,13 @@ class NCAAMCorrelationEngine:
     for NCAAM betting markets, conditional on matchup archetypes.
     
     Hard constraints:
-    - Season: 2025-2026 (Nov 1 2025 to May 1 2026)
+    - Season: Current NCAAM season (Nov 1 to May 1)
     - Min Sample: 40 games per archetype (or fallback)
     """
-    
-    SEASON_START = '2025-11-01'
-    SEASON_END = '2026-05-01'
+
+    from src.utils.ncaam_season import ncaam_season_date_bounds
+    SEASON_START, SEASON_END = ncaam_season_date_bounds()
+    del ncaam_season_date_bounds
     MIN_SAMPLE_SIZE = 40
     
     def fetch_season_data(self) -> pd.DataFrame:
