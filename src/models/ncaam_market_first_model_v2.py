@@ -899,7 +899,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
         w_base = self.W_BASE
         if avg_continuity < 0.5:
             w_base = min(w_base, 0.10)
-        w_kp = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity) if kp_available else 0.0
+        w_kp_target = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity)
+        if kp_available:
+            w_kp = w_kp_target
+        else:
+            w_kp = 0.0
+            # When KenPom ratings are unavailable, reallocate its dynamic projection weight
+            # to Torvik (unless NCAAM_W_BASE is explicitly pinned via env var) so the
+            # overall projection-vs-market blend stays at its seasonal target (e.g. 22% in Nov).
+            if os.getenv('NCAAM_W_BASE') is None:
+                w_base = min(w_base + w_kp_target, 0.45)
+        self.W_BASE = w_base
         
         mu_spread_final = mu_market_spread + (w_base * diff_torvik) + (self.W_SCHED * diff_sched) + (w_kp * diff_kenpom) + luck_adjustment
         
@@ -2290,19 +2300,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if line_s is not None:
             prob_home = _spread_cover_prob_home(mu_s, sig_s, line_s)
             prob_home_cal = self._calibrate_win_prob(prob_home)
+            push_prob = get_push_prob(float(line_s), float(sig_s))
 
-            ev_home = self._calculate_ev(prob_home_cal, price_home)
+            ev_home = self._calculate_ev(prob_home_cal, price_home, push_prob=push_prob)
             kelly_home = self._calculate_kelly(prob_home_cal, price_home)
 
             # No hard EV caps; extreme EVs are handled by sanity scoring (below).
             # Away cover prob = 1 - P(home covers) - push (approx already baked into helper via -push/2)
             # For symmetry we compute raw home cover without calibration then derive away.
             prob_home_raw = 1.0 - self._normal_cdf(-float(line_s), -float(mu_s), float(sig_s))
-            push_prob = get_push_prob(float(line_s), float(sig_s))
             prob_away = (1.0 - prob_home_raw) - (push_prob / 2)
             prob_away_cal = self._calibrate_win_prob(prob_away)
 
-            ev_away = self._calculate_ev(prob_away_cal, price_away)
+            ev_away = self._calculate_ev(prob_away_cal, price_away, push_prob=push_prob)
             kelly_away = self._calculate_kelly(prob_away_cal, price_away)
             # (removed hard EV cap; handled by sanity scoring)
 
@@ -2456,9 +2466,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
             prob_over_cal = self._calibrate_win_prob(prob_over)
             prob_under_cal = self._calibrate_win_prob(prob_under)
 
-            ev_over = self._calculate_ev(prob_over_cal, price_over)
+            ev_over = self._calculate_ev(prob_over_cal, price_over, push_prob=push_prob_t)
             kelly_over = self._calculate_kelly(prob_over_cal, price_over)
-            ev_under = self._calculate_ev(prob_under_cal, price_under)
+            ev_under = self._calculate_ev(prob_under_cal, price_under, push_prob=push_prob_t)
             kelly_under = self._calculate_kelly(prob_under_cal, price_under)
 
             # No hard EV caps; extreme EVs are handled by sanity scoring (below).
@@ -2585,12 +2595,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
         from src.utils.ev import clamp_prob
         return float(clamp_prob(win_prob, default=0.5))
 
-    def _calculate_ev(self, win_prob, price):
-        """Estimated Value (ROI) per 1u risked."""
+    def _calculate_ev(self, win_prob, price, push_prob: float = 0.0):
+        """Estimated Value (ROI) per 1u risked (accounting for push refund on whole numbers)."""
         from src.utils.ev import ev_per_unit
         ev = ev_per_unit(win_prob, price)
         # Guardrail: if odds invalid, treat as no edge.
-        return float(ev) if ev is not None else 0.0
+        if ev is None:
+            return 0.0
+        return float(ev) + max(0.0, float(push_prob or 0.0))
 
     def _calculate_kelly(self, win_prob, price):
         """Quarter Kelly stake fraction."""

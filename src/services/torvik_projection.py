@@ -42,8 +42,9 @@ class TorvikProjectionService:
 
         # Match by name (Torvik uses specific naming)
         h_proj = self._find_projection(home_team, official_projs)
+        a_proj = self._find_projection(away_team, official_projs)
 
-        if h_proj:
+        if h_proj and a_proj and h_proj.get("opponent") == a_proj.get("team"):
             return {
                 "source": "official",
                 "margin": -float(h_proj['spread']),
@@ -131,47 +132,21 @@ class TorvikProjectionService:
 
 
     def _find_projection(self, team_name: str, projections: Dict) -> Optional[Dict]:
+        """
+        Match team_name against projection keys using TeamMatcher (disambiguating State/City/etc.).
+        """
+        if not team_name or not projections:
+            return None
 
-        """
-        Fuzzy match team_name against projection keys.
-        """
-        if not team_name: return None
-        if not projections: return None
-        
         # 1. Exact Match
         if team_name in projections:
             return projections[team_name]
-            
-        # 2. Fuzzy Match (Keys are short names like 'Xavier' or 'Michigan St.')
-        # Normalize: 'St.' -> 'State', remove dots, lower
-        
-        def normalize(s):
-            s = s.lower().replace('.', '')
-            # Replace " st" at end of string with " state"
-            if s.endswith(' st'): 
-                s = s[:-3] + ' state'
-            return s.strip()
 
-        norm_input = normalize(team_name)
-        
-        candidates = []
-        for key, data in projections.items():
-            norm_key = normalize(key)
-            
-            # Check containment in either direction
-            # "Michigan St." (norm: michigan state) in "Michigan State Spartans" (norm: michigan state spartans) -> YES
-            # "Xavier" in "Xavier Musketeers" -> YES
-            
-            if norm_key in norm_input:
-                 candidates.append((key, data, len(norm_key)))
-            elif norm_input in norm_key: # Rare, but possible if Torvik has longer name
-                 candidates.append((key, data, len(norm_input)))
+        # 2. Canonical TeamMatcher lookup
+        matched_key = self.matcher.match_team(team_name, list(projections.keys()))
+        if matched_key and matched_key in projections:
+            return projections[matched_key]
 
-        if candidates:
-            # Pick longest MATCH LENGTH (closest fit)
-            candidates.sort(key=lambda x: x[2], reverse=True)
-            return candidates[0][1]
-            
         return None
 
     def get_matchup_team_stats(self, home_team: str, away_team: str, date: str = None) -> Dict:

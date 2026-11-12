@@ -2324,8 +2324,8 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                     <thead>
                                         <tr className="border-b border-slate-700 text-slate-400 uppercase text-[10px]">
                                             <th className="py-2 pr-3">Window</th>
-                                            <th className="py-2 px-2">Torvik Base (w_base)</th>
-                                            <th className="py-2 px-2">Torvik Sched (w_sched)</th>
+                                            <th className="py-2 px-2">Market Anchor</th>
+                                            <th className="py-2 px-2">Torvik (w_base)</th>
                                             <th className="py-2 px-2">KenPom (w_kp)</th>
                                             <th className="py-2 px-2">Sigma Mult (σ)</th>
                                             <th className="py-2 pl-2">Luck / Situational Scale</th>
@@ -2334,40 +2334,40 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                     <tbody className="divide-y divide-slate-800 text-slate-200">
                                         <tr>
                                             <td className="py-2 pr-3 font-semibold text-blue-300">November (Early Season)</td>
-                                            <td className="py-2 px-2 font-mono">12%</td>
-                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono text-emerald-300">78%</td>
+                                            <td className="py-2 px-2 font-mono">12% <span className="text-slate-400 text-[10px]">(22% solo)</span></td>
                                             <td className="py-2 px-2 font-mono">10%</td>
                                             <td className="py-2 px-2 font-mono">1.08×</td>
                                             <td className="py-2 pl-2">0.25× Luck (≥4 GP) • 0.50× Sit</td>
                                         </tr>
                                         <tr>
                                             <td className="py-2 pr-3 font-semibold">December (Non-Conf)</td>
-                                            <td className="py-2 px-2 font-mono">18%</td>
-                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono text-emerald-300">67%</td>
+                                            <td className="py-2 px-2 font-mono">18% <span className="text-slate-400 text-[10px]">(33% solo)</span></td>
                                             <td className="py-2 px-2 font-mono">15%</td>
                                             <td className="py-2 px-2 font-mono">1.04×</td>
                                             <td className="py-2 pl-2">0.60× Luck • 1.00× Sit</td>
                                         </tr>
                                         <tr>
                                             <td className="py-2 pr-3 font-semibold">January (Conf Play)</td>
-                                            <td className="py-2 px-2 font-mono">25%</td>
-                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono text-emerald-300">55%</td>
+                                            <td className="py-2 px-2 font-mono">25% <span className="text-slate-400 text-[10px]">(45% solo)</span></td>
                                             <td className="py-2 px-2 font-mono">20%</td>
                                             <td className="py-2 px-2 font-mono">1.00×</td>
                                             <td className="py-2 pl-2">1.00× Full Weight</td>
                                         </tr>
                                         <tr>
                                             <td className="py-2 pr-3 font-semibold">February (Late Conf)</td>
-                                            <td className="py-2 px-2 font-mono">32%</td>
-                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono text-emerald-300">48%</td>
+                                            <td className="py-2 px-2 font-mono">32% <span className="text-slate-400 text-[10px]">(45% solo)</span></td>
                                             <td className="py-2 px-2 font-mono">20%</td>
                                             <td className="py-2 px-2 font-mono">1.00×</td>
                                             <td className="py-2 pl-2">1.00× Full Weight</td>
                                         </tr>
                                         <tr>
                                             <td className="py-2 pr-3 font-semibold text-orange-300">March (Tournament)</td>
-                                            <td className="py-2 px-2 font-mono">38%</td>
-                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono text-emerald-300">42%</td>
+                                            <td className="py-2 px-2 font-mono">38% <span className="text-slate-400 text-[10px]">(45% solo)</span></td>
                                             <td className="py-2 px-2 font-mono">20%</td>
                                             <td className="py-2 px-2 font-mono">1.00×</td>
                                             <td className="py-2 pl-2">Neutral HCA (0.0) • Peak Alpha</td>
