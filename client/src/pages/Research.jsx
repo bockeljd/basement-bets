@@ -1017,6 +1017,57 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                             return pickText;
                                         };
 
+                                        const getImpliedProb = (odds) => {
+                                            if (!odds || isNaN(odds)) return null;
+                                            const n = Number(odds);
+                                            if (n === 0) return null;
+                                            if (n > 0) return 100 / (n + 100);
+                                            return Math.abs(n) / (Math.abs(n) + 100);
+                                        };
+
+                                        const getCuratedExplanation = (edge, top, pickText, edgePts) => {
+                                            const away = edge.away_team || 'Away team';
+                                            const home = edge.home_team || 'Home team';
+                                            const mkt = top.market_line;
+                                            const fair = top.fair_line;
+                                            const edgeStr = edgePts ? `${edgePts} points` : 'a clear statistical edge';
+
+                                            if (top.bet_type === 'TOTAL') {
+                                                const isUnder = /^UNDER/i.test(pickText) || String(top.side || '').toLowerCase() === 'under';
+                                                if (isUnder) {
+                                                    if (mkt >= 170) {
+                                                        return `Sportsbooks set an unusually inflated total of ${mkt} points for ${away} at ${home}. Our model accounts for both teams' true shooting percentages and half-court tempo, projecting a combined score of ${fair} points. That gives you a sizable ${edgeStr} cushion below the sportsbook line, making UNDER ${mkt} our highest-conviction play.`;
+                                                    }
+                                                    if (mkt >= 155) {
+                                                        return `The sportsbooks set a high-tempo total of ${mkt} points for ${away} at ${home}. Early-season possession data and defensive matchups project a final combined score closer to ${fair} points—${edgeStr} lower than the betting total—giving us comfortable breathing room on the UNDER.`;
+                                                    }
+                                                    return `In ${away} at ${home}, sportsbooks set the total at ${mkt} points. Our model projects a tighter, defense-first game with ${fair} combined points (${edgeStr} below the market), giving you strong value on the UNDER.`;
+                                                } else {
+                                                    if (mkt <= 138) {
+                                                        return `Sportsbooks set a conservative total of ${mkt} points for ${away} at ${home}. Our model expects both offenses to find higher tempo and scoring rhythm, projecting a fair total of ${fair} points (${edgeStr} higher than the line), creating a clear scoring edge for the OVER.`;
+                                                    }
+                                                    return `For ${away} at ${home}, the sportsbook total is set at ${mkt} points. Our matchup ratings project both teams to push the pace and generate more possessions, leading to a fair combined score of ${fair} points. That gives us ${edgeStr} of extra scoring room on the OVER.`;
+                                                }
+                                            }
+
+                                            if (top.bet_type === 'SPREAD') {
+                                                const pickedTeam = top.selection ? top.selection.replace(/[+-]?\d+(\.\d+)?$/, '').trim() : edge.home_team;
+                                                const opponent = (pickedTeam === edge.home_team) ? edge.away_team : edge.home_team;
+                                                const isDog = (mkt !== null && mkt !== undefined && Number(mkt) > 0) || (typeof top.selection === 'string' && top.selection.includes('+'));
+                                                if (isDog) {
+                                                    return `${pickedTeam} is getting ${mkt ? `+${mkt}` : 'points'} against ${opponent}. Our power ratings indicate ${pickedTeam} matches up much closer than bookmakers expect, evaluating the fair spread at ${fair ? `+${fair}` : 'closer'}. That gives you ${edgeStr} of safety buffer on the spread.`;
+                                                } else {
+                                                    return `${pickedTeam} is favored by ${mkt ? Math.abs(mkt) : ''} points against ${opponent}. Our model projects ${pickedTeam} to control this game and win by a fair margin of ${fair ? Math.abs(fair) : ''} points, providing a ${edgeStr} advantage over the sportsbook spread.`;
+                                                }
+                                            }
+
+                                            if (top.bet_type === 'MONEYLINE') {
+                                                return `Sportsbooks price ${pickText} at ${top.price ? (top.price > 0 ? `+${top.price}` : top.price) : 'market odds'} against ${edge.home_team || 'the opponent'}. Our model calculates a higher probability of winning outright than the odds reflect, creating strong positive expected value.`;
+                                            }
+
+                                            return `Model ratings project a fair line of ${fair} against the sportsbook's ${mkt}, giving ${pickText} a ${edgeStr} advantage.`;
+                                        };
+
                                         const nowMs = Date.now();
                                         const isStartingSoon = (st) => {
                                             if (!st) return false;
@@ -1168,6 +1219,11 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                             const suggestedUnits = top.kelly !== null && top.kelly !== undefined
                                                                 ? `${Math.max(0.5, Math.min(3.0, Math.round(Number(top.kelly) * 100 * 0.7 * 2) / 2)).toFixed(1)}u`
                                                                 : '1.0u';
+                                                            const impProb = getImpliedProb(top.price);
+                                                            const impPct = impProb ? (impProb * 100).toFixed(1) : null;
+                                                            const winProb = (Number(top.win_prob || 0.5) * 100).toFixed(1);
+                                                            const winGap = (impPct && winProb) ? (Number(winProb) - Number(impPct)).toFixed(1) : null;
+                                                            const curatedWhy = getCuratedExplanation(edge, top, pickText, edgePts);
 
                                                             return (
                                                                 <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
@@ -1250,24 +1306,37 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                                     </button>
 
                                                                     {isExpanded && (
-                                                                        <div id={`why-pick-${edge.id}`} className="p-3 rounded-lg bg-slate-950/90 border border-blue-500/25 text-[11px] text-slate-300 space-y-2">
-                                                                            <div className="flex justify-between items-center text-[10px] border-b border-slate-800 pb-1">
-                                                                                <span className="text-slate-400 uppercase font-bold tracking-wider">Line Advantage</span>
-                                                                                <span className="text-emerald-400 font-mono font-bold">
-                                                                                    {edgePts ? `${edgePts} pts edge` : 'Positive edge'}
+                                                                        <div id={`why-pick-${edge.id}`} className="p-3.5 rounded-xl bg-slate-950/95 border border-blue-500/30 text-slate-300 space-y-2.5 shadow-inner">
+                                                                            <div className="flex justify-between items-center text-[10px] border-b border-slate-800/80 pb-1.5">
+                                                                                <span className="text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                                                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                                                                    {edge.away_team} @ {edge.home_team}
+                                                                                </span>
+                                                                                <span className="text-emerald-400 font-mono font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                                                                    {edgePts ? `${edgePts} pt edge` : 'Model Edge'}
                                                                                 </span>
                                                                             </div>
-                                                                            <p className="text-slate-300 text-xs leading-relaxed">
-                                                                                {top.bet_type === 'TOTAL'
-                                                                                    ? `Sportsbook total is ${top.market_line ?? 'the consensus total'}. Model pace & scoring efficiency compute a fair total of ${top.fair_line}, creating a ${edgePts ?? 'positive'}-point edge on the ${String(pickText).split(' ')[0]}.`
-                                                                                    : `Sportsbook line is ${top.market_line ?? 'the consensus spread'}. Model ratings project a fair line of ${top.fair_line}, giving ${pickText} a ${edgePts ?? 'positive'}-point edge.`}
+
+                                                                            <p className="text-slate-200 text-xs leading-relaxed">
+                                                                                {curatedWhy}
                                                                             </p>
-                                                                            <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400 pt-1.5 border-t border-slate-800/70 font-mono">
-                                                                                <div>Win Chance: <strong className="text-slate-200">{(Number(top.win_prob || 0.5) * 100).toFixed(1)}%</strong></div>
-                                                                                <div>Expected Value: <strong className="text-green-400">{evFormatted}</strong></div>
+
+                                                                            {impPct && winGap && Number(winGap) > 0 && (
+                                                                                <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex items-start gap-2">
+                                                                                    <span className="text-amber-400 text-xs shrink-0 mt-0.5">💡</span>
+                                                                                    <div className="leading-snug">
+                                                                                        <strong className="text-slate-100">The Edge in Plain English: </strong>
+                                                                                        Sportsbook odds ({top.price ? fmtSigned(top.price, 0) : '—'}) imply a {impPct}% chance to win. Our model calculates a higher <strong className="text-slate-100">{winProb}%</strong> true win probability, giving you a <strong className="text-emerald-400 font-mono">+{winGap}% edge</strong> over the bookmaker and a positive <strong className="text-emerald-400 font-mono">{evFormatted}</strong> profit margin.
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+
+                                                                            <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400 pt-2 border-t border-slate-800/80 font-mono">
+                                                                                <div>Win Probability: <strong className="text-slate-100">{winProb}%</strong></div>
+                                                                                <div>Expected Profit: <strong className="text-emerald-400">{evFormatted}</strong></div>
                                                                                 {kellyStake && (
                                                                                     <div className="col-span-2 text-slate-400">
-                                                                                        Quarter-Kelly Stake: <strong className="text-emerald-300">{suggestedUnits}</strong> ({kellyStake} bankroll)
+                                                                                        Recommended Bet: <strong className="text-emerald-300">{suggestedUnits}</strong> ({kellyStake} bankroll)
                                                                                     </div>
                                                                                 )}
                                                                             </div>
