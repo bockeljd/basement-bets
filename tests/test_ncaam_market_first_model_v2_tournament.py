@@ -197,3 +197,39 @@ def test_analyze_november_big_favorite_no_kenpom_bias_and_outer_cap(monkeypatch)
     assert abs(res_clamped["debug"]["mu_spread_final"] - (-15.0)) <= 3.0 + 1e-6
 
 
+def test_team_matcher_disambiguation():
+    from src.utils.team_matcher import TeamMatcher
+
+    matcher = TeamMatcher()
+    TeamMatcher._source_names_cache[("bt_team_metrics_daily", "team_text")] = [
+        "Kansas",
+        "UMKC",
+        "Penn",
+        "Penn St.",
+        "Oklahoma",
+        "Oklahoma St.",
+        "Southern",
+        "SMU",
+        "California",
+        "Cal Baptist",
+        "Kentucky",
+        "Morgan St.",
+        "Maryland Eastern Shore",
+        "N.C. State",
+        "North Carolina",
+    ]
+
+    assert matcher.find_source_name("Kansas City Roos", "bt_team_metrics_daily", "team_text") == "UMKC"
+    assert matcher.find_source_name("Penn State Nittany Lions", "bt_team_metrics_daily", "team_text") == "Penn St."
+    assert matcher.find_source_name("Oklahoma State Cowboys", "bt_team_metrics_daily", "team_text") == "Oklahoma St."
+    assert matcher.find_source_name("Southern Methodist Mustangs", "bt_team_metrics_daily", "team_text") == "SMU"
+    assert matcher.find_source_name("Southern University Jaguars", "bt_team_metrics_daily", "team_text") == "Southern"
+    assert matcher.find_source_name("California Baptist Lancers", "bt_team_metrics_daily", "team_text") == "Cal Baptist"
+    assert matcher.find_source_name("Morgan State Bears", "bt_team_metrics_daily", "team_text") == "Morgan St."
+    assert matcher.find_source_name("Maryland-Eastern Shore Hawks", "bt_team_metrics_daily", "team_text") == "Maryland Eastern Shore"
+    assert matcher.find_source_name("North Carolina State Wolfpack", "bt_team_metrics_daily", "team_text") == "N.C. State"
+    # Non-D1 school should not false-match Kentucky Wildcats
+    assert matcher.find_source_name("Kentucky State Thorobreds", "bt_team_metrics_daily", "team_text") is None
+
+
+

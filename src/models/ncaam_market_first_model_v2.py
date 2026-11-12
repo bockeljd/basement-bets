@@ -969,7 +969,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if mu_market_total is None:
             mu_market_total = 145.0
         
-        mu_total_final = mu_market_total + (w_base * (mu_torvik_total - mu_market_total)) + (w_kp * (mu_kenpom_total - mu_market_total))
+        w_total_torvik = w_base + (0.5 * self.W_SCHED)
+        mu_total_final = mu_market_total + (w_total_torvik * (mu_torvik_total - mu_market_total)) + (w_kp * (mu_kenpom_total - mu_market_total))
         mu_total_final += kp_player_total_adj
         potential_adjustment_total = council_adjustment_total
         if COUNCIL_ADJUSTMENTS_ENABLED:
@@ -1929,11 +1930,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         lb = mean - (self.PUBLISH_CI_Z * se)
 
         # Standard rule: lower-bound EV must be >= 0
-        # Override ("reward mode", option B): allow a small number of high-EV, high-edge plays
-        # even if the archetype lower bound is negative. This is used to keep the system placing
-        # some bets so we can learn/improve.
-        override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV', '0.06'))  # 6%
-        override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS', '2.0'))
+        # Override ("reward mode", option B): allow high-EV, high-edge plays
+        # even if the archetype 95% CI lower bound is negative (since sd ~ 0.95 makes
+        # 95% CI wide across most bins). Note CAP_SPREAD=2.0 caps spread edge_pts at 2.0,
+        # so requiring 2.0 pts + 6% EV previously blocked all standard -110 spread plays.
+        override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV', '0.035'))  # 3.5%
+        override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS', '1.5'))
         
         # Totals have wider variances; applying an identical EV constraint effectively bans them 
         if market == 'TOTAL':

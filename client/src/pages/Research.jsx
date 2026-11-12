@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../api/axios';
 import { loadCache } from '../utils/httpCache';
 import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck, PlusCircle, TrendingUp } from 'lucide-react';
@@ -9,6 +9,34 @@ import MarchMadness from './MarchMadness';
 
 const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, formatDateMDY }) => {
     const [edges, setEdges] = useState([]);
+    const modelInfoDialogRef = useRef(null);
+
+    const openModelInfoDialog = () => {
+        const dialog = modelInfoDialogRef.current;
+        if (dialog && typeof dialog.showModal === 'function') {
+            if (!dialog.open) {
+                dialog.showModal();
+            }
+        }
+    };
+
+    const handleModelInfoDialogBackdropClick = (event) => {
+        const dialog = modelInfoDialogRef.current;
+        if (!dialog) return;
+        if (typeof HTMLDialogElement !== 'undefined' && 'closedBy' in HTMLDialogElement.prototype) {
+            return;
+        }
+        if (event.target !== dialog) return;
+        const rect = dialog.getBoundingClientRect();
+        const isDialogContent = (
+            rect.top <= event.clientY &&
+            event.clientY <= rect.top + rect.height &&
+            rect.left <= event.clientX &&
+            event.clientX <= rect.left + rect.width
+        );
+        if (isDialogContent) return;
+        dialog.close();
+    };
     // Top-level tabs: board vs history
     const [activeTab, setActiveTab] = useState('live');
 
@@ -580,10 +608,20 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                 </div>
             )}
             <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
-                <div>
+                <div className="flex items-center gap-3">
                     <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
                         {showModelPerformanceTab ? 'Model Recommendations' : "Today's Recommended Bets"}
                     </h1>
+                    <button
+                        type="button"
+                        onClick={openModelInfoDialog}
+                        title="View NCAAM v2.1 Model Weighting & Logic"
+                        aria-label="View NCAAM v2.1 Model Weighting and Logic"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-blue-300 text-xs font-semibold transition-all cursor-pointer"
+                    >
+                        <Info size={14} />
+                        <span>Model Logic & Weights</span>
+                    </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     {showModelPerformanceTab && (
@@ -2214,6 +2252,186 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                     <MarchMadness />
                 </div>
             )}
+
+            {/* Native Modal Dialog: NCAAM Model Weighting & Logic */}
+            <dialog
+                ref={modelInfoDialogRef}
+                {...({ closedby: 'any' })}
+                aria-labelledby="modelInfoDialogTitle"
+                onClick={handleModelInfoDialogBackdropClick}
+                className="backdrop:bg-black/70 backdrop:backdrop-blur-sm bg-slate-900 text-slate-100 border border-slate-700/80 rounded-2xl shadow-2xl max-w-3xl w-[94vw] max-h-[88vh] p-0 overflow-hidden m-auto"
+            >
+                <div className="flex flex-col max-h-[88vh]">
+                    <div className="flex items-center justify-between px-6 py-4 bg-slate-950/80 border-b border-slate-800">
+                        <div className="flex items-center gap-2.5">
+                            <div className="p-2 rounded-lg bg-blue-500/15 border border-blue-400/30 text-blue-400">
+                                <Info size={18} />
+                            </div>
+                            <div>
+                                <h2 id="modelInfoDialogTitle" className="text-lg font-bold text-white">
+                                    NCAAM Market-First Sniper v2.1 — Weighting & Logic
+                                </h2>
+                                <p className="text-xs text-slate-400">
+                                    2026-27 Season Bayesian Market-Prior Blend, Dynamic Monthly Weights & Publish Gates
+                                </p>
+                            </div>
+                        </div>
+                        <form method="dialog">
+                            <button
+                                type="submit"
+                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+                            >
+                                Close
+                            </button>
+                        </form>
+                    </div>
+
+                    <div className="p-6 overflow-y-auto space-y-6 text-sm leading-relaxed">
+                        {/* 1. Core Blend Architecture */}
+                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
+                            <h3 className="text-xs font-black uppercase tracking-wider text-blue-400 mb-2">
+                                1. Market-First Bayesian Blend
+                            </h3>
+                            <p className="text-slate-300 text-xs mb-3">
+                                Rather than predicting games in a vacuum, the model anchors on the live consensus sportsbook line (<code className="text-blue-300">μ_market</code>) and blends independent efficiency projections from <strong>BartTorvik (T-Rank)</strong> and <strong>KenPom</strong>, plus bounded situational signals, to compute a fair line (<code className="text-emerald-300">μ_fair</code>).
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                                <div>
+                                    <div className="text-slate-400 font-sans font-semibold mb-1">Spread Blend Formula:</div>
+                                    <div className="text-emerald-300">
+                                        μ_spread = μ_mkt + w_base·(Torvik − μ_mkt) + w_sched·(Sched − μ_mkt) + w_kp·(KenPom − μ_mkt) + Adj_sit
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-slate-400 font-sans font-semibold mb-1">Total Blend Formula:</div>
+                                    <div className="text-amber-300">
+                                        μ_total = μ_mkt + (w_base + 0.5·w_sched)·(Torvik − μ_mkt) + w_kp·(KenPom − μ_mkt) + Adj_player + Adj_ref
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* 2. Dynamic Monthly Weighting Schedule */}
+                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
+                            <h3 className="text-xs font-black uppercase tracking-wider text-emerald-400 mb-2">
+                                2. Dynamic Seasonal Weighting Schedule
+                            </h3>
+                            <p className="text-slate-300 text-xs mb-3">
+                                Early-season efficiency ratings rely heavily on preseason priors and transfer-portal projections. The model dynamically scales projection weights and variance (<code className="text-slate-200">σ</code>) by month as current-season sample size grows:
+                            </p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-slate-700 text-slate-400 uppercase text-[10px]">
+                                            <th className="py-2 pr-3">Window</th>
+                                            <th className="py-2 px-2">Torvik Base (w_base)</th>
+                                            <th className="py-2 px-2">Torvik Sched (w_sched)</th>
+                                            <th className="py-2 px-2">KenPom (w_kp)</th>
+                                            <th className="py-2 px-2">Sigma Mult (σ)</th>
+                                            <th className="py-2 pl-2">Luck / Situational Scale</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800 text-slate-200">
+                                        <tr>
+                                            <td className="py-2 pr-3 font-semibold text-blue-300">November (Early Season)</td>
+                                            <td className="py-2 px-2 font-mono">12%</td>
+                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono">10%</td>
+                                            <td className="py-2 px-2 font-mono">1.08×</td>
+                                            <td className="py-2 pl-2">0.25× Luck (≥4 GP) • 0.50× Sit</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-2 pr-3 font-semibold">December (Non-Conf)</td>
+                                            <td className="py-2 px-2 font-mono">18%</td>
+                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono">15%</td>
+                                            <td className="py-2 px-2 font-mono">1.04×</td>
+                                            <td className="py-2 pl-2">0.60× Luck • 1.00× Sit</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-2 pr-3 font-semibold">January (Conf Play)</td>
+                                            <td className="py-2 px-2 font-mono">25%</td>
+                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono">20%</td>
+                                            <td className="py-2 px-2 font-mono">1.00×</td>
+                                            <td className="py-2 pl-2">1.00× Full Weight</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-2 pr-3 font-semibold">February (Late Conf)</td>
+                                            <td className="py-2 px-2 font-mono">32%</td>
+                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono">20%</td>
+                                            <td className="py-2 px-2 font-mono">1.00×</td>
+                                            <td className="py-2 pl-2">1.00× Full Weight</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-2 pr-3 font-semibold text-orange-300">March (Tournament)</td>
+                                            <td className="py-2 px-2 font-mono">38%</td>
+                                            <td className="py-2 px-2 font-mono">15% (7.5% Tot)</td>
+                                            <td className="py-2 px-2 font-mono">20%</td>
+                                            <td className="py-2 px-2 font-mono">1.00×</td>
+                                            <td className="py-2 pl-2">Neutral HCA (0.0) • Peak Alpha</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="mt-2.5 text-[11px] text-slate-400">
+                                <strong>Transfer Portal / Continuity Guardrail:</strong> If average roster continuity is below <code className="text-slate-200">50%</code>, <code className="text-slate-200">w_base</code> is capped at <code className="text-slate-200">10%</code>, <code className="text-slate-200">w_kp</code> is capped at <code className="text-slate-200">8%</code>, and <code className="text-slate-200">σ</code> is inflated by an additional <code className="text-slate-200">1.05×</code>.
+                            </div>
+                        </section>
+
+                        {/* 3. Efficiency Math & Situational Signals */}
+                        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
+                                <h3 className="text-xs font-black uppercase tracking-wider text-purple-400 mb-2">
+                                    3. Efficiency & Pace Math
+                                </h3>
+                                <ul className="space-y-1.5 text-xs text-slate-300 list-disc pl-4">
+                                    <li><strong>Expected Tempo:</strong> Average of Home & Away adjusted tempo (<code className="text-slate-200">AdjT</code>, baseline <code className="text-slate-200">68.0</code> possessions).</li>
+                                    <li><strong>Raw Team Score:</strong> <code className="text-slate-200">(AdjOE × Opp_AdjDE / 106.0) × (Tempo / 100)</code>.</li>
+                                    <li><strong>Home Court Advantage:</strong> <code className="text-slate-200">+3.2 pts</code> on home courts (<code className="text-slate-200">0.0</code> on neutral sites), plus KenPom venue HCA delta (<code className="text-slate-200">±1.5 pts</code> cap), altitude boost, and cross-country travel (<code className="text-slate-200">&gt;1,000 mi: +0.5 pts</code> to home).</li>
+                                    <li><strong>Pace-Scaled KenPom Margin:</strong> <code className="text-slate-200">(AdjEM_home − AdjEM_away) × (Tempo / 100) + HCA</code>.</li>
+                                </ul>
+                            </div>
+
+                            <div className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
+                                <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 mb-2">
+                                    4. Situational Micro-Signals
+                                </h3>
+                                <ul className="space-y-1.5 text-xs text-slate-300 list-disc pl-4">
+                                    <li><strong>3PT Shooting Regression:</strong> Fades teams shooting <code className="text-slate-200">&gt;4%</code> above season 3PT% over their last 3 games (up to <code className="text-slate-200">−2.0 pts</code>; requires <code className="text-slate-200">≥4</code> current-season games).</li>
+                                    <li><strong>Luck Regression:</strong> Adjusts <code className="text-slate-200">±1.0 pt</code> (scaled by month, requires <code className="text-slate-200">≥4</code> games) when Torvik Luck exceeds <code className="text-slate-200">±0.05</code>.</li>
+                                    <li><strong>Letdown / Lookahead Spots:</strong> Penalizes flat spots after ranked upsets or before marquee matchups (<code className="text-slate-200">±1.5 pts</code>, scaled <code className="text-slate-200">0.5×</code> in Nov).</li>
+                                    <li><strong>Rest & Referee Signals:</strong> Short-rest fatigue penalties and crew foul/pace total adjustments.</li>
+                                </ul>
+                            </div>
+                        </section>
+
+                        {/* 4. Sniper Guardrails & Publish Gates */}
+                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
+                            <h3 className="text-xs font-black uppercase tracking-wider text-rose-400 mb-2">
+                                5. Sniper Caps, Uncertainty (σ) & Publish Gates
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
+                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                                    <div className="font-bold text-white mb-1">Deviation Caps</div>
+                                    Core efficiency blend is clamped at <code className="text-emerald-300">±2.0 pts</code> on Spreads (<code className="text-emerald-300">±3.0 pts</code> outer cap with micro-signals) and <code className="text-amber-300">±3.0 pts</code> on Totals (<code className="text-amber-300">±4.5 pts</code> outer cap) so single-source outliers cannot hijack the market prior.
+                                </div>
+                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                                    <div className="font-bold text-white mb-1">Dynamic Sigma (σ)</div>
+                                    <code className="text-slate-200">σ_spread = (10.5·√(T/68) + 0.1·|Δ|)·M_mo</code><br />
+                                    <code className="text-slate-200">σ_total = (13.5·√(T/68) + 0.1·|Δ|)·M_mo</code><br />
+                                    Further inflated if steam moves against the model or books disagree.
+                                </div>
+                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                                    <div className="font-bold text-white mb-1">Actionable Gates</div>
+                                    Requires <code className="text-emerald-300">EV ≥ +2.0%</code> (or <code className="text-emerald-300">≥ +3.5% EV &amp; 1.5 pt edge</code> on Spreads / <code className="text-amber-300">≥ +3.0% EV &amp; 1.5 pt edge</code> on Totals when archetype CI is wide), plus whole-number push probability adjustments.
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </dialog>
         </div>
     )
 }
