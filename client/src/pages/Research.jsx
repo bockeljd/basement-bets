@@ -1041,9 +1041,27 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                                             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{top.bet_type}</span>
                                                                             <span className="text-sm font-bold text-slate-100 whitespace-normal leading-tight">{pickText}</span>
                                                                         </div>
-                                                                        <div className="flex flex-col items-end shrink-0">
-                                                                            <span className="text-xs font-mono font-bold text-slate-400">{(top.price !== null && top.price !== undefined) ? fmtSigned(top.price, 0) : '—'}</span>
-                                                                            <span className="text-[10px] text-slate-500 uppercase font-bold">{top.confidence}</span>
+                                                                        <div className="flex flex-col items-end shrink-0 gap-1">
+                                                                            <span className="text-xs font-mono font-bold text-slate-300">{(top.price !== null && top.price !== undefined) ? fmtSigned(top.price, 0) : '—'}</span>
+                                                                            {top.confidence && (() => {
+                                                                                const confNorm = String(top.confidence).toUpperCase();
+                                                                                const confCls = confNorm === 'HIGH'
+                                                                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                                                                    : confNorm === 'MEDIUM'
+                                                                                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                                                                        : 'bg-slate-800 text-slate-400 border-slate-700';
+                                                                                const wpPct = (top.win_prob !== null && top.win_prob !== undefined)
+                                                                                    ? ` • ${(Number(top.win_prob) * 100).toFixed(0)}%`
+                                                                                    : '';
+                                                                                return (
+                                                                                    <span
+                                                                                        title="Confidence tier based on calibrated win probability (High ≥ 55%, Medium 52–54.9%, Low < 52%)"
+                                                                                        className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${confCls}`}
+                                                                                    >
+                                                                                        {top.confidence} Conf{wpPct}
+                                                                                    </span>
+                                                                                );
+                                                                            })()}
                                                                         </div>
                                                                     </div>
                                                                 </div>
@@ -2426,6 +2444,51 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
                                     <div className="font-bold text-white mb-1">Actionable Gates</div>
                                     Requires <code className="text-emerald-300">EV ≥ +2.0%</code> (or <code className="text-emerald-300">≥ +3.5% EV &amp; 1.5 pt edge</code> on Spreads / <code className="text-amber-300">≥ +3.0% EV &amp; 1.5 pt edge</code> on Totals when archetype CI is wide), plus whole-number push probability adjustments.
+                                </div>
+                            </div>
+                        </section>
+                        {/* 6. Understanding EV, Confidence Levels & Top 6 Selection */}
+                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
+                            <h3 className="text-xs font-black uppercase tracking-wider text-sky-400 mb-3">
+                                6. Understanding EV%, Confidence Levels &amp; Top 6 Ranking
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
+                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
+                                    <div className="font-bold text-white">What Is EV (Expected Value %)?</div>
+                                    <p>
+                                        <strong className="text-emerald-300">EV%</strong> is your projected long-run return per <code className="text-slate-200">1.0 unit</code> risked based on the gap between our calibrated win probability (<code className="text-slate-200">P_win</code>) and the sportsbook odds price:
+                                    </p>
+                                    <div className="font-mono text-[11px] text-emerald-300 bg-slate-900/90 p-2 rounded border border-slate-800">
+                                        EV = [P_win × b − (1 − P_win)] × (1 − P_push)
+                                    </div>
+                                    <p className="text-slate-400">
+                                        For example, <code className="text-slate-200">+8.5% EV</code> expects <code className="text-slate-200">+$8.50</code> profit per <code className="text-slate-200">$100</code> wagered over a large sample. Better prices like <code className="text-slate-200">-105</code> vs. <code className="text-slate-200">-110</code> directly raise EV even at the same win probability.
+                                    </p>
+                                </div>
+
+                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
+                                    <div className="font-bold text-white">Confidence Levels (High / Medium / Low)</div>
+                                    <p>
+                                        Every pick receives a confidence tier from its calibrated cover/total win probability (<code className="text-slate-200">win_prob</code>, or the conservative <code className="text-slate-200">p10</code> lower bound when uncertainty sampling is active):
+                                    </p>
+                                    <ul className="space-y-1 pl-1">
+                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] mr-1">HIGH</span> <code className="text-slate-200">P_win ≥ 55.0%</code></li>
+                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold text-[10px] mr-1">MEDIUM</span> <code className="text-slate-200">52.0% – 54.9%</code></li>
+                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-bold text-[10px] mr-1">LOW</span> <code className="text-slate-200">P_win &lt; 52.0%</code></li>
+                                    </ul>
+                                    <p className="text-slate-400">
+                                        <strong>Confidence</strong> reflects how likely the bet is to win; <strong>EV%</strong> reflects mathematical value relative to the odds price.
+                                    </p>
+                                </div>
+
+                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
+                                    <div className="font-bold text-white">Why Are These the Top 6 Plays?</div>
+                                    <p>
+                                        All scheduled games for the selected ET date are evaluated against live sportsbook lines, capped, and filtered through the Actionable Publish Gates (<code className="text-slate-200">is_actionable = true</code>).
+                                    </p>
+                                    <p>
+                                        Qualifying games (best market per matchup: Spread or Total) are then <strong>ranked strictly in descending order by EV%</strong>, and the <strong>#1–#6 highest-EV edges</strong> are featured in the Top 6 cards above the full slate.
+                                    </p>
                                 </div>
                             </div>
                         </section>
