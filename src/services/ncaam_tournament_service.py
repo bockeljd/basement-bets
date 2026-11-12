@@ -358,14 +358,23 @@ class NCAAMTournamentPredictionService:
         affected_teams = set()
         _shared_cache = {}
 
+        from contextlib import contextmanager
         from src.database import get_db_connection
         news_svc = getattr(self.model, "news_service", None)
         orig_skip_fetch = getattr(news_svc, "skip_fetch", False) if news_svc is not None else False
         if news_svc is not None:
             news_svc.skip_fetch = True
 
+        @contextmanager
+        def _optional_db_connection():
+            try:
+                with get_db_connection() as c:
+                    yield c
+            except RuntimeError:
+                yield None
+
         try:
-            with get_db_connection() as conn:
+            with _optional_db_connection() as conn:
                 # HEAT EVERYTHING (Parallel)
                 preheat_start = time.time()
                 self.preheat_cache(all_team_names)

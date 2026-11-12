@@ -152,34 +152,24 @@ def build_team_mapper(conn) -> callable:
 
 
 def get_metrics_cached(conn, cache: dict, team_text: str, date_iso: str | None):
-    k = (team_text, date_iso)
+    from src.utils.ncaam_season import normalize_iso_date, season_start_date_for_game
+    d_iso = normalize_iso_date(date_iso)
+    season_start = season_start_date_for_game(d_iso)
+    k = (team_text, d_iso)
     if k in cache:
         return cache[k]
 
-    if date_iso:
-        row = _exec(
-            conn,
-            """
-            SELECT adj_off, adj_def, adj_tempo
-            FROM bt_team_features_daily
-            WHERE team_text=:t AND date <= :d
-            ORDER BY date DESC
-            LIMIT 1
-            """,
-            {"t": team_text, "d": date_iso},
-        ).fetchone()
-    else:
-        row = _exec(
-            conn,
-            """
-            SELECT adj_off, adj_def, adj_tempo
-            FROM bt_team_features_daily
-            WHERE team_text=:t
-            ORDER BY date DESC
-            LIMIT 1
-            """,
-            {"t": team_text},
-        ).fetchone()
+    row = _exec(
+        conn,
+        """
+        SELECT adj_off, adj_def, adj_tempo
+        FROM bt_team_features_daily
+        WHERE team_text=:t AND date >= :season_start AND date <= :d
+        ORDER BY date DESC
+        LIMIT 1
+        """,
+        {"t": team_text, "season_start": season_start, "d": d_iso},
+    ).fetchone()
 
     cache[k] = dict(row) if row else None
     return cache[k]

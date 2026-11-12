@@ -119,12 +119,16 @@ class NCAAMBracketStateService:
         self.round_defs = self._build_round_definitions()
 
     def _load_seed_rows(self) -> List[Dict[str, Any]]:
-        with get_db_connection() as conn:
-            rows = _exec(conn, """
-                SELECT team_name, seed, region
-                FROM ncaam_tournament_seeds
-                WHERE season = %s
-            """, (self.season,)).fetchall()
+        rows = []
+        try:
+            with get_db_connection() as conn:
+                rows = _exec(conn, """
+                    SELECT team_name, seed, region
+                    FROM ncaam_tournament_seeds
+                    WHERE season = %s
+                """, (self.season,)).fetchall()
+        except Exception as e:
+            logger.warning("DB unavailable while loading bracket seeds for %s: %s", self.season, e)
 
         if rows:
             self.seed_source = "manual_bracket_data"

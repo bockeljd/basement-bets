@@ -132,23 +132,25 @@ class NCAAMMarketFirstModelV2(BaseModel):
         """Evaluate performance (No-op)."""
         pass
 
+    def _parse_game_datetime(self, game_date):
+        from datetime import datetime
+        if game_date is None:
+            return datetime.now()
+        if isinstance(game_date, str):
+            try:
+                return datetime.fromisoformat(game_date.replace('Z', '+00:00'))
+            except Exception:
+                return datetime.now()
+        return game_date
+
     def _get_dynamic_weights(self, game_date) -> float:
         """
         Returns a weight (W_BASE) that scales based on the time of year.
         Early season: Trust Market heavily (projections are preseason-based).
         Late season: Trust Projections more (based on actual games).
         """
-        from datetime import datetime
-        
-        if game_date is None:
-            game_date = datetime.now()
-        elif isinstance(game_date, str):
-            try:
-                game_date = datetime.fromisoformat(game_date.replace('Z', '+00:00'))
-            except:
-                game_date = datetime.now()
-        
-        month = game_date.month
+        dt = self._parse_game_datetime(game_date)
+        month = getattr(dt, 'month', 1)
         
         # Off-season/Early Season (Nov/Dec) - Preseason projections
         if month == 11: return 0.12  # Trust Market heavily
@@ -161,18 +163,48 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # April+ (Rare, post-tournament)
         return 0.25  # Default
 
-    def _calculate_shooting_regression(self, team_name: str) -> float:
+    def _get_dynamic_kenpom_weight(self, game_date, avg_continuity: float = 0.7) -> float:
+        """
+        Scale W_KENPOM dynamically by month and roster continuity so early-season
+        preseason priors do not overpower the market in November/December.
+        """
+        if os.getenv('NCAAM_W_KENPOM') is not None:
+            try:
+                return float(os.getenv('NCAAM_W_KENPOM'))
+            except Exception:
+                pass
+
+        dt = self._parse_game_datetime(game_date)
+        month = getattr(dt, 'month', 1)
+        base_kp = float(self.W_KENPOM)
+
+        if month == 11:
+            w_kp = base_kp * 0.50  # 0.10 when W_KENPOM=0.20
+        elif month == 12:
+            w_kp = base_kp * 0.75  # 0.15 when W_KENPOM=0.20
+        else:
+            w_kp = base_kp
+
+        if avg_continuity < 0.5:
+            w_kp = min(w_kp, 0.08)
+
+        return w_kp
+
+    def _calculate_shooting_regression(self, team_name: str, as_of_date=None) -> float:
         """
         3-Point Variance Signal: Fade teams shooting hot from 3.
-        If a team is shooting >8% above their season average over last 3 games,
-        apply a negative regression penalty.
+        Requires at least 4 current-season games before activating so week-1 noise
+        or prior-season games never distort early-November spreads.
         """
         from src.database import get_team_recent_shooting
         
         try:
-            stats = get_team_recent_shooting(team_name, num_games=3)
+            stats = get_team_recent_shooting(team_name, num_games=3, as_of_date=as_of_date)
+            games_played = int(stats.get('games_played') or 0)
+            if games_played < 4:
+                return 0.0
+
             delta = stats.get('delta', 0.0)
-            
             if delta is None:
                 return 0.0
                 
@@ -208,8 +240,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 current_date = datetime.now()
         
         try:
-            # 1. LETDOWN SPOT: Check if last game was an upset win
-            last_game = get_team_last_game(team_name)
+            # 1. LETDOWN SPOT: Check if last game in current season was an upset win
+            last_game = get_team_last_game(team_name, as_of_date=current_date)
             if last_game:
                 margin = last_game.get('margin', 0) or 0
                 opponent_rank = last_game.get('opponent_rank', 0) or 0
@@ -248,7 +280,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         Priority:
         1) referee_assignments.crew_avg_fouls (if present)
-        2) KenPom ref ratings (best-effort, header-driven)
+        2) KenPom ref ratings (best-effort, header-driven) when crew names are assigned.
+        If no officiating crew is assigned for the game, returns mu_total unchanged.
         """
         from src.database import get_referee_assignment
 
@@ -263,15 +296,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 except Exception:
                     crew_fouls = None
 
-            # Fall back to KenPom ref table if we have names.
+            # Fall back to KenPom ref table only if we have assigned referee names.
             if crew_fouls is None:
                 names = [ref_data.get('referee_1'), ref_data.get('referee_2'), ref_data.get('referee_3')]
                 names = [n for n in names if n]
                 if names:
                     crew_fouls = self.kenpom_client.estimate_crew_avg_fouls(names)
-                else:
-                    # No assignment available: use KenPom ref tendencies in aggregate.
-                    crew_fouls = self.kenpom_client.estimate_league_avg_ref_fouls()
 
             if crew_fouls is not None:
                 # Every 1 foul above average adds ~0.8 points to total
@@ -291,11 +321,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
     def _calculate_fatigue_penalty(self, team_name: str, event_id: str, current_game_date) -> float:
         """
-        Checks the schedule for 'Short Rest' spots.
+        Checks the schedule for 'Short Rest' spots within the current season.
         -2.5 pts for '3rd game in 6 days' (The 'Tired Legs' Spot)
         -1.5 pts for 'Back-to-back'
         """
         from src.database import get_db_connection, _exec
+        from src.utils.ncaam_season import season_start_date_for_game
         from datetime import datetime, timedelta
         
         if current_game_date is None:
@@ -307,10 +338,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 return 0.0
         
         try:
-            # Query recent games, excluding the current one
+            season_start = season_start_date_for_game(current_game_date)
+            # Query recent games in the active season, excluding the current one
             query = """
             SELECT id, start_time FROM events 
             WHERE (LOWER(home_team) LIKE LOWER(:t) OR LOWER(away_team) LIKE LOWER(:t))
+            AND start_time >= :season_start
             AND start_time < :now
             AND id != :eid  -- Critical fix: Exclude current game to prevent self-matching
             ORDER BY start_time DESC LIMIT 2
@@ -319,6 +352,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             # Use named parameters
             params = {
                 "t": f"%{team_name}%",
+                "season_start": season_start,
                 "now": current_game_date,
                 "eid": event_id
             }
@@ -436,8 +470,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
              if isinstance(game_date, datetime):
                  game_date_str = game_date.strftime("%Y%m%d")
                  
-        torvik_view = self.torvik_service.get_projection(team_a_canon, team_b_canon, date=game_date_str, conn=conn)
-        kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn)
+        try:
+            torvik_view = self.torvik_service.get_projection(team_a_canon, team_b_canon, date=game_date_str, conn=conn, neutral_site=True)
+        except TypeError:
+            torvik_view = self.torvik_service.get_projection(team_a_canon, team_b_canon, date=game_date_str, conn=conn)
+        try:
+            kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn, neutral_site=True)
+        except TypeError:
+            kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn)
 
         # Team style + player facts for narratives (best-effort)
         kp_a = None
@@ -504,7 +544,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             # KenPom adjustment (if available)
             if kenpom_adj and kenpom_adj.get('spread_adj') is not None:
-                mu_kp_spread = -kenpom_adj['spread_adj']
+                kp_val = kenpom_adj.get('neutral_margin') if kenpom_adj.get('neutral_margin') is not None else kenpom_adj['spread_adj']
+                mu_kp_spread = -float(kp_val)
                 mu_base_spread = (0.75 * mu_base_spread) + (0.25 * mu_kp_spread)
 
             # Sanity blend: if Torvik spread is wildly inconsistent with KenPom team strength, pull back.
@@ -725,7 +766,26 @@ class NCAAMMarketFirstModelV2(BaseModel):
             except Exception:
                 pass
 
-        torvik_view = self.torvik_service.get_projection(event['home_team'], event['away_team'], date=game_date_str)
+        # Neutral Site Detection (resolved early so Torvik/KenPom projections use neutral HCA=0)
+        is_neutral = bool(
+            (event_context and event_context.get('neutral_site'))
+            or event.get('neutral_site')
+            or self.manual_adjustments.get('is_neutral')
+        )
+
+        try:
+            torvik_view = self.torvik_service.get_projection(
+                event['home_team'],
+                event['away_team'],
+                date=game_date_str,
+                neutral_site=is_neutral,
+            )
+        except TypeError:
+            torvik_view = self.torvik_service.get_projection(
+                event['home_team'],
+                event['away_team'],
+                date=game_date_str,
+            )
         
         # VALIDATION: Abort if Torvik is missing (Stop the "0.0 edge" bug)
         if not torvik_view or torvik_view.get('lean') == 'No Data':
@@ -738,7 +798,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         # Other Signals
         torvik_team_stats = self.torvik_service.get_matchup_team_stats(event['home_team'], event['away_team'], date=game_date_str)
-        kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(event['home_team'], event['away_team'])
+        try:
+            kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(
+                event['home_team'],
+                event['away_team'],
+                neutral_site=is_neutral,
+            )
+        except TypeError:
+            kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(
+                event['home_team'],
+                event['away_team'],
+            )
         # News can be slow; fetch only if we have a candidate edge to write up.
         news_context = {}
         
@@ -758,26 +828,49 @@ class NCAAMMarketFirstModelV2(BaseModel):
         mu_torvik_spread = -(torvik_view.get('margin') or 0.0)
         mu_sched_spread = -(torvik_view.get('official_margin') or -mu_torvik_spread)
         
-        # KenPom Integration
-        kp_margin = kenpom_adj.get('spread_adj') or 0.0
-        mu_kenpom_line = -kp_margin
+        # KenPom Integration (only blend when KenPom ratings are actually available)
+        kp_available = bool(
+            kenpom_adj
+            and kenpom_adj.get('summary') != 'KenPom data not available'
+            and kenpom_adj.get('spread_adj') is not None
+        )
+        if kp_available:
+            if is_neutral and kenpom_adj.get('neutral_margin') is not None:
+                kp_margin = float(kenpom_adj.get('neutral_margin') or 0.0)
+            elif not is_neutral and kenpom_adj.get('fair_margin') is not None:
+                kp_margin = float(kenpom_adj.get('fair_margin') or 0.0)
+            else:
+                kp_margin = float(kenpom_adj.get('spread_adj') or 0.0)
+            mu_kenpom_line = -kp_margin
+            diff_kenpom = (mu_kenpom_line - mu_market_spread)
+        else:
+            kp_margin = 0.0
+            mu_kenpom_line = mu_torvik_spread
+            diff_kenpom = 0.0
         
         diff_torvik = (mu_torvik_spread - mu_market_spread)
         diff_sched = (mu_sched_spread - mu_market_spread)
-        diff_kenpom = (mu_kenpom_line - mu_market_spread)
         
         # --- Feature: Luck Regression ---
         # If a team has high "Luck" (>0.05), they are overperforming and due for regression.
-        # We apply a penalty to their projected margin.
-        
-        # Volatility Check: In November (Month 11), luck is noisy. Scale down.
-        luck_scale = 1.0
-        try:
-             # event['start_time'] is datetime object
-             if event['start_time'].month == 11:
-                 luck_scale = 0.5
-        except Exception:
-             pass
+        # In November (Month 11), small sample sizes make Luck noisy; require >= 4 games or scale heavily.
+        parsed_dt = self._parse_game_datetime(game_date_obj)
+        game_month = getattr(parsed_dt, 'month', 1)
+        luck_scale = 0.25 if game_month == 11 else (0.60 if game_month == 12 else 1.0)
+
+        def _parse_games_from_record(rec_str) -> Optional[int]:
+            if not rec_str or not isinstance(rec_str, str) or '-' not in rec_str:
+                return None
+            try:
+                parts = rec_str.strip().split('-')
+                return int(parts[0]) + int(parts[1])
+            except Exception:
+                return None
+
+        home_rec_games = _parse_games_from_record((torvik_team_stats.get('home') or {}).get('record'))
+        away_rec_games = _parse_games_from_record((torvik_team_stats.get('away') or {}).get('record'))
+        if (home_rec_games is not None and home_rec_games < 4) or (away_rec_games is not None and away_rec_games < 4):
+            luck_scale = 0.0
 
         home_luck = (torvik_team_stats.get('home') or {}).get('luck', 0.0) or 0.0
         away_luck = (torvik_team_stats.get('away') or {}).get('luck', 0.0) or 0.0
@@ -794,30 +887,21 @@ class NCAAMMarketFirstModelV2(BaseModel):
             luck_adjustment += (1.0 * luck_scale) # Away boost
             
         # --- Feature: Continuity / Transfer Portal Factor ---
-        # If teams have low continuity, metrics are less reliable early season.
-        # We trust the MARKET more.
-        home_continuity = (torvik_team_stats.get('home') or {}).get('continuity', 1.0) or 0.7
-        away_continuity = (torvik_team_stats.get('away') or {}).get('continuity', 1.0) or 0.7
+        # Note: Torvik stores continuity either as 0..1 or 0..100 percentage; normalize to 0..1.
+        raw_h_cont = (torvik_team_stats.get('home') or {}).get('continuity', 0.7) or 0.7
+        raw_a_cont = (torvik_team_stats.get('away') or {}).get('continuity', 0.7) or 0.7
+        home_continuity = float(raw_h_cont) / 100.0 if float(raw_h_cont) > 1.5 else float(raw_h_cont)
+        away_continuity = float(raw_a_cont) / 100.0 if float(raw_a_cont) > 1.5 else float(raw_a_cont)
         
         avg_continuity = (home_continuity + away_continuity) / 2.0
         
-        # Dynamic Weights
+        # Dynamic Weights for both Torvik (w_base) and KenPom (w_kp)
         w_base = self.W_BASE
         if avg_continuity < 0.5:
-             # Low continuity -> Trust Market More (increase W_BASE from 0.20 to 0.40?)
-             # Effectively reduces weight of Torvik/KenPom
-             # Wait, equation is: mu_market + W * (diff)
-             # If we want to stay closer to market, we REDUCE the weights of projections?
-             # Or we treat Market as anchor. 
-             # Current formula: market + 0.2*(torvik-market).
-             # If we want to trust market more, we should LOWER W_BASE.
-             # "increase W_BASE (Market Weight)" - wait, W_BASE in my code is strictly applied to Torvik diff?
-             # Let's check line 102: mu_spread_final = mu_market + (W_BASE * diff_torvik) ...
-             # YES. To trust market MORE, we need SMALLER weights on the diffs.
-             w_base = 0.10 # Reduced from 0.20
+            w_base = min(w_base, 0.10)
+        w_kp = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity) if kp_available else 0.0
         
-        
-        mu_spread_final = mu_market_spread + (w_base * diff_torvik) + (self.W_SCHED * diff_sched) + (self.W_KENPOM * diff_kenpom) + luck_adjustment
+        mu_spread_final = mu_market_spread + (w_base * diff_torvik) + (self.W_SCHED * diff_sched) + (w_kp * diff_kenpom) + luck_adjustment
         
         # --- Feature: Agent Council Qualitative Adjustment ---
         # Explanations-only mode: we still fetch and persist council narratives for UI,
@@ -885,7 +969,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if mu_market_total is None:
             mu_market_total = 145.0
         
-        mu_total_final = mu_market_total + (w_base * (mu_torvik_total - mu_market_total)) + (self.W_KENPOM * (mu_kenpom_total - mu_market_total))
+        mu_total_final = mu_market_total + (w_base * (mu_torvik_total - mu_market_total)) + (w_kp * (mu_kenpom_total - mu_market_total))
         mu_total_final += kp_player_total_adj
         potential_adjustment_total = council_adjustment_total
         if COUNCIL_ADJUSTMENTS_ENABLED:
@@ -897,18 +981,21 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if abs(mu_total_final - mu_market_total) > self.CAP_TOTAL:
              mu_total_final = mu_market_total + (self.CAP_TOTAL * math.copysign(1, mu_total_final - mu_market_total))
 
-        # 6. Pace-Adjusted Sigma (Refined)
+        # 6. Pace-Adjusted & Season-Calibrated Sigma (Refined)
         # Higher tempo = more possessions = higher variance = wider sigma
-        # Scaling: sqrt(tempo / avg) is theoretically correct for variance scaling.
+        # Early season (Nov/Dec) & low-continuity transfer rosters have higher residual variance.
         game_tempo = (torvik_team_stats or {}).get('game_tempo', 68.0) or 68.0
         tempo_factor = math.sqrt(game_tempo / 68.0)
         
         base_sigma_spread = 10.5
         base_sigma_total = 13.5  # Adjusted from 15.0 for accuracy
+
+        early_season_sigma_mult = 1.08 if game_month == 11 else (1.04 if game_month == 12 else 1.0)
+        if avg_continuity < 0.5:
+            early_season_sigma_mult *= 1.05
         
-        
-        sigma_spread = (base_sigma_spread * tempo_factor) + 0.1 * abs(diff_torvik)
-        sigma_total = (base_sigma_total * tempo_factor) + 0.1 * abs(mu_torvik_total - mu_market_total)
+        sigma_spread = ((base_sigma_spread * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
+        sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * abs(mu_torvik_total - mu_market_total)) * early_season_sigma_mult
 
         # --- Feature: Dynamic Sigma Inflation ---
         # If the Council identifies roster instability or significant red flags, 
@@ -948,21 +1035,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # sanity scoring (sigma inflation / higher EV thresholds) rather than forcing caps.
         
         # --- Feature: Advanced Home Court (Geo) ---
-        # Travel Fatigue & Altitude
-        # Neutral Site Detection
-        is_neutral = False
-        if event_context and event_context.get('neutral_site'):
-            is_neutral = True
-        elif ' vs ' in f"{event['away_team']} {event['home_team']}" or ' vs. ' in f"{event['away_team']} {event['home_team']}":
-             # Extremely crude heuristic: some feeds use "vs" for neutral, "@" for home.
-             # But our event['home_team'] is structured.
-             # Better: Check if event['site_key'] or similar exists.
-             # For now, rely on manual_adjustments or updated parsers.
-             pass
-             
-        if self.manual_adjustments.get('is_neutral'):
-            is_neutral = True
-
         # Altitude
         altitude_adj = self.geo_service.get_altitude_adjustment(event['home_team'], neutral_site=is_neutral) or 0.0
         if altitude_adj > 0:
@@ -988,13 +1060,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if dist > 1000 and not is_neutral:
             mu_spread_final -= 0.5
 
-        # --- Feature: Live Injury Impact Toggle ---
-        if self.manual_adjustments:
-            h_inj = self.manual_adjustments.get('home_injury', 0.0)
-            a_inj = self.manual_adjustments.get('away_injury', 0.0)
-            mu_spread_final += h_inj
-            mu_spread_final -= a_inj
-
         # --- Feature: Basement Line (Power Rating) ---
         raw_basement_line = (mu_torvik_spread + mu_kenpom_line) / 2.0
         raw_basement_line += luck_adjustment
@@ -1005,17 +1070,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
             raw_basement_line += self.manual_adjustments.get('home_injury', 0.0)
             raw_basement_line -= self.manual_adjustments.get('away_injury', 0.0)
         
-        # 6.5 Advanced Situational Signals
+        # 6.5 Advanced Situational Signals (scaled in early season & bounded by outer sniper guardrail)
+        situational_scale = 0.5 if game_month == 11 else 1.0
+
         # -- Shooting Regression (3PT Variance) --
-        shooting_regr_home = self._calculate_shooting_regression(event['home_team']) or 0.0
-        shooting_regr_away = self._calculate_shooting_regression(event['away_team']) or 0.0
-        shooting_adj = shooting_regr_home - shooting_regr_away
+        shooting_regr_home = self._calculate_shooting_regression(event['home_team'], as_of_date=game_date_obj) or 0.0
+        shooting_regr_away = self._calculate_shooting_regression(event['away_team'], as_of_date=game_date_obj) or 0.0
+        shooting_adj = (shooting_regr_home - shooting_regr_away) * situational_scale
         mu_spread_final += shooting_adj
         
         # -- Situational Spots (Letdown/Lookahead) --
         spot_adj_home = self._calculate_situational_spots(event['home_team'], event) or 0.0
         spot_adj_away = self._calculate_situational_spots(event['away_team'], event) or 0.0
-        spot_adj = spot_adj_home - spot_adj_away
+        spot_adj = (spot_adj_home - spot_adj_away) * situational_scale
         mu_spread_final += spot_adj
         
         # -- Fatigue / Short Rest Signal --
@@ -1025,9 +1092,24 @@ class NCAAMMarketFirstModelV2(BaseModel):
         a_fatigue = self._calculate_fatigue_penalty(event['away_team'], event_id, game_date) or 0.0
         fatigue_adj = h_fatigue - a_fatigue
         mu_spread_final += fatigue_adj
+
+        # Re-clamp automated spread adjustments so micro-signals cannot exceed CAP_SPREAD + 1.0
+        max_auto_spread_dev = self.CAP_SPREAD + 1.0
+        if abs(mu_spread_final - mu_market_spread) > max_auto_spread_dev:
+            mu_spread_final = mu_market_spread + (max_auto_spread_dev * math.copysign(1, mu_spread_final - mu_market_spread))
+
+        # --- Feature: Live Injury Impact Toggle (applied after automated clamp) ---
+        if self.manual_adjustments:
+            h_inj = self.manual_adjustments.get('home_injury', 0.0)
+            a_inj = self.manual_adjustments.get('away_injury', 0.0)
+            mu_spread_final += h_inj
+            mu_spread_final -= a_inj
         
         # -- Referee Signal (Totals) --
         mu_total_final = self._apply_referee_signal(event['id'], mu_total_final) or mu_total_final
+        max_auto_total_dev = self.CAP_TOTAL + 1.5
+        if abs(mu_total_final - mu_market_total) > max_auto_total_dev:
+            mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
         
         # 6.6 Generate Bell Curve Data for UI Visualization
         bell_curve_spread = self._generate_bell_curve(mu_spread_final, sigma_spread, mu_market_spread)
@@ -1714,15 +1796,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
     _action_network_stats: Optional[Dict[str, Any]] = None
 
+    def _resolve_model_param_path(self, filename: str) -> str:
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        bundled_path = os.path.join(repo_root, 'src', 'services', 'model_params', filename)
+        if os.path.exists(bundled_path):
+            return bundled_path
+        return os.path.join(repo_root, 'data', 'model_params', filename)
+
     def _load_action_network_stats(self) -> Dict[str, Any]:
         if self._action_network_stats is not None:
             return self._action_network_stats
 
-        import os
-        import json
-
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        path = os.path.join(repo_root, 'data', 'model_params', 'action_network_archetype_stats_ncaam.json')
+        path = self._resolve_model_param_path('action_network_archetype_stats_ncaam.json')
 
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -1871,8 +1956,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if self._winprob_calibration is not None:
             return self._winprob_calibration
 
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        path = os.path.join(repo_root, 'data', 'model_params', 'winprob_calibration_ncaam.json')
+        path = self._resolve_model_param_path('winprob_calibration_ncaam.json')
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 self._winprob_calibration = json.load(f)
@@ -1927,8 +2011,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if self._model_conf_params is not None:
             return self._model_conf_params
 
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        path = os.path.join(repo_root, 'data', 'model_params', 'model_confidence_params_ncaam.json')
+        path = self._resolve_model_param_path('model_confidence_params_ncaam.json')
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 self._model_conf_params = json.load(f)

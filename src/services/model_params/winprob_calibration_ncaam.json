@@ -1,0 +1,16 @@
+{
+  "sport": "ncaam",
+  "days": 1,
+  "n_obs": 0,
+  "method": "identity",
+  "points": [
+    {
+      "p": 0.0,
+      "p_cal": 0.0
+    },
+    {
+      "p": 1.0,
+      "p_cal": 1.0
+    }
+  ]
+}

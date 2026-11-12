@@ -4,6 +4,7 @@ from typing import Dict, Optional
 from src.database import get_db_connection, _exec
 from src.services.barttorvik import BartTorvikClient
 from src.services.team_identity_service import TeamIdentityService
+from src.utils.ncaam_season import normalize_iso_date, season_start_date_for_game
 from src.utils.team_matcher import TeamMatcher
 
 class TorvikProjectionService:
@@ -20,7 +21,7 @@ class TorvikProjectionService:
         self._metrics_cache = {}
         self._official_cache = {}
 
-    def get_projection(self, home_team: str, away_team: str, date: str = None, conn=None) -> Dict:
+    def get_projection(self, home_team: str, away_team: str, date: str = None, conn=None, neutral_site: bool = False) -> Dict:
         """
         Main entry point for "Torvik View".
         1. Try to fetch official Torvik projection for the day.
@@ -28,14 +29,15 @@ class TorvikProjectionService:
         """
         if not date:
             date = datetime.now().strftime("%Y%m%d")
+        date_compact = normalize_iso_date(date).replace("-", "")
             
         # 1. Official Projection Fetch (prefer cached DB ingest)
-        official_projs = self._fetch_official_from_db(date, conn=conn)
+        official_projs = self._fetch_official_from_db(date_compact, conn=conn)
 
         # In backtests, avoid network calls; fall back to computed projections when DB cache missing.
         no_net = str(os.getenv('BACKTEST_NO_NETWORK', '')).strip() not in ('', '0', 'false', 'False')
         if (not official_projs) and (not no_net):
-            official_projs = self.bt_client.fetch_daily_projections(date)
+            official_projs = self.bt_client.fetch_daily_projections(date_compact)
 
         # Match by name (Torvik uses specific naming)
         h_proj = self._find_projection(home_team, official_projs)
@@ -47,11 +49,11 @@ class TorvikProjectionService:
                 "official_margin": -float(h_proj['spread']),
                 "total": float(h_proj['total']),
                 "projected_score": h_proj.get('projected_score') or None,
-                "lean": "Official Torvik projection (cached)" if self._fetch_official_from_db(date) else "Official Torvik projection"
+                "lean": "Official Torvik projection (cached)" if self._fetch_official_from_db(date_compact) else "Official Torvik projection"
             }
 
         # 2. Heuristic Computation (The "Torvik thinks" backup)
-        return self.compute_torvik_projection(home_team, away_team, date=date)
+        return self.compute_torvik_projection(home_team, away_team, date=date, neutral_site=neutral_site)
 
     def _fetch_official_from_db(self, date_yyyymmdd: str, conn=None) -> Optional[Dict]:
         """Load official Torvik schedule JSON from DB if present."""
@@ -204,7 +206,7 @@ class TorvikProjectionService:
             "notes": None
         }
 
-    def compute_torvik_projection(self, home_team: str, away_team: str, date: str = None) -> Dict:
+    def compute_torvik_projection(self, home_team: str, away_team: str, date: str = None, neutral_site: bool = False) -> Dict:
         """Heuristic projection using raw efficiency (AdjOE, AdjDE, AdjTempo).
         Score = (OE_home * DE_away) / Avg_Eff * Tempo / 100.
         """
@@ -232,10 +234,9 @@ class TorvikProjectionService:
         h_score = (h_off * a_def / eff_factor) * (tempo / 100.0)
         a_score = (a_off * h_def / eff_factor) * (tempo / 100.0)
         
-        # HCA (Home Court Advantage). Torvik uses ~3 pts?
-        # Let's assume stats include HCA? No, raw efficiency is neutral.
-        # Add standard HCA of ~3.2 points (average).
-        h_score += 3.2
+        # HCA (Home Court Advantage): add ~3.2 points only on non-neutral courts.
+        if not neutral_site:
+            h_score += 3.2
         
         total = h_score + a_score
         spread = h_score - a_score # Home margin (e.g. +5 means Home by 5)
@@ -249,8 +250,9 @@ class TorvikProjectionService:
         }
 
     def _get_latest_metrics(self, team_name: str, date: str = None, conn=None) -> Optional[Dict]:
-        """Fetch latest daily metrics for a team from DB."""
-        cache_key = f"{team_name}_{date}"
+        """Fetch latest daily metrics for a team from DB within the target season."""
+        date_iso = normalize_iso_date(date)
+        cache_key = f"{team_name}_{date_iso}"
         if cache_key in self._metrics_cache:
             return self._metrics_cache[cache_key]
 
@@ -261,20 +263,30 @@ class TorvikProjectionService:
             return None
 
         if conn:
-            return self._exec_metrics_query(conn, t, date, cache_key)
+            return self._exec_metrics_query(conn, t, date_iso, cache_key)
         else:
             with get_db_connection() as c:
-                return self._exec_metrics_query(c, t, date, cache_key)
+                return self._exec_metrics_query(c, t, date_iso, cache_key)
 
     def _exec_metrics_query(self, conn, t, date, cache_key):
-        # Build query
-        # If date provided, find latest metrics ON OR BEFORE that date.
-        
-        params = {"t": t}
-        date_clause = ""
-        if date:
-            date_clause = "AND date <= :date"
-            params["date"] = date
+        # Enforce both upper bound (<= game date) and current-season lower bound (>= Nov 1 of season)
+        # so early-November lookups never leak prior-season March ratings.
+        date_iso = normalize_iso_date(date)
+        season_start_iso = season_start_date_for_game(date_iso)
+        date_compact = date_iso.replace("-", "")
+        season_start_compact = season_start_iso.replace("-", "")
+
+        params = {
+            "t": t,
+            "date_iso": date_iso,
+            "season_start_iso": season_start_iso,
+            "date_compact": date_compact,
+            "season_start_compact": season_start_compact,
+        }
+        date_clause = (
+            "AND ((date >= :season_start_iso AND date <= :date_iso) "
+            "OR (date >= :season_start_compact AND date <= :date_compact))"
+        )
             
         # NOTE: schema can vary across environments; some deployments only have
         # adj_off/adj_def/adj_tempo/luck. Query defensively.

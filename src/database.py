@@ -2813,22 +2813,22 @@ def insert_transactions_bulk(txns: list) -> int:
             print(f"[DB] insert_transactions_bulk error: {e}")
     return count
 
-def get_team_efficiency_by_name(team_name: str) -> dict:
+def get_team_efficiency_by_name(team_name: str, as_of_date: str = None) -> dict:
     """
-    Fetch latest team efficiency metrics (AdjO, AdjD, etc) from bt_team_metrics.
-    Returns empty dict if not found.
+    Fetch latest team efficiency metrics (AdjO, AdjD, etc) from bt_team_metrics
+    within the active NCAAM season. Returns empty dict if not found.
     """
-    # Use fuzzy match or strict? Strict for now, assuming canonical names are used or handled.
-    # Actually most reliable is to query by LIKE or exact.
+    from src.utils.ncaam_season import season_start_date_for_game
+    season_start = season_start_date_for_game(as_of_date)
     query = """
     SELECT * FROM bt_team_metrics
-    WHERE team_name = %s
+    WHERE team_name = %s AND date >= %s
     ORDER BY date DESC
     LIMIT 1
     """
     try:
         with get_db_connection() as conn:
-            row = _exec(conn, query, (team_name,)).fetchone()
+            row = _exec(conn, query, (team_name, season_start)).fetchone()
             if row:
                 return dict(row)
     except Exception as e:
@@ -2891,49 +2891,76 @@ def init_referee_assignments_table():
     print("referee_assignments table initialized.")
 
 
-def get_team_recent_shooting(team_name: str, num_games: int = 3) -> dict:
+def get_team_recent_shooting(team_name: str, num_games: int = 3, as_of_date: str = None) -> dict:
     """
-    Get a team's recent 3PT shooting vs their season average.
-    Returns: {recent_3p_pct, season_3p_pct, delta}
+    Get a team's recent 3PT shooting vs their current-season average.
+    Returns: {recent_3p_pct, season_3p_pct, delta, games_played}
     """
+    from src.utils.ncaam_season import normalize_iso_date, season_start_date_for_game
+    season_start = season_start_date_for_game(as_of_date)
+    date_upper = normalize_iso_date(as_of_date)
+
     query = """
     WITH recent AS (
         SELECT AVG(three_p_pct) as recent_avg
         FROM (
             SELECT three_p_pct FROM team_game_logs
             WHERE team_text ILIKE %s
+              AND game_date >= %s
+              AND game_date <= %s
             ORDER BY game_date DESC LIMIT %s
         ) sub
     ),
     season AS (
-        SELECT AVG(three_p_pct) as season_avg
+        SELECT AVG(three_p_pct) as season_avg, COUNT(*) as games_played
         FROM team_game_logs
         WHERE team_text ILIKE %s
+          AND game_date >= %s
+          AND game_date <= %s
     )
-    SELECT recent.recent_avg, season.season_avg
+    SELECT recent.recent_avg, season.season_avg, season.games_played
     FROM recent, season
     """
     with get_db_connection() as conn:
-        result = _exec(conn, query, (f"%{team_name}%", num_games, f"%{team_name}%")).fetchone()
-        if result and result[0] and result[1]:
+        result = _exec(
+            conn,
+            query,
+            (
+                f"%{team_name}%",
+                season_start,
+                date_upper,
+                num_games,
+                f"%{team_name}%",
+                season_start,
+                date_upper,
+            ),
+        ).fetchone()
+        if result and result[0] is not None and result[1] is not None:
             return {
                 "recent_3p_pct": float(result[0]),
                 "season_3p_pct": float(result[1]),
-                "delta": float(result[0]) - float(result[1])
+                "delta": float(result[0]) - float(result[1]),
+                "games_played": int(result[2] or 0),
             }
-    return {"recent_3p_pct": None, "season_3p_pct": None, "delta": 0.0}
+    return {"recent_3p_pct": None, "season_3p_pct": None, "delta": 0.0, "games_played": 0}
 
 
-def get_team_last_game(team_name: str) -> dict:
-    """Get result of team's most recent game for letdown/momentum analysis."""
+def get_team_last_game(team_name: str, as_of_date: str = None) -> dict:
+    """Get result of team's most recent game in the current season for letdown/momentum analysis."""
+    from src.utils.ncaam_season import normalize_iso_date, season_start_date_for_game
+    season_start = season_start_date_for_game(as_of_date)
+    date_upper = normalize_iso_date(as_of_date)
+
     query = """
     SELECT game_date, opponent, margin, is_home, opponent_rank
     FROM team_game_logs
     WHERE team_text ILIKE %s
+      AND game_date >= %s
+      AND game_date <= %s
     ORDER BY game_date DESC LIMIT 1
     """
     with get_db_connection() as conn:
-        result = _exec(conn, query, (f"%{team_name}%",)).fetchone()
+        result = _exec(conn, query, (f"%{team_name}%", season_start, date_upper)).fetchone()
         if result:
             return dict(result)
     return {}

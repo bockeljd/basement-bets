@@ -106,3 +106,33 @@ def parse_ncaam_season_end_year(
             end_y += 100
         return end_y
     return fallback
+
+
+def normalize_iso_date(value: Optional[Union[str, date, datetime]] = None) -> str:
+    """Normalize a date string ('YYYYMMDD', 'YYYY-MM-DD', ISO timestamp) or date/datetime into 'YYYY-MM-DD'."""
+    if value is None:
+        return _to_et_date(None).strftime("%Y-%m-%d")
+    if isinstance(value, (date, datetime)):
+        return _to_et_date(value).strftime("%Y-%m-%d")
+    s = str(value).strip()
+    if not s:
+        return _to_et_date(None).strftime("%Y-%m-%d")
+    m_compact = re.match(r"^(\d{4})(\d{2})(\d{2})", s)
+    if m_compact:
+        return f"{m_compact.group(1)}-{m_compact.group(2)}-{m_compact.group(3)}"
+    m_iso = re.match(r"^(\d{4}-\d{2}-\d{2})", s)
+    if m_iso:
+        return m_iso.group(1)
+    return _to_et_date(None).strftime("%Y-%m-%d")
+
+
+def season_start_date_for_game(value: Optional[Union[str, date, datetime]] = None) -> str:
+    """Return the 'YYYY-11-01' season floor date for a given game/as-of date."""
+    iso_str = normalize_iso_date(value)
+    try:
+        dt = datetime.strptime(iso_str, "%Y-%m-%d").date()
+    except Exception:
+        dt = _to_et_date(None)
+    end_year = current_ncaam_season_end_year(dt)
+    return f"{end_year - 1}-11-01"
+

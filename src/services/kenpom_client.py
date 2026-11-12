@@ -6,6 +6,7 @@ Fetches KenPom efficiency ratings from database and calculates adjustments
 
 from typing import Dict, Optional, List, Any
 from src.database import get_db_connection, _exec
+from src.utils.ncaam_season import season_start_date_for_game
 from src.utils.team_matcher import TeamMatcher
 
 class KenPomClient:
@@ -15,9 +16,14 @@ class KenPomClient:
         self.matcher = TeamMatcher()
         self._rating_cache = {} # memoize ratings for simulation loops
 
-    def _latest_asof_date(self, table: str) -> Optional[str]:
+    def _latest_asof_date(self, table: str, asof_date: Optional[str] = None) -> Optional[str]:
+        season_start = season_start_date_for_game(asof_date)
         with get_db_connection() as conn:
-            row = _exec(conn, f"SELECT MAX(asof_date)::text AS d FROM {table}").fetchone()
+            row = _exec(
+                conn,
+                f"SELECT MAX(asof_date)::text AS d FROM {table} WHERE asof_date >= %s",
+                (season_start,),
+            ).fetchone()
             return row['d'] if row and row.get('d') else None
 
     def _pair_headers(self, headers: list[str] | None, cols: list[Any] | None) -> Dict[str, Any]:
@@ -76,15 +82,16 @@ class KenPomClient:
             with get_db_connection() as c:
                 return self._exec_rating_query(c, matched_name)
 
-    def _exec_rating_query(self, conn, matched_name):
+    def _exec_rating_query(self, conn, matched_name, asof_date: Optional[str] = None):
+        season_start = season_start_date_for_game(asof_date)
         query = """
         SELECT team_name, rank, adj_em, adj_o, adj_d, adj_t
         FROM kenpom_team_ratings_daily
-        WHERE team_name = %s
+        WHERE team_name = %s AND asof_date >= %s
         ORDER BY asof_date DESC
         LIMIT 1
         """
-        cursor = _exec(conn, query, (matched_name,))
+        cursor = _exec(conn, query, (matched_name, season_start))
         row = cursor.fetchone()
         
         res = None
@@ -112,14 +119,15 @@ class KenPomClient:
             with get_db_connection() as c:
                 return self._exec_home_court(c, matched_name)
 
-    def _exec_home_court(self, conn, matched_name):
+    def _exec_home_court(self, conn, matched_name, asof_date: Optional[str] = None):
+        season_start = season_start_date_for_game(asof_date)
         row = _exec(conn, """
             SELECT team_name, hca, asof_date
             FROM kenpom_home_court_daily
-            WHERE team_name=%s
+            WHERE team_name=%s AND asof_date >= %s
             ORDER BY asof_date DESC
             LIMIT 1
-        """, (matched_name,)).fetchone()
+        """, (matched_name, season_start)).fetchone()
         if not row:
             return None
         return {"team": row["team_name"], "hca": row["hca"], "asof_date": row["asof_date"]}
@@ -153,8 +161,13 @@ class KenPomClient:
                 outs.append({"ref_name": row["ref_name"], "metrics": row["metrics"], "asof_date": row["asof_date"]})
         return outs
 
-    def _latest_asof_date_internal(self, conn, table: str) -> Optional[str]:
-        row = _exec(conn, f"SELECT MAX(asof_date)::text AS d FROM {table}").fetchone()
+    def _latest_asof_date_internal(self, conn, table: str, asof_date: Optional[str] = None) -> Optional[str]:
+        season_start = season_start_date_for_game(asof_date)
+        row = _exec(
+            conn,
+            f"SELECT MAX(asof_date)::text AS d FROM {table} WHERE asof_date >= %s",
+            (season_start,),
+        ).fetchone()
         return row['d'] if row and row.get('d') else None
 
     def estimate_crew_avg_fouls(self, ref_names: List[str], conn=None) -> Optional[float]:
@@ -266,46 +279,56 @@ class KenPomClient:
             out.append({"player_name": row["player_name"], "team_name": row["team_name"], "metrics": row["metrics"]})
         return out
 
-    def calculate_kenpom_adjustment(self, home_team: str, away_team: str, conn=None) -> Dict:
+    def calculate_kenpom_adjustment(
+        self,
+        home_team: str,
+        away_team: str,
+        conn=None,
+        neutral_site: bool = False,
+    ) -> Dict:
         """
-        Calculate spread/total adjustment based on KenPom ratings
-        
+        Calculate projected fair margin and total adjustment based on KenPom ratings.
+
         Logic:
-        - AdjEM difference → spread adjustment
-        - AdjT average → total adjustment
-        
-        Args:
-            home_team: Home team name
-            away_team: Away team name
-            
-        Returns:
-            Dict with spread_adj, total_adj, summary
+        - AdjEM is neutral-court efficiency margin per 100 possessions.
+        - Pace-scaled neutral margin = (Home AdjEM - Away AdjEM) * (avg_tempo / 100.0).
+        - Fair home margin = neutral_margin + HCA (~3.2 pts on home court, 0.0 on neutral).
+        - Total adjustment = (avg_tempo - 68.0) * 0.3.
         """
         home_rating = self.get_team_rating(home_team, conn=conn)
         away_rating = self.get_team_rating(away_team, conn=conn)
-        
+
         if not home_rating or not away_rating:
             return {
                 'spread_adj': 0.0,
+                'neutral_margin': 0.0,
+                'fair_margin': 0.0,
                 'total_adj': 0.0,
                 'summary': 'KenPom data not available'
             }
-        
-        # Spread adjustment based on AdjEM difference
-        # AdjEM is already adjusted for home court (~3.5 pts)
-        em_diff = home_rating['adj_em'] - away_rating['adj_em']
-        spread_adj = em_diff * 0.1  # 10 pt AdjEM diff = 1 pt spread
-        
+
+        baseline_tempo = 68.0
+        h_tempo = float(home_rating.get('adj_t') or baseline_tempo)
+        a_tempo = float(away_rating.get('adj_t') or baseline_tempo)
+        avg_tempo = (h_tempo + a_tempo) / 2.0
+
+        em_diff = float(home_rating.get('adj_em') or 0.0) - float(away_rating.get('adj_em') or 0.0)
+        neutral_margin = em_diff * (avg_tempo / 100.0)
+        hca = 0.0 if neutral_site else 3.2
+        fair_margin = neutral_margin + hca
+        spread_adj = fair_margin
+
         # Total adjustment based on tempo
-        avg_tempo = (home_rating['adj_t'] + away_rating['adj_t']) / 2
-        baseline_tempo = 68.0  # National average
         total_adj = (avg_tempo - baseline_tempo) * 0.3  # Faster tempo = higher total
-        
+
         summary = f"KenPom: {home_rating['team']} (#{home_rating['rank']}) vs {away_rating['team']} (#{away_rating['rank']})"
-        
+
         return {
             'spread_adj': round(spread_adj, 1),
+            'neutral_margin': round(neutral_margin, 1),
+            'fair_margin': round(fair_margin, 1),
             'total_adj': round(total_adj, 1),
+            'avg_tempo': round(avg_tempo, 1),
             'summary': summary,
             'home_adj_em': home_rating['adj_em'],
             'away_adj_em': away_rating['adj_em'],
