@@ -7,4 +7,4 @@ psycopg2-binary
 python-dotenv
 beautifulsoup4
 pydantic
-brotli>=2.0.0
+brotli>=1.0.9
