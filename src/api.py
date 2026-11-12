@@ -2225,6 +2225,47 @@ async def trigger_kenpom_ingestion(request: Request, authorized: bool = Depends(
         print(f"[Job] KenPom Ingestion Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+def _ingest_league_odds_window(league: str, start_date, end_date) -> int:
+    """Fetch and persist Action Network odds for a league and date window (YYYY-MM-DD or date objects)."""
+    try:
+        from src.services.odds_fetcher_service import OddsFetcherService
+        from src.services.odds_adapter import OddsAdapter
+        s_str = start_date.strftime("%Y%m%d") if hasattr(start_date, "strftime") else str(start_date).replace("-", "")
+        e_str = end_date.strftime("%Y%m%d") if hasattr(end_date, "strftime") else str(end_date).replace("-", "")
+        fetcher = OddsFetcherService()
+        adapter = OddsAdapter()
+        raw_games = fetcher.fetch_odds(league, start_date=s_str, end_date=e_str)
+        if raw_games:
+            return int(adapter.normalize_and_store(raw_games, league) or 0)
+    except Exception as e:
+        print(f"[OddsAutoIngest] Failed for {league} ({start_date}..{end_date}): {e}")
+    return 0
+
+
+@app.api_route("/api/jobs/ingest_odds", methods=["GET", "POST"])
+async def trigger_odds_ingestion(request: Request, authorized: bool = Depends(verify_cron_secret)):
+    """Cron Job: Ingest odds for active leagues (NCAAM, NBA, NFL, MLB, EPL)."""
+    job_key = "ingest_odds"
+    from src.services.job_service import JobContext, JobLockedException
+    from zoneinfo import ZoneInfo
+    try:
+        with JobContext(job_key) as ctx:
+            today_et = datetime.now(ZoneInfo("America/New_York")).date()
+            end_et = today_et + timedelta(days=2)
+            counts = {}
+            for lg in ("NCAAM", "NBA", "NFL"):
+                counts[lg] = _ingest_league_odds_window(lg, today_et, end_et)
+            ctx.state["last_run_date"] = today_et.strftime("%Y-%m-%d")
+            ctx.state["counts"] = counts
+            return {"status": "success", "counts": counts}
+    except JobLockedException:
+        return {"status": "skipped", "reason": "Locked"}
+    except Exception as e:
+        print(f"[Job] Odds Ingestion Failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/board")
 async def get_board(request: Request, league: str, date: Optional[str] = None, days: int = 1):
     """
@@ -2241,6 +2282,7 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
       - moneyline (home/away/draw) odds
     """
     from src.database import get_db_connection, _exec
+    from zoneinfo import ZoneInfo
 
     if not league:
         raise HTTPException(status_code=400, detail="league is required")
@@ -2250,7 +2292,7 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
         raise HTTPException(status_code=400, detail=f"Unsupported league: {league}")
 
     if not date:
-        date = datetime.now().strftime("%Y-%m-%d")
+        date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
     try:
         days = int(days)
@@ -2372,16 +2414,21 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
     def _build():
         with get_db_connection() as conn:
             rows = _exec(conn, query, {"league": league, "start_date": str(start_date), "end_date": str(end_date)}).fetchall()
-            return _ensure_utc([dict(r) for r in rows])
+        if not rows and league in {"NCAAM", "NBA", "NFL"}:
+            ingested = _ingest_league_odds_window(league, start_date, end_date)
+            if ingested > 0:
+                with get_db_connection() as conn:
+                    rows = _exec(conn, query, {"league": league, "start_date": str(start_date), "end_date": str(end_date)}).fetchall()
+        return _ensure_utc([dict(r) for r in rows])
 
     # Keep TTL short to avoid stale lines.
     return _cached_json(request, cache_key, ttl_s=int(os.getenv('BOARD_TTL_SECONDS', '30')), build_fn=_build)
 
 
 @app.get("/api/ncaam/board")
-async def get_ncaam_board(date: Optional[str] = None, days: int = 1):
+async def get_ncaam_board(request: Request, date: Optional[str] = None, days: int = 1):
     """Back-compat wrapper."""
-    return await get_board(league="NCAAM", date=date, days=days)
+    return await get_board(request=request, league="NCAAM", date=date, days=days)
 
 
 @app.get("/api/ncaam/top-picks")
@@ -2488,6 +2535,60 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             """,
             {"start": str(start_date), "end": str(end_date), "lim": int(limit_games)},
         ).fetchall()
+
+    if not rows:
+        ingested = _ingest_league_odds_window("NCAAM", start_date, end_date)
+        if ingested > 0:
+            with get_db_connection() as conn:
+                rows = _exec(
+                    conn,
+                    """
+                    WITH base_events AS (
+                      SELECT e.*,
+                        DATE(e.start_time AT TIME ZONE 'America/New_York') AS day_et,
+                        LOWER(regexp_replace(
+                          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.home_team,''),
+                            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
+                            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
+                            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
+                            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
+                            'St. Francis', 'Saint Francis'),
+                          '[^a-z0-9]+', '', 'g'
+                        )) AS home_key,
+                        LOWER(regexp_replace(
+                          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.away_team,''),
+                            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
+                            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
+                            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
+                            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
+                            'St. Francis', 'Saint Francis'),
+                          '[^a-z0-9]+', '', 'g'
+                        )) AS away_key,
+                        CASE
+                          WHEN e.id LIKE 'action:ncaam:%%' THEN 0
+                          WHEN e.id LIKE 'espn:ncaam:%%' THEN 1
+                          ELSE 2
+                        END AS src_rank
+                      FROM events e
+                      WHERE e.league = 'NCAAM'
+                        AND DATE(e.start_time AT TIME ZONE 'America/New_York') BETWEEN %(start)s AND %(end)s
+                    ),
+                    dedup_events AS (
+                      SELECT *
+                      FROM (
+                        SELECT *,
+                          ROW_NUMBER() OVER (PARTITION BY league, day_et, home_key, away_key ORDER BY src_rank ASC, start_time ASC) AS rn
+                        FROM base_events
+                      ) t
+                      WHERE rn = 1
+                    )
+                    SELECT id, home_team, away_team, start_time, day_et
+                    FROM dedup_events
+                    ORDER BY start_time ASC
+                    LIMIT %(lim)s
+                    """,
+                    {"start": str(start_date), "end": str(end_date), "lim": int(limit_games)},
+                ).fetchall()
 
     # Preserve event metadata so the UI doesn't have to join against /api/board.
     event_meta = {}
@@ -2679,11 +2780,10 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 """
                 SELECT event_id, computed_at, is_actionable, reason, rec_json
                 FROM daily_top_picks
-                WHERE date_et = %s
-                  AND league='NCAAM'
+                WHERE league='NCAAM'
                   AND event_id = ANY(%s)
                 """,
-                (date, list(event_ids)),
+                (list(event_ids),),
             ).fetchall()
         if cached:
             picks = {}
@@ -2755,12 +2855,9 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
 
     # If we don't have precomputed daily_top_picks and there are no stored picks,
     # allow a small on-demand compute to keep the UI from showing an empty slate.
-    # This is bounded and only triggers for today's ET date with days=1.
     if not compute_missing:
         try:
-            with get_db_connection() as conn:
-                today_et = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
-            if str(date) == str(today_et) and int(days) == 1:
+            if int(days) <= 3:
                 compute_missing = True
                 # keep it conservative by default
                 try:
@@ -2769,6 +2866,21 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                     max_compute = 20
         except Exception:
             pass
+
+    if compute_missing and event_ids:
+        try:
+            from src.utils.ncaam_season import season_start_date_for_game
+            from src.database import init_bt_team_metrics_db
+            from src.services.barttorvik import BartTorvikClient
+            s_start = season_start_date_for_game(date)
+            with get_db_connection() as conn:
+                bt_cnt_row = _exec(conn, "SELECT COUNT(*) AS cnt FROM bt_team_metrics_daily WHERE date >= %s", (s_start,)).fetchone()
+                bt_cnt = int(bt_cnt_row[0] if not isinstance(bt_cnt_row, dict) else bt_cnt_row.get("cnt", 0))
+            if bt_cnt == 0:
+                init_bt_team_metrics_db()
+                BartTorvikClient().get_efficiency_ratings()
+        except Exception as e:
+            print(f"[top-picks] auto-ingest Torvik check failed: {e}")
 
     model = NCAAMMarketFirstModelV2()
     picks = {}

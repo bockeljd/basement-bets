@@ -29,16 +29,27 @@ class OddsFetcherService:
         """
         api_sport = self.SPORT_MAP.get(league, league.lower())
         
-        # Determine Date Range
+        # Determine Date Range (use US/Eastern so late-evening ET runs on UTC servers fetch today's ET slate + tomorrow)
+        from zoneinfo import ZoneInfo
         if not start_date:
-            today = datetime.date.today()
-            dates = [today.strftime("%Y%m%d")]
+            today_et = datetime.datetime.now(ZoneInfo("America/New_York")).date()
+            tomorrow_et = today_et + datetime.timedelta(days=1)
+            dates = [today_et.strftime("%Y%m%d"), tomorrow_et.strftime("%Y%m%d")]
         else:
-            dates = [start_date] # TODO: Expand range if start!=end
-            if end_date and end_date != start_date:
-                # Basic expansion or just support list
-                # For MVP, just specific dates or single date
-                pass
+            s_clean = str(start_date).replace("-", "").strip()[:8]
+            dates = [s_clean]
+            if end_date:
+                e_clean = str(end_date).replace("-", "").strip()[:8]
+                if e_clean != s_clean:
+                    try:
+                        s_dt = datetime.datetime.strptime(s_clean, "%Y%m%d").date()
+                        e_dt = datetime.datetime.strptime(e_clean, "%Y%m%d").date()
+                        cur_dt = s_dt + datetime.timedelta(days=1)
+                        while cur_dt <= e_dt and len(dates) < 7:
+                            dates.append(cur_dt.strftime("%Y%m%d"))
+                            cur_dt += datetime.timedelta(days=1)
+                    except Exception:
+                        pass
 
         all_games = []
         for date_str in dates:

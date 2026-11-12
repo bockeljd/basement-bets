@@ -31,6 +31,10 @@
             "schedule": "30 6 * * *"
         },
         {
+            "path": "/api/jobs/ingest_odds",
+            "schedule": "5 7 * * *"
+        },
+        {
             "path": "/api/jobs/build_daily_top_picks",
             "schedule": "15 7 * * *"
         },
