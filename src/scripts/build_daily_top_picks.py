@@ -38,8 +38,10 @@ def ensure_table():
         conn.commit()
 
 
-def fetch_event_ids_for_date(date_et: str, limit_games: int = 250):
-    # Use same dedupe logic as /api/board.
+def fetch_event_ids_for_date(date_et: str, limit_games: int = 250, days: int = 3):
+    # Use same dedupe logic and 3-day window as /api/board so UI multi-day slate is precomputed.
+    start_d = dt.strptime(date_et, "%Y-%m-%d").date()
+    end_d = start_d + timedelta(days=max(1, int(days)) - 1)
     q = """
     WITH base_events AS (
       SELECT e.*,
@@ -69,7 +71,7 @@ def fetch_event_ids_for_date(date_et: str, limit_games: int = 250):
         END AS src_rank
       FROM events e
       WHERE e.league='NCAAM'
-        AND DATE(e.start_time AT TIME ZONE 'America/New_York') = %(d)s
+        AND DATE(e.start_time AT TIME ZONE 'America/New_York') BETWEEN %(start_d)s AND %(end_d)s
     ),
     dedup_events AS (
       SELECT *
@@ -80,14 +82,20 @@ def fetch_event_ids_for_date(date_et: str, limit_games: int = 250):
       ) t
       WHERE rn = 1
     )
-    SELECT id
+    SELECT id, day_et::text AS day_et
     FROM dedup_events
     ORDER BY start_time ASC
     LIMIT %(lim)s
     """
     with get_db_connection() as conn:
-        rows = _exec(conn, q, {"d": date_et, "lim": int(limit_games)}).fetchall()
-        return [r['id'] if isinstance(r, dict) else r[0] for r in rows]
+        rows = _exec(conn, q, {"start_d": str(start_d), "end_d": str(end_d), "lim": int(limit_games)}).fetchall()
+        out = []
+        for r in rows:
+            if isinstance(r, dict):
+                out.append((r['id'], str(r.get('day_et') or date_et)))
+            else:
+                out.append((r[0], str(r[1] if len(r) > 1 and r[1] else date_et)))
+        return out
 
 
 def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
@@ -172,8 +180,24 @@ def main():
     except Exception as e:
         print(f"[data_quality] check failed (continuing): {e}")
 
-    event_ids = fetch_event_ids_for_date(date_et, limit_games=limit_games)
-    print(f"events: {len(event_ids)}")
+    days = int(os.getenv('TOP_PICKS_DAYS', '3'))
+    event_rows = fetch_event_ids_for_date(date_et, limit_games=limit_games, days=days)
+    print(f"events: {len(event_rows)} (days={days})")
+
+    try:
+        from src.utils.ncaam_season import season_start_date_for_game
+        from src.database import init_bt_team_metrics_db
+        from src.services.barttorvik import BartTorvikClient
+        s_start = season_start_date_for_game(date_et)
+        with get_db_connection() as conn:
+            bt_cnt_row = _exec(conn, "SELECT COUNT(*) AS cnt FROM bt_team_metrics_daily WHERE date >= %s", (s_start,)).fetchone()
+            bt_cnt = int(bt_cnt_row[0] if not isinstance(bt_cnt_row, dict) else bt_cnt_row.get("cnt", 0))
+        if bt_cnt == 0:
+            print("[build_daily_top_picks] bt_team_metrics_daily empty for current season; fetching Torvik ratings...")
+            init_bt_team_metrics_db()
+            BartTorvikClient().get_efficiency_ratings()
+    except Exception as e:
+        print(f"[build_daily_top_picks] Torvik check failed (continuing): {e}")
 
     model = NCAAMMarketFirstModelV2()
 
@@ -193,7 +217,8 @@ def main():
 
     # Batch DB writes to reduce Neon egress: single connection + single commit.
     with get_db_connection() as conn:
-        for eid in event_ids:
+        for item in event_rows:
+            eid, ev_day_et = item if isinstance(item, tuple) else (item, date_et)
             diag['total_events'] += 1
             try:
                 # Use strict gates for cached picks so we don't surface negative/no-edge plays.
@@ -218,14 +243,14 @@ def main():
                 except Exception:
                     pass
 
-                upsert_pick(date_et, eid, res if isinstance(res, dict) else {}, conn=conn)
+                upsert_pick(ev_day_et, eid, res if isinstance(res, dict) else {}, conn=conn)
                 ok += 1
             except Exception as e:
                 err += 1
                 diag['errors'] += 1
                 # still upsert a no-bet row with error reason
                 try:
-                    upsert_pick(date_et, eid, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": str(e)}, conn=conn)
+                    upsert_pick(ev_day_et, eid, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": str(e)}, conn=conn)
                 except Exception:
                     pass
 

@@ -2785,6 +2785,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 """,
                 (list(event_ids),),
             ).fetchall()
+        cached = [r for r in cached if (dict(r).get('reason') or '') != 'Data Unavailable']
         if cached:
             picks = {}
             for r in cached:

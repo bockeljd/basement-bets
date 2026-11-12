@@ -36,8 +36,9 @@ class TorvikProjectionService:
 
         # In backtests, avoid network calls; fall back to computed projections when DB cache missing.
         no_net = str(os.getenv('BACKTEST_NO_NETWORK', '')).strip() not in ('', '0', 'false', 'False')
-        if (not official_projs) and (not no_net):
-            official_projs = self.bt_client.fetch_daily_projections(date_compact)
+        if official_projs is None and (not no_net):
+            official_projs = self.bt_client.fetch_daily_projections(date_compact) or {}
+            self._official_cache[date_compact] = official_projs
 
         # Match by name (Torvik uses specific naming)
         h_proj = self._find_projection(home_team, official_projs)
