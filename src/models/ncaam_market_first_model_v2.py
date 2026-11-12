@@ -454,11 +454,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
         kp_players_a = []
         kp_players_b = []
         try:
-            kp_players_a = self.kenpom_client.get_player_stats_for_team(team_a_canon, limit=12) or []
+            kp_players_a = self.kenpom_client.get_player_stats_for_team(team_a_canon, limit=12, conn=conn) or []
         except Exception:
             kp_players_a = []
         try:
-            kp_players_b = self.kenpom_client.get_player_stats_for_team(team_b_canon, limit=12) or []
+            kp_players_b = self.kenpom_client.get_player_stats_for_team(team_b_canon, limit=12, conn=conn) or []
         except Exception:
             kp_players_b = []
 

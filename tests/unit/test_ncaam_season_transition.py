@@ -128,6 +128,74 @@ class TestBracketSeedSeasonGating(unittest.TestCase):
             self.assertEqual(payload["regions"], {})
             self.assertEqual(payload["seed_metadata"]["source"], "preseason_unseeded")
 
+    def test_projected_bracket_seeds_filters_by_season_window(self):
+        from src.services.ncaam_bracket_seed_loader import build_projected_bracket_seeds
+        queries = []
+
+        class _FakeCursor:
+            def fetchall(self):
+                return []
+
+        def _fake_exec(conn, sql, params=None):
+            queries.append((sql, params))
+            return _FakeCursor()
+
+        with patch("src.database.get_db_connection") as mock_db, \
+             patch("src.database._exec", side_effect=_fake_exec):
+            mock_db.return_value.__enter__.return_value = object()
+            mock_db.return_value.__exit__.return_value = False
+            res = build_projected_bracket_seeds(season="2026-27")
+
+        self.assertEqual(res, {})
+        self.assertEqual(len(queries), 3)
+        for _, params in queries:
+            self.assertEqual(params[:2], ("2026-11-01", "2027-05-01"))
+
+    def test_simulate_bracket_disables_and_restores_news_fetch(self):
+        from types import SimpleNamespace
+        from src.services.ncaam_tournament_service import NCAAMTournamentPredictionService
+
+        service = NCAAMTournamentPredictionService()
+        service._model = SimpleNamespace(
+            news_service=SimpleNamespace(skip_fetch=False),
+        )
+        observed_skip_fetch = []
+
+        def _fake_analyze(*args, **kwargs):
+            observed_skip_fetch.append(service._model.news_service.skip_fetch)
+            ta, tb = kwargs["team_a"], kwargs["team_b"]
+            return {
+                "team_a": ta,
+                "team_b": tb,
+                "winner": ta,
+                "winner_side": "team_a",
+                "projected_spread_a": -2.0,
+                "projected_total": 140.0,
+                "win_prob_a": 60.0,
+                "win_prob_b": 40.0,
+                "confidence_0_100": 60.0,
+                "market_data_used": False,
+                "fallback_used": False,
+                "reason_codes": [],
+                "risk_flags": [],
+                "debug": {},
+            }
+
+        service._model.analyze_tournament_game = _fake_analyze
+        seeds = {
+            r: [{"seed": i + 1, "team_name": f"{r}{i + 1}"} for i in range(16)]
+            for r in ["East", "West", "South", "Midwest"]
+        }
+        with patch("src.database.get_db_connection") as mock_db, \
+             patch.object(service, "preheat_cache"):
+            mock_db.return_value.__enter__.return_value = object()
+            mock_db.return_value.__exit__.return_value = False
+            res = service.simulate_bracket(seeds, simulations=2, season="2026-27")
+
+        self.assertEqual(res.season, "2026-27")
+        self.assertTrue(observed_skip_fetch and all(observed_skip_fetch))
+        self.assertFalse(service._model.news_service.skip_fetch)
+
 
 class TestSeasonApiRoutes(unittest.TestCase):
     def test_bracket_current_and_2027_and_correlations_routes(self):

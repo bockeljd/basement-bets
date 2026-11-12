@@ -59,33 +59,52 @@ def _snake_seed_teams(team_names: List[str]) -> Dict[str, List[Dict[str, object]
     return grouped
 
 
-def build_projected_bracket_seeds(limit: int = 64) -> Dict[str, List[Dict[str, object]]]:
+def build_projected_bracket_seeds(limit: int = 64, season: str = None) -> Dict[str, List[Dict[str, object]]]:
     """Build a projected 64-team tournament field from live season ratings when official seeds aren't set."""
     try:
         from src.database import get_db_connection, _exec
+        from src.utils.ncaam_season import (
+            current_ncaam_season_short,
+            ncaam_season_date_bounds,
+            parse_ncaam_season_end_year,
+        )
+
+        target_season = season or current_ncaam_season_short()
+        season_end_year = parse_ncaam_season_end_year(target_season)
+        season_start, season_end = ncaam_season_date_bounds(season_end_year)
+
         with get_db_connection() as conn:
             rows = _exec(conn, """
                 SELECT team_name
                 FROM kenpom_team_ratings_daily
-                WHERE asof_date = (SELECT MAX(asof_date) FROM kenpom_team_ratings_daily)
+                WHERE asof_date = (
+                    SELECT MAX(asof_date)
+                    FROM kenpom_team_ratings_daily
+                    WHERE asof_date >= %s::date AND asof_date < %s::date
+                )
                 ORDER BY rank ASC
                 LIMIT %s
-            """, (int(limit),)).fetchall()
+            """, (season_start, season_end, int(limit))).fetchall()
             if not rows or len(rows) < 64:
                 rows = _exec(conn, """
                     SELECT team_name
                     FROM kenpom_ratings
+                    WHERE updated_at >= %s::timestamp AND updated_at < %s::timestamp
                     ORDER BY rank ASC
                     LIMIT %s
-                """, (int(limit),)).fetchall()
+                """, (season_start, season_end, int(limit))).fetchall()
             if not rows or len(rows) < 64:
                 rows = _exec(conn, """
                     SELECT team_text AS team_name
                     FROM bt_team_metrics_daily
-                    WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
+                    WHERE date = (
+                        SELECT MAX(date)
+                        FROM bt_team_metrics_daily
+                        WHERE date >= %s AND date < %s
+                    )
                     ORDER BY (adj_off - adj_def) DESC
                     LIMIT %s
-                """, (int(limit),)).fetchall()
+                """, (season_start, season_end, int(limit))).fetchall()
         teams = [r["team_name"] for r in (rows or []) if r and r.get("team_name")]
         if len(teams) < 64:
             return {}

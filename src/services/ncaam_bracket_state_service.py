@@ -140,7 +140,7 @@ class NCAAMBracketStateService:
                     expanded.append({"team_name": entry["team_name"], "seed": entry["seed"], "region": region})
             return expanded
 
-        projected = build_projected_bracket_seeds()
+        projected = build_projected_bracket_seeds(season=self.season)
         if projected:
             logger.info("Using projected rankings field for %s.", self.season)
             self.seed_source = "projected_ratings"

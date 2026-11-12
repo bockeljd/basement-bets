@@ -359,342 +359,351 @@ class NCAAMTournamentPredictionService:
         _shared_cache = {}
 
         from src.database import get_db_connection
-        with get_db_connection() as conn:
-            # HEAT EVERYTHING (Parallel)
-            preheat_start = time.time()
-            self.preheat_cache(all_team_names)
-            preheat_duration = time.time() - preheat_start
-            logging.info(f"Preheated {len(all_team_names)} teams in {preheat_duration:.2f}s")
-            
-            def _get_game_result(target_a: str, target_b: str, round_name: str, conn=None) -> TournamentGamePrediction:
-                nonlocal degraded_simulation, fallback_count
-                k = tuple(sorted([target_a, target_b]))
-                if k not in _shared_cache:
-                    gi = TournamentGameInput(team_a=target_a, team_b=target_b, round_index=0, neutral_site=True)
-                    try:
-                        # Shared connection is critical here to reuse preheated caches
-                        res = self.predict_game(gi, conn=conn)
-                    except Exception as e:
-                        degraded_simulation = True
-                        fallback_count += 1
-                        affected_teams.add(target_a)
-                        affected_teams.add(target_b)
-                        
-                        # Seed-based prior fallback
-                        seed_a = 8
-                        seed_b = 8
-                        for r_name, r_seeds in region_teams.items():
-                            for s, tnames in r_seeds.items():
-                                if target_a in tnames: seed_a = s
-                                if target_b in tnames: seed_b = s
-                        
-                        raw_prob_a = 0.5 + (seed_b - seed_a) * 0.04
-                        prob_a = max(0.05, min(0.95, raw_prob_a)) * 100.0
-                        
-                        data_issues.append(TournamentDataIssue(
-                            team=f"{target_a}/{target_b}",
-                            issue_type="MISSING_DATA",
-                            description=f"Fallback used. Missing Torvik/KenPom metrics. Error: {str(e)}"
-                        ))
-                        
-                        res = TournamentGamePrediction(
-                            team_a=target_a, team_b=target_b,
-                            winner=target_a if random.random() < (prob_a/100.0) else target_b,
-                            winner_side="team_a",
-                            projected_spread_a=-(seed_b - seed_a) * 2.0,
-                            projected_total=142.0,
-                            win_prob_a=prob_a,
-                            win_prob_b=100.0 - prob_a,
-                            confidence_0_100=40.0,
-                            market_data_used=False,
-                            fallback_used=True,
-                            reason_codes=[f"Seed-based fallback prior used ({seed_a} vs {seed_b})."],
-                            risk_flags=["MISSING_DATA", "DEGRADED_SIMULATION"],
-                            neutral_site=True
-                        )
-                    _shared_cache[k] = res
-                
-                cached = _shared_cache[k]
-                if cached.team_a == target_a:
-                    return cached
-                    
-                # Swap logic
-                swapped_k = (target_a, target_b, "swapped")
-                if swapped_k not in _shared_cache:
-                    _shared_cache[swapped_k] = TournamentGamePrediction(
-                        team_a=target_a, team_b=target_b,
-                        winner=cached.winner,
-                        winner_side="team_a" if cached.winner == target_a else "team_b",
-                        projected_spread_a=-cached.projected_spread_a,
-                        projected_total=cached.projected_total,
-                        win_prob_a=cached.win_prob_b,
-                        win_prob_b=cached.win_prob_a,
-                        confidence_0_100=cached.confidence_0_100,
-                        market_data_used=cached.market_data_used,
-                        fallback_used=cached.fallback_used,
-                        reason_codes=cached.reason_codes,
-                        risk_flags=cached.risk_flags,
-                        debug=cached.debug,
-                        neutral_site=True
-                    )
-                return _shared_cache[swapped_k]
-
-            def _resolve_locked_winner(ta: str, tb: str) -> Optional[str]:
-                norm_key = self._normalize_match_key(ta, tb)
-                if norm_key not in locked_map:
-                    return None
-                locked = locked_map[norm_key]
-                winner = locked.get("winner", ta)
-                if winner not in (ta, tb):
-                    winner = ta if standardize_team_name(winner) == standardize_team_name(ta) else tb
-                return winner
-
-            def _get_game_result_with_lock(ta: str, tb: str, rd: str, conn=None):
-                """Return prediction object, but force winner if matchup is locked."""
-                pred = _get_game_result(ta, tb, rd, conn=conn)
-                locked_w = _resolve_locked_winner(ta, tb)
-                if locked_w:
-                    pred.winner = locked_w
-                    pred.winner_side = 'team_a' if locked_w == ta else 'team_b'
-                return pred
-
-            # 3. Deterministic Bracket Construction (Front-loads cache)
-            first_four_det = []
-            det_region_teams = {r: {} for r in base_regions}
-            for region, sdict in region_teams.items():
-                for seed, lst in sdict.items():
-                    if len(lst) == 2:
-                        pred = _get_game_result_with_lock(lst[0], lst[1], "First Four", conn=conn)
-                        first_four_det.append(pred)
-                        det_region_teams[region][seed] = pred.winner
-                    else:
-                        det_region_teams[region][seed] = lst[0]
-
-            det_regions = {}
-            e8_winners_det = {}
-            base_pairings = [(1, 16), (8, 9), (5, 12), (4, 13), (6, 11), (3, 14), (7, 10), (2, 15)]
-            for region in base_regions:
-                tm = det_region_teams[region]
-                r64 = []
-                for (s1, s2) in base_pairings:
-                    if s1 in tm and s2 in tm: r64.append(_get_game_result_with_lock(tm[s1], tm[s2], "R64", conn=conn))
-                r32 = []
-                for i in range(0, len(r64), 2):
-                    if i+1 < len(r64): r32.append(_get_game_result_with_lock(r64[i].winner, r64[i+1].winner, "R32", conn=conn))
-                s16 = []
-                for i in range(0, len(r32), 2):
-                    if i+1 < len(r32): s16.append(_get_game_result_with_lock(r32[i].winner, r32[i+1].winner, "S16", conn=conn))
-                e8 = []
-                for i in range(0, len(s16), 2):
-                    if i+1 < len(s16):
-                        e8.append(_get_game_result_with_lock(s16[i].winner, s16[i+1].winner, "E8", conn=conn))
-                        e8_winners_det[region] = e8[-1].winner
-                det_regions[region] = {"round_of_64": r64, "round_of_32": r32, "sweet_16": s16, "elite_8": e8}
-
-            final_four_det = []
-            if "East" in e8_winners_det and "South" in e8_winners_det:
-                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["East"], e8_winners_det["South"], "FF", conn=conn))
-            if "West" in e8_winners_det and "Midwest" in e8_winners_det:
-                 final_four_det.append(_get_game_result_with_lock(e8_winners_det["West"], e8_winners_det["Midwest"], "FF", conn=conn))
-            
-            championship_det = None
-            champion_det = None
-            if len(final_four_det) == 2:
-                 championship_det = _get_game_result_with_lock(final_four_det[0].winner, final_four_det[1].winner, "NCG", conn=conn)
-                 champion_det = championship_det.winner
-
-        # 4. In-Memory MC Simulation Loop
-        advancements = {}
-        for region, seeds_dict in region_teams.items():
-            for seed, tlist in seeds_dict.items():
-                for t in tlist:
-                    advancements[t] = {
-                        'R32': 0, 'S16': 0, 'E8': 0, 'FF': 0, 'NCG': 0, 'CHAMP': 0,
-                        'seed': seed, 'region': region
-                    }
-
-        def _sim_matchup(ta: str, tb: str, rd: str) -> str:
-            locked_w = _resolve_locked_winner(ta, tb)
-            if locked_w:
-                return locked_w
-            pred = _get_game_result(ta, tb, rd)  # Hits memory cache
-            return ta if random.random() < (pred.win_prob_a / 100.0) else tb
-
-        # Track Round-of-64 slot winner frequencies.
-        # Using full-bracket "mode" is not stable with limited sims (almost all full brackets are unique).
-        # Instead: choose the modal winner per R64 slot, then deterministically project downstream rounds.
-        r64_slot_counts: Dict[str, List[Dict[str, int]]] = {r: [dict() for _ in range(len(base_pairings))] for r in base_regions}
-
-        for _ in range(simulations):
-            mc_region_teams = {r: {} for r in base_regions}
-            for region, sdict in region_teams.items():
-                for seed, lst in sdict.items():
-                    if len(lst) == 2:
-                        mc_region_teams[region][seed] = _sim_matchup(lst[0], lst[1], "First Four")
-                    else:
-                        mc_region_teams[region][seed] = lst[0]
-
-            e8_winners = {}
-            for region in base_regions:
-                tm = mc_region_teams[region]
-
-                # R64 (also update expected upset/slot frequencies)
-                r64_w = []
-                for slot_idx, (s1, s2) in enumerate(base_pairings):
-                    if s1 in tm and s2 in tm:
-                        pred = _get_game_result(tm[s1], tm[s2], "R64")
-                        w = tm[s1] if random.random() < (pred.win_prob_a / 100.0) else tm[s2]
-                        r64_w.append(w)
-                        r64_slot_counts[region][slot_idx][w] = r64_slot_counts[region][slot_idx].get(w, 0) + 1
-                for w in r64_w:
-                    advancements[w]['R32'] += 1
-
-                # R32
-                r32_w = []
-                for i in range(0, len(r64_w), 2):
-                    if i + 1 < len(r64_w):
-                        pred = _get_game_result(r64_w[i], r64_w[i + 1], "R32")
-                        w = r64_w[i] if random.random() < (pred.win_prob_a / 100.0) else r64_w[i + 1]
-                        r32_w.append(w)
-                for w in r32_w:
-                    advancements[w]['S16'] += 1
-
-                # S16
-                s16_w = []
-                for i in range(0, len(r32_w), 2):
-                    if i + 1 < len(r32_w):
-                        pred = _get_game_result(r32_w[i], r32_w[i + 1], "S16")
-                        w = r32_w[i] if random.random() < (pred.win_prob_a / 100.0) else r32_w[i + 1]
-                        s16_w.append(w)
-                for w in s16_w:
-                    advancements[w]['E8'] += 1
-
-                # E8
-                e8_w = []
-                for i in range(0, len(s16_w), 2):
-                    if i + 1 < len(s16_w):
-                        pred = _get_game_result(s16_w[i], s16_w[i + 1], "E8")
-                        w = s16_w[i] if random.random() < (pred.win_prob_a / 100.0) else s16_w[i + 1]
-                        e8_w.append(w)
-                for w in e8_w:
-                    advancements[w]['FF'] += 1
-                if e8_w:
-                    e8_winners[region] = e8_w[0]
-
-            # Final Four + Championship counts
-            ff_w = []
-            if "East" in e8_winners and "South" in e8_winners:
-                pred = _get_game_result(e8_winners["East"], e8_winners["South"], "FF")
-                w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
-                ff_w.append(w)
-                advancements[w]['NCG'] += 1
-            if "West" in e8_winners and "Midwest" in e8_winners:
-                pred = _get_game_result(e8_winners["West"], e8_winners["Midwest"], "FF")
-                w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
-                ff_w.append(w)
-                advancements[w]['NCG'] += 1
-
-            if len(ff_w) == 2:
-                pred = _get_game_result(ff_w[0], ff_w[1], "NCG")
-                w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
-                advancements[w]['CHAMP'] += 1
-
-        duration = time.time() - start_time
-        logger.info(f"Bracket simulation completed: {simulations} iterations in {duration:.2f}s. Fallbacks: {fallback_count}. Degraded: {degraded_simulation}")
-        if affected_teams:
-            logger.warning(f"Teams affected by fallbacks: {list(affected_teams)}")
-
-        adv_probs = [
-            TournamentTeamAdvancement(
-                team_name=t,
-                seed=c['seed'],
-                region=c['region'],
-                r32_prob=round((c['R32'] / simulations) * 100, 2),
-                s16_prob=round((c['S16'] / simulations) * 100, 2),
-                e8_prob=round((c['E8'] / simulations) * 100, 2),
-                final_four_prob=round((c['FF'] / simulations) * 100, 2),
-                championship_prob=round((c['NCG'] / simulations) * 100, 2),
-                champion_prob=round((c['CHAMP'] / simulations) * 100, 2)
-            ) for t, c in advancements.items()
-        ]
-        adv_probs.sort(key=lambda x: x.champion_prob, reverse=True)
-            
-        # Build a "perfect bracket" view: modal winner per Round-of-64 slot, then deterministically project downstream.
-        most_likely_regions: Dict[str, Dict[str, List[Dict[str, Any]]]] = {r: {} for r in base_regions}
-        most_likely_ff: List[Dict[str, Any]] = []
-        most_likely_championship: Optional[Dict[str, Any]] = None
-        most_likely_champion: Optional[str] = None
+        news_svc = getattr(self.model, "news_service", None)
+        orig_skip_fetch = getattr(news_svc, "skip_fetch", False) if news_svc is not None else False
+        if news_svc is not None:
+            news_svc.skip_fetch = True
 
         try:
-            # Reconstruct region teams (with play-in resolved deterministically)
-            ml_region_teams = {r: {} for r in base_regions}
-            for region in base_regions:
-                for seed, lst in region_teams[region].items():
-                    if len(lst) == 2:
-                        pred = _get_game_result_with_lock(lst[0], lst[1], "First Four", conn=conn)
-                        ml_region_teams[region][seed] = pred.winner
-                    else:
-                        ml_region_teams[region][seed] = lst[0]
+            with get_db_connection() as conn:
+                # HEAT EVERYTHING (Parallel)
+                preheat_start = time.time()
+                self.preheat_cache(all_team_names)
+                preheat_duration = time.time() - preheat_start
+                logging.info(f"Preheated {len(all_team_names)} teams in {preheat_duration:.2f}s")
 
-            e8_winners_ml = {}
-            for region in base_regions:
-                tm = ml_region_teams[region]
+                def _get_game_result(target_a: str, target_b: str, round_name: str, conn=conn) -> TournamentGamePrediction:
+                    nonlocal degraded_simulation, fallback_count
+                    k = tuple(sorted([target_a, target_b]))
+                    if k not in _shared_cache:
+                        gi = TournamentGameInput(team_a=target_a, team_b=target_b, round_index=0, neutral_site=True)
+                        try:
+                            # Shared connection is critical here to reuse preheated caches
+                            res = self.predict_game(gi, conn=conn)
+                        except Exception as e:
+                            degraded_simulation = True
+                            fallback_count += 1
+                            affected_teams.add(target_a)
+                            affected_teams.add(target_b)
 
-                # modal R64 winners
-                r64_winners = []
-                r64_matches = []
-                for slot_idx, (s1, s2) in enumerate(base_pairings):
-                    if s1 not in tm or s2 not in tm:
-                        continue
-                    pred = _get_game_result_with_lock(tm[s1], tm[s2], "R64", conn=conn)
-                    counts = r64_slot_counts.get(region, [dict() for _ in range(len(base_pairings))])[slot_idx]
-                    if counts:
-                        modal = max(counts.items(), key=lambda kv: kv[1])[0]
-                    else:
-                        modal = pred.winner
-                    # force winner to modal
-                    pred.winner = modal
-                    pred.winner_side = 'team_a' if modal == pred.team_a else 'team_b'
-                    r64_winners.append(modal)
-                    r64_matches.append(pred.model_dump())
-                most_likely_regions[region]['round_of_64'] = r64_matches
+                            # Seed-based prior fallback
+                            seed_a = 8
+                            seed_b = 8
+                            for r_name, r_seeds in region_teams.items():
+                                for s, tnames in r_seeds.items():
+                                    if target_a in tnames: seed_a = s
+                                    if target_b in tnames: seed_b = s
 
-                # downstream rounds: deterministic winner from model given the modal entrants
-                def _det_round(prev: List[str], rd: str) -> Tuple[List[str], List[Dict[str, Any]]]:
-                    out_w = []
-                    out_m = []
-                    for i in range(0, len(prev), 2):
-                        if i + 1 >= len(prev):
-                            continue
-                        pred = _get_game_result_with_lock(prev[i], prev[i + 1], rd, conn=conn)
-                        out_w.append(pred.winner)
-                        out_m.append(pred.model_dump())
-                    return out_w, out_m
+                            raw_prob_a = 0.5 + (seed_b - seed_a) * 0.04
+                            prob_a = max(0.05, min(0.95, raw_prob_a)) * 100.0
 
-                r32_w, r32_m = _det_round(r64_winners, "R32")
-                most_likely_regions[region]['round_of_32'] = r32_m
-                s16_w, s16_m = _det_round(r32_w, "S16")
-                most_likely_regions[region]['sweet_16'] = s16_m
-                e8_w, e8_m = _det_round(s16_w, "E8")
-                most_likely_regions[region]['elite_8'] = e8_m
-                if e8_w:
-                    e8_winners_ml[region] = e8_w[0]
+                            data_issues.append(TournamentDataIssue(
+                                team=f"{target_a}/{target_b}",
+                                issue_type="MISSING_DATA",
+                                description=f"Fallback used. Missing Torvik/KenPom metrics. Error: {str(e)}"
+                            ))
 
-            if "East" in e8_winners_ml and "South" in e8_winners_ml:
-                pred = _get_game_result_with_lock(e8_winners_ml["East"], e8_winners_ml["South"], "FF", conn=conn)
-                most_likely_ff.append(pred.model_dump())
-            if "West" in e8_winners_ml and "Midwest" in e8_winners_ml:
-                pred = _get_game_result_with_lock(e8_winners_ml["West"], e8_winners_ml["Midwest"], "FF", conn=conn)
-                most_likely_ff.append(pred.model_dump())
+                            res = TournamentGamePrediction(
+                                team_a=target_a, team_b=target_b,
+                                winner=target_a if random.random() < (prob_a/100.0) else target_b,
+                                winner_side="team_a",
+                                projected_spread_a=-(seed_b - seed_a) * 2.0,
+                                projected_total=142.0,
+                                win_prob_a=prob_a,
+                                win_prob_b=100.0 - prob_a,
+                                confidence_0_100=40.0,
+                                market_data_used=False,
+                                fallback_used=True,
+                                reason_codes=[f"Seed-based fallback prior used ({seed_a} vs {seed_b})."],
+                                risk_flags=["MISSING_DATA", "DEGRADED_SIMULATION"],
+                                neutral_site=True
+                            )
+                        _shared_cache[k] = res
 
-            if len(most_likely_ff) == 2:
-                ta = most_likely_ff[0].get('winner')
-                tb = most_likely_ff[1].get('winner')
-                pred = _get_game_result_with_lock(ta, tb, "NCG", conn=conn)
-                most_likely_championship = pred.model_dump()
-                most_likely_champion = pred.winner
-        except Exception as e:
-            logger.warning(f"Failed to build most_likely_bracket (falling back to deterministic): {e}")
+                    cached = _shared_cache[k]
+                    if cached.team_a == target_a:
+                        return cached
+
+                    # Swap logic
+                    swapped_k = (target_a, target_b, "swapped")
+                    if swapped_k not in _shared_cache:
+                        _shared_cache[swapped_k] = TournamentGamePrediction(
+                            team_a=target_a, team_b=target_b,
+                            winner=cached.winner,
+                            winner_side="team_a" if cached.winner == target_a else "team_b",
+                            projected_spread_a=-cached.projected_spread_a,
+                            projected_total=cached.projected_total,
+                            win_prob_a=cached.win_prob_b,
+                            win_prob_b=cached.win_prob_a,
+                            confidence_0_100=cached.confidence_0_100,
+                            market_data_used=cached.market_data_used,
+                            fallback_used=cached.fallback_used,
+                            reason_codes=cached.reason_codes,
+                            risk_flags=cached.risk_flags,
+                            debug=cached.debug,
+                            neutral_site=True
+                        )
+                    return _shared_cache[swapped_k]
+
+                def _resolve_locked_winner(ta: str, tb: str) -> Optional[str]:
+                    norm_key = self._normalize_match_key(ta, tb)
+                    if norm_key not in locked_map:
+                        return None
+                    locked = locked_map[norm_key]
+                    winner = locked.get("winner", ta)
+                    if winner not in (ta, tb):
+                        winner = ta if standardize_team_name(winner) == standardize_team_name(ta) else tb
+                    return winner
+
+                def _get_game_result_with_lock(ta: str, tb: str, rd: str, conn=conn):
+                    """Return prediction object, but force winner if matchup is locked."""
+                    pred = _get_game_result(ta, tb, rd, conn=conn)
+                    locked_w = _resolve_locked_winner(ta, tb)
+                    if locked_w:
+                        pred.winner = locked_w
+                        pred.winner_side = 'team_a' if locked_w == ta else 'team_b'
+                    return pred
+
+                # 3. Deterministic Bracket Construction (Front-loads cache)
+                first_four_det = []
+                det_region_teams = {r: {} for r in base_regions}
+                for region, sdict in region_teams.items():
+                    for seed, lst in sdict.items():
+                        if len(lst) == 2:
+                            pred = _get_game_result_with_lock(lst[0], lst[1], "First Four", conn=conn)
+                            first_four_det.append(pred)
+                            det_region_teams[region][seed] = pred.winner
+                        else:
+                            det_region_teams[region][seed] = lst[0]
+
+                det_regions = {}
+                e8_winners_det = {}
+                base_pairings = [(1, 16), (8, 9), (5, 12), (4, 13), (6, 11), (3, 14), (7, 10), (2, 15)]
+                for region in base_regions:
+                    tm = det_region_teams[region]
+                    r64 = []
+                    for (s1, s2) in base_pairings:
+                        if s1 in tm and s2 in tm: r64.append(_get_game_result_with_lock(tm[s1], tm[s2], "R64", conn=conn))
+                    r32 = []
+                    for i in range(0, len(r64), 2):
+                        if i+1 < len(r64): r32.append(_get_game_result_with_lock(r64[i].winner, r64[i+1].winner, "R32", conn=conn))
+                    s16 = []
+                    for i in range(0, len(r32), 2):
+                        if i+1 < len(r32): s16.append(_get_game_result_with_lock(r32[i].winner, r32[i+1].winner, "S16", conn=conn))
+                    e8 = []
+                    for i in range(0, len(s16), 2):
+                        if i+1 < len(s16):
+                            e8.append(_get_game_result_with_lock(s16[i].winner, s16[i+1].winner, "E8", conn=conn))
+                            e8_winners_det[region] = e8[-1].winner
+                    det_regions[region] = {"round_of_64": r64, "round_of_32": r32, "sweet_16": s16, "elite_8": e8}
+
+                final_four_det = []
+                if "East" in e8_winners_det and "South" in e8_winners_det:
+                    final_four_det.append(_get_game_result_with_lock(e8_winners_det["East"], e8_winners_det["South"], "FF", conn=conn))
+                if "West" in e8_winners_det and "Midwest" in e8_winners_det:
+                    final_four_det.append(_get_game_result_with_lock(e8_winners_det["West"], e8_winners_det["Midwest"], "FF", conn=conn))
+
+                championship_det = None
+                champion_det = None
+                if len(final_four_det) == 2:
+                    championship_det = _get_game_result_with_lock(final_four_det[0].winner, final_four_det[1].winner, "NCG", conn=conn)
+                    champion_det = championship_det.winner
+
+                # 4. In-Memory MC Simulation Loop
+                advancements = {}
+                for region, seeds_dict in region_teams.items():
+                    for seed, tlist in seeds_dict.items():
+                        for t in tlist:
+                            advancements[t] = {
+                                'R32': 0, 'S16': 0, 'E8': 0, 'FF': 0, 'NCG': 0, 'CHAMP': 0,
+                                'seed': seed, 'region': region
+                            }
+
+                def _sim_matchup(ta: str, tb: str, rd: str) -> str:
+                    locked_w = _resolve_locked_winner(ta, tb)
+                    if locked_w:
+                        return locked_w
+                    pred = _get_game_result(ta, tb, rd, conn=conn)
+                    return ta if random.random() < (pred.win_prob_a / 100.0) else tb
+
+                # Track Round-of-64 slot winner frequencies.
+                # Using full-bracket "mode" is not stable with limited sims (almost all full brackets are unique).
+                # Instead: choose the modal winner per R64 slot, then deterministically project downstream rounds.
+                r64_slot_counts: Dict[str, List[Dict[str, int]]] = {r: [dict() for _ in range(len(base_pairings))] for r in base_regions}
+
+                for _ in range(simulations):
+                    mc_region_teams = {r: {} for r in base_regions}
+                    for region, sdict in region_teams.items():
+                        for seed, lst in sdict.items():
+                            if len(lst) == 2:
+                                mc_region_teams[region][seed] = _sim_matchup(lst[0], lst[1], "First Four")
+                            else:
+                                mc_region_teams[region][seed] = lst[0]
+
+                    e8_winners = {}
+                    for region in base_regions:
+                        tm = mc_region_teams[region]
+
+                        # R64 (also update expected upset/slot frequencies)
+                        r64_w = []
+                        for slot_idx, (s1, s2) in enumerate(base_pairings):
+                            if s1 in tm and s2 in tm:
+                                pred = _get_game_result(tm[s1], tm[s2], "R64", conn=conn)
+                                w = tm[s1] if random.random() < (pred.win_prob_a / 100.0) else tm[s2]
+                                r64_w.append(w)
+                                r64_slot_counts[region][slot_idx][w] = r64_slot_counts[region][slot_idx].get(w, 0) + 1
+                        for w in r64_w:
+                            advancements[w]['R32'] += 1
+
+                        # R32
+                        r32_w = []
+                        for i in range(0, len(r64_w), 2):
+                            if i + 1 < len(r64_w):
+                                pred = _get_game_result(r64_w[i], r64_w[i + 1], "R32", conn=conn)
+                                w = r64_w[i] if random.random() < (pred.win_prob_a / 100.0) else r64_w[i + 1]
+                                r32_w.append(w)
+                        for w in r32_w:
+                            advancements[w]['S16'] += 1
+
+                        # S16
+                        s16_w = []
+                        for i in range(0, len(r32_w), 2):
+                            if i + 1 < len(r32_w):
+                                pred = _get_game_result(r32_w[i], r32_w[i + 1], "S16", conn=conn)
+                                w = r32_w[i] if random.random() < (pred.win_prob_a / 100.0) else r32_w[i + 1]
+                                s16_w.append(w)
+                        for w in s16_w:
+                            advancements[w]['E8'] += 1
+
+                        # E8
+                        e8_w = []
+                        for i in range(0, len(s16_w), 2):
+                            if i + 1 < len(s16_w):
+                                pred = _get_game_result(s16_w[i], s16_w[i + 1], "E8", conn=conn)
+                                w = s16_w[i] if random.random() < (pred.win_prob_a / 100.0) else s16_w[i + 1]
+                                e8_w.append(w)
+                        for w in e8_w:
+                            advancements[w]['FF'] += 1
+                        if e8_w:
+                            e8_winners[region] = e8_w[0]
+
+                    # Final Four + Championship counts
+                    ff_w = []
+                    if "East" in e8_winners and "South" in e8_winners:
+                        pred = _get_game_result(e8_winners["East"], e8_winners["South"], "FF", conn=conn)
+                        w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
+                        ff_w.append(w)
+                        advancements[w]['NCG'] += 1
+                    if "West" in e8_winners and "Midwest" in e8_winners:
+                        pred = _get_game_result(e8_winners["West"], e8_winners["Midwest"], "FF", conn=conn)
+                        w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
+                        ff_w.append(w)
+                        advancements[w]['NCG'] += 1
+
+                    if len(ff_w) == 2:
+                        pred = _get_game_result(ff_w[0], ff_w[1], "NCG", conn=conn)
+                        w = pred.team_a if random.random() < (pred.win_prob_a / 100.0) else pred.team_b
+                        advancements[w]['CHAMP'] += 1
+
+                duration = time.time() - start_time
+                logger.info(f"Bracket simulation completed: {simulations} iterations in {duration:.2f}s. Fallbacks: {fallback_count}. Degraded: {degraded_simulation}")
+                if affected_teams:
+                    logger.warning(f"Teams affected by fallbacks: {list(affected_teams)}")
+
+                adv_probs = [
+                    TournamentTeamAdvancement(
+                        team_name=t,
+                        seed=c['seed'],
+                        region=c['region'],
+                        r32_prob=round((c['R32'] / simulations) * 100, 2),
+                        s16_prob=round((c['S16'] / simulations) * 100, 2),
+                        e8_prob=round((c['E8'] / simulations) * 100, 2),
+                        final_four_prob=round((c['FF'] / simulations) * 100, 2),
+                        championship_prob=round((c['NCG'] / simulations) * 100, 2),
+                        champion_prob=round((c['CHAMP'] / simulations) * 100, 2)
+                    ) for t, c in advancements.items()
+                ]
+                adv_probs.sort(key=lambda x: x.champion_prob, reverse=True)
+
+                # Build a "perfect bracket" view: modal winner per Round-of-64 slot, then deterministically project downstream.
+                most_likely_regions: Dict[str, Dict[str, List[Dict[str, Any]]]] = {r: {} for r in base_regions}
+                most_likely_ff: List[Dict[str, Any]] = []
+                most_likely_championship: Optional[Dict[str, Any]] = None
+                most_likely_champion: Optional[str] = None
+
+                try:
+                    # Reconstruct region teams (with play-in resolved deterministically)
+                    ml_region_teams = {r: {} for r in base_regions}
+                    for region in base_regions:
+                        for seed, lst in region_teams[region].items():
+                            if len(lst) == 2:
+                                pred = _get_game_result_with_lock(lst[0], lst[1], "First Four", conn=conn)
+                                ml_region_teams[region][seed] = pred.winner
+                            else:
+                                ml_region_teams[region][seed] = lst[0]
+
+                    e8_winners_ml = {}
+                    for region in base_regions:
+                        tm = ml_region_teams[region]
+
+                        # modal R64 winners
+                        r64_winners = []
+                        r64_matches = []
+                        for slot_idx, (s1, s2) in enumerate(base_pairings):
+                            if s1 not in tm or s2 not in tm:
+                                continue
+                            pred = _get_game_result_with_lock(tm[s1], tm[s2], "R64", conn=conn)
+                            counts = r64_slot_counts.get(region, [dict() for _ in range(len(base_pairings))])[slot_idx]
+                            if counts:
+                                modal = max(counts.items(), key=lambda kv: kv[1])[0]
+                            else:
+                                modal = pred.winner
+                            # force winner to modal
+                            pred.winner = modal
+                            pred.winner_side = 'team_a' if modal == pred.team_a else 'team_b'
+                            r64_winners.append(modal)
+                            r64_matches.append(pred.model_dump())
+                        most_likely_regions[region]['round_of_64'] = r64_matches
+
+                        # downstream rounds: deterministic winner from model given the modal entrants
+                        def _det_round(prev: List[str], rd: str) -> Tuple[List[str], List[Dict[str, Any]]]:
+                            out_w = []
+                            out_m = []
+                            for i in range(0, len(prev), 2):
+                                if i + 1 >= len(prev):
+                                    continue
+                                pred = _get_game_result_with_lock(prev[i], prev[i + 1], rd, conn=conn)
+                                out_w.append(pred.winner)
+                                out_m.append(pred.model_dump())
+                            return out_w, out_m
+
+                        r32_w, r32_m = _det_round(r64_winners, "R32")
+                        most_likely_regions[region]['round_of_32'] = r32_m
+                        s16_w, s16_m = _det_round(r32_w, "S16")
+                        most_likely_regions[region]['sweet_16'] = s16_m
+                        e8_w, e8_m = _det_round(s16_w, "E8")
+                        most_likely_regions[region]['elite_8'] = e8_m
+                        if e8_w:
+                            e8_winners_ml[region] = e8_w[0]
+
+                    if "East" in e8_winners_ml and "South" in e8_winners_ml:
+                        pred = _get_game_result_with_lock(e8_winners_ml["East"], e8_winners_ml["South"], "FF", conn=conn)
+                        most_likely_ff.append(pred.model_dump())
+                    if "West" in e8_winners_ml and "Midwest" in e8_winners_ml:
+                        pred = _get_game_result_with_lock(e8_winners_ml["West"], e8_winners_ml["Midwest"], "FF", conn=conn)
+                        most_likely_ff.append(pred.model_dump())
+
+                    if len(most_likely_ff) == 2:
+                        ta = most_likely_ff[0].get('winner')
+                        tb = most_likely_ff[1].get('winner')
+                        pred = _get_game_result_with_lock(ta, tb, "NCG", conn=conn)
+                        most_likely_championship = pred.model_dump()
+                        most_likely_champion = pred.winner
+                except Exception as e:
+                    logger.warning(f"Failed to build most_likely_bracket (falling back to deterministic): {e}")
+        finally:
+            if news_svc is not None:
+                news_svc.skip_fetch = orig_skip_fetch
 
         most_likely = {
             "regions": most_likely_regions if most_likely_regions else {r: {k: [m.model_dump() for m in v] for k, v in rounds.items()} for r, rounds in det_regions.items()},

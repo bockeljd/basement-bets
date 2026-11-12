@@ -19,14 +19,19 @@ import ManualAddBetModal from './components/ManualAddBetModal';
 console.log("Basement Bets Frontend v1.6.5 Loaded at " + new Date().toISOString());
 
 // --- Login Modal Component ---
-const LoginModal = ({ onSubmit }) => {
+const LoginModal = ({ onSubmit, errorMessage }) => {
     const [pass, setPass] = useState('');
     return (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999]">
+        <div className="fixed inset-0 bg-slate-950/95 flex items-center justify-center z-[9999] p-4">
             <div className="bg-slate-900 border border-slate-700 p-8 rounded-xl max-w-md w-full shadow-2xl">
                 <h2 className="text-2xl font-bold text-white mb-4">Authentication</h2>
                 <p className="text-slate-400 mb-6">Enter the Basement Password to access this server.</p>
-                <form onSubmit={(e) => { e.preventDefault(); onSubmit(pass); }}>
+                {errorMessage && (
+                    <p className="text-sm text-red-400 bg-red-950/50 border border-red-800/60 rounded p-2.5 mb-4">
+                        {errorMessage}
+                    </p>
+                )}
+                <form onSubmit={(e) => { e.preventDefault(); if (pass.trim()) onSubmit(pass); }}>
                     <input
                         type="password"
                         value={pass}
@@ -37,7 +42,8 @@ const LoginModal = ({ onSubmit }) => {
                     />
                     <button
                         type="submit"
-                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded transition-colors"
+                        disabled={!pass.trim()}
+                        className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded transition-colors"
                     >
                         Login
                     </button>
@@ -159,11 +165,20 @@ function App() {
 
     // Auth State
     const [showLogin, setShowLogin] = useState(() => {
-        return !localStorage.getItem('basement_password');
+        try {
+            return !localStorage.getItem('basement_password');
+        } catch (e) {
+            return true;
+        }
     });
 
     const handleLogin = (pass) => {
-        localStorage.setItem('basement_password', pass);
+        const cleaned = (pass || '').trim();
+        if (!cleaned) return;
+        try {
+            localStorage.setItem('basement_password', cleaned);
+            sessionStorage.removeItem('basement_password_prompted');
+        } catch (e) { }
         window.location.reload();
     };
 
@@ -252,9 +267,9 @@ function App() {
         const reloadDashboard = async () => {
             setLoading(true);
             try {
-                const { data: d } = await api.get('/api/dashboard');
+                const { data: d } = await api.get('/api/dashboard', { timeout: 25000 });
                 // Snapshot (reported) vs computed in-play series (snapshots + newly-added settled bets)
-                const { data: inplay } = await api.get('/api/financials/inplay/series', { params: { days: 120 } });
+                const { data: inplay } = await api.get('/api/financials/inplay/series', { params: { days: 120 }, timeout: 25000 });
 
                 setStats(d.stats || { total_bets: 0, total_profit: 0, win_rate: 0, roi: 0 });
                 setBets(d.bets || []);
@@ -353,6 +368,14 @@ function App() {
         window.__BB_RELOAD_DASHBOARD__ = reloadDashboard;
     }, []);
 
+    if (showLogin) {
+        return (
+            <ErrorBoundary>
+                <LoginModal onSubmit={handleLogin} errorMessage={error} />
+            </ErrorBoundary>
+        );
+    }
+
     if (error) return (
         <div className="flex flex-col items-center justify-center min-h-screen text-red-500 bg-slate-950 p-6 text-center">
             <AlertCircle size={48} className="mb-4" />
@@ -365,8 +388,8 @@ function App() {
                 <button
                     onClick={() => {
                         const pass = prompt("Enter Basement Password:");
-                        if (pass) {
-                            localStorage.setItem('basement_password', pass);
+                        if (pass && pass.trim()) {
+                            try { localStorage.setItem('basement_password', pass.trim()); } catch (e) { }
                             window.location.reload();
                         }
                     }}
@@ -429,7 +452,6 @@ function App() {
 
     return (
         <ErrorBoundary>
-            {showLogin && <LoginModal onSubmit={handleLogin} />}
             {/* <StagingBanner /> */}
             <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans selection:bg-brand-blue/30">
                 <div className="max-w-7xl mx-auto">
