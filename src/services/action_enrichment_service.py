@@ -47,8 +47,9 @@ class ActionEnrichmentService:
         
         for game in raw_games:
             try:
-                self._process_game(game, league)
+                saved_cnt = self._process_game(game, league)
                 stats["games_processed"] += 1
+                stats["splits_saved"] += int(saved_cnt or 0)
             except Exception as e:
                 print(f"[Enrichment] Failed to process game {game.get('id')}: {e}")
                 stats["errors"] += 1
@@ -139,7 +140,7 @@ class ActionEnrichmentService:
         self._store_raw_enrichment(event_id, game)
         
         # 3. Extract Splits
-        self._extract_splits(event_id, game)
+        return self._extract_splits(event_id, game)
         
         # 4. Extract Props/Injuries (Placeholder)
         pass
@@ -282,11 +283,12 @@ class ActionEnrichmentService:
                 })
         return splits
 
-    def _extract_splits(self, event_id: str, game_data: Dict):
+    def _extract_splits(self, event_id: str, game_data: Dict) -> int:
         splits = self.parse_splits_from_game(game_data)
         if not splits:
-            return
+            return 0
 
+        saved = 0
         ts_bucket = datetime.datetime.now().strftime("%Y%m%d%H")
         with get_db_connection() as conn:
             for s in splits:
@@ -327,8 +329,11 @@ class ActionEnrichmentService:
                         ),
                     )
                     conn.commit()
-                except Exception:
+                    saved += 1
+                except Exception as exc:
+                    print(f"[Enrichment] Split insert error for {event_id} ({s.get('market')} {s.get('selection')}): {exc}")
                     try:
                         conn.rollback()
                     except Exception:
                         pass
+        return saved

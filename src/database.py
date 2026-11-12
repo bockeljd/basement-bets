@@ -818,9 +818,31 @@ def init_enrichment_db():
     CREATE INDEX IF NOT EXISTS idx_enrich_event ON action_game_enrichment(event_id);
     CREATE INDEX IF NOT EXISTS idx_props_player ON action_props(player_name);
     """
+    migrate_uuid_sql = """
+    DO $$
+    DECLARE t text;
+    BEGIN
+        FOREACH t IN ARRAY ARRAY['action_game_enrichment','action_injuries','action_splits','action_props','action_news']
+        LOOP
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = t
+                  AND column_name = 'event_id'
+                  AND data_type <> 'text'
+            ) THEN
+                EXECUTE format('ALTER TABLE %I ALTER COLUMN event_id TYPE TEXT USING event_id::text', t);
+            END IF;
+        END LOOP;
+    END $$;
+    CREATE INDEX IF NOT EXISTS idx_splits_event ON action_splits(event_id, as_of_ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_injuries_event ON action_injuries(event_id, reported_at DESC);
+    """
     with get_admin_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(schema)
+            cur.execute(migrate_uuid_sql)
         conn.commit()
     print("Action Network Enrichment tables initialized.")
 
@@ -3108,10 +3130,10 @@ def get_latest_action_splits(event_id: str) -> dict:
                 enr = _exec(
                     conn,
                     """
-                    SELECT raw_json->>'num_bets' AS num_bets
+                    SELECT payload_json->>'num_bets' AS num_bets
                     FROM action_game_enrichment
                     WHERE event_id = %s
-                    ORDER BY fetched_at DESC
+                    ORDER BY as_of_ts DESC
                     LIMIT 1
                     """,
                     (event_id,),

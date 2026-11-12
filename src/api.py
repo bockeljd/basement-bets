@@ -5093,7 +5093,7 @@ async def trigger_prediction_grading(
 @app.api_route("/api/jobs/run_council_today", methods=["GET", "POST"])
 async def trigger_run_council_today(
     request: Request,
-    max_events: int = 6,
+    max_events: int = 1,
     authorized: bool = Depends(verify_cron_secret),
 ):
     """Cron/manual: run Agent Council + RAG Memory synthesis for today's top actionable NCAAM plays."""
@@ -5109,9 +5109,13 @@ async def trigger_run_council_today(
         }
 
     try:
+        import uuid
         from zoneinfo import ZoneInfo
+
+        t0 = time.monotonic()
         today_et = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-        cap = max(1, min(int(max_events or 6), 10))
+        cap = max(1, min(int(max_events or 1), 3))
+        run_id = f"cron_council_{uuid.uuid4().hex[:12]}"
 
         with get_db_connection() as conn:
             rows = _exec(
@@ -5146,7 +5150,7 @@ async def trigger_run_council_today(
                 WHERE mp.outcome IN ('WON', 'LOST', 'W', 'L')
                   AND mp.analyzed_at > NOW() - INTERVAL '72 hours'
                 ORDER BY mp.event_id, mp.analyzed_at DESC
-                LIMIT 4
+                LIMIT 3
                 """,
             ).fetchall()
 
@@ -5182,6 +5186,7 @@ async def trigger_run_council_today(
             research_out, _ = ResearchAgent().run({"events": events_ctx})
             memories_out, _ = MemoryAgent().run({"events": events_ctx})
             oracle_out, _ = OracleAgent().run({
+                "run_id": run_id,
                 "events": events_ctx,
                 "edges": edges_summary,
                 "research": research_out or {},
@@ -5189,8 +5194,30 @@ async def trigger_run_council_today(
             })
             council_processed = len(oracle_out or {})
 
+            if oracle_out:
+                try:
+                    with get_db_connection() as conn:
+                        _exec(
+                            conn,
+                            """
+                            INSERT INTO decision_runs
+                            (run_id, created_at, league, status, inputs_hash, payload_json, model_version, council_narrative)
+                            VALUES (%s, NOW(), 'NCAAM', 'SUCCESS', %s, %s, 'v2_cron', %s)
+                            ON CONFLICT (run_id) DO NOTHING
+                            """,
+                            (
+                                run_id,
+                                today_et,
+                                json.dumps({"event_ids": [e.event_id for e in events_ctx]}),
+                                json.dumps(oracle_out),
+                            ),
+                        )
+                        conn.commit()
+                except Exception as dr_err:
+                    print(f"[run_council_today] decision_runs persist skipped: {dr_err}")
+
         memories_generated = 0
-        if settled_rows:
+        if settled_rows and (time.monotonic() - t0) < 26.0:
             try:
                 from src.agents.post_mortem_agent import PostMortemAgent
                 completed = [
@@ -5211,8 +5238,10 @@ async def trigger_run_council_today(
         return {
             "status": "success",
             "date": today_et,
+            "run_id": run_id,
             "events_processed": council_processed,
             "memories_generated": memories_generated,
+            "elapsed_sec": round(time.monotonic() - t0, 2),
         }
     except Exception as e:
         print(f"[run_council_today] error: {e}")

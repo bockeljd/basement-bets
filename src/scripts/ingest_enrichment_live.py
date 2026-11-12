@@ -34,12 +34,14 @@ def main() -> int:
     ]
 
     # 1. Action Network v2 public splits (today & tomorrow ET)
-    an_processed = 0
+    an_games = 0
+    an_splits = 0
     an_service = ActionEnrichmentService()
     for d in dates_compact:
         try:
             res = an_service.ingest_enrichment_for_league("NCAAM", date_str=d)
-            an_processed += int((res or {}).get("count") or 0)
+            an_games += int((res or {}).get("games_processed") or (res or {}).get("count") or 0)
+            an_splits += int((res or {}).get("splits_saved") or 0)
         except Exception as exc:
             print(f"[enrich] Action Network v2 warning for {d}: {exc}")
 
@@ -62,12 +64,12 @@ def main() -> int:
 
     upsert_health(
         "action_splits",
-        "ok" if an_processed > 0 else "stale",
-        row_count=an_processed,
-        notes=f"games={an_processed} refs={espn_res.get('crews_saved', 0)} injuries={injuries_saved}",
+        "ok" if an_splits > 0 else ("alert" if an_games > 0 else "stale"),
+        row_count=an_splits,
+        notes=f"games={an_games} splits={an_splits} refs={espn_res.get('crews_saved', 0)} injuries={injuries_saved}",
     )
     print(
-        f"[enrich] Complete: action_games={an_processed} ref_crews={espn_res.get('crews_saved', 0)} injuries={injuries_saved}"
+        f"[enrich] Complete: action_games={an_games} splits={an_splits} ref_crews={espn_res.get('crews_saved', 0)} injuries={injuries_saved}"
     )
     return 0
 

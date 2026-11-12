@@ -119,8 +119,8 @@ jobs:
             -H "Content-Type: application/json" \
             --fail-with-body "${diag_url}" || true
 
-          echo "Triggering Agent Council: ${url}"
-          curl -sS -X POST \
+          echo "Triggering Agent Council: ${url}?max_events=1"
+          curl -sS -X POST --max-time 55 \
             -H "Authorization: Bearer ${BASEMENT_CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --fail-with-body "${url}"
+            --fail-with-body "${url}?max_events=1"
