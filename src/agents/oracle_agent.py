@@ -108,21 +108,32 @@ class OracleAgent(BaseAgent):
         }}
         """
 
+        fast_mode = bool(context.get("fast_mode"))
+        llm_model = "gemini-2.5-flash-lite" if fast_mode else "gemini-2.0-flash"
+
         try:
-            self.log_trace(f"Pass 1: Initial Synthesis for {len(events)} matchups", {"event_ids": [ev.event_id for ev in events]})
-            
-            # Pass 1: Initial Debate
+            self.log_trace(
+                f"Pass 1: Initial Synthesis for {len(events)} matchups",
+                {"event_ids": [ev.event_id for ev in events], "fast_mode": fast_mode},
+            )
+
+            # Pass 1: Initial Debate (includes all 5 roles incl. Contrarian Auditor)
             initial_response = generate_content(
-                model="gemini-2.0-flash",
+                model=llm_model,
                 system_prompt=system_prompt,
                 json_mode=True,
-                max_tokens=8192
+                max_tokens=3072 if fast_mode else 8192,
+                timeout=18 if fast_mode else 25,
+                retries=2 if fast_mode else 3,
             )
             if not initial_response:
                 raise ValueError("Oracle Pass 1 returned empty response")
-            
-            # Pass 2: The Contrarian Critique
-            critique_prompt = f"""
+
+            if fast_mode:
+                final_text = initial_response
+            else:
+                # Pass 2: The Contrarian Critique
+                critique_prompt = f"""
             You are the 'Council Auditor', a contrarian sports analyst. 
             Review the following initial AI council debate for {len(events)} matchups:
             
@@ -134,19 +145,19 @@ class OracleAgent(BaseAgent):
             3. CRITICAL: If a 'historical_lesson' or 'extracted_fact' was misinterpreted, flag it clearly.
             4. Return a JSON dict keyed by event_id with a concise 'critique' and a 'risk_score' (0.0 to 1.0).
             """
-            
-            self.log_trace("Pass 2: Contrarian Critique initiated")
-            critique_response = generate_content(
-                model="gemini-2.0-flash",
-                system_prompt=critique_prompt,
-                json_mode=True,
-                max_tokens=4096
-            )
-            if not critique_response:
-                raise ValueError("Oracle Pass 2 (Critique) returned empty response")
-            
-            # Pass 3: Final Synthesis (Injecting Critique back into the Oracle)
-            final_prompt = f"""
+
+                self.log_trace("Pass 2: Contrarian Critique initiated")
+                critique_response = generate_content(
+                    model=llm_model,
+                    system_prompt=critique_prompt,
+                    json_mode=True,
+                    max_tokens=4096
+                )
+                if not critique_response:
+                    raise ValueError("Oracle Pass 2 (Critique) returned empty response")
+
+                # Pass 3: Final Synthesis (Injecting Critique back into the Oracle)
+                final_prompt = f"""
             You are 'The Oracle'. You have completed an initial debate and received a critique from the Council Auditor.
             
             INITIAL DEBATE:
@@ -163,17 +174,17 @@ class OracleAgent(BaseAgent):
             
             Keep the exact same JSON format as the initial debate, but with the 5th agent "Contrarian Auditor" added to the debate array.
             """
-            
-            self.log_trace("Pass 3: Final Synthesis initiated")
-            final_text = generate_content(
-                model="gemini-2.0-flash",
-                system_prompt=final_prompt,
-                json_mode=True,
-                max_tokens=8192
-            )
-            
-            if not final_text:
-                raise ValueError("Oracle Pass 3 (Synthesis) returned empty response")
+
+                self.log_trace("Pass 3: Final Synthesis initiated")
+                final_text = generate_content(
+                    model=llm_model,
+                    system_prompt=final_prompt,
+                    json_mode=True,
+                    max_tokens=8192
+                )
+
+                if not final_text:
+                    raise ValueError("Oracle Pass 3 (Synthesis) returned empty response")
                 
             clean_text = final_text.strip()
             if clean_text.startswith("```json"):

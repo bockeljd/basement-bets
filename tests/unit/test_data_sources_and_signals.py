@@ -514,3 +514,52 @@ def test_db_signal_loaders_and_daily_top_picks_serialize_datetimes(monkeypatch):
     assert params["act"] is True
     assert json.loads(params["rec"])["signals"]["haslametrics"]["asof_date"] == "2026-11-12"
     assert json.loads(params["ctx"])["captured_at"] == str(ts_now)
+
+
+def test_oracle_fast_mode_and_gemini_rest_no_sleep_on_400(monkeypatch):
+    import requests as req_lib
+    import src.utils.gemini_rest as gr
+    from src.agents.contracts import EventContext
+    from src.agents.oracle_agent import OracleAgent
+
+    sleep_calls = []
+    monkeypatch.setattr(gr.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    class _BadResp:
+        status_code = 400
+        text = '{"error":{"message":"Bad request"}}'
+
+        def raise_for_status(self):
+            raise req_lib.HTTPError("400 Bad Request", response=self)
+
+    monkeypatch.setattr(gr.requests, "post", lambda *a, **kw: _BadResp())
+    with pytest.raises(req_lib.HTTPError):
+        gr.generate_content("gemini-2.5-flash-lite", "test", retries=5)
+    assert sleep_calls == []
+
+    # Oracle fast_mode executes single pass cleanly without calling Pass 2 / Pass 3
+    calls = []
+    sample_oracle_json = json.dumps({
+        "evt_fast_1": {
+            "debate": [
+                {"agent": "Executive Summary", "message": "Edge looks solid."},
+                {"agent": "Research & Roster", "message": "No actionable news found."},
+                {"agent": "Historical Context", "message": "No prior lessons."},
+                {"agent": "Contrarian Auditor", "message": "Check shooting variance."},
+                {"agent": "Verdict", "message": "Lean Duke."},
+            ],
+            "oracle_verdict": "Lean Duke -3.5",
+            "signals": {"confidence": 0.68, "data_points": [], "sources": [], "red_flags": []},
+        }
+    })
+    import src.agents.oracle_agent as oa_mod
+    monkeypatch.setattr(oa_mod, "generate_content", lambda **kw: calls.append(kw.get("model")) or sample_oracle_json)
+    oracle = OracleAgent()
+    monkeypatch.setattr(oracle, "_persist_signals", lambda *a, **kw: None)
+
+    ev = EventContext(event_id="evt_fast_1", league="NCAAM", home_team="Duke", away_team="UNC", start_time="2026-11-12T23:00:00Z")
+    out, _ = oracle.run({"events": [ev], "edges": {"evt_fast_1": "SPREAD Duke -3.5"}, "fast_mode": True})
+    assert len(calls) == 1
+    assert calls[0] == "gemini-2.5-flash-lite"
+    assert out["evt_fast_1"]["oracle_verdict"] == "Lean Duke -3.5"

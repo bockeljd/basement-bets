@@ -5183,14 +5183,24 @@ async def trigger_run_council_today(
                         rec = {}
                 edges_summary[eid] = f"{rec.get('bet_type', 'PLAY')} {rec.get('selection', '')} (EV {rec.get('edge', 'N/A')})"
 
-            research_out, _ = ResearchAgent().run({"events": events_ctx})
-            memories_out, _ = MemoryAgent().run({"events": events_ctx})
+            research_out = {}
+            try:
+                research_out, _ = ResearchAgent().run({"events": events_ctx, "fast_mode": True})
+            except Exception as r_err:
+                print(f"[run_council_today] ResearchAgent skipped: {r_err}")
+            memories_out = {}
+            if (time.monotonic() - t0) < 18.0:
+                try:
+                    memories_out, _ = MemoryAgent().run({"events": events_ctx, "fast_mode": True})
+                except Exception as m_err:
+                    print(f"[run_council_today] MemoryAgent skipped: {m_err}")
             oracle_out, _ = OracleAgent().run({
                 "run_id": run_id,
                 "events": events_ctx,
                 "edges": edges_summary,
                 "research": research_out or {},
                 "memories": memories_out or {},
+                "fast_mode": True,
             })
             council_processed = len(oracle_out or {})
 
@@ -5217,7 +5227,7 @@ async def trigger_run_council_today(
                     print(f"[run_council_today] decision_runs persist skipped: {dr_err}")
 
         memories_generated = 0
-        if settled_rows and (time.monotonic() - t0) < 26.0:
+        if settled_rows and (time.monotonic() - t0) < 22.0:
             try:
                 from src.agents.post_mortem_agent import PostMortemAgent
                 completed = [
@@ -5228,7 +5238,7 @@ async def trigger_run_council_today(
                         "actual_result": dict(r)["outcome"],
                         "game_date": dict(r)["game_date"],
                     }
-                    for r in settled_rows
+                    for r in settled_rows[:2]
                 ]
                 pm_out, _ = PostMortemAgent().run({"completed_games": completed})
                 memories_generated = int((pm_out or {}).get("memories_generated") or 0)

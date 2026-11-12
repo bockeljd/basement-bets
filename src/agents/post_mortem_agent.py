@@ -113,10 +113,12 @@ Rules:
 
             try:
                 response_text = generate_content(
-                    model="gemini-2.0-flash", # Upgrade to 2.0 for better analysis
+                    model="gemini-2.5-flash-lite" if os.environ.get("VERCEL") else "gemini-2.0-flash",
                     system_prompt=full_prompt,
                     json_mode=True,
-                    max_tokens=4000
+                    max_tokens=4000,
+                    timeout=15 if os.environ.get("VERCEL") else 25,
+                    retries=2,
                 )
                 if not response_text:
                     parsed_lessons = {}

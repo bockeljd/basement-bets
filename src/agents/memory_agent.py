@@ -39,15 +39,21 @@ class MemoryAgent(BaseAgent):
         # No need for matrix creation in pure python
         # We will iterate through all_memories directly
         
+        fast_mode = bool(context.get("fast_mode"))
         for ev in events:
-            # Multi-query strategy: Matchup, Team A, Team B, and Archetypes
-            queries = [
-                f"Lessons learned betting on {ev.away_team} vs {ev.home_team} tight matchups",
-                f"Lessons learned betting on {ev.away_team} performance and dynamics",
-                f"Lessons learned betting on {ev.home_team} performance and dynamics",
-                f"Historical betting lessons for high-tempo or defensive matchups similar to {ev.away_team} style",
-                f"Historical betting lessons for high-tempo or defensive matchups similar to {ev.home_team} style"
-            ]
+            # Multi-query strategy offline; single composite query in fast serverless mode.
+            if fast_mode:
+                queries = [
+                    f"Lessons learned betting on {ev.away_team} vs {ev.home_team} basketball matchups injuries tempo",
+                ]
+            else:
+                queries = [
+                    f"Lessons learned betting on {ev.away_team} vs {ev.home_team} tight matchups",
+                    f"Lessons learned betting on {ev.away_team} performance and dynamics",
+                    f"Lessons learned betting on {ev.home_team} performance and dynamics",
+                    f"Historical betting lessons for high-tempo or defensive matchups similar to {ev.away_team} style",
+                    f"Historical betting lessons for high-tempo or defensive matchups similar to {ev.home_team} style"
+                ]
             
             event_lessons = []
             seen_ids = set()

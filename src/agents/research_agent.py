@@ -31,11 +31,13 @@ class ResearchAgent(BaseAgent):
         from src.utils.ncaam_season import current_ncaam_calendar_year
         search_year = current_ncaam_calendar_year()
         batch_citations = {}
+        fast_mode = bool(context.get("fast_mode"))
+        ddg_timeout = 4 if fast_mode else 10
         for ev in events:
             query = f"{ev.away_team} vs {ev.home_team} basketball news injuries {search_year}"
             self.log_trace(f"Searching DuckDuckGo for {ev.away_team} vs {ev.home_team}", {"query": query})
             try:
-                resp = requests.post(search_url, data={"q": query}, headers=headers, timeout=10)
+                resp = requests.post(search_url, data={"q": query}, headers=headers, timeout=ddg_timeout)
                 resp.raise_for_status()
                 soup = BeautifulSoup(resp.text, 'html.parser')
 
@@ -58,28 +60,29 @@ class ResearchAgent(BaseAgent):
 
                 batch_citations[ev.event_id] = citations
                 
-                # DEEP SCRAPING: Fetch actual content for the top 3 results to give LLM full context
+                # In serverless fast_mode, rely on snippets to fit strict HTTP budgets.
                 scraped_context = []
-                for cite in citations[:3]:
-                    url = cite['url']
-                    try:
-                        self.log_trace(f"Deep scraping: {url}")
-                        c_resp = requests.get(url, headers=headers, timeout=5)
-                        c_resp.raise_for_status()
-                        c_soup = BeautifulSoup(c_resp.text, 'html.parser')
-                        
-                        # Remove script/style noise
-                        for script in c_soup(["script", "style"]):
-                            script.decompose()
+                if not fast_mode:
+                    for cite in citations[:3]:
+                        url = cite['url']
+                        try:
+                            self.log_trace(f"Deep scraping: {url}")
+                            c_resp = requests.get(url, headers=headers, timeout=5)
+                            c_resp.raise_for_status()
+                            c_soup = BeautifulSoup(c_resp.text, 'html.parser')
                             
-                        text = c_soup.get_text(separator=' ', strip=True)
-                        # Cap at 1500 chars per page to avoid token blowup
-                        scraped_context.append({
-                            "url": url,
-                            "content": text[:1500]
-                        })
-                    except Exception as ce:
-                        self.log_trace(f"Scrape failed for {url}: {ce}")
+                            # Remove script/style noise
+                            for script in c_soup(["script", "style"]):
+                                script.decompose()
+                                
+                            text = c_soup.get_text(separator=' ', strip=True)
+                            # Cap at 1500 chars per page to avoid token blowup
+                            scraped_context.append({
+                                "url": url,
+                                "content": text[:1500]
+                            })
+                        except Exception as ce:
+                            self.log_trace(f"Scrape failed for {url}: {ce}")
 
                 research_results[ev.event_id] = {
                     "query": query,
@@ -105,7 +108,7 @@ class ResearchAgent(BaseAgent):
         # Each fact must have: team, type (injury|lineup|travel|pace|other), detail, source_url.
         # Falls back gracefully if the call fails to avoid blocking the Oracle.
         events_with_citations = [ev for ev in events if batch_citations.get(ev.event_id)]
-        if events_with_citations:
+        if events_with_citations and not fast_mode:
             try:
                 extraction_input = []
                 for ev in events_with_citations:
