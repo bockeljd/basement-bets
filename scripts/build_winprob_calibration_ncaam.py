@@ -112,7 +112,31 @@ def to_piecewise_points(blocks: List[Tuple[float, float]], min_points: int = 8) 
     return fixed
 
 
-def main(days: int = 14, out_path: str | None = None):
+def fit_calibration_artifact(obs: List[Obs], days: int = 30, min_points: int = 12) -> Dict[str, Any]:
+    """Fit piecewise-linear monotonic PAVA calibration map from Obs list."""
+    blocks = pava(obs)
+    pts = to_piecewise_points(blocks, min_points=min_points)
+
+    # De-dupe identical p's and clip extreme calibrated probs (avoid 0/1 blowups)
+    dedup = []
+    last_p = None
+    for p, y in pts:
+        if last_p is not None and abs(p - last_p) < 1e-9:
+            continue
+        y = max(0.01, min(0.99, float(y)))
+        dedup.append((float(p), float(y)))
+        last_p = p
+
+    return {
+        "sport": "ncaam",
+        "days": int(days),
+        "n_obs": len(obs),
+        "method": "isotonic_pava_piecewise_linear",
+        "points": [{"p": p, "p_cal": y} for p, y in dedup],
+    }
+
+
+def main(days: int = 30, out_path: str | None = None, min_obs: int = 50, allow_insufficient: bool = True):
     q = """
     SELECT win_prob, outcome
     FROM model_predictions
@@ -138,47 +162,48 @@ def main(days: int = 14, out_path: str | None = None):
             continue
         obs.append(Obs(p=p, y=(1 if res == "W" else 0), w=1.0))
 
-    if len(obs) < 200:
-        raise SystemExit(f"Not enough decided observations for calibration: {len(obs)}")
+    if len(obs) < int(min_obs):
+        msg = f"[calibration] Only {len(obs)} decided observations in last {days}d (< min_obs={min_obs}); keeping existing curve."
+        if allow_insufficient:
+            print(msg)
+            return
+        raise SystemExit(msg)
 
-    blocks = pava(obs)
-    pts = to_piecewise_points(blocks, min_points=12)
-
-    # De-dupe identical p's and clip extreme calibrated probs (avoid 0/1 blowups)
-    dedup = []
-    last_p = None
-    for p, y in pts:
-        if last_p is not None and abs(p - last_p) < 1e-9:
-            continue
-        y = max(0.01, min(0.99, float(y)))
-        dedup.append((float(p), float(y)))
-        last_p = p
-
-    artifact = {
-        "sport": "ncaam",
-        "days": int(days),
-        "n_obs": len(obs),
-        "method": "isotonic_pava_piecewise_linear",
-        "points": [{"p": p, "p_cal": y} for p, y in dedup],
-    }
+    artifact = fit_calibration_artifact(obs, days=days, min_points=12)
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    if out_path is None:
-        out_path = os.path.join(repo_root, "data", "model_params", "winprob_calibration_ncaam.json")
+    out_paths = (
+        [out_path]
+        if out_path is not None
+        else [
+            os.path.join(repo_root, "data", "model_params", "winprob_calibration_ncaam.json"),
+            os.path.join(repo_root, "src", "services", "model_params", "winprob_calibration_ncaam.json"),
+        ]
+    )
 
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(artifact, f, indent=2)
-        f.write("\n")
+    for target in out_paths:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump(artifact, f, indent=2)
+            f.write("\n")
+        print(f"Wrote {target}")
 
-    print(f"Wrote {out_path}")
+    try:
+        from src.database import upsert_model_param
+        upsert_model_param("winprob_calibration_ncaam", artifact)
+        print("Persisted winprob_calibration_ncaam to DB model_params_store")
+    except Exception as e:
+        print(f"[calibration] DB model_params_store update skipped: {e}")
+
     print(f"n_obs={artifact['n_obs']} points={len(artifact['points'])}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--days", type=int, default=14)
+    ap.add_argument("--days", type=int, default=30)
+    ap.add_argument("--min-obs", type=int, default=50)
+    ap.add_argument("--strict", action="store_true", help="Exit non-zero if fewer than --min-obs samples")
     ap.add_argument("--out", type=str, default=None)
     args = ap.parse_args()
 
-    main(days=args.days, out_path=args.out)
+    main(days=args.days, out_path=args.out, min_obs=args.min_obs, allow_insufficient=not args.strict)

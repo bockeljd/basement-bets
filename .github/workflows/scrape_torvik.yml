@@ -34,6 +34,12 @@ jobs:
         run: |
           python scripts/github_scrape_torvik.py
 
+      - name: Ingest Haslametrics XML Ratings
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python src/scripts/ingest_haslametrics.py
+
       - name: Update Data Health
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

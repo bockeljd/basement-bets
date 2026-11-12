@@ -7,6 +7,7 @@ beautifulsoup4
 python-jose
 google-generativeai
 python-dateutil
+brotli
 
 # NOTE: keep Vercel serverless bundle small (< 250MB).
 # lxml, numpy, pandas, scikit-learn, scipy are TOO LARGE for Vercel.

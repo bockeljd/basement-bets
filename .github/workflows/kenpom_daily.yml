@@ -33,8 +33,9 @@ jobs:
       - name: Ingest KenPom (daily)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Prefer username+password login (fresh session each run, no cookie management).
-          # If KENPOM_COOKIE is also set it will be used as a fallback if login fails.
+          # Official KenPom API key (from kenpom.com/register-api.php) — tried first if set.
+          KENPOM_API_KEY: ${{ secrets.KENPOM_API_KEY }}
+          # Fallback: email+password or cookie session
           KENPOM_EMAIL: ${{ secrets.KENPOM_EMAIL }}
           KENPOM_PASSWORD: ${{ secrets.KENPOM_PASSWORD }}
           KENPOM_COOKIE: ${{ secrets.KENPOM_COOKIE }}

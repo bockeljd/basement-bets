@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../api/axios';
 import { loadCache } from '../utils/httpCache';
-import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck, PlusCircle, TrendingUp } from 'lucide-react';
+import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck, PlusCircle, TrendingUp, Upload } from 'lucide-react';
 
 import OpenBetsPanel from '../components/OpenBetsPanel';
 import ParlayRecommendations from '../components/ParlayRecommendations';
@@ -97,6 +97,49 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
             else next.add(id);
             return next;
         });
+    };
+
+    // KenPom manual CSV upload state (inside How the Model Works dialog)
+    const kenpomFileInputRef = useRef(null);
+    const [kenpomCsvFile, setKenpomCsvFile] = useState(null);
+    const [kenpomUploadState, setKenpomUploadState] = useState({ uploading: false, status: 'idle', message: '' });
+
+    const handleKenpomCsvUpload = async (event) => {
+        event.preventDefault();
+        if (kenpomUploadState.uploading) return;
+        if (!kenpomCsvFile) {
+            setKenpomUploadState({
+                uploading: false,
+                status: 'error',
+                message: 'Please choose a KenPom CSV or TSV file first.',
+            });
+            return;
+        }
+        setKenpomUploadState({ uploading: true, status: 'uploading', message: 'Importing KenPom ratings...' });
+        try {
+            const formData = new FormData();
+            formData.append('file', kenpomCsvFile);
+            const res = await api.post('/api/admin/kenpom/upload-csv', formData);
+            const rowsCount = res?.data?.rows ?? 'all';
+            const asof = res?.data?.asof_date ? ` (as of ${res.data.asof_date})` : '';
+            setKenpomUploadState({
+                uploading: false,
+                status: 'success',
+                message: `Loaded ${rowsCount} teams into KenPom ratings${asof}. Refreshing board...`,
+            });
+            setKenpomCsvFile(null);
+            if (kenpomFileInputRef.current) {
+                kenpomFileInputRef.current.value = '';
+            }
+            await fetchSchedule();
+        } catch (err) {
+            const detail = err?.response?.data?.detail || err?.message || 'Upload failed';
+            setKenpomUploadState({
+                uploading: false,
+                status: 'error',
+                message: `Could not import KenPom file: ${detail}`,
+            });
+        }
     };
 
     // Sorting State
@@ -802,7 +845,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                             else tooltip += `\nUnknown — no health data yet.`;
 
                                             const boardKey = (leagueFilter === 'EPL') ? 'board:EPL' : 'board:NCAAM';
-                                            const key = ['odds', 'torvik', 'kenpom', boardKey];
+                                            const key = ['odds', 'torvik', 'haslametrics', 'kenpom', 'action_splits', boardKey];
                                             tooltip += `\n\nKey sources:`;
                                             tooltip += `\n- ${key.map(shortLine).join('\n- ')}`;
 
@@ -1031,22 +1074,29 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                             const mkt = top.market_line;
                                             const fair = top.fair_line;
                                             const edgeStr = edgePts ? `${edgePts} points` : 'a clear statistical edge';
+                                            const sig = top?.signals || edge?.recommended_bet?.signals || {};
+                                            const ratingNames = ['BartTorvik'];
+                                            if (sig.haslametrics) ratingNames.push('Haslametrics');
+                                            if (sig.kenpom) ratingNames.push('KenPom');
+                                            const sourcePhrase = ratingNames.length > 1
+                                                ? `our blended ${ratingNames.join(' + ')} computer ratings`
+                                                : 'our BartTorvik power ratings';
 
                                             if (top.bet_type === 'TOTAL') {
                                                 const isUnder = /^UNDER/i.test(pickText) || String(top.side || '').toLowerCase() === 'under';
                                                 if (isUnder) {
                                                     if (mkt >= 170) {
-                                                        return `Sportsbooks set an unusually inflated total of ${mkt} points for ${away} at ${home}. Our model accounts for both teams' true shooting percentages and half-court tempo, projecting a combined score of ${fair} points. That gives you a sizable ${edgeStr} cushion below the sportsbook line, making UNDER ${mkt} our highest-conviction play.`;
+                                                        return `Sportsbooks set an unusually inflated total of ${mkt} points for ${away} at ${home}. Using ${sourcePhrase}, our model accounts for shooting efficiency and half-court tempo to project a combined score of ${fair} points—giving you a sizable ${edgeStr} cushion below the sportsbook line on UNDER ${mkt}.`;
                                                     }
                                                     if (mkt >= 155) {
-                                                        return `The sportsbooks set a high-tempo total of ${mkt} points for ${away} at ${home}. Early-season possession data and defensive matchups project a final combined score closer to ${fair} points—${edgeStr} lower than the betting total—giving us comfortable breathing room on the UNDER.`;
+                                                        return `Sportsbooks set a high-tempo total of ${mkt} points for ${away} at ${home}. Comparing the market against ${sourcePhrase}, we project a combined score closer to ${fair} points—${edgeStr} lower than the betting total—leaving comfortable room on the UNDER.`;
                                                     }
-                                                    return `In ${away} at ${home}, sportsbooks set the total at ${mkt} points. Our model projects a tighter, defense-first game with ${fair} combined points (${edgeStr} below the market), giving you strong value on the UNDER.`;
+                                                    return `In ${away} at ${home}, sportsbooks set the total at ${mkt} points. Based on ${sourcePhrase}, we project a tighter game around ${fair} combined points (${edgeStr} below the market), giving strong value on the UNDER.`;
                                                 } else {
                                                     if (mkt <= 138) {
-                                                        return `Sportsbooks set a conservative total of ${mkt} points for ${away} at ${home}. Our model expects both offenses to find higher tempo and scoring rhythm, projecting a fair total of ${fair} points (${edgeStr} higher than the line), creating a clear scoring edge for the OVER.`;
+                                                        return `Sportsbooks set a conservative total of ${mkt} points for ${away} at ${home}. Using ${sourcePhrase}, we expect faster pace and better scoring efficiency—projecting ${fair} combined points (${edgeStr} higher than the line) on the OVER.`;
                                                     }
-                                                    return `For ${away} at ${home}, the sportsbook total is set at ${mkt} points. Our matchup ratings project both teams to push the pace and generate more possessions, leading to a fair combined score of ${fair} points. That gives us ${edgeStr} of extra scoring room on the OVER.`;
+                                                    return `For ${away} at ${home}, the sportsbook total is ${mkt} points. Combining pace and efficiency from ${sourcePhrase}, we project a fair combined score of ${fair} points (${edgeStr} higher than the market) for value on the OVER.`;
                                                 }
                                             }
 
@@ -1055,17 +1105,150 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                 const opponent = (pickedTeam === edge.home_team) ? edge.away_team : edge.home_team;
                                                 const isDog = (mkt !== null && mkt !== undefined && Number(mkt) > 0) || (typeof top.selection === 'string' && top.selection.includes('+'));
                                                 if (isDog) {
-                                                    return `${pickedTeam} is getting ${mkt ? `+${mkt}` : 'points'} against ${opponent}. Our power ratings indicate ${pickedTeam} matches up much closer than bookmakers expect, evaluating the fair spread at ${fair ? `+${fair}` : 'closer'}. That gives you ${edgeStr} of safety buffer on the spread.`;
+                                                    return `${pickedTeam} is getting ${mkt ? `+${mkt}` : 'points'} against ${opponent}. Blending ${sourcePhrase} puts the fair line closer to ${fair ? fmtSigned(fair, 1) : 'pick-em'}, giving you a ${edgeStr} safety buffer on the spread.`;
                                                 } else {
-                                                    return `${pickedTeam} is favored by ${mkt ? Math.abs(mkt) : ''} points against ${opponent}. Our model projects ${pickedTeam} to control this game and win by a fair margin of ${fair ? Math.abs(fair) : ''} points, providing a ${edgeStr} advantage over the sportsbook spread.`;
+                                                    return `${pickedTeam} is favored by ${mkt ? Math.abs(mkt) : ''} points against ${opponent}. Using ${sourcePhrase}, we project ${pickedTeam} to win by around ${fair ? Math.abs(fair) : ''} points, creating a ${edgeStr} advantage over the sportsbook number.`;
                                                 }
                                             }
 
                                             if (top.bet_type === 'MONEYLINE') {
-                                                return `Sportsbooks price ${pickText} at ${top.price ? (top.price > 0 ? `+${top.price}` : top.price) : 'market odds'} against ${edge.home_team || 'the opponent'}. Our model calculates a higher probability of winning outright than the odds reflect, creating strong positive expected value.`;
+                                                return `Sportsbooks price ${pickText} at ${top.price ? (top.price > 0 ? `+${top.price}` : top.price) : 'market odds'} against ${edge.home_team || 'the opponent'}. Using ${sourcePhrase}, our model estimates a higher true chance of winning outright than the odds reflect, creating positive expected value.`;
                                             }
 
-                                            return `Model ratings project a fair line of ${fair} against the sportsbook's ${mkt}, giving ${pickText} a ${edgeStr} advantage.`;
+                                            return `${sourcePhrase} project a fair line of ${fair} against the sportsbook's ${mkt}, giving ${pickText} a ${edgeStr} advantage.`;
+                                        };
+
+                                        const getCuratedSignals = (edge, top, pickText) => {
+                                            const sig = top?.signals || edge?.recommended_bet?.signals;
+                                            if (!sig || typeof sig !== 'object') return [];
+                                            const items = [];
+                                            const mktType = String(top.bet_type || '').toUpperCase();
+                                            const away = edge.away_team || 'Away';
+                                            const home = edge.home_team || 'Home';
+                                            const cleanPicked = top.selection ? top.selection.replace(/[+-]?\d+(\.\d+)?$/, '').trim().toLowerCase() : '';
+                                            const sideLower = String(top.side || '').toLowerCase();
+                                            const pickedIsHome = sideLower === 'home' || (cleanPicked && String(home).toLowerCase() === cleanPicked);
+
+                                            // 1. Computer Ratings Breakdown (BartTorvik + Haslametrics + KenPom)
+                                            const ratingParts = [];
+                                            if (mktType === 'TOTAL') {
+                                                if (sig.torvik?.fair_total != null) {
+                                                    ratingParts.push(`BartTorvik projects ${Number(sig.torvik.fair_total).toFixed(1)} total pts`);
+                                                }
+                                                if (sig.haslametrics?.fair_total != null) {
+                                                    ratingParts.push(`Haslametrics projects ${Number(sig.haslametrics.fair_total).toFixed(1)} total pts`);
+                                                }
+                                                if (sig.kenpom?.available) {
+                                                    ratingParts.push('KenPom ratings are also blended in');
+                                                }
+                                            } else {
+                                                const toSideFair = (homeSpread) => {
+                                                    if (homeSpread === null || homeSpread === undefined || Number.isNaN(Number(homeSpread))) return null;
+                                                    return pickedIsHome ? Number(homeSpread) : -Number(homeSpread);
+                                                };
+                                                const teamLabel = pickedIsHome ? home : away;
+                                                const tFair = toSideFair(sig.torvik?.fair_spread_home);
+                                                const hFair = toSideFair(sig.haslametrics?.fair_spread_home);
+                                                const kFair = toSideFair(sig.kenpom?.fair_spread_home);
+                                                if (tFair !== null) ratingParts.push(`BartTorvik: ${teamLabel} ${fmtSigned(tFair, 1)}`);
+                                                if (hFair !== null) ratingParts.push(`Haslametrics: ${teamLabel} ${fmtSigned(hFair, 1)}`);
+                                                if (kFair !== null) ratingParts.push(`KenPom: ${teamLabel} ${fmtSigned(kFair, 1)}`);
+                                            }
+                                            if (ratingParts.length > 0) {
+                                                items.push({
+                                                    key: 'ratings',
+                                                    icon: '📊',
+                                                    label: 'Rating Models',
+                                                    text: `${ratingParts.join(' • ')}.`,
+                                                    tone: 'blue',
+                                                });
+                                            }
+
+                                            // 2. Public Ticket % vs Money % (Action Network Splits)
+                                            const mktSplits = sig.public_splits?.[mktType] || sig.public_splits?.SPREAD;
+                                            if (mktSplits && typeof mktSplits === 'object') {
+                                                let sideKey = null;
+                                                let sideLabel = pickText;
+                                                if (mktType === 'TOTAL') {
+                                                    const isUnder = /^UNDER/i.test(pickText) || sideLower === 'under';
+                                                    sideKey = isUnder ? 'UNDER' : 'OVER';
+                                                    sideLabel = isUnder ? 'the UNDER' : 'the OVER';
+                                                } else {
+                                                    sideKey = pickedIsHome ? 'HOME' : 'AWAY';
+                                                    sideLabel = pickedIsHome ? home : away;
+                                                }
+                                                const sideSplit = mktSplits[sideKey];
+                                                const betPct = sideSplit?.bet_pct != null ? Number(sideSplit.bet_pct) : null;
+                                                const handlePct = sideSplit?.handle_pct != null ? Number(sideSplit.handle_pct) : null;
+                                                if (betPct !== null && handlePct !== null) {
+                                                    const sharpGap = handlePct - betPct;
+                                                    const sharpFlag = String(sideSplit?.sharp_indicator || '').toUpperCase();
+                                                    let splitMsg;
+                                                    let tone = 'slate';
+                                                    if (sharpFlag === 'RLM' || sharpFlag === 'SHARP_MONEY' || sharpGap >= 10) {
+                                                        splitMsg = `Only ${Math.round(betPct)}% of public tickets are on ${sideLabel}, yet ${Math.round(handlePct)}% of total dollars wagered back this side—showing bigger, sharper bets landing here.`;
+                                                        tone = 'emerald';
+                                                    } else if (betPct <= 36) {
+                                                        splitMsg = `${Math.round(100 - betPct)}% of public tickets are backing the other side (${Math.round(betPct)}% bets / ${Math.round(handlePct)}% money here), making this a low-public contrarian play.`;
+                                                        tone = 'emerald';
+                                                    } else if (betPct >= 68 && sharpGap <= -10) {
+                                                        splitMsg = `${Math.round(betPct)}% of tickets are on ${sideLabel}, though larger money is lighter (${Math.round(handlePct)}% handle), so our edge comes mostly from team ratings rather than sharp splits.`;
+                                                        tone = 'amber';
+                                                    } else {
+                                                        splitMsg = `Public betting check: ${Math.round(betPct)}% of tickets and ${Math.round(handlePct)}% of total money are backing ${sideLabel}.`;
+                                                    }
+                                                    items.push({
+                                                        key: 'splits',
+                                                        icon: '💰',
+                                                        label: 'Public vs. Big Money',
+                                                        text: splitMsg,
+                                                        tone,
+                                                    });
+                                                }
+                                            }
+
+                                            // 3. Pre-Game Injury Watch (Rotowire / ESPN)
+                                            if (Array.isArray(sig.injuries) && sig.injuries.length > 0) {
+                                                const topInj = sig.injuries
+                                                    .slice(0, 3)
+                                                    .map((inj) => {
+                                                        const p = inj.player || 'Player';
+                                                        const t = inj.team || (inj.side === 'home' ? home : away);
+                                                        const st = inj.status || 'Questionable';
+                                                        return `${p} (${t} — ${st})`;
+                                                    })
+                                                    .join(', ');
+                                                items.push({
+                                                    key: 'injuries',
+                                                    icon: '🩹',
+                                                    label: 'Injury Watch',
+                                                    text: `Reported status on the slate: ${topInj}. Our model automatically widens uncertainty around injured lineups before recommending a stake.`,
+                                                    tone: 'amber',
+                                                });
+                                            }
+
+                                            // 4. Pre-Game Referee Crew (ESPN)
+                                            if (sig.referees && ((Array.isArray(sig.referees.officials) && sig.referees.officials.length > 0) || sig.referees.crew_avg_fouls != null)) {
+                                                const crewNames = Array.isArray(sig.referees.officials) && sig.referees.officials.length > 0
+                                                    ? sig.referees.officials.join(', ')
+                                                    : 'Crew assigned';
+                                                const fouls = sig.referees.crew_avg_fouls != null ? Number(sig.referees.crew_avg_fouls) : null;
+                                                let foulNote = '';
+                                                if (fouls !== null) {
+                                                    if (fouls >= 37.5) foulNote = ` (averages ${fouls.toFixed(1)} fouls/game — extra whistle stoppages can nudge scoring higher)`;
+                                                    else if (fouls <= 33.5) foulNote = ` (averages ${fouls.toFixed(1)} fouls/game — tends to let teams play with fewer free throws)`;
+                                                    else foulNote = ` (averages ${fouls.toFixed(1)} fouls/game — right near national average)`;
+                                                }
+                                                items.push({
+                                                    key: 'referees',
+                                                    icon: '⚖️',
+                                                    label: 'Referee Crew',
+                                                    text: `${crewNames}${foulNote}.`,
+                                                    tone: 'slate',
+                                                });
+                                            }
+
+                                            return items;
                                         };
 
                                         const nowMs = Date.now();
@@ -1224,6 +1407,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                             const winProb = (Number(top.win_prob || 0.5) * 100).toFixed(1);
                                                             const winGap = (impPct && winProb) ? (Number(winProb) - Number(impPct)).toFixed(1) : null;
                                                             const curatedWhy = getCuratedExplanation(edge, top, pickText, edgePts);
+                                                            const curatedSignals = getCuratedSignals(edge, top, pickText);
 
                                                             return (
                                                                 <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
@@ -1320,6 +1504,29 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                                                             <p className="text-slate-200 text-xs leading-relaxed">
                                                                                 {curatedWhy}
                                                                             </p>
+
+                                                                            {curatedSignals.length > 0 && (
+                                                                                <div className="space-y-1.5">
+                                                                                    {curatedSignals.map((sigItem) => {
+                                                                                        const toneCls = sigItem.tone === 'emerald'
+                                                                                            ? 'border-emerald-500/25 bg-emerald-950/25'
+                                                                                            : sigItem.tone === 'amber'
+                                                                                                ? 'border-amber-500/25 bg-amber-950/20'
+                                                                                                : sigItem.tone === 'blue'
+                                                                                                    ? 'border-blue-500/25 bg-blue-950/20'
+                                                                                                    : 'border-slate-800 bg-slate-900/75';
+                                                                                        return (
+                                                                                            <div key={sigItem.key} className={`p-2 rounded-lg border text-[11px] text-slate-300 flex items-start gap-2 ${toneCls}`}>
+                                                                                                <span className="text-xs shrink-0 mt-0.5" aria-hidden="true">{sigItem.icon}</span>
+                                                                                                <div className="leading-snug">
+                                                                                                    <strong className="text-slate-100">{sigItem.label}: </strong>
+                                                                                                    {sigItem.text}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                            )}
 
                                                                             {impPct && winGap && Number(winGap) > 0 && (
                                                                                 <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex items-start gap-2">
@@ -2590,7 +2797,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                 1. The Core Idea: Market-First Betting
                             </h3>
                             <p className="text-slate-300 text-xs mb-3">
-                                Sportsbooks are very good at setting lines, so we don't try to predict final scores out of thin air. Instead, we start with the live sportsbook consensus line as our baseline and compare it with respected college basketball computer ratings (<strong>BartTorvik</strong> and <strong>KenPom</strong>).
+                                Sportsbooks are very good at setting lines, so we don't try to predict final scores out of thin air. Instead, we start with the live sportsbook consensus line as our baseline and compare it against multiple independent college basketball rating systems (<strong>BartTorvik</strong>, <strong>Haslametrics</strong>, and <strong>KenPom</strong>), alongside live public money splits, injury reports, and referee crews.
                             </p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-950/70 p-3 rounded-lg border border-slate-800">
                                 <div>
@@ -2761,6 +2968,139 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                     </p>
                                 </div>
                             </div>
+                        </section>
+
+                        {/* 7. Live Data Sources & Manual KenPom CSV Import */}
+                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 space-y-4">
+                            <div>
+                                <h3 className="text-xs font-black uppercase tracking-wider text-indigo-400 mb-2">
+                                    7. Live Data Sources &amp; KenPom Import
+                                </h3>
+                                <p className="text-xs text-slate-300 mb-3">
+                                    Every game is checked against multiple feeds. When KenPom isn&apos;t uploaded yet, the model automatically blends <strong>BartTorvik</strong> (65%) and <strong>Haslametrics</strong> (35%), then layers in public ticket vs. money splits, pre-game injuries, and assigned referees.
+                                </p>
+                                {(() => {
+                                    const by = {};
+                                    (dataHealth || []).forEach((item) => {
+                                        if (item?.source) by[item.source] = item;
+                                    });
+                                    const feedDefs = [
+                                        { key: 'torvik', label: 'BartTorvik' },
+                                        { key: 'haslametrics', label: 'Haslametrics' },
+                                        { key: 'kenpom', label: 'KenPom' },
+                                        { key: 'odds', label: 'Sportsbook Odds' },
+                                        { key: 'action_splits', label: 'Public Splits' },
+                                    ];
+                                    const fmtAge = (iso) => {
+                                        if (!iso) return 'No data yet';
+                                        const ms = Date.now() - new Date(iso).getTime();
+                                        if (!Number.isFinite(ms) || ms < 0) return 'Updated';
+                                        const mins = Math.round(ms / 60000);
+                                        if (mins < 60) return `${mins}m ago`;
+                                        const hrs = Math.round(mins / 60);
+                                        if (hrs < 48) return `${hrs}h ago`;
+                                        return `${Math.round(hrs / 24)}d ago`;
+                                    };
+                                    return (
+                                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                                            {feedDefs.map((feed) => {
+                                                const row = by[feed.key];
+                                                const st = String(row?.status || 'unknown').toLowerCase();
+                                                const badgeCls = st === 'ok'
+                                                    ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+                                                    : (st === 'warning' || st === 'alert' || st === 'stale')
+                                                        ? 'border-amber-500/35 bg-amber-500/10 text-amber-300'
+                                                        : st === 'error'
+                                                            ? 'border-rose-500/35 bg-rose-500/10 text-rose-300'
+                                                            : 'border-slate-700 bg-slate-900/80 text-slate-400';
+                                                const labelText = st === 'ok'
+                                                    ? 'Fresh'
+                                                    : (st === 'warning' || st === 'alert')
+                                                        ? 'Check'
+                                                        : st === 'stale'
+                                                            ? 'Stale'
+                                                            : st === 'error'
+                                                                ? 'Issue'
+                                                                : 'Pending';
+                                                return (
+                                                    <div key={feed.key} className={`rounded-lg border px-2.5 py-2 text-[11px] ${badgeCls}`}>
+                                                        <div className="font-bold text-slate-100 truncate">{feed.label}</div>
+                                                        <div className="flex items-center justify-between gap-1 mt-0.5 text-[10px]">
+                                                            <span className="font-semibold">{labelText}</span>
+                                                            <span className="opacity-80">{fmtAge(row?.last_success_at)}</span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+
+                            <form
+                                aria-labelledby="kenpomUploadHeading"
+                                method="POST"
+                                onSubmit={handleKenpomCsvUpload}
+                                className="bg-slate-900/80 border border-slate-700/70 rounded-lg p-3.5 space-y-2.5"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <h4 id="kenpomUploadHeading" className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                                        <Upload size={14} className="text-purple-400" aria-hidden="true" />
+                                        <span>Import Your KenPom Ratings (CSV / TSV)</span>
+                                    </h4>
+                                    <span className="text-[10px] text-slate-400">Optional boost</span>
+                                </div>
+
+                                <div className="flex flex-col sm:flex-row sm:items-end gap-2.5">
+                                    <div className="flex-1 min-w-0">
+                                        <label htmlFor="kenpom-csv-file" className="block text-[11px] font-medium text-slate-300 mb-1">
+                                            KenPom ratings file (.csv or .tsv)
+                                        </label>
+                                        <input
+                                            ref={kenpomFileInputRef}
+                                            id="kenpom-csv-file"
+                                            name="file"
+                                            type="file"
+                                            accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain"
+                                            aria-describedby="kenpom-csv-help"
+                                            onChange={(e) => {
+                                                const f = e.target.files?.[0] || null;
+                                                setKenpomCsvFile(f);
+                                                if (kenpomUploadState.status !== 'idle') {
+                                                    setKenpomUploadState({ uploading: false, status: 'idle', message: '' });
+                                                }
+                                            }}
+                                            className="block w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-slate-600 file:bg-slate-800 file:text-xs file:font-semibold file:text-slate-100 hover:file:bg-slate-700 cursor-pointer"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={kenpomUploadState.uploading || !kenpomCsvFile}
+                                        className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 disabled:opacity-45 disabled:cursor-not-allowed text-white transition-colors cursor-pointer"
+                                    >
+                                        <Upload size={13} aria-hidden="true" />
+                                        <span>{kenpomUploadState.uploading ? 'Importing...' : 'Upload KenPom CSV'}</span>
+                                    </button>
+                                </div>
+
+                                <p id="kenpom-csv-help" className="text-[11px] text-slate-400 leading-snug">
+                                    Export the main summary ratings table from your KenPom subscription as a CSV (or paste table rows into a .tsv file) and upload it here to immediately feed KenPom efficiency &amp; tempo numbers into today&apos;s picks.
+                                </p>
+
+                                <div
+                                    role="status"
+                                    aria-live="polite"
+                                    className={kenpomUploadState.message
+                                        ? `text-xs rounded-md px-2.5 py-1.5 border ${kenpomUploadState.status === 'success'
+                                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                            : kenpomUploadState.status === 'error'
+                                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                                : 'bg-blue-500/10 border-blue-500/30 text-blue-300'}`
+                                        : 'sr-only'}
+                                >
+                                    {kenpomUploadState.message || ''}
+                                </div>
+                            </form>
                         </section>
                     </div>
                 </div>

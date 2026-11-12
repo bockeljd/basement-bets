@@ -57,29 +57,50 @@ class ActionEnrichmentService:
 
     def _fetch_raw(self, league: str, date_str: str) -> List[Dict]:
         """
-        Direct fetch to get full JSON payload.
+        Direct fetch to get full v2 scoreboard JSON payload (including markets book 15 bet_info splits).
         """
-        # Mapping from OddsFetcherService
         sport_map = {
             'NBA': 'nba', 'NFL': 'nfl', 'MLB': 'mlb', 
             'NCAAM': 'ncaab', 'NCAAF': 'ncaaf', 'EPL': 'soccer'
         }
         api_sport = sport_map.get(league, league.lower())
         
-        url = f"https://api.actionnetwork.com/web/v1/scoreboard/{api_sport}?date={date_str}"
+        url = f"https://api.actionnetwork.com/web/v2/scoreboard/{api_sport}?date={date_str}"
+        if api_sport == 'ncaab':
+            url += "&division=D1"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Origin': 'https://www.actionnetwork.com',
+            'Referer': 'https://www.actionnetwork.com/',
         }
         
         import requests
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = requests.get(url, headers=headers, timeout=12)
         resp.raise_for_status()
         data = resp.json()
         return data.get('games', [])
 
+    def _resolve_direct_action_event_id(self, game: Dict, league: str) -> Optional[str]:
+        """Resolve exact `action:<league>:<id>` row in events table before fuzzy linking."""
+        an_id = game.get('id')
+        if not an_id:
+            return None
+        candidate_id = f"action:{league.lower()}:{an_id}"
+        try:
+            with get_db_connection() as conn:
+                row = _exec(conn, "SELECT id FROM events WHERE id = %s LIMIT 1", (candidate_id,)).fetchone()
+                if row:
+                    return dict(row).get("id") if isinstance(row, dict) or hasattr(row, "keys") else row[0]
+        except Exception:
+            return None
+        return None
+
     def _process_game(self, game: Dict, league: str):
         # 1. Resolve Canonical Event ID
-        # We need (Home, Away, Date)
+        # First check exact action:<league>:<id> primary key; fallback to (Home, Away, Date ET) fuzzy link.
+        event_id = self._resolve_direct_action_event_id(game, league)
+
         home_team_id = game.get('home_team_id')
         away_team_id = game.get('away_team_id')
         
@@ -87,38 +108,32 @@ class ActionEnrichmentService:
         home_name = "Unknown"
         away_name = "Unknown"
         for t in game.get('teams', []):
-            if t['id'] == home_team_id: home_name = t['full_name']
-            if t['id'] == away_team_id: away_name = t['full_name']
+            if t.get('id') == home_team_id:
+                home_name = t.get('full_name') or t.get('display_name') or home_name
+            if t.get('id') == away_team_id:
+                away_name = t.get('full_name') or t.get('display_name') or away_name
             
-        start_time_iso = game.get('start_time')
-        # Parse ISO to YYYY-MM-DD
-        try:
-            dt = datetime.datetime.fromisoformat(start_time_iso.replace('Z', '+00:00'))
-            date_str = dt.strftime("%Y-%m-%d")
-        except:
-            date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        if not event_id:
+            start_time_iso = game.get('start_time')
+            try:
+                from zoneinfo import ZoneInfo
+                dt = datetime.datetime.fromisoformat(str(start_time_iso).replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                date_str = dt.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+            except Exception:
+                date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-        # Link!
-        # Use link_leg with sufficient context to find the event.
-        # We pass one team as the selection to anchor key matching.
-        mock_leg = {
-            "selection": home_name,
-            "team": home_name
-        }
-        description = f"{home_name} vs {away_name}"
-        
-        link_res = self.linker.link_leg(mock_leg, league, date_str, description=description)
-        
-        event_id = link_res.get('event_id')
-        if not event_id or link_res.get('link_status') != 'LINKED':
-            # Try linking with away team if home failed?
-            mock_leg_away = {"selection": away_name, "team": away_name}
-            link_res = self.linker.link_leg(mock_leg_away, league, date_str, description=description)
+            mock_leg = {"selection": home_name, "team": home_name}
+            description = f"{home_name} vs {away_name}"
+            link_res = self.linker.link_leg(mock_leg, league, date_str, description=description)
             event_id = link_res.get('event_id')
-            
-            if not event_id:
-                # print(f"Skipping enrichment for {home_name} vs {away_name} (No Link: {link_res.get('reason')})")
-                return 
+            if not event_id or link_res.get('link_status') != 'LINKED':
+                mock_leg_away = {"selection": away_name, "team": away_name}
+                link_res = self.linker.link_leg(mock_leg_away, league, date_str, description=description)
+                event_id = link_res.get('event_id')
+                if not event_id:
+                    return
 
         # 2. Store Raw Enrichment
         self._store_raw_enrichment(event_id, game)
@@ -166,85 +181,154 @@ class ActionEnrichmentService:
                 # Likely Unique Constraint -> Data hasn't changed
                 pass
 
+    @staticmethod
+    def parse_splits_from_game(game_data: Dict) -> List[Dict]:
+        """Parse public ticket % and money % from Action Network v2 `markets` (fallback: legacy `odds`)."""
+        splits: List[Dict] = []
+
+        def _sharp_tag(bet_pct, handle_pct):
+            if bet_pct is None or handle_pct is None:
+                return None
+            diff = float(handle_pct) - float(bet_pct)
+            if float(bet_pct) < 45.0 and float(handle_pct) >= 55.0 and diff >= 12.0:
+                return "RLM"
+            if diff >= 12.0 and float(handle_pct) >= 55.0:
+                return "SHARP_MONEY"
+            return None
+
+        markets = (game_data or {}).get("markets") or {}
+        book_payload = None
+        if isinstance(markets, dict):
+            # Prefer book '15' (Action consensus), else first book with an 'event' map.
+            if isinstance(markets.get("15"), dict) and isinstance(markets["15"].get("event"), dict):
+                book_payload = markets["15"]["event"]
+            else:
+                for bk in markets.values():
+                    if isinstance(bk, dict) and isinstance(bk.get("event"), dict):
+                        book_payload = bk["event"]
+                        break
+
+        if isinstance(book_payload, dict):
+            market_map = (("spread", "SPREAD"), ("total", "TOTAL"), ("moneyline", "ML"))
+            for v2_key, canon_mkt in market_map:
+                items = book_payload.get(v2_key) or []
+                if not isinstance(items, list):
+                    continue
+                # Prefer pregame outcomes (is_live False) or outcomes with non-zero split info.
+                selected_by_side: Dict[str, Dict] = {}
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    side = str(item.get("side") or "").upper().strip()
+                    if not side:
+                        continue
+                    bet_info = item.get("bet_info") or {}
+                    t_pct = ((bet_info.get("tickets") or {}).get("percent"))
+                    m_pct = ((bet_info.get("money") or {}).get("percent"))
+                    if t_pct is None and m_pct is None:
+                        continue
+                    is_live = bool(item.get("is_live"))
+                    prev = selected_by_side.get(side)
+                    score = (0 if is_live else 2) + (1 if ((t_pct or 0) + (m_pct or 0)) > 0 else 0)
+                    if prev is None or score > prev["_score"]:
+                        line_val = item.get("value")
+                        if canon_mkt == "ML":
+                            line_val = None
+                        selected_by_side[side] = {
+                            "_score": score,
+                            "market": canon_mkt,
+                            "selection": side,
+                            "line": line_val,
+                            "bet_pct": t_pct,
+                            "handle_pct": m_pct,
+                            "sharp_indicator": _sharp_tag(t_pct, m_pct),
+                        }
+                for row in selected_by_side.values():
+                    row.pop("_score", None)
+                    if (row.get("bet_pct") or 0) > 0 or (row.get("handle_pct") or 0) > 0:
+                        splits.append(row)
+
+        if splits:
+            return splits
+
+        # Legacy v1 fallback (`game['odds']`)
+        odds_list = (game_data or {}).get("odds") or []
+        if not odds_list:
+            return []
+        target_odd = next(
+            (o for o in odds_list if o.get("ml_home_public") is not None or o.get("spread_home_money") is not None),
+            None,
+        )
+        if not target_odd:
+            return []
+
+        legacy_specs = (
+            ("ML", "HOME", None, target_odd.get("ml_home_public"), target_odd.get("ml_home_money")),
+            ("ML", "AWAY", None, target_odd.get("ml_away_public"), target_odd.get("ml_away_money")),
+            ("SPREAD", "HOME", target_odd.get("spread_home"), target_odd.get("spread_home_public"), target_odd.get("spread_home_money")),
+            ("SPREAD", "AWAY", target_odd.get("spread_away"), target_odd.get("spread_away_public"), target_odd.get("spread_away_money")),
+            ("TOTAL", "OVER", target_odd.get("total"), target_odd.get("total_over_public"), target_odd.get("total_over_money")),
+            ("TOTAL", "UNDER", target_odd.get("total"), target_odd.get("total_under_public"), target_odd.get("total_under_money")),
+        )
+        for mkt, sel, ln, bp, hp in legacy_specs:
+            if bp is not None or hp is not None:
+                splits.append({
+                    "market": mkt,
+                    "selection": sel,
+                    "line": ln,
+                    "bet_pct": bp,
+                    "handle_pct": hp,
+                    "sharp_indicator": _sharp_tag(bp, hp),
+                })
+        return splits
+
     def _extract_splits(self, event_id: str, game_data: Dict):
-        odds_list = game_data.get('odds', [])
-        if not odds_list: return
-        
-        # Typically the first odds object has the consensus/public stats
-        # We iterate to find one with stats
-        target_odd = None
-        for o in odds_list:
-            if o.get('ml_home_public') is not None or o.get('spread_home_money') is not None:
-                target_odd = o
-                break
-        
-        # If none found, we can't extract specific splits, but maybe we extract the first one anyway if we want to log nulls?
-        # User constraint: "Tables populate only when data exists". So we skip if null.
-        if not target_odd: return
-        
-        # Mapping fields
-        # market_type, selection, line, bet_pct, handle_pct
-        
-        splits = []
-        
-        # Moneyline
-        if target_odd.get('ml_home_public'):
-            splits.append({
-                "market": "ML", "selection": "HOME", 
-                "bet_pct": target_odd.get('ml_home_public'), "handle_pct": target_odd.get('ml_home_money')
-            })
-        if target_odd.get('ml_away_public'):
-            splits.append({
-                "market": "ML", "selection": "AWAY", 
-                "bet_pct": target_odd.get('ml_away_public'), "handle_pct": target_odd.get('ml_away_money')
-            })
-            
-        # Spread
-        if target_odd.get('spread_home_public'):
-            splits.append({
-                "market": "SPREAD", "selection": "HOME", "line": target_odd.get('spread_home'),
-                "bet_pct": target_odd.get('spread_home_public'), "handle_pct": target_odd.get('spread_home_money')
-            })
-        if target_odd.get('spread_away_public'):
-            splits.append({
-                "market": "SPREAD", "selection": "AWAY", "line": target_odd.get('spread_away'),
-                "bet_pct": target_odd.get('spread_away_public'), "handle_pct": target_odd.get('spread_away_money')
-            })
-            
-        # Total
-        if target_odd.get('total_over_public'):
-            splits.append({
-                "market": "TOTAL", "selection": "OVER", "line": target_odd.get('total'),
-                "bet_pct": target_odd.get('total_over_public'), "handle_pct": target_odd.get('total_over_money')
-            })
-        if target_odd.get('total_under_public'):
-            splits.append({
-                "market": "TOTAL", "selection": "UNDER", "line": target_odd.get('total'),
-                "bet_pct": target_odd.get('total_under_public'), "handle_pct": target_odd.get('total_under_money')
-            })
-            
-        # Insert
-        for s in splits:
-             row_id = str(uuid.uuid4())
-             # Fingerprint: event_id + market + selection + bet_pct + handle_pct + timestamp_bucket?
-             # If values change, we want new row? Or update?
-             # "action_splits" implies history. So unique on time.
-             # Bucket time to hour?
-             ts_bucket = datetime.datetime.now().strftime("%Y%m%d%H")
-             
-             fp = self._generate_fingerprint(event_id, s['market'], s['selection'], s.get('bet_pct'), s.get('handle_pct'), ts_bucket)
-             
-             ins = """
-             INSERT INTO action_splits
-             (id, event_id, market_type, selection, line, bet_pct, handle_pct, as_of_ts, fingerprint)
-             VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
-             """
-             with get_db_connection() as conn:
-                 try:
-                     _exec(conn, ins, (
-                         row_id, str(event_id), s['market'], s['selection'], s.get('line'),
-                         s.get('bet_pct'), s.get('handle_pct'), fp
-                     ))
-                     conn.commit()
-                 except:
-                     pass
+        splits = self.parse_splits_from_game(game_data)
+        if not splits:
+            return
+
+        ts_bucket = datetime.datetime.now().strftime("%Y%m%d%H")
+        with get_db_connection() as conn:
+            for s in splits:
+                row_id = str(uuid.uuid4())
+                fp = self._generate_fingerprint(
+                    event_id,
+                    s["market"],
+                    s["selection"],
+                    s.get("bet_pct"),
+                    s.get("handle_pct"),
+                    ts_bucket,
+                )
+                ins = """
+                INSERT INTO action_splits
+                (id, event_id, market_type, selection, line, bet_pct, handle_pct, sharp_indicator, as_of_ts, fingerprint)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
+                ON CONFLICT (fingerprint) DO UPDATE SET
+                    line = EXCLUDED.line,
+                    bet_pct = EXCLUDED.bet_pct,
+                    handle_pct = EXCLUDED.handle_pct,
+                    sharp_indicator = EXCLUDED.sharp_indicator,
+                    as_of_ts = CURRENT_TIMESTAMP
+                """
+                try:
+                    _exec(
+                        conn,
+                        ins,
+                        (
+                            row_id,
+                            str(event_id),
+                            s["market"],
+                            s["selection"],
+                            s.get("line"),
+                            s.get("bet_pct"),
+                            s.get("handle_pct"),
+                            s.get("sharp_indicator"),
+                            fp,
+                        ),
+                    )
+                    conn.commit()
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass

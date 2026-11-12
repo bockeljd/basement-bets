@@ -181,6 +181,18 @@ def ensure_tables():
         );
         CREATE INDEX IF NOT EXISTS ix_kp_team_asof_rank ON kenpom_team_ratings_daily(asof_date, rank);
 
+        CREATE TABLE IF NOT EXISTS kenpom_ratings (
+          team_name TEXT PRIMARY KEY,
+          rank INTEGER,
+          conference TEXT,
+          record TEXT,
+          adj_em REAL,
+          adj_o REAL,
+          adj_d REAL,
+          adj_t REAL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
         CREATE TABLE IF NOT EXISTS kenpom_ref_ratings_daily (
           asof_date DATE NOT NULL,
           ref_name TEXT NOT NULL,
@@ -802,15 +814,242 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
         return n
 
 
-def main():
-    print(f"[{datetime.now(timezone.utc).isoformat()}] ingest_kenpom")
+def _clean_kp_team_name(raw_name: str) -> str:
+    """Clean trailing tournament seed numbers/markers (e.g. 'Duke 1*' -> 'Duke')."""
+    import re
+    s = str(raw_name or "").strip().strip('"').strip("'")
+    return re.sub(r"([A-Za-z\).'])\s+\d{1,2}\*?$", r"\1", s).strip()
 
-    cookie = (os.getenv("KENPOM_COOKIE") or "").strip()
-    if not cookie:
-        raise RuntimeError("KENPOM_COOKIE is required for subscription scrape")
+
+def _parse_kp_float(val) -> float | None:
+    if val is None:
+        return None
+    s = str(val).replace("+", "").replace(",", "").strip()
+    if not s or s in ("-", "N/A", "NA", "--"):
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _parse_kp_int(val) -> int | None:
+    f = _parse_kp_float(val)
+    return int(round(f)) if f is not None else None
+
+
+def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
+    """Parse KenPom ratings CSV/TSV export into canonical team rating rows.
+
+    Supports both KenPom summary CSV headers (Season, TeamName, AdjTempo, AdjOE, AdjDE, AdjEM, ...)
+    and table copy/export headers (Rk/Rank, Team, Conf, W-L/Record, NetRtg/AdjEM, ORtg/AdjO, DRtg/AdjD, AdjT).
+    """
+    import csv
+    import io
+
+    text = (csv_text or "").lstrip("\ufeff").strip()
+    if not text:
+        return []
+
+    sample = "\n".join(text.splitlines()[:5])
+    delimiter = "\t" if sample.count("\t") > sample.count(",") else ","
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    rows_raw = [r for r in reader if r and any(c.strip() for c in r)]
+    if not rows_raw:
+        return []
+
+    header_idx = 0
+    for idx, r in enumerate(rows_raw[:5]):
+        joined = " ".join(c.strip().lower() for c in r)
+        if any(tok in joined for tok in ("team", "adjem", "netrtg", "adjoe", "ortg")):
+            header_idx = idx
+            break
+
+    headers = [c.strip() for c in rows_raw[header_idx]]
+    norm_headers = ["".join(ch for ch in h.lower() if ch.isalnum()) for h in headers]
+
+    def _find_col(candidates: tuple[str, ...]) -> int | None:
+        for cand in candidates:
+            if cand in norm_headers:
+                return norm_headers.index(cand)
+        return None
+
+    idx_team = _find_col(("teamname", "team", "school"))
+    if idx_team is None:
+        raise ValueError("Missing required 'Team' or 'TeamName' column in CSV")
+
+    idx_rank = _find_col(("rk", "rank", "rankadjem", "ranknetrtg"))
+    idx_conf = _find_col(("conf", "confshort", "conference"))
+    idx_rec = _find_col(("wl", "record"))
+    idx_wins = _find_col(("wins", "w"))
+    idx_losses = _find_col(("losses", "l"))
+    idx_em = _find_col(("adjem", "netrtg", "em"))
+    idx_o = _find_col(("adjo", "adjoe", "ortg", "oe"))
+    idx_d = _find_col(("adjd", "adjde", "drtg", "de"))
+    idx_t = _find_col(("adjt", "adjtempo", "tempo"))
+
+    if idx_em is None and (idx_o is None or idx_d is None):
+        raise ValueError("CSV must contain NetRtg/AdjEM or both ORtg/AdjO and DRtg/AdjD columns")
+
+    out: list[dict] = []
+    for row in rows_raw[header_idx + 1:]:
+        if len(row) <= idx_team:
+            continue
+        team = _clean_kp_team_name(row[idx_team])
+        if not team or team.lower() in ("team", "teamname"):
+            continue
+        if idx_em is not None and len(row) > idx_em and str(row[idx_em]).strip().lower() in ("adjem", "netrtg"):
+            continue
+
+        adj_o = _parse_kp_float(row[idx_o]) if (idx_o is not None and len(row) > idx_o) else None
+        adj_d = _parse_kp_float(row[idx_d]) if (idx_d is not None and len(row) > idx_d) else None
+        adj_em = _parse_kp_float(row[idx_em]) if (idx_em is not None and len(row) > idx_em) else None
+        if adj_em is None and adj_o is not None and adj_d is not None:
+            adj_em = round(adj_o - adj_d, 2)
+        adj_t = _parse_kp_float(row[idx_t]) if (idx_t is not None and len(row) > idx_t) else None
+        rank = _parse_kp_int(row[idx_rank]) if (idx_rank is not None and len(row) > idx_rank) else None
+        conf = row[idx_conf].strip() if (idx_conf is not None and len(row) > idx_conf and row[idx_conf].strip()) else None
+
+        record = row[idx_rec].strip() if (idx_rec is not None and len(row) > idx_rec and row[idx_rec].strip()) else None
+        if not record and idx_wins is not None and idx_losses is not None and len(row) > max(idx_wins, idx_losses):
+            w_val = _parse_kp_int(row[idx_wins])
+            l_val = _parse_kp_int(row[idx_losses])
+            if w_val is not None and l_val is not None:
+                record = f"{w_val}-{l_val}"
+
+        if adj_em is None and adj_o is None and adj_d is None:
+            continue
+
+        out.append({
+            "team_name": team,
+            "rank": rank,
+            "adj_em": adj_em,
+            "adj_o": adj_o,
+            "adj_d": adj_d,
+            "adj_t": adj_t,
+            "conf": conf,
+            "record": record,
+            "raw": {"source": "csv_upload", "row": row},
+        })
+
+    if out and any(r.get("rank") is None for r in out):
+        out.sort(key=lambda r: float(r.get("adj_em") or -999), reverse=True)
+        for i, r in enumerate(out, start=1):
+            if r.get("rank") is None:
+                r["rank"] = i
+    return out
+
+
+def fetch_kenpom_official_api(api_key: str, year: int | None = None, timeout: int = 20) -> list[dict]:
+    """Fetch KenPom ratings via official subscription API (kenpom.com/register-api.php)."""
+    from src.utils.ncaam_season import current_ncaam_season_end_year
+
+    y = int(year or current_ncaam_season_end_year())
+    resp = requests.get(
+        "https://kenpom.com/api.php",
+        params={"endpoint": "ratings", "y": y},
+        headers={
+            "Authorization": f"Bearer {api_key.strip()}",
+            "Accept": "application/json",
+            "User-Agent": "BasementBets/1.0",
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    rows = payload.get("data", payload) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise ValueError(f"Unexpected KenPom API payload type: {type(rows).__name__}")
+
+    out: list[dict] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        team = _clean_kp_team_name(item.get("TeamName") or item.get("team_name") or item.get("Team") or "")
+        if not team:
+            continue
+        adj_o = _parse_kp_float(item.get("AdjOE") or item.get("AdjO") or item.get("ORtg") or item.get("adj_o"))
+        adj_d = _parse_kp_float(item.get("AdjDE") or item.get("AdjD") or item.get("DRtg") or item.get("adj_d"))
+        adj_em = _parse_kp_float(item.get("AdjEM") or item.get("NetRtg") or item.get("adj_em"))
+        if adj_em is None and adj_o is not None and adj_d is not None:
+            adj_em = round(adj_o - adj_d, 2)
+        adj_t = _parse_kp_float(item.get("AdjTempo") or item.get("AdjT") or item.get("adj_t"))
+        rank = _parse_kp_int(item.get("RankAdjEM") or item.get("Rank") or item.get("Rk") or item.get("rank"))
+        conf = item.get("ConfShort") or item.get("Conf") or item.get("conf") or None
+        wins = item.get("Wins")
+        losses = item.get("Losses")
+        record = item.get("Record") or (f"{wins}-{losses}" if wins is not None and losses is not None else None)
+        out.append({
+            "team_name": team,
+            "rank": rank,
+            "adj_em": adj_em,
+            "adj_o": adj_o,
+            "adj_d": adj_d,
+            "adj_t": adj_t,
+            "conf": conf,
+            "record": record,
+            "raw": {"source": "official_api", "data": item},
+        })
+    return out
+
+
+def ingest_kenpom_csv(csv_text: str, asof_date: str | None = None) -> dict:
+    """Parse and upsert KenPom ratings from CSV text into DB and update data_health."""
+    from src.scripts.update_data_health import upsert as upsert_health
+
+    teams = parse_kenpom_csv_text(csv_text)
+    if len(teams) < 10:
+        raise ValueError(f"Parsed only {len(teams)} valid teams from CSV; expected a full KenPom table (>=10 rows).")
 
     ensure_tables()
-    asof = _asof_date_et()
+    asof = (asof_date or _asof_date_et())[:10]
+    n_saved = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
+    upsert_health(
+        "kenpom",
+        "ok",
+        row_count=n_saved,
+        notes=f"kenpom CSV upload asof={asof} rows={n_saved}",
+    )
+    return {"status": "ok", "asof_date": asof, "rows": n_saved}
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Ingest KenPom daily ratings via CSV, Official API, or web session")
+    parser.add_argument("--csv", type=str, default=None, help="Path to KenPom ratings CSV/TSV file")
+    parser.add_argument("--date", type=str, default=None, help="Override asof_date (YYYY-MM-DD)")
+    args = parser.parse_args()
+
+    print(f"[{datetime.now(timezone.utc).isoformat()}] ingest_kenpom")
+
+    if args.csv:
+        with open(args.csv, "r", encoding="utf-8", errors="replace") as f:
+            res = ingest_kenpom_csv(f.read(), asof_date=args.date)
+        print(f"csv_upload: asof={res['asof_date']} rows={res['rows']}")
+        return
+
+    ensure_tables()
+    asof = (args.date or _asof_date_et())[:10]
+
+    api_key = (os.getenv("KENPOM_API_KEY") or "").strip()
+    if api_key:
+        teams = fetch_kenpom_official_api(api_key)
+        n_team = upsert_daily('kenpom_team_ratings_daily', asof, teams, ['team_name'])
+        print(f"official_api teams: fetched={len(teams)} upserted={n_team}")
+        try:
+            from src.scripts.update_data_health import upsert
+            status = 'ok' if (n_team and n_team > 0) else 'stale'
+            upsert('kenpom', status=status, row_count=n_team, notes=f"official_api team={n_team}")
+        except Exception as e:
+            print(f"[kenpom] data_health upsert failed: {e}")
+        return
+
+    cookie = (os.getenv("KENPOM_COOKIE") or "").strip()
+    email = (os.getenv("KENPOM_EMAIL") or "").strip()
+    password = (os.getenv("KENPOM_PASSWORD") or "").strip()
+    if not cookie and not (email and password):
+        raise RuntimeError("Set KENPOM_API_KEY, --csv <path>, or KENPOM_EMAIL/KENPOM_PASSWORD/KENPOM_COOKIE")
 
     sess = _session()
 

@@ -173,6 +173,70 @@ def trigger_init_db(request: Request):
     init_db()
     return {"status": "success", "message": "Database Initialized (Postgres)"}
 
+
+@app.post("/api/admin/kenpom/upload-csv")
+async def upload_kenpom_csv(request: Request):
+    """Upload KenPom ratings CSV/TSV (multipart file or JSON csv_text) to refresh KenPom ratings."""
+    from src.scripts.ingest_kenpom import ingest_kenpom_csv
+
+    csv_text = None
+    asof_date = None
+    ctype = (request.headers.get("content-type") or "").lower()
+
+    try:
+        if "multipart/form-data" in ctype:
+            import importlib.util
+            has_multipart = bool(
+                importlib.util.find_spec("multipart")
+                or importlib.util.find_spec("python_multipart")
+            )
+            if has_multipart:
+                form = await request.form()
+                asof_val = form.get("asof_date")
+                asof_date = str(asof_val).strip() if asof_val else None
+                upload = form.get("file") or form.get("csv_file")
+                if upload is not None and hasattr(upload, "read"):
+                    raw_bytes = await upload.read()
+                    csv_text = raw_bytes.decode("utf-8", errors="replace")
+                elif isinstance(upload, str):
+                    csv_text = upload
+            else:
+                # Zero-dependency fallback when python-multipart is not installed (Vercel slim bundle)
+                from email.parser import BytesParser
+                raw_ct = request.headers.get("content-type") or ctype
+                raw_body = await request.body()
+                msg = BytesParser().parsebytes(
+                    f"Content-Type: {raw_ct}\r\nMIME-Version: 1.0\r\n\r\n".encode("latin-1") + raw_body
+                )
+                for part in (msg.get_payload() or []) if msg.is_multipart() else []:
+                    field_name = part.get_param("name", header="content-disposition")
+                    payload_bytes = part.get_payload(decode=True)
+                    if not isinstance(payload_bytes, (bytes, bytearray)):
+                        raw_str = part.get_payload()
+                        payload_bytes = raw_str.encode("utf-8", errors="replace") if isinstance(raw_str, str) else b""
+                    if field_name in ("file", "csv_file"):
+                        csv_text = bytes(payload_bytes).decode("utf-8", errors="replace")
+                    elif field_name == "asof_date":
+                        val = bytes(payload_bytes).decode("utf-8", errors="replace").strip()
+                        asof_date = val or None
+        else:
+            body = await request.json()
+            csv_text = body.get("csv_text") or body.get("csv")
+            asof_date = body.get("asof_date")
+
+        if not csv_text or not str(csv_text).strip():
+            raise HTTPException(status_code=400, detail="Missing KenPom CSV content.")
+
+        result = ingest_kenpom_csv(str(csv_text), asof_date=asof_date)
+        _top_picks_cache.clear()
+        return result
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to ingest KenPom CSV: {e}")
+
 @app.get("/api/health")
 def health_check():
     from src.database import get_db_connection, _exec
@@ -2723,6 +2787,10 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             'confidence': conf,
             'book': rec.get('book')
         }
+        if rec.get('signals') is not None:
+            out['signals'] = rec.get('signals')
+        if rec.get('movement_tags') is not None:
+            out['movement_tags'] = rec.get('movement_tags')
         return out
 
     def _load_latest_stored_pick(conn, eid: str):
@@ -5020,6 +5088,135 @@ async def trigger_prediction_grading(
             status_code=500,
             content={"status": "error", "message": f"Grading failed: {e}"}
         )
+
+
+@app.api_route("/api/jobs/run_council_today", methods=["GET", "POST"])
+async def trigger_run_council_today(
+    request: Request,
+    max_events: int = 6,
+    authorized: bool = Depends(verify_cron_secret),
+):
+    """Cron/manual: run Agent Council + RAG Memory synthesis for today's top actionable NCAAM plays."""
+    from src.database import get_db_connection, _exec
+
+    gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    if not gemini_key:
+        return {
+            "status": "skipped",
+            "reason": "GEMINI_API_KEY not configured",
+            "events_processed": 0,
+            "memories_generated": 0,
+        }
+
+    try:
+        from zoneinfo import ZoneInfo
+        today_et = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        cap = max(1, min(int(max_events or 6), 10))
+
+        with get_db_connection() as conn:
+            rows = _exec(
+                conn,
+                """
+                SELECT e.id, e.home_team, e.away_team, e.start_time, d.rec_json
+                FROM daily_top_picks d
+                JOIN events e ON e.id = d.event_id
+                WHERE d.league = 'NCAAM'
+                  AND d.date_et = %s
+                  AND d.is_actionable = TRUE
+                  AND e.start_time > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM council_signals cs
+                      WHERE cs.event_id = d.event_id
+                        AND cs.created_at > NOW() - INTERVAL '12 hours'
+                  )
+                ORDER BY COALESCE((d.rec_json->>'edge')::text, '0') DESC, e.start_time ASC
+                LIMIT %s
+                """,
+                (today_et, cap),
+            ).fetchall()
+
+            settled_rows = _exec(
+                conn,
+                """
+                SELECT DISTINCT ON (mp.event_id)
+                    e.home_team, e.away_team, mp.selection, mp.outcome,
+                    DATE(e.start_time AT TIME ZONE 'America/New_York')::text AS game_date
+                FROM model_predictions mp
+                JOIN events e ON e.id = mp.event_id
+                WHERE mp.outcome IN ('WON', 'LOST', 'W', 'L')
+                  AND mp.analyzed_at > NOW() - INTERVAL '72 hours'
+                ORDER BY mp.event_id, mp.analyzed_at DESC
+                LIMIT 4
+                """,
+            ).fetchall()
+
+        council_processed = 0
+        if rows:
+            from src.agents.contracts import EventContext
+            from src.agents.research_agent import ResearchAgent
+            from src.agents.memory_agent import MemoryAgent
+            from src.agents.oracle_agent import OracleAgent
+
+            events_ctx = []
+            edges_summary = {}
+            for r in rows:
+                d = dict(r)
+                eid = d["id"]
+                events_ctx.append(
+                    EventContext(
+                        event_id=eid,
+                        league="NCAAM",
+                        home_team=d["home_team"],
+                        away_team=d["away_team"],
+                        start_time=str(d["start_time"]),
+                    )
+                )
+                rec = d.get("rec_json") or {}
+                if isinstance(rec, str):
+                    try:
+                        rec = json.loads(rec)
+                    except Exception:
+                        rec = {}
+                edges_summary[eid] = f"{rec.get('bet_type', 'PLAY')} {rec.get('selection', '')} (EV {rec.get('edge', 'N/A')})"
+
+            research_out, _ = ResearchAgent().run({"events": events_ctx})
+            memories_out, _ = MemoryAgent().run({"events": events_ctx})
+            oracle_out, _ = OracleAgent().run({
+                "events": events_ctx,
+                "edges": edges_summary,
+                "research": research_out or {},
+                "memories": memories_out or {},
+            })
+            council_processed = len(oracle_out or {})
+
+        memories_generated = 0
+        if settled_rows:
+            try:
+                from src.agents.post_mortem_agent import PostMortemAgent
+                completed = [
+                    {
+                        "home_team": dict(r)["home_team"],
+                        "away_team": dict(r)["away_team"],
+                        "recommended_bet": dict(r)["selection"],
+                        "actual_result": dict(r)["outcome"],
+                        "game_date": dict(r)["game_date"],
+                    }
+                    for r in settled_rows
+                ]
+                pm_out, _ = PostMortemAgent().run({"completed_games": completed})
+                memories_generated = int((pm_out or {}).get("memories_generated") or 0)
+            except Exception as pm_err:
+                print(f"[run_council_today] PostMortem skipped: {pm_err}")
+
+        return {
+            "status": "success",
+            "date": today_et,
+            "events_processed": council_processed,
+            "memories_generated": memories_generated,
+        }
+    except Exception as e:
+        print(f"[run_council_today] error: {e}")
+        return {"status": "error", "error": str(e), "events_processed": 0}
 
 
 @app.api_route("/api/jobs/build_daily_top_picks", methods=["GET", "POST"])

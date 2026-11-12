@@ -181,6 +181,8 @@ def init_db():
     init_council_signals_db()
     init_agent_traces_db()
     init_ncaam_bracket_cache_db()
+    init_haslametrics_db()
+    init_model_params_store_db()
 
     # Explicitly init bets last as it depends on others conceptually (not foreign key wise mostly)
     init_bets_db()
@@ -2997,3 +2999,167 @@ def get_referee_assignment(event_id: str) -> dict:
         if result:
             return dict(result)
     return {}
+
+
+def init_haslametrics_db():
+    """Create haslametrics_ratings_daily table for second free rating source."""
+    schema = """
+    CREATE TABLE IF NOT EXISTS haslametrics_ratings_daily (
+        asof_date DATE NOT NULL,
+        team_name TEXT NOT NULL,
+        rank INTEGER,
+        conf TEXT,
+        record TEXT,
+        oe REAL,
+        de REAL,
+        net_eff REAL,
+        ou REAL,
+        du REAL,
+        tempo REAL,
+        ap REAL,
+        sos REAL,
+        mom REAL,
+        inc REAL,
+        av_eff REAL,
+        av_pace REAL,
+        hca_eff REAL,
+        hca_pace REAL,
+        raw JSONB,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (asof_date, team_name)
+    );
+    CREATE INDEX IF NOT EXISTS ix_hasla_asof_rank ON haslametrics_ratings_daily(asof_date, rank);
+    """
+    with get_admin_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(schema)
+        conn.commit()
+    print("Haslametrics table initialized.")
+
+
+def init_model_params_store_db():
+    """Create model_params_store for dynamic serverless calibration artifacts."""
+    schema = """
+    CREATE TABLE IF NOT EXISTS model_params_store (
+        param_key TEXT PRIMARY KEY,
+        payload JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    with get_admin_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(schema)
+        conn.commit()
+    print("Model params store table initialized.")
+
+
+def upsert_model_param(param_key: str, payload: dict) -> None:
+    """Persist JSON parameter payload to model_params_store."""
+    import json
+    init_model_params_store_db()
+    sql = """
+    INSERT INTO model_params_store(param_key, payload, updated_at)
+    VALUES (%s, %s::jsonb, NOW())
+    ON CONFLICT (param_key) DO UPDATE SET
+      payload = EXCLUDED.payload,
+      updated_at = NOW();
+    """
+    with get_admin_db_connection() as conn:
+        _exec(conn, sql, (param_key, json.dumps(payload)))
+        conn.commit()
+
+
+def get_model_param(param_key: str):
+    """Fetch JSON parameter payload from model_params_store, or None if unavailable."""
+    try:
+        with get_db_connection() as conn:
+            row = _exec(
+                conn,
+                "SELECT payload FROM model_params_store WHERE param_key = %s",
+                (param_key,),
+            ).fetchone()
+            if row:
+                return dict(row).get("payload") if isinstance(row, dict) or hasattr(row, "keys") else row[0]
+    except Exception:
+        return None
+    return None
+
+
+def get_latest_action_splits(event_id: str) -> dict:
+    """Return latest Action Network public ticket vs money percentages for an event."""
+    if not event_id:
+        return {}
+    out = {}
+    try:
+        with get_db_connection() as conn:
+            rows = _exec(
+                conn,
+                """
+                SELECT DISTINCT ON (market_type, selection)
+                    market_type, selection, line, bet_pct, handle_pct, sharp_indicator, as_of_ts
+                FROM action_splits
+                WHERE event_id = %s
+                ORDER BY market_type, selection, as_of_ts DESC
+                """,
+                (event_id,),
+            ).fetchall()
+            num_bets = None
+            try:
+                enr = _exec(
+                    conn,
+                    """
+                    SELECT raw_json->>'num_bets' AS num_bets
+                    FROM action_game_enrichment
+                    WHERE event_id = %s
+                    ORDER BY fetched_at DESC
+                    LIMIT 1
+                    """,
+                    (event_id,),
+                ).fetchone()
+                if enr:
+                    nb_val = dict(enr).get("num_bets") if isinstance(enr, dict) or hasattr(enr, "keys") else enr[0]
+                    if nb_val is not None:
+                        num_bets = int(float(nb_val))
+            except Exception:
+                num_bets = None
+
+            for r in rows or []:
+                d = dict(r)
+                mkt = str(d.get("market_type") or "").upper()
+                sel = str(d.get("selection") or "").upper()
+                if not mkt or not sel:
+                    continue
+                out.setdefault(mkt, {})[sel] = {
+                    "line": d.get("line"),
+                    "bet_pct": d.get("bet_pct"),
+                    "handle_pct": d.get("handle_pct"),
+                    "sharp_indicator": d.get("sharp_indicator"),
+                    "as_of_ts": d.get("as_of_ts"),
+                }
+            if num_bets is not None:
+                out["num_bets"] = num_bets
+    except Exception:
+        return {}
+    return out
+
+
+def get_latest_action_injuries(event_id: str) -> list:
+    """Return latest stored injury rows for an event."""
+    if not event_id:
+        return []
+    try:
+        with get_db_connection() as conn:
+            rows = _exec(
+                conn,
+                """
+                SELECT player_name, team_id, status, description, reported_at, source_url
+                FROM action_injuries
+                WHERE event_id = %s
+                ORDER BY reported_at DESC NULLS LAST
+                LIMIT 25
+                """,
+                (event_id,),
+            ).fetchall()
+            return [dict(r) for r in rows] if rows else []
+    except Exception:
+        return []

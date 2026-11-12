@@ -43,6 +43,16 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python3 src/scripts/build_market_consensus.py
 
+      - name: Ingest Haslametrics (if stale > 4h)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 src/scripts/ingest_haslametrics.py --if-stale-hours 4 || echo "⚠️ Haslametrics warning (continuing)"
+
+      - name: Ingest Live Enrichment (Action Splits, ESPN Refs, Injuries)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 src/scripts/ingest_enrichment_live.py || echo "⚠️ Enrichment warning (continuing)"
+
       - name: Update Data Health
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

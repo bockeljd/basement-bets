@@ -155,6 +155,42 @@ def main():
                 notes = str(e)
     upsert('results', status=status, row_count=n, notes=notes)
 
+    # Haslametrics health
+    hasla_status = 'stale'
+    hasla_n = 0
+    hasla_notes = 'no rows in last 2 days'
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM haslametrics_ratings_daily WHERE updated_at > NOW() - INTERVAL '48 hours'"
+                )
+                hasla_n = cur.fetchone()[0]
+                if hasla_n and hasla_n > 0:
+                    hasla_status = 'ok'
+                    hasla_notes = 'rows in last 48h'
+    except Exception as e:
+        hasla_status = 'error'
+        hasla_notes = str(e)[:180]
+    upsert('haslametrics', status=hasla_status, row_count=hasla_n, notes=hasla_notes)
+
+    # Action Network public splits health
+    splits_status = 'stale'
+    splits_n = 0
+    splits_notes = 'no splits in last 24h'
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM action_splits WHERE as_of_ts > NOW() - INTERVAL '24 hours'")
+                splits_n = cur.fetchone()[0]
+                if splits_n and splits_n > 0:
+                    splits_status = 'ok'
+                    splits_notes = 'splits in last 24h'
+    except Exception as e:
+        splits_status = 'error'
+        splits_notes = str(e)[:180]
+    upsert('action_splits', status=splits_status, row_count=splits_n, notes=splits_notes)
+
     print('[update_data_health] done')
 
 
