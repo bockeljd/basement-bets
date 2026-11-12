@@ -3151,12 +3151,15 @@ def get_latest_action_splits(event_id: str) -> dict:
                 sel = str(d.get("selection") or "").upper()
                 if not mkt or not sel:
                     continue
+                as_of_ts = d.get("as_of_ts")
+                if hasattr(as_of_ts, "isoformat"):
+                    as_of_ts = as_of_ts.isoformat()
                 out.setdefault(mkt, {})[sel] = {
                     "line": d.get("line"),
                     "bet_pct": d.get("bet_pct"),
                     "handle_pct": d.get("handle_pct"),
                     "sharp_indicator": d.get("sharp_indicator"),
-                    "as_of_ts": d.get("as_of_ts"),
+                    "as_of_ts": as_of_ts,
                 }
             if num_bets is not None:
                 out["num_bets"] = num_bets
@@ -3182,6 +3185,12 @@ def get_latest_action_injuries(event_id: str) -> list:
                 """,
                 (event_id,),
             ).fetchall()
-            return [dict(r) for r in rows] if rows else []
+            out = []
+            for r in rows or []:
+                d = dict(r)
+                if hasattr(d.get("reported_at"), "isoformat"):
+                    d["reported_at"] = d["reported_at"].isoformat()
+                out.append(d)
+            return out
     except Exception:
         return []

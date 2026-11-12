@@ -136,8 +136,8 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
         "mv": res.get('model_version') if isinstance(res, dict) else None,
         "act": bool(is_actionable),
         "reason": reason,
-        "rec": json.dumps(rec) if rec is not None else None,
-        "ctx": json.dumps(ctx) if ctx is not None else None,
+        "rec": json.dumps(rec, default=str) if rec is not None else None,
+        "ctx": json.dumps(ctx, default=str) if ctx is not None else None,
     }
 
     if conn is None:
@@ -246,6 +246,7 @@ def main():
                 upsert_pick(ev_day_et, eid, res if isinstance(res, dict) else {}, conn=conn)
                 ok += 1
             except Exception as e:
+                print(f"[build_daily_top_picks] error on {eid}: {e}")
                 err += 1
                 diag['errors'] += 1
                 # still upsert a no-bet row with error reason

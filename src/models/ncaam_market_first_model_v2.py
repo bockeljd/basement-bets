@@ -1271,19 +1271,26 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 refs = [ra.get('referee_1'), ra.get('referee_2'), ra.get('referee_3')]
                 refs = [r for r in refs if r]
                 if refs or ra.get('crew_avg_fouls') is not None:
+                    crew_fouls = ra.get('crew_avg_fouls')
                     ref_summary = {
                         "officials": refs,
-                        "crew_avg_fouls": ra.get('crew_avg_fouls'),
+                        "crew_avg_fouls": float(crew_fouls) if crew_fouls is not None else None,
                     }
         except Exception:
             ref_summary = None
+
+        hasla_asof = haslametrics_view.get("asof_date") if hasla_available else None
+        if hasattr(hasla_asof, "isoformat"):
+            hasla_asof = hasla_asof.isoformat()
+        elif hasla_asof is not None:
+            hasla_asof = str(hasla_asof)
 
         matchup_signals = {
             "haslametrics": {
                 "fair_spread_home": round(-float(hasla_margin), 1),
                 "fair_total": round(float(mu_hasla_total), 1),
                 "projected_score": haslametrics_view.get("projected_score"),
-                "asof_date": haslametrics_view.get("asof_date"),
+                "asof_date": hasla_asof,
             } if hasla_available else None,
             "kenpom": {
                 "fair_spread_home": round(-float(kp_margin), 1),

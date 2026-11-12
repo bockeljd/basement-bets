@@ -1,4 +1,6 @@
-from datetime import datetime
+import json
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
 import brotli
@@ -245,7 +247,7 @@ def test_model_v2_haslametrics_blend_injuries_and_splits(monkeypatch):
     model.haslametrics_client = MagicMock()
     model.haslametrics_client.calculate_projection.return_value = {
         "available": True,
-        "asof_date": "2026-02-15",
+        "asof_date": date(2026, 2, 15),
         "margin": 12.0,
         "total": 152.0,
         "projected_score": "70-82",
@@ -286,13 +288,16 @@ def test_model_v2_haslametrics_blend_injuries_and_splits(monkeypatch):
     snap = {"spread_home": -3.5, "total": 148.0}
     res = model.analyze("evt_sig_1", event_context=event, market_snapshot=snap, relax_gates=True, persist=False)
 
-    # Signals populated for UI drawer
+    # Signals populated for UI drawer and strictly JSON-serializable without default=str
     assert res["signals"]["haslametrics"]["fair_spread_home"] == pytest.approx(-12.0, abs=0.1)
+    assert res["signals"]["haslametrics"]["asof_date"] == "2026-02-15"
     assert res["signals"]["haslametrics"]["fair_total"] == pytest.approx(152.0, abs=0.1)
     assert res["signals"]["kenpom"] is None
     assert len(res["signals"]["injuries"]) == 1
     assert res["recommendations"]
     assert res["recommendations"][0]["signals"]["haslametrics"]["projected_score"] == "70-82"
+    serialized_rec = json.dumps(res["recommendations"][0])
+    assert '"asof_date": "2026-02-15"' in serialized_rec
     # Haslametrics contributes non-zero weight in 2-way blend when KenPom is absent
     assert res["signals"]["weights"]["haslametrics"] > 0.0
     assert res["signals"]["weights"]["torvik"] > res["signals"]["weights"]["haslametrics"]
@@ -411,3 +416,101 @@ def test_update_data_health_records_haslametrics_and_splits(monkeypatch):
     udh.main()
     assert recorded["haslametrics"] == ("ok", 365, "rows in last 48h")
     assert recorded["action_splits"] == ("ok", 12, "splits in last 24h")
+
+
+def test_db_signal_loaders_and_daily_top_picks_serialize_datetimes(monkeypatch):
+    import src.database as db
+    import src.scripts.build_daily_top_picks as bdtp
+
+    ts_now = datetime(2026, 11, 12, 20, 30, 0, tzinfo=timezone.utc)
+
+    class _FakeCursor:
+        def __init__(self, conn):
+            self._conn = conn
+            self._sql = ""
+
+        def execute(self, sql, params=None):
+            self._sql = str(sql)
+            self._conn.captured.append((self._sql, params))
+
+        def fetchall(self):
+            if "FROM action_splits" in self._sql:
+                return [
+                    {
+                        "market_type": "SPREAD",
+                        "selection": "HOME",
+                        "line": -3.5,
+                        "bet_pct": 34,
+                        "handle_pct": 68,
+                        "sharp_indicator": True,
+                        "as_of_ts": ts_now,
+                    }
+                ]
+            if "FROM action_injuries" in self._sql:
+                return [
+                    {
+                        "player_name": "Star Guard",
+                        "team_id": "Duke",
+                        "status": "Out",
+                        "description": "Ankle",
+                        "reported_at": ts_now,
+                        "source_url": "https://www.rotowire.com/",
+                    }
+                ]
+            return []
+
+        def fetchone(self):
+            if "FROM action_game_enrichment" in self._sql:
+                return {"num_bets": 1240}
+            return None
+
+    class _FakeConn:
+        def __init__(self):
+            self.captured = []
+
+        def cursor(self):
+            return _FakeCursor(self)
+
+        def commit(self):
+            pass
+
+    fake_conn = _FakeConn()
+
+    @contextmanager
+    def _fake_get_conn():
+        yield fake_conn
+
+    monkeypatch.setattr(db, "get_db_connection", _fake_get_conn)
+
+    splits = db.get_latest_action_splits("evt_ser_1")
+    assert splits["num_bets"] == 1240
+    assert splits["SPREAD"]["HOME"]["as_of_ts"] == ts_now.isoformat()
+    assert json.loads(json.dumps(splits))["SPREAD"]["HOME"]["handle_pct"] == 68
+
+    injuries = db.get_latest_action_injuries("evt_ser_1")
+    assert injuries[0]["reported_at"] == ts_now.isoformat()
+    assert json.loads(json.dumps(injuries))[0]["player_name"] == "Star Guard"
+
+    # Also ensure upsert_pick succeeds when nested fields contain raw date/datetime objects
+    fake_conn.captured.clear()
+    res = {
+        "model_version": "ncaam_market_first_v2",
+        "recommendations": [
+            {
+                "bet_type": "SPREAD",
+                "pick": "Duke -3.5",
+                "ev": 0.06,
+                "signals": {
+                    "haslametrics": {"asof_date": date(2026, 11, 12)},
+                    "public_splits": splits,
+                },
+            }
+        ],
+        "context_json": {"captured_at": ts_now},
+    }
+    bdtp.upsert_pick("2026-11-12", "evt_ser_1", res, conn=fake_conn)
+    assert len(fake_conn.captured) == 1
+    params = fake_conn.captured[0][1]
+    assert params["act"] is True
+    assert json.loads(params["rec"])["signals"]["haslametrics"]["asof_date"] == "2026-11-12"
+    assert json.loads(params["ctx"])["captured_at"] == str(ts_now)
