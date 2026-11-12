@@ -360,3 +360,54 @@ def test_api_smoke_run_council_and_kenpom_csv_validation(monkeypatch):
     )
     assert resp_ok.status_code == 200
     assert resp_ok.json() == {"status": "ok", "asof_date": "2026-11-12", "rows": 365}
+
+
+def test_update_data_health_records_haslametrics_and_splits(monkeypatch):
+    from contextlib import contextmanager
+    import src.scripts.update_data_health as udh
+
+    recorded = {}
+
+    class _FakeCursor:
+        def __init__(self):
+            self._sql = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params=None):
+            self._sql = str(sql)
+
+        def fetchone(self):
+            if "haslametrics_ratings_daily" in self._sql:
+                return (365,)
+            if "action_splits" in self._sql:
+                return (12,)
+            if "bt_team_metrics_daily" in self._sql:
+                return (360, "2026-11-12", "2026-11-12")
+            return (100,)
+
+        def fetchall(self):
+            return []
+
+    class _FakeConn:
+        def cursor(self):
+            return _FakeCursor()
+
+        def commit(self):
+            pass
+
+    @contextmanager
+    def _fake_conn():
+        yield _FakeConn()
+
+    monkeypatch.setattr(udh, "get_admin_db_connection", _fake_conn)
+    monkeypatch.setattr(udh, "ensure_table", lambda: None)
+    monkeypatch.setattr(udh, "upsert", lambda src, status, row_count=None, notes=None: recorded.__setitem__(src, (status, row_count, notes)))
+
+    udh.main()
+    assert recorded["haslametrics"] == ("ok", 365, "rows in last 48h")
+    assert recorded["action_splits"] == ("ok", 12, "splits in last 24h")

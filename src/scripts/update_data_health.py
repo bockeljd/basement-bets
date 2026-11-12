@@ -160,7 +160,7 @@ def main():
     hasla_n = 0
     hasla_notes = 'no rows in last 2 days'
     try:
-        with get_db_connection() as conn:
+        with get_admin_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COUNT(*) FROM haslametrics_ratings_daily WHERE updated_at > NOW() - INTERVAL '48 hours'"
@@ -179,7 +179,7 @@ def main():
     splits_n = 0
     splits_notes = 'no splits in last 24h'
     try:
-        with get_db_connection() as conn:
+        with get_admin_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM action_splits WHERE as_of_ts > NOW() - INTERVAL '24 hours'")
                 splits_n = cur.fetchone()[0]
