@@ -615,12 +615,12 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                     <button
                         type="button"
                         onClick={openModelInfoDialog}
-                        title="View NCAAM v2.1 Model Weighting & Logic"
-                        aria-label="View NCAAM v2.1 Model Weighting and Logic"
+                        title="View NCAAM Model Logic"
+                        aria-label="View NCAAM Model Logic"
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-blue-300 text-xs font-semibold transition-all cursor-pointer"
                     >
                         <Info size={14} />
-                        <span>Model Logic & Weights</span>
+                        <span>Model Logic</span>
                     </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2287,10 +2287,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                             </div>
                             <div>
                                 <h2 id="modelInfoDialogTitle" className="text-lg font-bold text-white">
-                                    NCAAM Market-First Sniper v2.1 — Weighting & Logic
+                                    How the Model Works
                                 </h2>
                                 <p className="text-xs text-slate-400">
-                                    2026-27 Season Bayesian Market-Prior Blend, Dynamic Monthly Weights & Publish Gates
+                                    A plain-English guide to our college basketball betting picks, ratings, and value scores
                                 </p>
                             </div>
                         </div>
@@ -2305,189 +2305,180 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                     </div>
 
                     <div className="p-6 overflow-y-auto space-y-6 text-sm leading-relaxed">
-                        {/* 1. Core Blend Architecture */}
+                        {/* 1. Core Idea: Market-First Betting */}
                         <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
                             <h3 className="text-xs font-black uppercase tracking-wider text-blue-400 mb-2">
-                                1. Market-First Bayesian Blend
+                                1. The Core Idea: Market-First Betting
                             </h3>
                             <p className="text-slate-300 text-xs mb-3">
-                                Rather than predicting games in a vacuum, the model anchors on the live consensus sportsbook line (<code className="text-blue-300">μ_market</code>) and blends independent efficiency projections from <strong>BartTorvik (T-Rank)</strong> and <strong>KenPom</strong>, plus bounded situational signals, to compute a fair line (<code className="text-emerald-300">μ_fair</code>).
+                                Sportsbooks are very good at setting lines, so we don't try to predict final scores out of thin air. Instead, we start with the live sportsbook consensus line as our baseline and compare it with respected college basketball computer ratings (<strong>BartTorvik</strong> and <strong>KenPom</strong>).
                             </p>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-950/70 p-3 rounded-lg border border-slate-800">
                                 <div>
-                                    <div className="text-slate-400 font-sans font-semibold mb-1">Spread Blend Formula:</div>
+                                    <div className="text-slate-400 font-semibold mb-1">Point Spreads:</div>
                                     <div className="text-emerald-300">
-                                        μ_spread = μ_mkt + w_base·(Torvik − μ_mkt) + w_sched·(Sched − μ_mkt) + w_kp·(KenPom − μ_mkt) + Adj_sit
+                                        Sportsbook Spread + Adjustment (team efficiency difference, home court advantage, and rest).
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="text-slate-400 font-sans font-semibold mb-1">Total Blend Formula:</div>
+                                    <div className="text-slate-400 font-semibold mb-1">Over/Under Totals:</div>
                                     <div className="text-amber-300">
-                                        μ_total = μ_mkt + (w_base + 0.5·w_sched)·(Torvik − μ_mkt) + w_kp·(KenPom − μ_mkt) + Adj_player + Adj_ref
+                                        Sportsbook Total + Adjustment (expected game pace and offensive vs. defensive scoring rates).
                                     </div>
                                 </div>
                             </div>
+                            <p className="text-slate-400 text-xs mt-2.5">
+                                If the computer ratings show a team is noticeably better or worse than the sportsbook thinks, the model calculates what the line <em>should</em> be (our <strong>Fair Line</strong>). The difference between the sportsbook line and our fair line is our <strong>Edge</strong>.
+                            </p>
                         </section>
 
-                        {/* 2. Dynamic Monthly Weighting Schedule */}
+                        {/* 2. Why Season Timing Matters */}
                         <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
                             <h3 className="text-xs font-black uppercase tracking-wider text-emerald-400 mb-2">
-                                2. Dynamic Seasonal Weighting Schedule
+                                2. Why the Time of Year Matters
                             </h3>
                             <p className="text-slate-300 text-xs mb-3">
-                                Early-season efficiency ratings rely heavily on preseason priors and transfer-portal projections. The model dynamically scales projection weights and variance (<code className="text-slate-200">σ</code>) by month as current-season sample size grows:
+                                College basketball teams change drastically every off-season with the transfer portal and freshmen. The model automatically adjusts how much it trusts computer models versus sportsbooks depending on the month:
                             </p>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left text-xs border-collapse">
                                     <thead>
                                         <tr className="border-b border-slate-700 text-slate-400 uppercase text-[10px]">
-                                            <th className="py-2 pr-3">Window</th>
-                                            <th className="py-2 px-2">Market Anchor</th>
-                                            <th className="py-2 px-2">Torvik (w_base)</th>
-                                            <th className="py-2 px-2">KenPom (w_kp)</th>
-                                            <th className="py-2 px-2">Sigma Mult (σ)</th>
-                                            <th className="py-2 pl-2">Luck / Situational Scale</th>
+                                            <th className="py-2 pr-3">Time of Season</th>
+                                            <th className="py-2 px-2">Sportsbook Trust</th>
+                                            <th className="py-2 px-2">Model Trust</th>
+                                            <th className="py-2 pl-2">How It Works</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800 text-slate-200">
                                         <tr>
                                             <td className="py-2 pr-3 font-semibold text-blue-300">November (Early Season)</td>
                                             <td className="py-2 px-2 font-mono text-emerald-300">78%</td>
-                                            <td className="py-2 px-2 font-mono">12% <span className="text-slate-400 text-[10px]">(22% solo)</span></td>
-                                            <td className="py-2 px-2 font-mono">10%</td>
-                                            <td className="py-2 px-2 font-mono">1.08×</td>
-                                            <td className="py-2 pl-2">0.25× Luck (≥4 GP) • 0.50× Sit</td>
+                                            <td className="py-2 px-2 font-mono">22%</td>
+                                            <td className="py-2 pl-2 text-slate-300">Heavy trust in sportsbooks while rosters settle; small, cautious model adjustments.</td>
                                         </tr>
                                         <tr>
-                                            <td className="py-2 pr-3 font-semibold">December (Non-Conf)</td>
+                                            <td className="py-2 pr-3 font-semibold">December (Non-Conference)</td>
                                             <td className="py-2 px-2 font-mono text-emerald-300">67%</td>
-                                            <td className="py-2 px-2 font-mono">18% <span className="text-slate-400 text-[10px]">(33% solo)</span></td>
-                                            <td className="py-2 px-2 font-mono">15%</td>
-                                            <td className="py-2 px-2 font-mono">1.04×</td>
-                                            <td className="py-2 pl-2">0.60× Luck • 1.00× Sit</td>
+                                            <td className="py-2 px-2 font-mono">33%</td>
+                                            <td className="py-2 pl-2 text-slate-300">Ratings begin updating as teams play real opponents.</td>
                                         </tr>
                                         <tr>
-                                            <td className="py-2 pr-3 font-semibold">January (Conf Play)</td>
+                                            <td className="py-2 pr-3 font-semibold">January (Conference Play)</td>
                                             <td className="py-2 px-2 font-mono text-emerald-300">55%</td>
-                                            <td className="py-2 px-2 font-mono">25% <span className="text-slate-400 text-[10px]">(45% solo)</span></td>
-                                            <td className="py-2 px-2 font-mono">20%</td>
-                                            <td className="py-2 px-2 font-mono">1.00×</td>
-                                            <td className="py-2 pl-2">1.00× Full Weight</td>
+                                            <td className="py-2 px-2 font-mono">45%</td>
+                                            <td className="py-2 pl-2 text-slate-300">Conference matchups provide reliable, head-to-head game data.</td>
                                         </tr>
                                         <tr>
-                                            <td className="py-2 pr-3 font-semibold">February (Late Conf)</td>
+                                            <td className="py-2 pr-3 font-semibold">February (Late Season)</td>
                                             <td className="py-2 px-2 font-mono text-emerald-300">48%</td>
-                                            <td className="py-2 px-2 font-mono">32% <span className="text-slate-400 text-[10px]">(45% solo)</span></td>
-                                            <td className="py-2 px-2 font-mono">20%</td>
-                                            <td className="py-2 px-2 font-mono">1.00×</td>
-                                            <td className="py-2 pl-2">1.00× Full Weight</td>
+                                            <td className="py-2 px-2 font-mono">52%</td>
+                                            <td className="py-2 pl-2 text-slate-300">Rotations and team identities are clear; computer data takes the lead.</td>
                                         </tr>
                                         <tr>
-                                            <td className="py-2 pr-3 font-semibold text-orange-300">March (Tournament)</td>
+                                            <td className="py-2 pr-3 font-semibold text-orange-300">March (Tournament Time)</td>
                                             <td className="py-2 px-2 font-mono text-emerald-300">42%</td>
-                                            <td className="py-2 px-2 font-mono">38% <span className="text-slate-400 text-[10px]">(45% solo)</span></td>
-                                            <td className="py-2 px-2 font-mono">20%</td>
-                                            <td className="py-2 px-2 font-mono">1.00×</td>
-                                            <td className="py-2 pl-2">Neutral HCA (0.0) • Peak Alpha</td>
+                                            <td className="py-2 px-2 font-mono">58%</td>
+                                            <td className="py-2 pl-2 text-slate-300">Full season sample size; neutral-court adjustments for March Madness.</td>
                                         </tr>
                                     </tbody>
                                 </table>
                             </div>
                             <div className="mt-2.5 text-[11px] text-slate-400">
-                                <strong>Transfer Portal / Continuity Guardrail:</strong> If average roster continuity is below <code className="text-slate-200">50%</code>, <code className="text-slate-200">w_base</code> is capped at <code className="text-slate-200">10%</code>, <code className="text-slate-200">w_kp</code> is capped at <code className="text-slate-200">8%</code>, and <code className="text-slate-200">σ</code> is inflated by an additional <code className="text-slate-200">1.05×</code>.
+                                <strong>Roster Turnover Safety Rule:</strong> If a team returned less than half its players from last year, the model automatically reduces its adjustment size to protect against early-season volatility.
                             </div>
                         </section>
 
-                        {/* 3. Efficiency Math & Situational Signals */}
+                        {/* 3. Extra Matchup & Situational Signals */}
                         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
                                 <h3 className="text-xs font-black uppercase tracking-wider text-purple-400 mb-2">
-                                    3. Efficiency & Pace Math
+                                    3. Matchup Factors
                                 </h3>
-                                <ul className="space-y-1.5 text-xs text-slate-300 list-disc pl-4">
-                                    <li><strong>Expected Tempo:</strong> Average of Home & Away adjusted tempo (<code className="text-slate-200">AdjT</code>, baseline <code className="text-slate-200">68.0</code> possessions).</li>
-                                    <li><strong>Raw Team Score:</strong> <code className="text-slate-200">(AdjOE × Opp_AdjDE / 106.0) × (Tempo / 100)</code>.</li>
-                                    <li><strong>Home Court Advantage:</strong> <code className="text-slate-200">+3.2 pts</code> on home courts (<code className="text-slate-200">0.0</code> on neutral sites), plus KenPom venue HCA delta (<code className="text-slate-200">±1.5 pts</code> cap), altitude boost, and cross-country travel (<code className="text-slate-200">&gt;1,000 mi: +0.5 pts</code> to home).</li>
-                                    <li><strong>Pace-Scaled KenPom Margin:</strong> <code className="text-slate-200">(AdjEM_home − AdjEM_away) × (Tempo / 100) + HCA</code>.</li>
+                                <ul className="space-y-2 text-xs text-slate-300 list-disc pl-4">
+                                    <li><strong>Home Court Advantage:</strong> Gives home teams about +3.2 points (0 on neutral courts), plus extra boosts for high-altitude arenas (like Colorado or Utah).</li>
+                                    <li><strong>Pace of Play (Tempo):</strong> Fast-tempo teams create more possessions (higher totals and wider score swings), while slow-tempo teams grind out low-possession games.</li>
+                                    <li><strong>Travel Fatigue:</strong> Adds a penalty when visiting teams travel cross-country (&gt;1,000 miles) or play with less rest than their opponent.</li>
                                 </ul>
                             </div>
 
                             <div className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
                                 <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 mb-2">
-                                    4. Situational Micro-Signals
+                                    4. Situational Spots
                                 </h3>
-                                <ul className="space-y-1.5 text-xs text-slate-300 list-disc pl-4">
-                                    <li><strong>3PT Shooting Regression:</strong> Fades teams shooting <code className="text-slate-200">&gt;4%</code> above season 3PT% over their last 3 games (up to <code className="text-slate-200">−2.0 pts</code>; requires <code className="text-slate-200">≥4</code> current-season games).</li>
-                                    <li><strong>Luck Regression:</strong> Adjusts <code className="text-slate-200">±1.0 pt</code> (scaled by month, requires <code className="text-slate-200">≥4</code> games) when Torvik Luck exceeds <code className="text-slate-200">±0.05</code>.</li>
-                                    <li><strong>Letdown / Lookahead Spots:</strong> Penalizes flat spots after ranked upsets or before marquee matchups (<code className="text-slate-200">±1.5 pts</code>, scaled <code className="text-slate-200">0.5×</code> in Nov).</li>
-                                    <li><strong>Rest & Referee Signals:</strong> Short-rest fatigue penalties and crew foul/pace total adjustments.</li>
+                                <ul className="space-y-2 text-xs text-slate-300 list-disc pl-4">
+                                    <li><strong>3-Point Shooting Streaks:</strong> Fades teams that have been unsustainably hot from 3-point range over recent games, anticipating a return to their normal average.</li>
+                                    <li><strong>Letdown / Trap Games:</strong> Flags teams coming off huge emotional upsets against top-ranked rivals who may come out flat in their next game.</li>
+                                    <li><strong>Late-Game Fouling:</strong> Total adjustments account for referee whistle tendencies and end-game intentional foul strategies.</li>
                                 </ul>
                             </div>
                         </section>
 
-                        {/* 4. Sniper Guardrails & Publish Gates */}
+                        {/* 4. Safety Guardrails */}
                         <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
                             <h3 className="text-xs font-black uppercase tracking-wider text-rose-400 mb-2">
-                                5. Sniper Caps, Uncertainty (σ) & Publish Gates
+                                5. Safety Guardrails
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
                                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                                    <div className="font-bold text-white mb-1">Deviation Caps</div>
-                                    Core efficiency blend is clamped at <code className="text-emerald-300">±2.0 pts</code> on Spreads (<code className="text-emerald-300">±3.0 pts</code> outer cap with micro-signals) and <code className="text-amber-300">±3.0 pts</code> on Totals (<code className="text-amber-300">±4.5 pts</code> outer cap) so single-source outliers cannot hijack the market prior.
+                                    <div className="font-bold text-white mb-1">Strict Deviation Caps</div>
+                                    The model can never move a spread by more than <strong>2.0 to 3.0 points</strong> or a total by more than <strong>3.0 to 4.5 points</strong>. This ensures a single outlier projection can never hijack a pick.
                                 </div>
                                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                                    <div className="font-bold text-white mb-1">Dynamic Sigma (σ)</div>
-                                    <code className="text-slate-200">σ_spread = (10.5·√(T/68) + 0.1·|Δ|)·M_mo</code><br />
-                                    <code className="text-slate-200">σ_total = (13.5·√(T/68) + 0.1·|Δ|)·M_mo</code><br />
-                                    Further inflated if steam moves against the model or books disagree.
+                                    <div className="font-bold text-white mb-1">Market Line Checks</div>
+                                    We compare lines across multiple sportsbooks. If books disagree widely or sharp money is aggressively moving the other way, the model flags or blocks the play.
                                 </div>
                                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                                    <div className="font-bold text-white mb-1">Actionable Gates</div>
-                                    Requires <code className="text-emerald-300">EV ≥ +2.0%</code> (or <code className="text-emerald-300">≥ +3.5% EV &amp; 1.5 pt edge</code> on Spreads / <code className="text-amber-300">≥ +3.0% EV &amp; 1.5 pt edge</code> on Totals when archetype CI is wide), plus whole-number push probability adjustments.
+                                    <div className="font-bold text-white mb-1">Publish Standards</div>
+                                    A bet is only recommended when it has at least a <strong>1.5-point edge</strong> against the market and at least a <strong>+2.0% expected profit margin</strong>.
                                 </div>
                             </div>
                         </section>
-                        {/* 6. Understanding EV, Confidence Levels & Top 6 Selection */}
+
+                        {/* 5. EV, Confidence & Top 6 Selection */}
                         <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
                             <h3 className="text-xs font-black uppercase tracking-wider text-sky-400 mb-3">
-                                6. Understanding EV%, Confidence Levels &amp; Top 6 Ranking
+                                6. EV%, Confidence Levels &amp; Top 6 Ranking
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
                                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
                                     <div className="font-bold text-white">What Is EV (Expected Value %)?</div>
                                     <p>
-                                        <strong className="text-emerald-300">EV%</strong> is your projected long-run return per <code className="text-slate-200">1.0 unit</code> risked based on the gap between our calibrated win probability (<code className="text-slate-200">P_win</code>) and the sportsbook odds price:
+                                        <strong className="text-emerald-300">EV%</strong> measures your expected return per dollar wagered based on the difference between our model's win probability and the sportsbook odds:
                                     </p>
-                                    <div className="font-mono text-[11px] text-emerald-300 bg-slate-900/90 p-2 rounded border border-slate-800">
-                                        EV = [P_win × b − (1 − P_win)] × (1 − P_push)
+                                    <div className="text-[11px] text-slate-200 bg-slate-900/90 p-2 rounded border border-slate-800">
+                                        <strong>Example:</strong> A pick with <span className="text-emerald-300 font-bold">+8.5% EV</span> means that if you placed 100 bets like this for $100 each ($10,000 total), you would expect to earn about <strong>+$850 in net profit</strong> over the long haul.
                                     </div>
                                     <p className="text-slate-400">
-                                        For example, <code className="text-slate-200">+8.5% EV</code> expects <code className="text-slate-200">+$8.50</code> profit per <code className="text-slate-200">$100</code> wagered over a large sample. Better prices like <code className="text-slate-200">-105</code> vs. <code className="text-slate-200">-110</code> directly raise EV even at the same win probability.
+                                        Better odds give you more value. Getting <code className="text-slate-200">-105</code> instead of <code className="text-slate-200">-110</code> directly boosts your EV% because you risk less to win the same payout.
                                     </p>
                                 </div>
 
                                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
                                     <div className="font-bold text-white">Confidence Levels (High / Medium / Low)</div>
                                     <p>
-                                        Every pick receives a confidence tier from its calibrated cover/total win probability (<code className="text-slate-200">win_prob</code>, or the conservative <code className="text-slate-200">p10</code> lower bound when uncertainty sampling is active):
+                                        Confidence tells you how frequently the model expects the bet to win:
                                     </p>
                                     <ul className="space-y-1 pl-1">
-                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] mr-1">HIGH</span> <code className="text-slate-200">P_win ≥ 55.0%</code></li>
-                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold text-[10px] mr-1">MEDIUM</span> <code className="text-slate-200">52.0% – 54.9%</code></li>
-                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-bold text-[10px] mr-1">LOW</span> <code className="text-slate-200">P_win &lt; 52.0%</code></li>
+                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] mr-1">HIGH</span> Win chance of <strong>55% or higher</strong></li>
+                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold text-[10px] mr-1">MEDIUM</span> Win chance of <strong>52.0% – 54.9%</strong></li>
+                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-bold text-[10px] mr-1">LOW</span> Win chance under 52% (near break-even)</li>
                                     </ul>
                                     <p className="text-slate-400">
-                                        <strong>Confidence</strong> reflects how likely the bet is to win; <strong>EV%</strong> reflects mathematical value relative to the odds price.
+                                        <strong>Confidence</strong> is <em>how often</em> the bet wins; <strong>EV%</strong> is <em>how much value</em> you get for the price you pay.
                                     </p>
                                 </div>
 
                                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
                                     <div className="font-bold text-white">Why Are These the Top 6 Plays?</div>
                                     <p>
-                                        All scheduled games for the selected ET date are evaluated against live sportsbook lines, capped, and filtered through the Actionable Publish Gates (<code className="text-slate-200">is_actionable = true</code>).
+                                        The model reviews every college basketball game scheduled for today. For each game, it identifies whether the Spread or Over/Under is the better opportunity.
                                     </p>
                                     <p>
-                                        Qualifying games (best market per matchup: Spread or Total) are then <strong>ranked strictly in descending order by EV%</strong>, and the <strong>#1–#6 highest-EV edges</strong> are featured in the Top 6 cards above the full slate.
+                                        It filters out any game that doesn't meet its minimum edge and quality standards, and then <strong>ranks all qualifying bets from highest EV% to lowest</strong>.
+                                    </p>
+                                    <p className="text-slate-400">
+                                        The <strong>Top 6 Plays</strong> are simply the 6 bets on today's board offering the greatest mathematical advantage against the sportsbooks.
                                     </p>
                                 </div>
                             </div>
