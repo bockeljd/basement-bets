@@ -85,6 +85,20 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
     // Mobile UX: collapse recommended list to Top 6 by default (expandable)
     const [showAllMobileRecs, setShowAllMobileRecs] = useState(false);
 
+    // Quick slate filter & why-this-pick accordion state
+    const [pickTypeFilter, setPickTypeFilter] = useState('all'); // 'all' | 'spread' | 'total' | 'high_conf' | 'soon'
+    const [pickViewMode, setPickViewMode] = useState('top6'); // 'top6' | 'all'
+    const [expandedPickIds, setExpandedPickIds] = useState(new Set());
+
+    const toggleWhyPick = (id) => {
+        setExpandedPickIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
     // Sorting State
     const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
 
@@ -95,8 +109,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
     const BOARD_DAYS_DEFAULT = showModelPerformanceTab ? 3 : 1;
 
     useEffect(() => {
-        // reset mobile expansion when the slate changes
+        // reset mobile expansion and pick filters when the slate changes
         setShowAllMobileRecs(false);
+        setExpandedPickIds(new Set());
+        setPickTypeFilter('all');
         fetchSchedule();
     }, [selectedDate, leagueFilter]); // Refetch when date/league changes
 
@@ -1001,98 +1017,292 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                                             return pickText;
                                         };
 
-                                        const top6 = rows.slice(0, 6);
+                                        const nowMs = Date.now();
+                                        const isStartingSoon = (st) => {
+                                            if (!st) return false;
+                                            try {
+                                                const diff = new Date(st).getTime() - nowMs;
+                                                return diff > 0 && diff < 3.5 * 3600 * 1000;
+                                            } catch { return false; }
+                                        };
+
+                                        const nTotal = rows.length;
+                                        const nSpreads = rows.filter(r => r.top.bet_type === 'SPREAD').length;
+                                        const nTotals = rows.filter(r => r.top.bet_type === 'TOTAL').length;
+                                        const nHigh = rows.filter(r => String(r.top.confidence).toUpperCase() === 'HIGH').length;
+                                        const nSoon = rows.filter(r => isStartingSoon(r.edge.start_time)).length;
+
+                                        let filteredRows = rows;
+                                        if (pickTypeFilter === 'spread') filteredRows = filteredRows.filter(r => r.top.bet_type === 'SPREAD');
+                                        else if (pickTypeFilter === 'total') filteredRows = filteredRows.filter(r => r.top.bet_type === 'TOTAL');
+                                        else if (pickTypeFilter === 'high_conf') filteredRows = filteredRows.filter(r => String(r.top.confidence).toUpperCase() === 'HIGH');
+                                        else if (pickTypeFilter === 'soon') filteredRows = filteredRows.filter(r => isStartingSoon(r.edge.start_time));
+
+                                        const displayedRows = (pickViewMode === 'top6' && pickTypeFilter === 'all')
+                                            ? filteredRows.slice(0, 6)
+                                            : filteredRows;
 
                                         return (
                                             <div className="mb-6">
-                                                <div className="flex items-center gap-2 mb-3">
-                                                    <TrendingUp className="text-emerald-400" size={18} />
-                                                    <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 6 Plays Today</div>
-                                                    <div className="text-[10px] text-slate-500 ml-auto">{selectedDate} • Sorted by EV%</div>
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <TrendingUp className="text-emerald-400" size={18} />
+                                                        <div className="text-sm font-black text-slate-100 uppercase tracking-wider">
+                                                            {pickViewMode === 'top6' && pickTypeFilter === 'all' ? 'Top 6 Plays Today' : `Actionable Plays (${displayedRows.length})`}
+                                                        </div>
+                                                        <span className="text-[10px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full font-mono border border-slate-700/60">
+                                                            {displayedRows.length} of {rows.length} total
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="text-[10px] text-slate-500">{selectedDate} • Ranked by EV%</div>
+                                                        {rows.length > 6 && pickTypeFilter === 'all' && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPickViewMode(v => v === 'top6' ? 'all' : 'top6')}
+                                                                className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                                                            >
+                                                                {pickViewMode === 'top6' ? `View All ${rows.length} Plays →` : '← Show Top 6 Only'}
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                    {top6.map(({ edge, top }, i) => {
-                                                        const date = edge.start_time ? new Date(edge.start_time) : null;
-                                                        const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
-                                                        const pickText = fmtPick(edge, top);
-                                                        const evRaw = String(top.edge || '').replace('%', '').trim();
-                                                        const evNum = Number(evRaw);
-                                                        const evFormatted = `${evNum >= 0 ? '+' : ''}${evNum.toFixed(1)}%`;
 
-                                                        return (
-                                                            <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
-                                                                <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className={`flex items-center justify-center w-5 h-5 rounded-full ${edge.sport === 'MLB' ? 'bg-teal-500' : 'bg-emerald-500'} text-slate-950 text-[10px] font-black`}>{i + 1}</span>
-                                                                        <span className="text-xs font-bold text-slate-300">{edge.sport} Pick</span>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-1 bg-green-500/10 px-2 py-1 rounded-md border border-green-500/20">
-                                                                        <TrendingUp size={12} className="text-green-400" />
-                                                                        <span className="text-[11px] font-black text-green-400">{evFormatted} EV</span>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="flex flex-col gap-1 min-w-0">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-slate-500 font-bold uppercase">{timeStr}</span>
-                                                                        <span className="text-xs text-slate-400 font-medium truncate">{edge.away_team} @ {edge.home_team}</span>
-                                                                    </div>
-                                                                    <div className="flex items-baseline justify-between gap-4">
-                                                                        <div className="flex flex-col min-w-0">
-                                                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{top.bet_type}</span>
-                                                                            <span className="text-sm font-bold text-slate-100 whitespace-normal leading-tight">{pickText}</span>
-                                                                        </div>
-                                                                        <div className="flex flex-col items-end shrink-0 gap-1">
-                                                                            <span className="text-xs font-mono font-bold text-slate-300">{(top.price !== null && top.price !== undefined) ? fmtSigned(top.price, 0) : '—'}</span>
-                                                                            {top.confidence && (() => {
-                                                                                const confNorm = String(top.confidence).toUpperCase();
-                                                                                const confCls = confNorm === 'HIGH'
-                                                                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                                                                                    : confNorm === 'MEDIUM'
-                                                                                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                                                                                        : 'bg-slate-800 text-slate-400 border-slate-700';
-                                                                                const wpPct = (top.win_prob !== null && top.win_prob !== undefined)
-                                                                                    ? ` • ${(Number(top.win_prob) * 100).toFixed(0)}%`
-                                                                                    : '';
-                                                                                return (
-                                                                                    <span
-                                                                                        title="Confidence tier based on calibrated win probability (High ≥ 55%, Medium 52–54.9%, Low < 52%)"
-                                                                                        className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${confCls}`}
-                                                                                    >
-                                                                                        {top.confidence} Conf{wpPct}
-                                                                                    </span>
-                                                                                );
-                                                                            })()}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="flex gap-2 mt-auto pt-2 border-t border-slate-800/40">
-                                                                    <button
-                                                                        onClick={() => onAddBet?.({
-                                                                            sport: edge.sport,
-                                                                            game: `${edge.away_team} @ ${edge.home_team}`,
-                                                                            market: top.bet_type,
-                                                                            pick: pickText,
-                                                                            line: top.market_line,
-                                                                            odds: top.price,
-                                                                            book: top.book,
-                                                                        })}
-                                                                        className="flex-1 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-black border border-emerald-500/20 transition-colors uppercase tracking-widest"
-                                                                    >
-                                                                        Add
-                                                                    </button>
-                                                                    {edge.sport === 'NCAAM' && (
-                                                                        <button
-                                                                            onClick={() => analyzeGame(edge)}
-                                                                            className="flex-1 py-1.5 rounded-lg bg-slate-800/40 hover:bg-slate-700/40 text-slate-300 text-[10px] font-black border border-slate-700/50 transition-colors uppercase tracking-widest"
-                                                                        >
-                                                                            Details
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
+                                                {/* Quick Filter Pills */}
+                                                <div className="flex flex-wrap items-center gap-1.5 mb-4 p-2 rounded-xl bg-slate-900/60 border border-slate-800">
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1 flex items-center gap-1">
+                                                        <Filter size={11} /> Filter:
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPickTypeFilter('all')}
+                                                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                                            pickTypeFilter === 'all'
+                                                                ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40'
+                                                                : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
+                                                        }`}
+                                                    >
+                                                        All Plays ({nTotal})
+                                                    </button>
+                                                    {nSpreads > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPickTypeFilter('spread')}
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                                                pickTypeFilter === 'spread'
+                                                                    ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40'
+                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
+                                                            }`}
+                                                        >
+                                                            Spreads ({nSpreads})
+                                                        </button>
+                                                    )}
+                                                    {nTotals > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPickTypeFilter('total')}
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                                                pickTypeFilter === 'total'
+                                                                    ? 'bg-amber-600/30 text-amber-300 border border-amber-500/40'
+                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
+                                                            }`}
+                                                        >
+                                                            Totals ({nTotals})
+                                                        </button>
+                                                    )}
+                                                    {nHigh > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPickTypeFilter('high_conf')}
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                                                pickTypeFilter === 'high_conf'
+                                                                    ? 'bg-teal-600/30 text-teal-300 border border-teal-500/40'
+                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
+                                                            }`}
+                                                        >
+                                                            High Conf ({nHigh})
+                                                        </button>
+                                                    )}
+                                                    {nSoon > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPickTypeFilter('soon')}
+                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                                                pickTypeFilter === 'soon'
+                                                                    ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
+                                                            }`}
+                                                        >
+                                                            Starting &lt; 3h ({nSoon})
+                                                        </button>
+                                                    )}
                                                 </div>
+
+                                                {displayedRows.length === 0 ? (
+                                                    <div className="p-8 text-center text-slate-400 bg-slate-900/40 rounded-xl border border-slate-800">
+                                                        <p className="text-sm font-medium">No plays match the selected "{pickTypeFilter}" filter.</p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPickTypeFilter('all')}
+                                                            className="mt-2 text-xs text-blue-400 hover:underline cursor-pointer"
+                                                        >
+                                                            Reset filter to All Plays
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                        {displayedRows.map(({ edge, top }, i) => {
+                                                            const date = edge.start_time ? new Date(edge.start_time) : null;
+                                                            const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
+                                                            const pickText = fmtPick(edge, top);
+                                                            const evRaw = String(top.edge || '').replace('%', '').trim();
+                                                            const evNum = Number(evRaw);
+                                                            const evFormatted = `${evNum >= 0 ? '+' : ''}${evNum.toFixed(1)}%`;
+                                                            const isExpanded = expandedPickIds.has(edge.id);
+                                                            const edgePts = (top.edge_points !== null && top.edge_points !== undefined)
+                                                                ? Math.abs(Number(top.edge_points)).toFixed(1)
+                                                                : null;
+                                                            const kellyStake = top.kelly !== null && top.kelly !== undefined
+                                                                ? `${(Number(top.kelly) * 100).toFixed(1)}%`
+                                                                : null;
+                                                            const suggestedUnits = top.kelly !== null && top.kelly !== undefined
+                                                                ? `${Math.max(0.5, Math.min(3.0, Math.round(Number(top.kelly) * 100 * 0.7 * 2) / 2)).toFixed(1)}u`
+                                                                : '1.0u';
+
+                                                            return (
+                                                                <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
+                                                                    <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className={`flex items-center justify-center w-5 h-5 rounded-full ${edge.sport === 'MLB' ? 'bg-teal-500' : 'bg-emerald-500'} text-slate-950 text-[10px] font-black`}>{i + 1}</span>
+                                                                            <span className="text-xs font-bold text-slate-300">{edge.sport} Pick</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1 bg-green-500/10 px-2 py-1 rounded-md border border-green-500/20">
+                                                                            <TrendingUp size={12} className="text-green-400" />
+                                                                            <span className="text-[11px] font-black text-green-400">{evFormatted} EV</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex flex-col gap-1 min-w-0">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="text-[10px] text-slate-500 font-bold uppercase">{timeStr}</span>
+                                                                            <span className="text-xs text-slate-400 font-medium truncate">{edge.away_team} @ {edge.home_team}</span>
+                                                                        </div>
+                                                                        <div className="flex items-baseline justify-between gap-4">
+                                                                            <div className="flex flex-col min-w-0">
+                                                                                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{top.bet_type}</span>
+                                                                                <span className="text-sm font-bold text-slate-100 whitespace-normal leading-tight">{pickText}</span>
+                                                                            </div>
+                                                                            <div className="flex flex-col items-end shrink-0 gap-1">
+                                                                                <span className="text-xs font-mono font-bold text-slate-300">{(top.price !== null && top.price !== undefined) ? fmtSigned(top.price, 0) : '—'}</span>
+                                                                                {top.confidence && (() => {
+                                                                                    const confNorm = String(top.confidence).toUpperCase();
+                                                                                    const confCls = confNorm === 'HIGH'
+                                                                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                                                                        : confNorm === 'MEDIUM'
+                                                                                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                                                                            : 'bg-slate-800 text-slate-400 border-slate-700';
+                                                                                    const wpPct = (top.win_prob !== null && top.win_prob !== undefined)
+                                                                                        ? ` • ${(Number(top.win_prob) * 100).toFixed(0)}%`
+                                                                                        : '';
+                                                                                    return (
+                                                                                        <span
+                                                                                            title="Confidence tier based on calibrated win probability (High ≥ 55%, Medium 52–54.9%, Low < 52%)"
+                                                                                            className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${confCls}`}
+                                                                                        >
+                                                                                            {top.confidence} Conf{wpPct}
+                                                                                        </span>
+                                                                                    );
+                                                                                })()}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Line Metrics: Market vs Fair & Sizing */}
+                                                                    <div className="flex items-center justify-between text-[11px] bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80">
+                                                                        <div className="flex items-center gap-1.5 text-slate-400">
+                                                                            <span>Fair: <strong className="text-slate-200 font-mono">{top.fair_line !== null && top.fair_line !== undefined ? top.fair_line : '—'}</strong></span>
+                                                                            <span className="text-slate-600">•</span>
+                                                                            <span>Mkt: <span className="font-mono text-slate-300">{top.market_line !== null && top.market_line !== undefined ? top.market_line : '—'}</span></span>
+                                                                            {edgePts !== null && (
+                                                                                <span className="text-emerald-400 font-bold font-mono">({edgePts}pt edge)</span>
+                                                                            )}
+                                                                        </div>
+                                                                        {kellyStake && (
+                                                                            <div className="text-slate-400 text-[10px]" title="Recommended stake based on Quarter-Kelly formula">
+                                                                                Rec: <strong className="text-emerald-300 font-mono">{suggestedUnits}</strong>
+                                                                                <span className="text-slate-500 ml-1">({kellyStake})</span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+
+                                                                    {/* Expandable Why This Pick Accordion */}
+                                                                    <button
+                                                                        type="button"
+                                                                        aria-expanded={isExpanded}
+                                                                        aria-controls={`why-pick-${edge.id}`}
+                                                                        onClick={() => toggleWhyPick(edge.id)}
+                                                                        className="text-left flex items-center justify-between text-[11px] text-blue-400/90 hover:text-blue-300 transition-colors font-semibold py-0.5 cursor-pointer mt-0.5"
+                                                                    >
+                                                                        <span className="flex items-center gap-1">
+                                                                            <Info size={12} />
+                                                                            <span>Why this pick?</span>
+                                                                        </span>
+                                                                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                                                    </button>
+
+                                                                    {isExpanded && (
+                                                                        <div id={`why-pick-${edge.id}`} className="p-3 rounded-lg bg-slate-950/90 border border-blue-500/25 text-[11px] text-slate-300 space-y-2">
+                                                                            <div className="flex justify-between items-center text-[10px] border-b border-slate-800 pb-1">
+                                                                                <span className="text-slate-400 uppercase font-bold tracking-wider">Line Advantage</span>
+                                                                                <span className="text-emerald-400 font-mono font-bold">
+                                                                                    {edgePts ? `${edgePts} pts edge` : 'Positive edge'}
+                                                                                </span>
+                                                                            </div>
+                                                                            <p className="text-slate-300 text-xs leading-relaxed">
+                                                                                {top.bet_type === 'TOTAL'
+                                                                                    ? `Sportsbook total is ${top.market_line ?? 'the consensus total'}. Model pace & scoring efficiency compute a fair total of ${top.fair_line}, creating a ${edgePts ?? 'positive'}-point edge on the ${String(pickText).split(' ')[0]}.`
+                                                                                    : `Sportsbook line is ${top.market_line ?? 'the consensus spread'}. Model ratings project a fair line of ${top.fair_line}, giving ${pickText} a ${edgePts ?? 'positive'}-point edge.`}
+                                                                            </p>
+                                                                            <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400 pt-1.5 border-t border-slate-800/70 font-mono">
+                                                                                <div>Win Chance: <strong className="text-slate-200">{(Number(top.win_prob || 0.5) * 100).toFixed(1)}%</strong></div>
+                                                                                <div>Expected Value: <strong className="text-green-400">{evFormatted}</strong></div>
+                                                                                {kellyStake && (
+                                                                                    <div className="col-span-2 text-slate-400">
+                                                                                        Quarter-Kelly Stake: <strong className="text-emerald-300">{suggestedUnits}</strong> ({kellyStake} bankroll)
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    <div className="flex gap-2 mt-auto pt-2 border-t border-slate-800/40">
+                                                                        <button
+                                                                            onClick={() => onAddBet?.({
+                                                                                sport: edge.sport,
+                                                                                game: `${edge.away_team} @ ${edge.home_team}`,
+                                                                                market: top.bet_type,
+                                                                                pick: pickText,
+                                                                                line: top.market_line,
+                                                                                odds: top.price,
+                                                                                book: top.book,
+                                                                            })}
+                                                                            className="flex-1 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-black border border-emerald-500/20 transition-colors uppercase tracking-widest cursor-pointer"
+                                                                        >
+                                                                            Add
+                                                                        </button>
+                                                                        {edge.sport === 'NCAAM' && (
+                                                                            <button
+                                                                                onClick={() => analyzeGame(edge)}
+                                                                                className="flex-1 py-1.5 rounded-lg bg-slate-800/40 hover:bg-slate-700/40 text-slate-300 text-[10px] font-black border border-slate-700/50 transition-colors uppercase tracking-widest cursor-pointer"
+                                                                            >
+                                                                                Details
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })()}
