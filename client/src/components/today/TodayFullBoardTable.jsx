@@ -52,14 +52,21 @@ const TodayFullBoardTable = ({
       .map((game) => {
         const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
         const rec = meta?.rec || null;
+        const ctx = meta?.context || {};
+        const lean = ctx?.closest_lean || null;
         const isActionable = Boolean(meta?.isActionable && rec);
         const isFinal = Boolean(game.final || String(game.status || '').toUpperCase().includes('FINAL'));
-        const evVal = rec?.ev !== null && rec?.ev !== undefined ? Number(rec.ev) : -999;
+        const evVal =
+          rec?.ev !== null && rec?.ev !== undefined
+            ? Number(rec.ev)
+            : (lean?.ev !== null && lean?.ev !== undefined ? Number(lean.ev) - 100 : -999);
         const confVal = Number(rec?.confidence_0_100 ?? rec?.confidence ?? -1);
         return {
           game,
           meta,
           rec,
+          ctx,
+          lean,
           isActionable,
           isFinal,
           evVal: Number.isFinite(evVal) ? evVal : -999,
@@ -68,7 +75,7 @@ const TodayFullBoardTable = ({
       })
       .filter((row) => {
         if (q) {
-          const hay = `${row.game.away_team || ''} ${row.game.home_team || ''} ${row.rec?.selection || ''}`.toLowerCase();
+          const hay = `${row.game.away_team || ''} ${row.game.home_team || ''} ${row.rec?.selection || ''} ${row.lean?.selection || ''}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
         if (statusFilter === 'picks') return row.isActionable;
@@ -192,13 +199,14 @@ const TodayFullBoardTable = ({
                 </td>
               </tr>
             ) : (
-              rows.map(({ game, meta, rec, isActionable, isFinal }) => {
+              rows.map(({ game, meta, rec, ctx, lean, isActionable, isFinal }) => {
                 const conf = getConfidenceMeta(rec);
                 const cleanReason = safeReasonText(meta?.reason);
                 const homeSpread = game.home_spread ?? game.spread_home;
                 const totalLine = game.total_line ?? game.total;
                 const mlHome = game.ml_home_odds ?? game.moneyline_home;
                 const mlAway = game.ml_away_odds ?? game.moneyline_away;
+                const hasFairLines = ctx?.fair_spread_home != null || ctx?.fair_total != null;
 
                 return (
                   <tr
@@ -248,6 +256,12 @@ const TodayFullBoardTable = ({
                         <span className="text-slate-400">
                           Moneyline: {fmtOdds(mlAway)} / {fmtOdds(mlHome)}
                         </span>
+                        {hasFairLines && (
+                          <span className="text-[10px] text-indigo-300/90">
+                            Model Fair: {ctx.fair_spread_home != null ? fmtSigned(ctx.fair_spread_home, 1) : '—'} · O/U{' '}
+                            {ctx.fair_total != null ? Number(ctx.fair_total).toFixed(1) : '—'}
+                          </span>
+                        )}
                       </div>
                     </td>
 
@@ -268,9 +282,17 @@ const TodayFullBoardTable = ({
                         </div>
                       ) : (
                         <div className="flex flex-col gap-0.5">
-                          <span className="inline-flex w-fit px-2 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 text-[10px] font-bold uppercase">
-                            NO BET
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="inline-flex w-fit px-2 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 text-[10px] font-bold uppercase">
+                              NO BET
+                            </span>
+                            {lean?.selection && (
+                              <span className="text-[11px] font-mono text-slate-300 truncate">
+                                Lean: {lean.selection}
+                                {lean.edge_points != null ? ` (${fmtSigned(lean.edge_points, 1)} pts)` : ''}
+                              </span>
+                            )}
+                          </div>
                           {cleanReason && (
                             <span className="text-[11px] text-slate-400 line-clamp-2">{cleanReason}</span>
                           )}
@@ -287,6 +309,13 @@ const TodayFullBoardTable = ({
                           <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${conf.badgeCls}`}>
                             {conf.tier}
                           </span>
+                        </div>
+                      ) : lean?.ev_pct != null ? (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="font-mono text-[11px] text-slate-300">
+                            {fmtSigned(lean.ev_pct, 1)}%
+                          </span>
+                          <span className="text-[10px] uppercase tracking-wide text-slate-500">Lean</span>
                         </div>
                       ) : (
                         <span className="text-slate-600">—</span>

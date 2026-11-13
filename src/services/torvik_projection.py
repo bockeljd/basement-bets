@@ -166,14 +166,12 @@ class TorvikProjectionService:
         # Be careful: DB rows may include keys with explicit NULLs (None), so `.get(key, 0)`
         # can still return None. Coalesce to 0.0 before arithmetic to avoid
         # `TypeError: unsupported operand type(s) for +: 'NoneType' and 'NoneType'`.
-        h_tempo = h.get('adj_tempo') or 0.0
-        a_tempo = a.get('adj_tempo') or 0.0
-        game_tempo = (float(h_tempo) + float(a_tempo)) / 2.0
-
-        # If tempo is missing in DB for one/both teams, fall back to a sane NCAA baseline
-        # so downstream projection math never sees None.
-        if not game_tempo:
-            game_tempo = 68.0
+        h_tempo = float(h.get('adj_tempo') or 0.0)
+        a_tempo = float(a.get('adj_tempo') or 0.0)
+        if h_tempo > 0.0 and a_tempo > 0.0:
+            game_tempo = max(56.0, min(84.0, 68.0 + 0.65 * ((h_tempo - 68.0) + (a_tempo - 68.0))))
+        else:
+            game_tempo = (h_tempo + a_tempo) / 2.0 if (h_tempo > 0.0 and a_tempo > 0.0) else (h_tempo or a_tempo or 68.0)
 
         return {
             "home": h,
@@ -210,9 +208,10 @@ class TorvikProjectionService:
         h_score = (h_off * a_def / eff_factor) * (tempo / 100.0)
         a_score = (a_off * h_def / eff_factor) * (tempo / 100.0)
         
-        # HCA (Home Court Advantage): add ~3.2 points only on non-neutral courts.
+        # HCA (Home Court Advantage): split +/-1.6 (~3.2 pt home margin) so totals aren't inflated.
         if not neutral_site:
-            h_score += 3.2
+            h_score += 1.6
+            a_score -= 1.6
         
         total = h_score + a_score
         spread = h_score - a_score # Home margin (e.g. +5 means Home by 5)

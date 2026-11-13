@@ -288,6 +288,26 @@ def _expand_hasla_abbrev(name: str) -> str:
         (r"\bAbil\.", "Abilene"),
         (r"\bSt\.", "State"),
         (r"\bGa\.", "Georgia"),
+        (r"\bGeo\.", "George"),
+        (r"\bConn\.", "Connecticut"),
+        (r"\bTenn\.", "Tennessee"),
+        (r"\bMiss\.", "Mississippi"),
+        (r"\bArk\.", "Arkansas"),
+        (r"\bFla\.", "Florida"),
+        (r"\bIll\.", "Illinois"),
+        (r"\bInd\.", "Indiana"),
+        (r"\bMich\.", "Michigan"),
+        (r"\bMass\.", "Massachusetts"),
+        (r"\bWash\.", "Washington"),
+        (r"\bKy\.", "Kentucky"),
+        (r"\bLa\.", "Louisiana"),
+        (r"\bOkla\.", "Oklahoma"),
+        (r"\bAla\.", "Alabama"),
+        (r"\bCol\.", "College"),
+        (r"\bUniv\.", "University"),
+        (r"\bFt\.", "Fort"),
+        (r"\bMt\.", "Mount"),
+        (r"\bPt\.", "Point"),
         (r"\bSE\b", "Southeast"),
         (r"\bSW\b", "Southwest"),
         (r"\bNE\b", "Northeast"),
@@ -399,7 +419,25 @@ class HaslametricsClient:
             if expanded == norm_target:
                 return raw_name
 
-        return None
+        # 3. Token-prefix matching against mascot-suffixed DB/event names (e.g., "Geo. Washington" -> "George Washington Colonials")
+        q_words = [w for w in norm_target.split() if w]
+        disambig = getattr(self.matcher, "_DISAMBIGUATING_NEXT_WORDS", set())
+        best_prefix_hit = None
+        best_prefix_len = 0
+        for raw_name in all_names:
+            expanded = self.matcher.normalize(_expand_hasla_abbrev(raw_name))
+            c_words = [w for w in expanded.split() if w]
+            if len(c_words) >= 2 and len(q_words) > len(c_words) and q_words[:len(c_words)] == c_words:
+                next_word = q_words[len(c_words)]
+                if next_word not in disambig and len(c_words) > best_prefix_len:
+                    best_prefix_hit = raw_name
+                    best_prefix_len = len(c_words)
+            elif len(c_words) == 1 and len(c_words[0]) >= 4 and len(q_words) >= 2 and q_words[0] == c_words[0]:
+                if q_words[1] not in disambig and 1 > best_prefix_len:
+                    best_prefix_hit = raw_name
+                    best_prefix_len = 1
+
+        return best_prefix_hit
 
     def get_team_rating(
         self,

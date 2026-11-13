@@ -43,7 +43,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.1.2-sniper"
+    VERSION = "2.2.0-ensemble"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -957,6 +957,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         home_luck = (torvik_team_stats.get('home') or {}).get('luck', 0.0) or 0.0
         away_luck = (torvik_team_stats.get('away') or {}).get('luck', 0.0) or 0.0
+        if isinstance(kenpom_adj, dict):
+            kp_hl = _safe_float(kenpom_adj.get('home_luck'))
+            kp_al = _safe_float(kenpom_adj.get('away_luck'))
+            if kp_hl is not None:
+                home_luck = (home_luck + kp_hl) / 2.0 if home_luck else kp_hl
+            if kp_al is not None:
+                away_luck = (away_luck + kp_al) / 2.0 if away_luck else kp_al
         
         luck_adjustment = 0.0
         if home_luck > 0.05:
@@ -978,44 +985,68 @@ class NCAAMMarketFirstModelV2(BaseModel):
         
         avg_continuity = (home_continuity + away_continuity) / 2.0
         
-        # Dynamic Weights for both Torvik (w_base) and KenPom (w_kp)
+        # Dynamic Weights for Torvik (w_base), KenPom (w_kp), and Haslametrics (w_hasla)
+        # Keep efficiency signals meaningfully independent from Vegas when multiple systems agree.
         w_base = self.W_BASE
         if avg_continuity < 0.5:
-            w_base = min(w_base, 0.10)
+            w_base = min(w_base, 0.12)
         w_kp_target = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity)
+        w_hasla_base = 0.10 if game_month == 11 else (0.12 if game_month == 12 else 0.15)
+        if avg_continuity < 0.5:
+            w_hasla_base = min(w_hasla_base, 0.08)
         w_hasla_override = os.getenv('NCAAM_W_HASLA')
         w_hasla = 0.0
         if kp_available and hasla_available:
-            # Blend all 3 rating sources (Torvik + KenPom + Haslametrics) within calibrated projection budget
-            total_budget = min(w_base + w_kp_target, 0.58)
-            if w_hasla_override is not None:
-                w_kp = round(w_kp_target * 0.70, 4)
-                w_hasla = float(w_hasla_override)
-            elif os.getenv('NCAAM_W_BASE') is None:
-                w_kp = round(w_kp_target * 0.70, 4)
-                w_hasla = round(w_kp_target * 0.30 + (w_base * 0.15), 4)
-                w_base = round(max(0.05, total_budget - w_kp - w_hasla), 4)
-            else:
-                w_kp = round(w_kp_target * 0.70, 4)
-                w_hasla = round(w_kp_target * 0.30, 4)
+            w_kp = w_kp_target
+            w_hasla = float(w_hasla_override) if w_hasla_override is not None else w_hasla_base
         elif kp_available:
             w_kp = w_kp_target
         elif hasla_available:
-            # No KenPom available: split projection budget 65% Torvik / 35% Haslametrics
             w_kp = 0.0
             if w_hasla_override is not None:
                 w_hasla = float(w_hasla_override)
             elif os.getenv('NCAAM_W_BASE') is None:
-                total_budget = min(w_base + w_kp_target, 0.45)
-                w_hasla = round(total_budget * 0.35, 4)
-                w_base = round(total_budget - w_hasla, 4)
+                w_hasla = round(w_hasla_base + (w_kp_target * 0.45), 4)
+                w_base = round(w_base + (w_kp_target * 0.55), 4)
             else:
-                w_hasla = round(min(w_kp_target * 0.50, 0.12), 4)
+                w_hasla = w_hasla_base
         else:
             w_kp = 0.0
-            # When neither KenPom nor Haslametrics are available, reallocate KenPom weight to Torvik.
             if os.getenv('NCAAM_W_BASE') is None:
                 w_base = min(w_base + w_kp_target, 0.45)
+
+        # Multi-Source Conviction Boost: when independent rating sources agree Vegas is off,
+        # scale ensemble weight up (up to 60% independent / 40% market) instead of hugging market.
+        spread_sig_diffs = []
+        if abs(diff_torvik) >= 1.0:
+            spread_sig_diffs.append(diff_torvik)
+        if kp_available and abs(diff_kenpom) >= 1.0:
+            spread_sig_diffs.append(diff_kenpom)
+        if hasla_available and abs(diff_hasla) >= 1.0:
+            spread_sig_diffs.append(diff_hasla)
+
+        agree_count = 0
+        if len(spread_sig_diffs) >= 2:
+            if all(d > 0 for d in spread_sig_diffs) or all(d < 0 for d in spread_sig_diffs):
+                agree_count = len(spread_sig_diffs)
+
+        if os.getenv('NCAAM_W_BASE') is None and agree_count >= 2:
+            conv_mult = 1.45 if agree_count >= 3 else 1.30
+            w_base *= conv_mult
+            w_kp *= conv_mult
+            w_hasla *= conv_mult
+
+        eff_sum = w_base + w_kp + w_hasla
+        if eff_sum > 0.60 and eff_sum > 0:
+            scale_back = 0.60 / eff_sum
+            w_base = round(w_base * scale_back, 4)
+            w_kp = round(w_kp * scale_back, 4)
+            w_hasla = round(w_hasla * scale_back, 4)
+        else:
+            w_base = round(w_base, 4)
+            w_kp = round(w_kp, 4)
+            w_hasla = round(w_hasla, 4)
+
         self.W_BASE = w_base
         
         mu_spread_final = (
@@ -1035,6 +1066,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "w_base": float(w_base),
             "w_kp": float(w_kp),
             "w_hasla": float(w_hasla),
+            "conviction_sources": int(agree_count),
         }
         
         # --- Feature: Agent Council Qualitative Adjustment ---
@@ -1069,15 +1101,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if council_adjustment_spread != 0.0:
                 print(f"[MODEL] Council spread adj {council_adjustment_spread:+.2f} computed but GATED (Phase 1 mode).")
         
-        # Apply Caps
-        if abs(mu_spread_final - mu_market_spread) > self.CAP_SPREAD:
-             mu_spread_final = mu_market_spread + (self.CAP_SPREAD * math.copysign(1, mu_spread_final - mu_market_spread))
+        # Apply Caps (widen raw cap modestly when 2+ independent sources agree)
+        effective_cap_spread = self.CAP_SPREAD
+        if (os.getenv('NCAAM_CAP_SPREAD') is None) and agree_count >= 2:
+            effective_cap_spread = max(self.CAP_SPREAD, 3.2)
+        if abs(mu_spread_final - mu_market_spread) > effective_cap_spread:
+             mu_spread_final = mu_market_spread + (effective_cap_spread * math.copysign(1, mu_spread_final - mu_market_spread))
 
         # Total - with None-safe handling
         mu_torvik_total = torvik_view.get('total') or 145.0
         kenpom_total_adj = (kenpom_adj.get('total_adj') if isinstance(kenpom_adj, dict) else None) or 0.0
+        kp_fair_total = _safe_float(kenpom_adj.get('fair_total')) if isinstance(kenpom_adj, dict) else None
         market_total = market_snapshot.get('total') or 145.0
-        mu_kenpom_total = market_total + kenpom_total_adj
+        mu_kenpom_total = kp_fair_total if kp_fair_total is not None else (market_total + kenpom_total_adj)
 
         # KenPom player-based (rotation-weighted) efficiency signal (best-effort)
         # This helps totals (PPP proxy) and later props.
@@ -1105,11 +1141,39 @@ class NCAAMMarketFirstModelV2(BaseModel):
         mu_hasla_total = float(haslametrics_view.get('total') or mu_torvik_total) if hasla_available else mu_torvik_total
         
         w_total_torvik = w_base + (0.5 * self.W_SCHED)
+        w_total_kp = w_kp
+        w_total_hasla = w_hasla
+        diff_tv_tot = mu_torvik_total - mu_market_total
+        diff_kp_tot = (mu_kenpom_total - mu_market_total) if kp_available else 0.0
+        diff_hs_tot = (mu_hasla_total - mu_market_total) if hasla_available else 0.0
+
+        tot_sig_diffs = []
+        if abs(diff_tv_tot) >= 1.5:
+            tot_sig_diffs.append(diff_tv_tot)
+        if kp_available and abs(diff_kp_tot) >= 1.5:
+            tot_sig_diffs.append(diff_kp_tot)
+        if hasla_available and abs(diff_hs_tot) >= 1.5:
+            tot_sig_diffs.append(diff_hs_tot)
+
+        agree_count_total = 0
+        if len(tot_sig_diffs) >= 2:
+            if all(d > 0 for d in tot_sig_diffs) or all(d < 0 for d in tot_sig_diffs):
+                agree_count_total = len(tot_sig_diffs)
+
+        if os.getenv('NCAAM_W_BASE') is None and agree_count_total >= 2:
+            tot_sum = w_total_torvik + w_total_kp + w_total_hasla
+            target_sum = min(0.55, tot_sum * (1.35 if agree_count_total >= 3 else 1.25))
+            if tot_sum > 0 and target_sum > tot_sum:
+                mult_t = target_sum / tot_sum
+                w_total_torvik *= mult_t
+                w_total_kp *= mult_t
+                w_total_hasla *= mult_t
+
         mu_total_final = (
             mu_market_total
-            + (w_total_torvik * (mu_torvik_total - mu_market_total))
-            + (w_kp * (mu_kenpom_total - mu_market_total))
-            + (w_hasla * (mu_hasla_total - mu_market_total))
+            + (w_total_torvik * diff_tv_tot)
+            + (w_total_kp * diff_kp_tot)
+            + (w_total_hasla * diff_hs_tot)
         )
         mu_total_final += kp_player_total_adj
         potential_adjustment_total = council_adjustment_total
@@ -1119,8 +1183,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if council_adjustment_total != 0.0:
                 print(f"[MODEL] Council total adj {council_adjustment_total:+.2f} computed but GATED (Phase 1 mode).")
         
-        if abs(mu_total_final - mu_market_total) > self.CAP_TOTAL:
-             mu_total_final = mu_market_total + (self.CAP_TOTAL * math.copysign(1, mu_total_final - mu_market_total))
+        effective_cap_total = self.CAP_TOTAL
+        if (os.getenv('NCAAM_CAP_TOTAL') is None) and agree_count_total >= 2:
+            effective_cap_total = max(self.CAP_TOTAL, 4.5)
+        if abs(mu_total_final - mu_market_total) > effective_cap_total:
+             mu_total_final = mu_market_total + (effective_cap_total * math.copysign(1, mu_total_final - mu_market_total))
 
         # 6. Pace-Adjusted & Season-Calibrated Sigma (Refined)
         # Higher tempo = more possessions = higher variance = wider sigma
@@ -1260,8 +1327,40 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if inj_total_adj != 0.0:
             mu_total_final += inj_total_adj
 
-        # Re-clamp automated spread adjustments so micro-signals cannot exceed CAP_SPREAD + 1.0
-        max_auto_spread_dev = self.CAP_SPREAD + 1.0
+        # -- Strength of Schedule / Non-Conference Cupcake + Haslametrics Momentum & Inconsistency --
+        kp_sos_adj = _safe_float((kenpom_adj or {}).get('sos_spread_adj')) or 0.0
+        hasla_sos_adj = 0.0
+        mom_adj = 0.0
+        if hasla_available and isinstance(haslametrics_view, dict):
+            h_hasla = haslametrics_view.get('home') or {}
+            a_hasla = haslametrics_view.get('away') or {}
+            h_sos_rank = _safe_float(h_hasla.get('sos'))
+            a_sos_rank = _safe_float(a_hasla.get('sos'))
+            if h_sos_rank is not None and a_sos_rank is not None:
+                hasla_sos_adj = max(-0.6, min(0.6, ((a_sos_rank - h_sos_rank) / 250.0) * 0.45))
+            h_mom = _safe_float(h_hasla.get('mom'))
+            a_mom = _safe_float(a_hasla.get('mom'))
+            if h_mom is not None and a_mom is not None:
+                mom_adj = max(-0.5, min(0.5, (h_mom - a_mom) * 2.5))
+            h_inc = _safe_float(h_hasla.get('inc'))
+            a_inc = _safe_float(a_hasla.get('inc'))
+            if h_inc is not None and a_inc is not None:
+                avg_inc = max(0.0, (h_inc + a_inc) / 2.0)
+                if avg_inc > 0.10:
+                    sigma_spread *= (1.0 + min(0.08, avg_inc * 0.25))
+
+        if kp_available and hasla_available:
+            sos_adj = max(-1.0, min(1.0, (kp_sos_adj * 0.65) + (hasla_sos_adj * 0.35)))
+        elif kp_available:
+            sos_adj = max(-1.0, min(1.0, kp_sos_adj))
+        else:
+            sos_adj = hasla_sos_adj
+
+        # Positive sos_adj / mom_adj favors home team -> lower (more negative) home spread
+        mu_spread_final -= (sos_adj + mom_adj) * situational_scale
+
+        # Re-clamp automated spread adjustments (allow up to effective_cap + 1.0 when consensus agrees)
+        max_auto_spread_dev = effective_cap_spread + 1.0
         if abs(mu_spread_final - mu_market_spread) > max_auto_spread_dev:
             mu_spread_final = mu_market_spread + (max_auto_spread_dev * math.copysign(1, mu_spread_final - mu_market_spread))
 
@@ -1274,7 +1373,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         
         # -- Referee Signal (Totals) --
         mu_total_final = self._apply_referee_signal(event['id'], mu_total_final) or mu_total_final
-        max_auto_total_dev = self.CAP_TOTAL + 1.5
+        max_auto_total_dev = effective_cap_total + 1.5
         if abs(mu_total_final - mu_market_total) > max_auto_total_dev:
             mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
         
@@ -1373,6 +1472,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "w_base": self.W_BASE,
             "w_kp": w_kp,
             "w_hasla": w_hasla,
+            "conviction_sources": agree_count,
+            "conviction_sources_total": agree_count_total,
+            "sos_adj": round(float(sos_adj), 3),
+            "mom_adj": round(float(mom_adj), 3),
             "shooting_adj": shooting_adj,
             "spot_adj": spot_adj,
             "fatigue_adj": fatigue_adj,
@@ -1395,9 +1498,21 @@ class NCAAMMarketFirstModelV2(BaseModel):
         }
         
         mc = market_snapshot.get('_market_consensus') if isinstance(market_snapshot, dict) else None
+        closest_lean = market_snapshot.get('_best_candidate') if isinstance(market_snapshot, dict) else None
         ctx = {
             'mu_spread_power': float(mu_spread_final) if mu_spread_final is not None else None,
             'mu_total_power': float(mu_total_final) if mu_total_final is not None else None,
+            'fair_spread_home': round(float(mu_spread_final), 1) if mu_spread_final is not None else None,
+            'fair_total': round(float(mu_total_final), 1) if mu_total_final is not None else None,
+            'basement_line': round(float(raw_basement_line), 1) if raw_basement_line is not None else None,
+            'torvik_spread_home': round(float(mu_torvik_spread), 1) if mu_torvik_spread is not None else None,
+            'hasla_spread_home': round(float(mu_hasla_line), 1) if hasla_available else None,
+            'kenpom_spread_home': round(float(mu_kenpom_line), 1) if kp_available else None,
+            'conviction_sources': int(agree_count),
+            'efficiency_weight': round(float(w_base + w_kp + w_hasla), 3),
+            'sos_adj': round(float(sos_adj), 2),
+            'mom_adj': round(float(mom_adj), 2),
+            'closest_lean': closest_lean,
             'sigma_spread': float(sigma_spread) if sigma_spread is not None else None,
             'sigma_total': float(sigma_total) if sigma_total is not None else None,
             'line_at_prediction_spread_home': (float(market_snapshot.get('spread_home')) if market_snapshot.get('spread_home') is not None else None) if isinstance(market_snapshot, dict) else None,
@@ -1844,6 +1959,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "outputs_json": outputs_json_str,
             "narrative": narrative,
             "narrative_json": narrative_json_str,
+            "context": ctx,
             "context_json": context_json_str,
             "is_actionable": bool(ui_recs),
             "block_reason": block_reason,
@@ -2230,13 +2346,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # even if the archetype 95% CI lower bound is negative (since sd ~ 0.95 makes
         # 95% CI wide across most bins). Note CAP_SPREAD=2.0 caps spread edge_pts at 2.0,
         # so requiring 2.0 pts + 6% EV previously blocked all standard -110 spread plays.
-        override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV', '0.035'))  # 3.5%
-        override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS', '1.5'))
+        override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV', '0.025'))  # 2.5%
+        override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS', '1.1'))
         
         # Totals have wider variance & worse historical ROI; require >= +4.0% EV override.
         if market == 'TOTAL':
             override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV_TOTAL', '0.04'))
-            override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS_TOTAL', '1.5'))
+            override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS_TOTAL', '1.3'))
 
         override_ok = (ev >= override_ev) and (edge_pts >= override_edge) and (n >= min_n)
 
@@ -2700,6 +2816,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return score, reasons, sigma_mult, ev_penalty
 
 
+        candidates_eval: List[Dict[str, Any]] = []
+
         # --- Spread ---
         line_s = snap.get("spread_home")
         price_home = snap.get("spread_price_home", -110)
@@ -2792,6 +2910,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             # Choose the higher-EV side, then gate it.
             best = cand_home if cand_home["ev"] >= cand_away["ev"] else cand_away
+            candidates_eval.append(best)
             if relax_gates or self._passes_publish_gates(best, market_line_home=market_line_s, torvik_ok=torvik_ok):
                 # 1) Steam / movement handling
                 reason = self._steam_block_reason('SPREAD', str(best.get('side') or ''), snap.get('_market_consensus') if isinstance(snap, dict) else None, snap)
@@ -2931,6 +3050,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             }
 
             best = cand_over if cand_over["ev"] >= cand_under["ev"] else cand_under
+            candidates_eval.append(best)
             if relax_gates or self._passes_publish_gates(best, market_line_home=None, torvik_ok=torvik_ok):
                 reason = self._steam_block_reason('TOTAL', str(best.get('side') or ''), snap.get('_market_consensus') if isinstance(snap, dict) else None, snap)
                 steam_hard_block = str(os.getenv('STEAM_HARD_BLOCK', '0')).strip() not in ('0', 'false', 'False', '')
@@ -2987,6 +3107,53 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             recs.append(out)
                     else:
                         recs.append({**best, 'steam_blocked': False})
+
+        if candidates_eval and isinstance(snap, dict):
+            top_cand = max(candidates_eval, key=lambda c: float(c.get('ev') or -999.0))
+            mkt = str(top_cand.get('market') or '').upper()
+            side = str(top_cand.get('side') or '').lower()
+            line_val = _safe_float(top_cand.get('line'))
+            if mkt == 'SPREAD' and line_val is not None:
+                team_lbl = top_cand.get('team') or (event.get('home_team') if side == 'home' else event.get('away_team'))
+                sign = '+' if line_val > 0 else ''
+                sel_lbl = f"{team_lbl} {sign}{line_val:g}"
+                fair_val = round(float(mu_s) if side == 'home' else float(-mu_s), 1)
+                edge_val = round(float(line_val) - float(fair_val), 1)
+                gate_msg = snap.get('_no_bet_reason_spread')
+            elif mkt == 'TOTAL' and line_val is not None:
+                side_up = side.upper()
+                sel_lbl = f"{side_up} {line_val:g}"
+                fair_val = round(float(mu_t), 1)
+                edge_val = round((fair_val - line_val) if side_up == 'OVER' else (line_val - fair_val), 1)
+                gate_msg = snap.get('_no_bet_reason_total')
+            else:
+                sel_lbl = str(top_cand.get('side') or '')
+                fair_val = None
+                edge_val = _safe_float(top_cand.get('edge_points'))
+                gate_msg = None
+
+            ev_f = float(top_cand.get('ev') or 0.0)
+            if not gate_msg:
+                gate_msg = (
+                    f"EV {ev_f * 100:+.1f}% / edge {edge_val if edge_val is not None else 0:+.1f} pts below strict publish gate"
+                )
+            snap['_best_candidate'] = {
+                'bet_type': mkt,
+                'selection': sel_lbl,
+                'market_line': line_val,
+                'fair_line': fair_val,
+                'edge_points': edge_val,
+                'ev': round(ev_f, 4),
+                'ev_pct': round(ev_f * 100.0, 2),
+                'price': top_cand.get('price'),
+                'book': top_cand.get('book'),
+                'win_prob': top_cand.get('win_prob'),
+                'confidence': self._confidence_label_from_winprob(
+                    top_cand.get('win_prob_lb10'),
+                    fallback_win_prob=top_cand.get('win_prob'),
+                ),
+                'reason': gate_msg,
+            }
 
         return self._apply_split_and_injury_signals(
             recs,

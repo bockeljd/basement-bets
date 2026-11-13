@@ -859,10 +859,11 @@ def _parse_kenpom_rows(
 ) -> list[dict]:
     norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
 
-    def _find_col(candidates: tuple[str, ...]) -> int | None:
+    def _find_col(candidates: tuple[str, ...], start: int = 0) -> int | None:
         for cand in candidates:
-            if cand in norm_headers:
-                return norm_headers.index(cand)
+            for idx in range(start, len(norm_headers)):
+                if norm_headers[idx] == cand:
+                    return idx
         return None
 
     idx_team = _find_col(("teamname", "team", "school"))
@@ -878,9 +879,28 @@ def _parse_kenpom_rows(
     idx_o = _find_col(("adjo", "adjoe", "ortg", "oe"))
     idx_d = _find_col(("adjd", "adjde", "drtg", "de"))
     idx_t = _find_col(("adjt", "adjtempo", "tempo"))
+    after_t = (idx_t + 1) if idx_t is not None else 0
+    idx_luck = _find_col(("luck",), start=after_t)
+    idx_sos = _find_col(("sosadjem", "sosnetrtg", "sos", "netrtg"), start=(idx_luck + 1 if idx_luck is not None else after_t))
+    idx_opp_o = _find_col(("oppo", "sosoppo", "ortg", "adjo", "adjoe"), start=(idx_sos + 1 if idx_sos is not None else after_t))
+    idx_opp_d = _find_col(("oppd", "sosoppd", "drtg", "adjd", "adjde"), start=(idx_opp_o + 1 if idx_opp_o is not None else after_t))
+    idx_ncsos = _find_col(("ncsosadjem", "ncsosnetrtg", "ncsos", "netrtg"), start=(idx_opp_d + 1 if idx_opp_d is not None else after_t))
+    has_colspan_ranks = (
+        idx_t is not None
+        and (idx_t + 1) < len(norm_headers)
+        and "rank" in norm_headers[idx_t + 1]
+    )
 
     if idx_em is None and (idx_o is None or idx_d is None):
         raise ValueError("CSV must contain NetRtg/AdjEM or both ORtg/AdjO and DRtg/AdjD columns")
+
+    def _safe_metric(row_vals: list[str], col_idx: int | None, lo: float, hi: float) -> float | None:
+        if col_idx is None or col_idx >= len(row_vals):
+            return None
+        val = _parse_kp_float(row_vals[col_idx])
+        if val is None or val < lo or val > hi:
+            return None
+        return val
 
     out: list[dict] = []
     for row in data_rows:
@@ -907,12 +927,36 @@ def _parse_kenpom_rows(
         eff_idx_d = (idx_o + 2) if row_has_interleaved_ranks else idx_d
         eff_idx_t = (idx_o + 4) if (row_has_interleaved_ranks and idx_t is not None) else idx_t
 
+        if row_has_interleaved_ranks and eff_idx_t is not None:
+            eff_idx_luck = eff_idx_t + 2
+            eff_idx_sos = eff_idx_t + 4
+            eff_idx_opp_o = eff_idx_t + 6
+            eff_idx_opp_d = eff_idx_t + 8
+            eff_idx_ncsos = eff_idx_t + 10
+        elif has_colspan_ranks and eff_idx_t is not None:
+            eff_idx_luck = idx_luck if idx_luck is not None else eff_idx_t + 2
+            eff_idx_sos = idx_sos if idx_sos is not None else eff_idx_t + 4
+            eff_idx_opp_o = idx_opp_o if idx_opp_o is not None else eff_idx_t + 6
+            eff_idx_opp_d = idx_opp_d if idx_opp_d is not None else eff_idx_t + 8
+            eff_idx_ncsos = idx_ncsos if idx_ncsos is not None else eff_idx_t + 10
+        else:
+            eff_idx_luck = idx_luck
+            eff_idx_sos = idx_sos
+            eff_idx_opp_o = idx_opp_o
+            eff_idx_opp_d = idx_opp_d
+            eff_idx_ncsos = idx_ncsos
+
         adj_o = _parse_kp_float(row[eff_idx_o]) if (eff_idx_o is not None and len(row) > eff_idx_o) else None
         adj_d = _parse_kp_float(row[eff_idx_d]) if (eff_idx_d is not None and len(row) > eff_idx_d) else None
         adj_em = _parse_kp_float(row[idx_em]) if (idx_em is not None and len(row) > idx_em) else None
         if adj_em is None and adj_o is not None and adj_d is not None:
             adj_em = round(adj_o - adj_d, 2)
         adj_t = _parse_kp_float(row[eff_idx_t]) if (eff_idx_t is not None and len(row) > eff_idx_t) else None
+        luck = _safe_metric(row, eff_idx_luck, -0.5, 0.5)
+        sos_adj_em = _safe_metric(row, eff_idx_sos, -40.0, 40.0)
+        opp_o = _safe_metric(row, eff_idx_opp_o, 70.0, 140.0)
+        opp_d = _safe_metric(row, eff_idx_opp_d, 70.0, 140.0)
+        ncsos_adj_em = _safe_metric(row, eff_idx_ncsos, -40.0, 40.0)
         rank = _parse_kp_int(row[idx_rank]) if (idx_rank is not None and len(row) > idx_rank) else None
         conf = str(row[idx_conf]).strip() if (idx_conf is not None and len(row) > idx_conf and str(row[idx_conf]).strip()) else None
 
@@ -933,9 +977,22 @@ def _parse_kenpom_rows(
             "adj_o": adj_o,
             "adj_d": adj_d,
             "adj_t": adj_t,
+            "luck": luck,
+            "sos_adj_em": sos_adj_em,
+            "opp_o": opp_o,
+            "opp_d": opp_d,
+            "ncsos_adj_em": ncsos_adj_em,
             "conf": conf,
             "record": record,
-            "raw": {"source": source_tag, "row": row},
+            "raw": {
+                "source": source_tag,
+                "luck": luck,
+                "sos_adj_em": sos_adj_em,
+                "opp_o": opp_o,
+                "opp_d": opp_d,
+                "ncsos_adj_em": ncsos_adj_em,
+                "row": row,
+            },
         })
 
     if out and any(r.get("rank") is None for r in out):

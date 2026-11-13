@@ -8,6 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Award,
+  BarChart2,
+  PlusCircle,
+  Sparkles,
   X,
 } from 'lucide-react';
 import api from '../api/axios';
@@ -22,6 +25,10 @@ import ModelLogicDialog from '../components/today/ModelLogicDialog';
 import {
   getTodayEtStr,
   shiftEtDateStr,
+  fmtTimeEt,
+  fmtOdds,
+  fmtSigned,
+  safeReasonText,
   makeMatchupKey,
   lookupTopPickForGame,
   getConfidenceMeta,
@@ -55,12 +62,14 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
   const [pickViewMode, setPickViewMode] = useState('top6'); // top6 | all
   const [expandedPickIds, setExpandedPickIds] = useState(new Set());
 
-  // Modals
+  // Modals & rescore state
   const [selectedGame, setSelectedGame] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [correlationResult, setCorrelationResult] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showModelLogicDialog, setShowModelLogicDialog] = useState(false);
+  const [rescoringSlate, setRescoringSlate] = useState(false);
+  const [rescoreProgress, setRescoreProgress] = useState('');
 
   const BOARD_DAYS_DEFAULT = showModelPerformanceTab ? 3 : 1;
 
@@ -73,14 +82,20 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     });
   };
 
-  const fetchSchedule = async () => {
+  const fetchSchedule = async (opts = {}) => {
+    const forceRefresh = Boolean(opts && typeof opts === 'object' && opts.forceRefresh === true);
     setLoading(true);
     setError(null);
     setDegradedMode(false);
     setDegradedAsOf(null);
 
     const boardParams = { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT };
-    const topPicksParams = { date: selectedDate, days: BOARD_DAYS_DEFAULT, limit_games: 250 };
+    const topPicksParams = {
+      date: selectedDate,
+      days: BOARD_DAYS_DEFAULT,
+      limit_games: 250,
+      ...(forceRefresh ? { refresh: true } : {}),
+    };
 
     try {
       const [boardRes, topPicksRes, healthRes, matchupRes, mlbRes] = await Promise.all([
@@ -122,6 +137,8 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             reason: item?.reason,
             source: item?.source,
             event: item?.event,
+            context: item?.context || null,
+            model_version: item?.model_version || null,
           };
           mapped[eid] = recObj;
           const ev = item?.event || {};
@@ -202,6 +219,8 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               reason: tp[eid]?.reason,
               source: tp[eid]?.source,
               event: tp[eid]?.event,
+              context: tp[eid]?.context || null,
+              model_version: tp[eid]?.model_version || null,
             };
           });
           setRowTopPicks(mapped);
@@ -306,13 +325,67 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         tone: 'ok',
         text: `Grading complete: ${res?.data?.graded || 0} model predictions updated.`,
       });
-      await fetchSchedule();
+      await fetchSchedule({ forceRefresh: true });
     } catch (err) {
       setToast({
         tone: 'err',
         text: `Grading failed: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
       });
       setLoading(false);
+    }
+  };
+
+  const handleRescoreSlate = async () => {
+    if (rescoringSlate || leagueFilter !== 'NCAAM') return;
+    setRescoringSlate(true);
+    setRescoreProgress('Re-scoring slate...');
+    setToast({
+      tone: 'warn',
+      text: `Re-scoring ${selectedDate} NCAAM slate with latest KenPom, Haslametrics & Torvik projections...`,
+    });
+    try {
+      let offset = 0;
+      let done = false;
+      let loops = 0;
+      let totalOk = 0;
+      let eventsTotal = 0;
+      while (!done && loops < 10) {
+        loops += 1;
+        const res = await api.post('/api/jobs/build_daily_top_picks', null, {
+          params: {
+            date: selectedDate,
+            days: 1,
+            offset,
+            max_events: 20,
+            limit_games: 250,
+          },
+        });
+        const d = res?.data || {};
+        eventsTotal = Number(d.events_total || eventsTotal || 0);
+        totalOk += Number(d.ok || 0);
+        const nextOffset = Number(d.next_offset ?? offset + Number(d.processed || 0));
+        done = Boolean(d.done) || nextOffset <= offset;
+        offset = nextOffset;
+        if (eventsTotal > 0) {
+          setRescoreProgress(`Re-scoring ${Math.min(offset, eventsTotal)}/${eventsTotal}...`);
+        }
+      }
+      setToast({
+        tone: 'ok',
+        text: `Slate re-scored (${totalOk} games evaluated). Refreshing Top Plays & Full Board...`,
+      });
+      await fetchSchedule({ forceRefresh: true });
+    } catch (err) {
+      if (err?.response?.status === 401 || err?.response?.status === 403) {
+        setAuthPromptOpen(true);
+      }
+      setToast({
+        tone: 'err',
+        text: `Re-score failed: ${err?.response?.data?.detail || err?.message || 'Could not re-score slate'}`,
+      });
+    } finally {
+      setRescoringSlate(false);
+      setRescoreProgress('');
     }
   };
 
@@ -341,18 +414,28 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       setAnalysisResult(merged);
       setCorrelationResult(corrRes?.data || null);
 
-      if ((merged?.recommendations || [])[0]) {
-        const freshRec = merged.recommendations[0];
-        setRowTopPicks((prev) => ({
-          ...prev,
-          [game.id]: {
-            ...(prev[game.id] || {}),
-            rec: freshRec,
-            isActionable: true,
-            analyzedAt: new Date().toISOString(),
-          },
-        }));
-      }
+      const freshRec = (merged?.recommendations || [])[0] || null;
+      const freshCtx =
+        merged?.context ||
+        (() => {
+          try {
+            return typeof merged?.context_json === 'string' ? JSON.parse(merged.context_json) : merged?.context_json || null;
+          } catch {
+            return null;
+          }
+        })();
+      setRowTopPicks((prev) => ({
+        ...prev,
+        [game.id]: {
+          ...(prev[game.id] || {}),
+          rec: freshRec,
+          isActionable: Boolean(freshRec),
+          reason: freshRec ? null : (merged?.block_reason || merged?.headline || prev[game.id]?.reason || null),
+          context: freshCtx || prev[game.id]?.context || null,
+          model_version: merged?.model_version || prev[game.id]?.model_version || null,
+          analyzedAt: new Date().toISOString(),
+        },
+      }));
     } catch (err) {
       setToast({
         tone: 'err',
@@ -434,6 +517,36 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     });
     return pickViewMode === 'top6' ? list.slice(0, 6) : list;
   }, [actionablePlays, pickTypeFilter, pickViewMode]);
+
+  const closestLeans = useMemo(() => {
+    const gamesForLeague = (edges || []).filter((e) => !leagueFilter || e.sport === leagueFilter);
+    const leans = [];
+    gamesForLeague.forEach((game) => {
+      const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
+      if (meta?.isActionable) return;
+      const ctx = meta?.context || null;
+      const lean = ctx?.closest_lean || null;
+      if (!lean || !lean.selection) return;
+      const evVal = lean.ev != null ? Number(lean.ev) : null;
+      const edgePts = lean.edge_points != null ? Number(lean.edge_points) : 0;
+      if ((evVal !== null && evVal > 0) || Math.abs(edgePts) >= 0.8) {
+        leans.push({
+          id: game.id,
+          game,
+          meta,
+          ctx,
+          lean,
+          evVal: evVal ?? -999,
+          edgePts,
+        });
+      }
+    });
+    leans.sort((a, b) => {
+      if (a.evVal !== b.evVal) return b.evVal - a.evVal;
+      return Math.abs(b.edgePts) - Math.abs(a.edgePts);
+    });
+    return leans.slice(0, 6);
+  }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey]);
 
   const tabs = useMemo(() => {
     const base = [
@@ -589,13 +702,25 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
           <button
             type="button"
-            onClick={fetchSchedule}
-            disabled={loading}
+            onClick={() => fetchSchedule({ forceRefresh: true })}
+            disabled={loading || rescoringSlate}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer disabled:opacity-50"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
             <span>Refresh</span>
           </button>
+
+          {leagueFilter === 'NCAAM' && (
+            <button
+              type="button"
+              onClick={handleRescoreSlate}
+              disabled={loading || rescoringSlate}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-xs font-semibold text-indigo-200 cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles size={13} className={rescoringSlate ? 'animate-pulse' : ''} aria-hidden="true" />
+              <span>{rescoringSlate ? (rescoreProgress || 'Re-scoring...') : 'Re-Score Slate'}</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -727,20 +852,37 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               ))}
             </div>
           ) : filteredTopPlays.length === 0 ? (
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-2">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-3">
               <h3 className="text-base font-bold text-slate-200">
-                No Qualifying Top Plays Match This Filter
+                {actionablePlays.length === 0
+                  ? 'No Plays Passed Strict Publish Risk Gates'
+                  : 'No Qualifying Top Plays Match This Filter'}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Switch filters above or open the Full Board tab to inspect every game&apos;s fair line, injuries, and public splits.
+                {actionablePlays.length === 0
+                  ? 'Try Re-Scoring the slate after KenPom/odds updates, review Closest Model Leans below, or open the Full Board to see Model Fair spreads and totals for every game.'
+                  : 'Switch filters above or open the Full Board tab to inspect every game’s fair line, injuries, and public splits.'}
               </p>
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('board')}
-                className="mt-2 inline-flex px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white cursor-pointer"
-              >
-                View Full Board ({slateSummary.totalGames} games)
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                {leagueFilter === 'NCAAM' && (
+                  <button
+                    type="button"
+                    onClick={handleRescoreSlate}
+                    disabled={rescoringSlate}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles size={13} aria-hidden="true" />
+                    <span>{rescoringSlate ? (rescoreProgress || 'Re-scoring...') : 'Re-Score Slate'}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('board')}
+                  className="inline-flex px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white cursor-pointer"
+                >
+                  View Full Board ({slateSummary.totalGames} games)
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -757,6 +899,102 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                 />
               ))}
             </div>
+          )}
+
+          {/* Closest Model Leans (Near-Miss Board) */}
+          {actionablePlays.length < 4 && closestLeans.length > 0 && (
+            <section aria-label="Closest model leans" className="pt-2 space-y-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-indigo-200 tracking-tight">
+                    Closest Model Leans (Below Strict Publish Gate)
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Top near-miss edges ranked by expected value — helpful when strict publish gates hold plays back.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('board')}
+                  className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
+                >
+                  Compare all Model Fair lines on Full Board
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {closestLeans.map(({ id, game, lean, meta }) => {
+                  const reasonTxt = safeReasonText(lean.reason || meta?.reason);
+                  return (
+                    <article
+                      key={id}
+                      className="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 flex flex-col justify-between gap-3"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
+                          <span>{fmtTimeEt(game.start_time)} ET</span>
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-indigo-200 font-bold uppercase text-[10px]">
+                            {lean.bet_type || 'LEAN'} NEAR-MISS
+                          </span>
+                        </div>
+                        <div className="text-xs font-semibold text-slate-200 truncate">
+                          {game.away_team} @ {game.home_team}
+                        </div>
+                        <div className="flex items-baseline justify-between gap-2 pt-0.5">
+                          <span className="text-sm font-bold text-white truncate">
+                            {lean.selection}
+                          </span>
+                          <span className="text-xs font-mono font-bold text-indigo-300 shrink-0">
+                            {lean.edge_points != null ? `${fmtSigned(lean.edge_points, 1)} pts` : ''}{' '}
+                            {lean.ev_pct != null ? `(${fmtSigned(lean.ev_pct, 1)}%)` : ''}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400 flex flex-wrap items-center gap-x-2">
+                          <span>Book: {lean.market_line != null ? lean.market_line : '—'} ({fmtOdds(lean.price)})</span>
+                          <span>·</span>
+                          <span className="text-indigo-300">Model Fair: {lean.fair_line != null ? lean.fair_line : '—'}</span>
+                        </div>
+                        {reasonTxt && (
+                          <p className="text-[11px] text-slate-400 line-clamp-2">{reasonTxt}</p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenGameDetails(game)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer"
+                        >
+                          <BarChart2 size={12} aria-hidden="true" />
+                          <span>Details</span>
+                        </button>
+                        {onAddBet && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onAddBet({
+                                sport: game.sport || leagueFilter,
+                                game: `${game.away_team} @ ${game.home_team}`,
+                                market: lean.bet_type,
+                                pick: lean.selection,
+                                line: lean.market_line,
+                                odds: lean.price,
+                                book: lean.book || 'Consensus',
+                              })
+                            }
+                            aria-label={`Log lean ${lean.selection}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 cursor-pointer"
+                          >
+                            <PlusCircle size={12} aria-hidden="true" />
+                            <span>Log Lean</span>
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
           )}
         </section>
       )}

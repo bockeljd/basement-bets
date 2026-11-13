@@ -414,11 +414,17 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
               2. How Each Pick Is Built
             </h3>
             <p className="text-slate-300">
-              Every prediction starts from the live sportsbook line and blends team strength ratings from{' '}
-              <strong>BartTorvik</strong>, <strong>Haslametrics</strong>, and <strong>KenPom</strong>, plus missing-player
-              injury adjustments, betting money vs. ticket splits, and referee foul tendencies. A bet is only posted when
-              our projected line disagrees with the sportsbook by at least <strong>1.5 points</strong> and clears{' '}
-              <strong>+2.0% expected value</strong>.
+              Our independent projection engine blends team efficiency ratings from{' '}
+              <strong>BartTorvik</strong>, <strong>KenPom</strong>, and <strong>Haslametrics</strong> alongside live
+              sportsbook odds. Instead of just echoing Vegas, whenever multiple independent systems agree the line is
+              off, Basement Bets boosts efficiency projection weight up to <strong>40%&ndash;60%</strong>.
+            </p>
+            <p className="text-slate-400">
+              KenPom contributes pace-adjusted efficiency margins, true scoring-efficiency fair totals,{' '}
+              <strong>Strength of Schedule (SOS / non-conference cupcake filters)</strong>, and{' '}
+              <strong>Luck regression</strong>; Haslametrics adds recent <strong>momentum</strong> and game-to-game{' '}
+              <strong>consistency</strong>. Plays are published when a side clears <strong>+2.0% EV</strong> (or{' '}
+              <strong>1.1+ pts / +2.5% EV</strong> high-conviction override) with clean safety checks.
             </p>
           </section>
 

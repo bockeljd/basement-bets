@@ -2594,7 +2594,7 @@ async def get_ncaam_board(request: Request, date: Optional[str] = None, days: in
 
 
 @app.get("/api/ncaam/top-picks")
-async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days: int = 1, limit_games: int = 25, compute_missing: bool = False, relax_gates: bool = False, max_compute: int = 20):
+async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days: int = 1, limit_games: int = 25, compute_missing: bool = False, relax_gates: bool = False, max_compute: int = 20, refresh: bool = False):
     """Return top model pick per game for the NCAAM board window.
 
     Goal: allow UI to render a 'Top pick' badge without firing /analyze for every row.
@@ -2628,12 +2628,12 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
     limit_games = max(1, min(limit_games, 250))
 
     # New behavior: serve precomputed daily picks when available (built by background job).
-    # compute_missing can still be used for ad-hoc computation, but UI should prefer cached.
+    # compute_missing/refresh can still be used for ad-hoc computation, but UI prefers cached when fresh.
     cache_key = f"{date}:{days}:{limit_games}:{'compute' if compute_missing else 'cached'}"
     now = datetime.now()
     cached = _top_picks_cache.get(cache_key)
-    # When compute_missing=True, bypass cache so UI always gets freshly-computed recs.
-    if (not compute_missing) and cached and (now - cached["at"]) < TOP_PICKS_TTL:
+    # When compute_missing=True or refresh=True, bypass in-memory cache so UI gets fresh recs.
+    if (not compute_missing) and (not refresh) and cached and (now - cached["at"]) < TOP_PICKS_TTL:
         payload = cached["data"]
         # Attach ETag so browser/clients can revalidate cheaply.
         etag = _make_etag(payload)
@@ -2938,13 +2938,15 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         return {'rec': _normalize_rec(rec), 'analyzed_at': r.get('analyzed_at')}
 
     # Try cached daily picks first.
+    fresh_cached_picks = {}
+    has_stale_version = False
     try:
         with get_db_connection() as conn:
             # Limit egress: only pull cached picks for the event_ids in the requested window.
             cached = _exec(
                 conn,
                 """
-                SELECT event_id, computed_at, is_actionable, reason, rec_json
+                SELECT event_id, computed_at, model_version, is_actionable, reason, rec_json, context_json
                 FROM daily_top_picks
                 WHERE league='NCAAM'
                   AND event_id = ANY(%s)
@@ -2965,14 +2967,32 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 return 'Line matches fair value — pass'
             return txt
 
+        def _parse_ctx_json(val):
+            if isinstance(val, dict):
+                return val
+            if isinstance(val, str) and val.strip():
+                try:
+                    parsed = json.loads(val)
+                    return parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    return {}
+            return {}
+
         cached = [r for r in cached if (dict(r).get('reason') or '') != 'Data Unavailable']
-        if cached:
+        if cached and not refresh:
+            current_ver = getattr(NCAAMMarketFirstModelV2, 'VERSION', '')
             picks = {}
+            actionable_cached = 0
             for r in cached:
                 d = dict(r)
                 eid = d.get('event_id')
                 is_act = bool(d.get('is_actionable'))
-                picks[eid] = {
+                mv = d.get('model_version') or ''
+                if is_act:
+                    actionable_cached += 1
+                if mv != current_ver:
+                    has_stale_version = True
+                entry = {
                     'rec': d.get('rec_json'),
                     'analyzed_at': d.get('computed_at'),
                     'event': event_meta.get(eid),
@@ -2980,60 +3000,69 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                     'source': 'cached',
                     'is_actionable': is_act,
                     'reason': None if is_act else _clean_no_bet_reason(d.get('reason')),
+                    'model_version': mv,
+                    'context': _parse_ctx_json(d.get('context_json')),
                 }
-            # Attach latest full-run status when available so the UI can show:
-            # "Stale slate — latest full run produced NO BETS. Showing last cached picks." (option 2)
-            run_meta = None
-            try:
-                with get_db_connection() as conn2:
-                    rm = _exec(conn2, """
-                      SELECT status, run_type, scanned, recs, created_at
-                      FROM model_run_log
-                      WHERE league='NCAAM' AND date_et=%s AND run_type='full'
-                      ORDER BY created_at DESC
-                      LIMIT 1
-                    """, (date,)).fetchone()
-                if rm:
-                    rmd = dict(rm)
-                    ca = rmd.get('created_at')
-                    if hasattr(ca, 'isoformat'):
-                        rmd['created_at'] = ca.isoformat().replace('+00:00', 'Z')
-                    run_meta = rmd
-            except Exception:
-                run_meta = None
+                picks[eid] = entry
+                if mv == current_ver:
+                    fresh_cached_picks[eid] = entry
 
-            data = {
-                'generated_at': datetime.utcnow().isoformat() + 'Z',
-                'date': date,
-                'days': days,
-                'limit_games': limit_games,
-                'run_meta': run_meta,
-                'stats': {
-                    'events_total': len(event_ids),
-                    'scanned': len(event_ids),
-                    'stored': 0,
-                    'computed_attempted': 0,
-                    'computed_with_pick': len([v for v in picks.values() if v.get('rec')]),
-                    'computed_no_pick': 0,
-                    'no_pick_reasons': {},
-                    'errors': 0,
-                },
-                'errors': [],
-                'no_pick_samples': [],
-                'picks': picks,
-            }
-            # NOTE: do not re-import jsonable_encoder inside this function; that
-            # creates a local symbol and can cause UnboundLocalError earlier.
-            data = jsonable_encoder(data)
-            etag = _make_etag(data)
-            inm = request.headers.get('if-none-match')
-            if inm and inm.strip() == etag:
-                return JSONResponse(status_code=304, content=None, headers={'ETag': etag})
-            return JSONResponse(content=data, headers={'ETag': etag, 'Cache-Control': f"public, max-age={int(os.getenv('TOP_PICKS_TTL_SECONDS', '90'))}"})
+            # Fast-return unless caller explicitly requested compute_missing or stale 0-pick cache needs auto-heal
+            if (not compute_missing) and not (actionable_cached == 0 and has_stale_version):
+                run_meta = None
+                try:
+                    with get_db_connection() as conn2:
+                        rm = _exec(conn2, """
+                          SELECT status, run_type, scanned, recs, created_at
+                          FROM model_run_log
+                          WHERE league='NCAAM' AND date_et=%s AND run_type='full'
+                          ORDER BY created_at DESC
+                          LIMIT 1
+                        """, (date,)).fetchone()
+                    if rm:
+                        rmd = dict(rm)
+                        ca = rmd.get('created_at')
+                        if hasattr(ca, 'isoformat'):
+                            rmd['created_at'] = ca.isoformat().replace('+00:00', 'Z')
+                        run_meta = rmd
+                except Exception:
+                    run_meta = None
+
+                data = {
+                    'generated_at': datetime.utcnow().isoformat() + 'Z',
+                    'date': date,
+                    'days': days,
+                    'limit_games': limit_games,
+                    'run_meta': run_meta,
+                    'stats': {
+                        'events_total': len(event_ids),
+                        'scanned': len(event_ids),
+                        'stored': 0,
+                        'computed_attempted': 0,
+                        'computed_with_pick': len([v for v in picks.values() if v.get('rec')]),
+                        'computed_no_pick': 0,
+                        'no_pick_reasons': {},
+                        'errors': 0,
+                    },
+                    'errors': [],
+                    'no_pick_samples': [],
+                    'picks': picks,
+                }
+                data = jsonable_encoder(data)
+                etag = _make_etag(data)
+                inm = request.headers.get('if-none-match')
+                if inm and inm.strip() == etag:
+                    return JSONResponse(status_code=304, content=None, headers={'ETag': etag})
+                return JSONResponse(content=data, headers={'ETag': etag, 'Cache-Control': f"public, max-age={int(os.getenv('TOP_PICKS_TTL_SECONDS', '90'))}"})
+            else:
+                compute_missing = True
     except Exception as e:
         # Don't fail the endpoint if the cache query fails, but do log so we can debug.
         print(f"[top-picks] cached daily_top_picks query failed: {e}")
         pass
+
+    if refresh:
+        compute_missing = True
 
     # If we don't have precomputed daily_top_picks and there are no stored picks,
     # allow a small on-demand compute to keep the UI from showing an empty slate.
@@ -3065,20 +3094,40 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             print(f"[top-picks] auto-ingest Torvik check failed: {e}")
 
     model = NCAAMMarketFirstModelV2()
-    picks = {}
+    picks = dict(fresh_cached_picks)
 
     stats = {
         'events_total': len(event_ids),
         'scanned': 0,
         'stored': 0,
         'computed_attempted': 0,
-        'computed_with_pick': 0,
+        'computed_with_pick': len([v for v in picks.values() if v.get('rec')]),
         'computed_no_pick': 0,
         'no_pick_reasons': {},
         'errors': 0,
     }
     errors = []
     no_pick_samples = []
+
+    try:
+        from src.scripts.build_daily_top_picks import ensure_table as _ensure_dtp, upsert_pick as _upsert_dtp
+    except Exception:
+        _ensure_dtp = None
+        _upsert_dtp = None
+
+    def _clean_no_bet_reason(raw):
+        txt = str(raw or '').strip()
+        if not txt:
+            return 'No clear betting edge'
+        if ('Object of type' in txt and 'serializable' in txt) or ('Traceback' in txt) or len(txt) > 140:
+            return 'Analysis unavailable — click Details to retry'
+        if txt.startswith('Sanity block'):
+            return 'Held for safety — model & book odds need closer match'
+        if txt.startswith('Steam move'):
+            return 'Passed — line already moved against this side'
+        if txt == 'No Edge Detected':
+            return 'Line matches fair value — pass'
+        return txt
 
     with get_db_connection() as conn:
         now_dt = datetime.now(timezone.utc)
@@ -3096,27 +3145,32 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         # Keep on-demand top-picks computation bounded for serverless.
         time_budget_s = float(os.getenv('TOP_PICKS_TIME_BUDGET_S', '15'))
         target_picks = int(os.getenv('TOP_PICKS_TARGET_PICKS', '5'))
+        upserted_any = False
 
         for eid in event_ids:
             stats['scanned'] += 1
+            if eid in picks:
+                continue
             try:
                 st = _dt((event_meta.get(eid) or {}).get('start_time'))
                 if st and st.tzinfo is None:
                     st = st.replace(tzinfo=timezone.utc)
 
-                stored = _load_latest_stored_pick(conn, eid)
-                if stored and stored.get('rec'):
-                    stats['stored'] += 1
-                    picks[eid] = {
-                        'rec': stored['rec'],
-                        'analyzed_at': stored.get('analyzed_at'),
-                        'event': event_meta.get(eid),
-                        'locked': bool(st and st <= now_dt),
-                        'source': 'stored',
-                        'is_actionable': True,
-                        'reason': None,
-                    }
-                    continue
+                if not refresh and not has_stale_version:
+                    stored = _load_latest_stored_pick(conn, eid)
+                    if stored and stored.get('rec'):
+                        stats['stored'] += 1
+                        picks[eid] = {
+                            'rec': stored['rec'],
+                            'analyzed_at': stored.get('analyzed_at'),
+                            'event': event_meta.get(eid),
+                            'locked': bool(st and st <= now_dt),
+                            'source': 'stored',
+                            'is_actionable': True,
+                            'reason': None,
+                            'context': {},
+                        }
+                        continue
 
                 if not compute_missing:
                     continue
@@ -3138,6 +3192,8 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 # In top-picks, do not persist predictions (serverless runtime + avoid DB churn).
                 res = model.analyze(eid, relax_gates=bool(relax_gates), persist=False)
                 top = (res.get('recommendations') or [None])[0]
+                ctx_res = res.get('context') if isinstance(res, dict) and isinstance(res.get('context'), dict) else {}
+                mv_res = res.get('model_version') if isinstance(res, dict) else getattr(model, 'VERSION', None)
                 if top:
                     stats['computed_with_pick'] += 1
                     picks[eid] = {
@@ -3148,6 +3204,8 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                         'source': 'computed',
                         'is_actionable': True,
                         'reason': None,
+                        'model_version': mv_res,
+                        'context': ctx_res,
                     }
                 else:
                     stats['computed_no_pick'] += 1
@@ -3165,11 +3223,23 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                         'source': 'computed',
                         'is_actionable': False,
                         'reason': reason,
+                        'model_version': mv_res,
+                        'context': ctx_res,
                     }
 
                     stats['no_pick_reasons'][reason] = int(stats['no_pick_reasons'].get(reason, 0)) + 1
                     if len(no_pick_samples) < 20:
                         no_pick_samples.append({'event_id': eid, 'reason': reason})
+
+                if _upsert_dtp and isinstance(res, dict):
+                    try:
+                        if not upserted_any and _ensure_dtp:
+                            _ensure_dtp()
+                        ev_day_str = str((event_meta.get(eid) or {}).get('day_et') or date)
+                        _upsert_dtp(ev_day_str, str(eid), res, conn=conn)
+                        upserted_any = True
+                    except Exception:
+                        pass
             except Exception as e:
                 stats['errors'] += 1
                 msg = str(e)
@@ -3177,6 +3247,13 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 if len(errors) < 20:
                     errors.append({'event_id': eid, 'error': msg})
                 print(f"[top-picks] analyze failed for {eid}: {e}")
+
+        if upserted_any:
+            try:
+                conn.commit()
+                _clear_model_caches()
+            except Exception:
+                pass
 
     data = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
@@ -3240,7 +3317,11 @@ async def analyze_ncaam_game(request: Request):
 
         # Pull canonical event row (teams, start_time, etc.)
         with get_db_connection() as conn:
-            row = _exec(conn, "SELECT id, league, home_team, away_team FROM events WHERE id = :id", {"id": event_id}).fetchone()
+            row = _exec(
+                conn,
+                "SELECT id, league, home_team, away_team, DATE(start_time AT TIME ZONE 'America/New_York')::text AS day_et FROM events WHERE id = :id",
+                {"id": event_id},
+            ).fetchone()
 
         if not row:
             raise HTTPException(status_code=404, detail=f"Event not found: {event_id}")
@@ -3296,6 +3377,20 @@ async def analyze_ncaam_game(request: Request):
         # Ensure teams are included even if model wrapper doesn't add them
         result.setdefault("home_team", ev.get("home_team"))
         result.setdefault("away_team", ev.get("away_team"))
+
+        # Sync live analysis back into daily_top_picks so Today's Top Plays & Full Board stay updated.
+        if isinstance(result, dict) and result.get("_source") != "daily_top_picks":
+            try:
+                from src.scripts.build_daily_top_picks import ensure_table as _ensure_dtp, upsert_pick as _upsert_dtp
+                _ensure_dtp()
+                ev_day = ev.get("day_et")
+                if not ev_day:
+                    with get_db_connection() as c_day:
+                        ev_day = _exec(c_day, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+                _upsert_dtp(str(ev_day), str(event_id), result)
+                _clear_model_caches()
+            except Exception as up_err:
+                print(f"[API] analyze upsert_pick warning: {up_err}")
 
         # NET context (best-effort from cached DB snapshot)
         try:
@@ -5603,6 +5698,7 @@ async def trigger_run_council_today(
 async def trigger_build_daily_top_picks(
     request: Request,
     date: Optional[str] = None,
+    days: int = 1,
     limit_games: int = 250,
     offset: int = 0,
     max_events: int = 15,
@@ -5661,7 +5757,13 @@ async def trigger_build_daily_top_picks(
             max_events = 15
         max_events = max(1, min(max_events, 50))
 
-        eids_all = fetch_event_ids_for_date(date, limit_games=limit_games)
+        try:
+            days_i = int(days)
+        except Exception:
+            days_i = 1
+        days_i = max(1, min(days_i, 7))
+
+        eids_all = fetch_event_ids_for_date(date, limit_games=limit_games, days=days_i)
         eids = eids_all[offset: offset + max_events]
 
         model = NCAAMMarketFirstModelV2()
@@ -5671,18 +5773,26 @@ async def trigger_build_daily_top_picks(
         # Batch DB writes to reduce Neon egress.
         from src.database import get_db_connection
         with get_db_connection() as conn:
-            for eid in eids:
+            for item in eids:
+                if isinstance(item, (tuple, list)) and len(item) >= 2:
+                    eid_val = str(item[0])
+                    day_val = str(item[1] or date)
+                else:
+                    eid_val = str(item)
+                    day_val = str(date)
                 try:
-                    res = model.analyze(eid, relax_gates=False, persist=True)
-                    upsert_pick(date, eid, res if isinstance(res, dict) else {}, conn=conn)
+                    res = model.analyze(eid_val, relax_gates=False, persist=True)
+                    upsert_pick(day_val, eid_val, res if isinstance(res, dict) else {}, conn=conn)
                     ok += 1
                 except Exception as e:
                     err += 1
                     try:
-                        upsert_pick(date, eid, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": "Analysis unavailable — click Details to retry"}, conn=conn)
+                        upsert_pick(day_val, eid_val, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": "Analysis unavailable — click Details to retry"}, conn=conn)
                     except Exception:
                         pass
             conn.commit()
+
+        _clear_model_caches()
 
         processed = ok + err
         next_offset = offset + processed

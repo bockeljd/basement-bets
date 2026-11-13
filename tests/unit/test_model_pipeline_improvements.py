@@ -558,3 +558,222 @@ def test_parse_kenpom_saved_html_with_colspan_and_upload_clears_caches(monkeypat
     assert "stale_key" not in api_mod._HTTP_CACHE
     assert "stale_tp" not in api_mod._top_picks_cache
 
+
+def test_kenpom_rich_metrics_and_efficiency_total():
+    import src.scripts.ingest_kenpom as ik
+    from src.services.kenpom_client import KenPomClient
+
+    html_doc = (
+        "<!doctype html><html><body><table id='ratings-table'><thead>"
+        "<tr><th>Rk</th><th>Team</th><th>Conf</th><th>W-L</th><th>NetRtg</th>"
+        "<th colspan='2'>ORtg</th><th colspan='2'>DRtg</th><th colspan='2'>AdjT</th>"
+        "<th colspan='2'>Luck</th><th colspan='2'>NetRtg</th>"
+        "<th colspan='2'>ORtg</th><th colspan='2'>DRtg</th><th colspan='2'>NetRtg</th></tr>"
+        "</thead><tbody>"
+        "<tr><td>1</td><td>Duke</td><td>ACC</td><td>3-0</td><td>+31.4</td>"
+        "<td>124.2</td><td>2</td><td>92.8</td><td>3</td><td>70.0</td><td>40</td>"
+        "<td>+.042</td><td>85</td><td>+8.5</td><td>15</td><td>111.0</td><td>10</td><td>102.5</td><td>20</td><td>+6.4</td><td>22</td></tr>"
+        "<tr><td>45</td><td>Brown</td><td>Ivy</td><td>1-2</td><td>-2.0</td>"
+        "<td>104.0</td><td>180</td><td>106.0</td><td>175</td><td>66.0</td><td>240</td>"
+        "<td>-.031</td><td>290</td><td>-3.5</td><td>210</td><td>102.0</td><td>215</td><td>105.5</td><td>195</td><td>-8.0</td><td>310</td></tr>"
+        "</tbody></table></body></html>"
+    )
+    parsed = ik.parse_kenpom_csv_text(html_doc)
+    assert len(parsed) == 2
+    assert parsed[0]["luck"] == pytest.approx(0.042)
+    assert parsed[0]["sos_adj_em"] == pytest.approx(8.5)
+    assert parsed[0]["opp_o"] == pytest.approx(111.0)
+    assert parsed[0]["opp_d"] == pytest.approx(102.5)
+    assert parsed[0]["ncsos_adj_em"] == pytest.approx(6.4)
+    assert parsed[1]["luck"] == pytest.approx(-0.031)
+    assert parsed[1]["ncsos_adj_em"] == pytest.approx(-8.0)
+
+    kp = KenPomClient.__new__(KenPomClient)
+    kp.get_team_rating = lambda name, conn=None: (
+        {
+            "team": "Duke",
+            "rank": 1,
+            "adj_em": 31.4,
+            "adj_o": 124.2,
+            "adj_d": 92.8,
+            "adj_t": 70.0,
+            "luck": 0.042,
+            "sos_adj_em": 8.5,
+            "ncsos_adj_em": 6.4,
+        }
+        if name == "Duke"
+        else {
+            "team": "Brown",
+            "rank": 45,
+            "adj_em": -2.0,
+            "adj_o": 104.0,
+            "adj_d": 106.0,
+            "adj_t": 66.0,
+            "luck": -0.031,
+            "sos_adj_em": -3.5,
+            "ncsos_adj_em": -8.0,
+        }
+    )
+    adj = kp.calculate_kenpom_adjustment("Duke", "Brown", neutral_site=False)
+    assert adj["fair_total"] is not None and 130.0 < adj["fair_total"] < 170.0
+    assert adj["projected_score"] is not None and "-" in adj["projected_score"]
+    assert adj["luck_diff"] == pytest.approx(0.073)
+    assert adj["sos_diff"] == pytest.approx(12.0)
+    assert adj["sos_spread_adj"] > 0.0
+
+
+def test_torvik_symmetric_hca_and_hasla_prefix_matching():
+    from src.services.torvik_projection import TorvikProjectionService
+    from src.services.haslametrics_client import HaslametricsClient
+    from src.utils.team_matcher import TeamMatcher
+
+    svc = TorvikProjectionService.__new__(TorvikProjectionService)
+    svc.LEAGUE_AVG_EFF = 106.5
+    stats_pair = {
+        "home": {"adj_off": 112.0, "adj_def": 100.0, "adj_tempo": 68.0},
+        "away": {"adj_off": 112.0, "adj_def": 100.0, "adj_tempo": 68.0},
+        "game_tempo": 68.0,
+    }
+    svc.get_matchup_team_stats = lambda h, a, date=None: stats_pair
+    proj_home = svc.compute_torvik_projection("Team A", "Team B", neutral_site=False)
+    proj_neutral = svc.compute_torvik_projection("Team A", "Team B", neutral_site=True)
+    # Symmetric HCA (+1.6 / -1.6) shifts margin by +3.2 without inflating total
+    assert proj_home["margin"] == pytest.approx(proj_neutral["margin"] + 3.2)
+    assert proj_home["total"] == pytest.approx(proj_neutral["total"])
+
+    hc = HaslametricsClient.__new__(HaslametricsClient)
+    hc.matcher = TeamMatcher()
+    hc.matcher.find_source_name = lambda *a, **kw: None
+    hc._all_names_cache = ["Geo. Washington", "Saint Mary's", "Ohio St."]
+    assert hc._find_hasla_team_name(None, "George Washington Colonials") == "Geo. Washington"
+
+
+def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monkeypatch):
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from fastapi.testclient import TestClient
+    import src.api as api_mod
+    from src.config import settings
+
+    model = NCAAMMarketFirstModelV2()
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    ev_ctx = {
+        "id": "action:ncaam:999999",
+        "home_team": "George Washington Colonials",
+        "away_team": "Harvard Crimson",
+        "start_time": "2026-11-13T23:00:00+00:00",
+        "neutral_site": False,
+    }
+    monkeypatch.setattr(
+        model.torvik_service,
+        "get_projection",
+        lambda h, a, date=None, neutral_site=False: {
+            "margin": 8.0,  # fair spread -8.0 (3.5 pts stronger than -4.5 market)
+            "total": 144.0,
+            "projected_score": "68-76",
+            "lean": "Home",
+        },
+    )
+    monkeypatch.setattr(
+        model.torvik_service,
+        "get_matchup_team_stats",
+        lambda h, a, date=None: {
+            "home": {"continuity": 0.72, "luck": 0.0, "record": "3-0", "adj_off": 114.0, "adj_def": 99.0},
+            "away": {"continuity": 0.72, "luck": 0.0, "record": "3-0", "adj_off": 106.0, "adj_def": 103.0},
+            "game_tempo": 69.0,
+        },
+    )
+    monkeypatch.setattr(
+        model.kenpom_client,
+        "calculate_kenpom_adjustment",
+        lambda h, a, neutral_site=False: {
+            "spread_adj": 8.5,
+            "fair_margin": 8.5,
+            "neutral_margin": 5.3,
+            "total_adj": 0.3,
+            "fair_total": 145.5,
+            "sos_spread_adj": 0.25,
+            "summary": "KenPom: George Washington vs Harvard",
+        },
+    )
+    monkeypatch.setattr(model.kenpom_client, "get_player_stats_for_team", lambda t, limit=50: [])
+    monkeypatch.setattr(model.kenpom_client, "get_team_player_agg", lambda t: None)
+    monkeypatch.setattr(model.kenpom_client, "get_team_rating", lambda t: {"adj_t": 69.0})
+    monkeypatch.setattr(model.kenpom_client, "get_home_court", lambda t: None)
+    monkeypatch.setattr(
+        model.haslametrics_client,
+        "calculate_projection",
+        lambda h, a, neutral_site=False, asof_date=None: {
+            "available": True,
+            "margin": 8.2,
+            "total": 143.5,
+            "projected_score": "68-76",
+            "home": {"sos": 50, "mom": 0.05, "inc": 0.08},
+            "away": {"sos": 150, "mom": -0.02, "inc": 0.08},
+        },
+    )
+    monkeypatch.setattr(model.geo_service, "get_altitude_adjustment", lambda h, neutral_site=False: 0.0)
+    monkeypatch.setattr(model.geo_service, "calculate_distance", lambda h, a: 100.0)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda t, as_of_date=None: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda t, ev: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda t, eid, gd: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.02, "sd": 0.90})
+
+    snapshot = {
+        "spread_home": -4.5,
+        "spread_price_home": -110,
+        "total": 137.0,
+        "total_over_price": -110,
+        "book_spread": "DraftKings",
+        "book_total": "DraftKings",
+        "_best_spread_home": {"line_value": -4.5, "price": -110, "book": "DraftKings"},
+        "_best_spread_away": {"line_value": 4.5, "price": -110, "book": "DraftKings"},
+        "_best_total_over": {"line_value": 137.0, "price": -110, "book": "DraftKings"},
+        "_best_total_under": {"line_value": 137.0, "price": -110, "book": "DraftKings"},
+    }
+    res = model.analyze(
+        "action:ncaam:999999",
+        market_snapshot=snapshot,
+        event_context=ev_ctx,
+        persist=False,
+    )
+    ctx = res["context"]
+    assert ctx["conviction_sources"] == 3
+    assert ctx["efficiency_weight"] >= 0.40
+    assert ctx["fair_spread_home"] < -5.8
+    assert ctx["fair_total"] > 138.0
+    assert ctx["closest_lean"] is not None
+
+    # Verify /api/jobs/build_daily_top_picks cleanly unpacks (event_id, day_et) tuples
+    import src.scripts.build_daily_top_picks as bdtp
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+    monkeypatch.setattr(bdtp, "ensure_table", lambda: None)
+    monkeypatch.setattr(
+        bdtp,
+        "fetch_event_ids_for_date",
+        lambda date, limit_games=250, days=1: [("action:ncaam:111", "2026-11-13")],
+    )
+    analyzed_ids = []
+    upserted = []
+    monkeypatch.setattr(
+        NCAAMMarketFirstModelV2,
+        "analyze",
+        lambda self, eid, **kw: analyzed_ids.append(eid) or {"recommendations": [], "block_reason": "Pass", "model_version": self.VERSION},
+    )
+    monkeypatch.setattr(bdtp, "upsert_pick", lambda d, eid, r, conn=None: upserted.append((d, eid)))
+
+    mock_conn = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_conn
+    with patch("src.database.get_db_connection", return_value=mock_ctx):
+        client = TestClient(api_mod.app)
+        r_job = client.post(
+            "/api/jobs/build_daily_top_picks?date=2026-11-13&days=1&offset=0&max_events=10",
+            headers={"X-BASEMENT-KEY": "test-secret"},
+        )
+    assert r_job.status_code == 200
+    assert r_job.json()["ok"] == 1
+    assert analyzed_ids == ["action:ncaam:111"]
+    assert upserted == [("2026-11-13", "action:ncaam:111")]
+
+

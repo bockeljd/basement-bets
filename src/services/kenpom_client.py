@@ -4,6 +4,7 @@ KenPom Client for Ensemble Model
 Fetches KenPom efficiency ratings from database and calculates adjustments
 """
 
+import json
 from typing import Dict, Optional, List, Any
 from src.database import get_db_connection, _exec
 from src.utils.ncaam_season import season_start_date_for_game
@@ -85,7 +86,7 @@ class KenPomClient:
     def _exec_rating_query(self, conn, matched_name, asof_date: Optional[str] = None):
         season_start = season_start_date_for_game(asof_date)
         query = """
-        SELECT team_name, rank, adj_em, adj_o, adj_d, adj_t
+        SELECT team_name, rank, adj_em, adj_o, adj_d, adj_t, raw
         FROM kenpom_team_ratings_daily
         WHERE team_name = %s AND asof_date >= %s
         ORDER BY asof_date DESC
@@ -96,13 +97,25 @@ class KenPomClient:
         
         res = None
         if row:
+            raw_val = row.get('raw') if isinstance(row, dict) else (row[6] if len(row) > 6 else None)
+            if isinstance(raw_val, str):
+                try:
+                    raw_val = json.loads(raw_val)
+                except Exception:
+                    raw_val = {}
+            raw_dict = raw_val if isinstance(raw_val, dict) else {}
             res = {
-                'team': row['team_name'],
-                'rank': row['rank'],
-                'adj_em': row['adj_em'],
-                'adj_o': row['adj_o'],
-                'adj_d': row['adj_d'],
-                'adj_t': row['adj_t']
+                'team': row['team_name'] if isinstance(row, dict) else row[0],
+                'rank': row['rank'] if isinstance(row, dict) else row[1],
+                'adj_em': row['adj_em'] if isinstance(row, dict) else row[2],
+                'adj_o': row['adj_o'] if isinstance(row, dict) else row[3],
+                'adj_d': row['adj_d'] if isinstance(row, dict) else row[4],
+                'adj_t': row['adj_t'] if isinstance(row, dict) else row[5],
+                'luck': raw_dict.get('luck'),
+                'sos_adj_em': raw_dict.get('sos_adj_em'),
+                'opp_o': raw_dict.get('opp_o'),
+                'opp_d': raw_dict.get('opp_d'),
+                'ncsos_adj_em': raw_dict.get('ncsos_adj_em'),
             }
         
         self._rating_cache[matched_name] = res
@@ -311,6 +324,11 @@ class KenPomClient:
         h_tempo = float(home_rating.get('adj_t') or baseline_tempo)
         a_tempo = float(away_rating.get('adj_t') or baseline_tempo)
         avg_tempo = (h_tempo + a_tempo) / 2.0
+        expected_tempo = (
+            max(55.0, min(85.0, h_tempo + a_tempo - baseline_tempo))
+            if (h_tempo > 40.0 and a_tempo > 40.0)
+            else avg_tempo
+        )
 
         em_diff = float(home_rating.get('adj_em') or 0.0) - float(away_rating.get('adj_em') or 0.0)
         neutral_margin = em_diff * (avg_tempo / 100.0)
@@ -318,8 +336,44 @@ class KenPomClient:
         fair_margin = neutral_margin + hca
         spread_adj = fair_margin
 
-        # Total adjustment based on tempo
-        total_adj = (avg_tempo - baseline_tempo) * 0.3  # Faster tempo = higher total
+        # Total adjustment based on tempo (preserved for backwards-compatible callers/tests)
+        total_adj = (avg_tempo - baseline_tempo) * 0.3
+
+        # True efficiency-based total projection when AdjO & AdjD are available
+        h_adj_o = float(home_rating.get('adj_o') or 0.0)
+        h_adj_d = float(home_rating.get('adj_d') or 0.0)
+        a_adj_o = float(away_rating.get('adj_o') or 0.0)
+        a_adj_d = float(away_rating.get('adj_d') or 0.0)
+        fair_total = None
+        projected_score = None
+        if h_adj_o > 50.0 and h_adj_d > 50.0 and a_adj_o > 50.0 and a_adj_d > 50.0:
+            d1_avg_eff = 106.5
+            hca_ppp = 0.0 if neutral_site else (hca * 0.5)
+            h_ppp = ((h_adj_o * a_adj_d) / d1_avg_eff) + hca_ppp
+            a_ppp = ((a_adj_o * h_adj_d) / d1_avg_eff) - hca_ppp
+            home_score = h_ppp * (expected_tempo / 100.0)
+            away_score = a_ppp * (expected_tempo / 100.0)
+            fair_total = round(home_score + away_score, 1)
+            projected_score = f"{int(round(away_score))}-{int(round(home_score))}"
+
+        def _opt_float(v):
+            try:
+                return float(v) if v is not None else None
+            except Exception:
+                return None
+
+        h_luck = _opt_float(home_rating.get('luck'))
+        a_luck = _opt_float(away_rating.get('luck'))
+        h_sos = _opt_float(home_rating.get('sos_adj_em'))
+        a_sos = _opt_float(away_rating.get('sos_adj_em'))
+        h_ncsos = _opt_float(home_rating.get('ncsos_adj_em'))
+        a_ncsos = _opt_float(away_rating.get('ncsos_adj_em'))
+
+        luck_diff = round(h_luck - a_luck, 3) if (h_luck is not None and a_luck is not None) else None
+        sos_diff = round(h_sos - a_sos, 2) if (h_sos is not None and a_sos is not None) else None
+        ncsos_diff = round(h_ncsos - a_ncsos, 2) if (h_ncsos is not None and a_ncsos is not None) else None
+        raw_sos_adj = ((sos_diff or 0.0) * 0.05) + ((ncsos_diff or 0.0) * 0.03)
+        sos_spread_adj = round(max(-1.0, min(1.0, raw_sos_adj)), 2) if (sos_diff is not None or ncsos_diff is not None) else 0.0
 
         summary = f"KenPom: {home_rating['team']} (#{home_rating['rank']}) vs {away_rating['team']} (#{away_rating['rank']})"
 
@@ -328,7 +382,20 @@ class KenPomClient:
             'neutral_margin': round(neutral_margin, 1),
             'fair_margin': round(fair_margin, 1),
             'total_adj': round(total_adj, 1),
+            'fair_total': fair_total,
+            'projected_score': projected_score,
+            'expected_tempo': round(expected_tempo, 1),
             'avg_tempo': round(avg_tempo, 1),
+            'luck_diff': luck_diff,
+            'sos_diff': sos_diff,
+            'ncsos_diff': ncsos_diff,
+            'sos_spread_adj': sos_spread_adj,
+            'home_luck': h_luck,
+            'away_luck': a_luck,
+            'home_sos': h_sos,
+            'away_sos': a_sos,
+            'home_ncsos': h_ncsos,
+            'away_ncsos': a_ncsos,
             'summary': summary,
             'home_adj_em': home_rating['adj_em'],
             'away_adj_em': away_rating['adj_em'],
