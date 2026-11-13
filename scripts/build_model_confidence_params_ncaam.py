@@ -71,9 +71,11 @@ def _fetch_tau_errors(days: int) -> tuple[List[float], List[float]]:
             continue
         err = cl - mu
         if mkt == 'SPREAD':
-            spread_err.append(err)
+            if abs(mu) <= 60.0 and abs(cl) <= 60.0 and abs(err) <= 20.0:
+                spread_err.append(err)
         elif mkt == 'TOTAL':
-            total_err.append(err)
+            if 80.0 <= mu <= 240.0 and 80.0 <= cl <= 240.0 and abs(err) <= 30.0:
+                total_err.append(err)
     return spread_err, total_err
 
 
@@ -99,8 +101,8 @@ def main(days: int = 14, out_path: str | None = None, min_obs: int = 20, auto_wi
         print(f"[confidence] Insufficient closing-line observations in last {used_days}d (spread={len(spread_err)}, total={len(total_err)}); keeping existing params.")
         return
 
-    tau_spread = _std(spread_err)
-    tau_total = _std(total_err)
+    tau_spread = min(12.0, _std(spread_err))
+    tau_total = min(18.0, _std(total_err))
 
     artifact = {
         "sport": "ncaam",

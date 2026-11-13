@@ -50,9 +50,9 @@ const MARKET_COLOR = {
 
 function StatTile({ label, value, sub, accent }) {
   return (
-    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col gap-1">
+    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col gap-1 min-w-0">
       <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">{label}</div>
-      <div className={`text-2xl font-black ${accent || 'text-slate-100'}`}>{value}</div>
+      <div className={`text-xl sm:text-2xl font-black tabular-nums whitespace-nowrap ${accent || 'text-slate-100'}`}>{value}</div>
       {sub && <div className="text-xs text-slate-500">{sub}</div>}
     </div>
   );
@@ -140,8 +140,8 @@ function PredictionRow({ pred }) {
 
   return (
     <tr className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-      <td className="py-3 px-4 text-xs text-slate-400 whitespace-nowrap font-mono tabular-nums">{pred.day_et || pred.analyzed_at?.slice(0, 10) || '—'}</td>
-      <td className="py-3 px-4">
+      <td className="py-2.5 px-2.5 sm:px-3 text-xs text-slate-400 whitespace-nowrap font-mono tabular-nums">{pred.day_et || pred.analyzed_at?.slice(0, 10) || '—'}</td>
+      <td className="py-2.5 px-2.5 sm:px-3 min-w-[140px]">
         <div className="text-xs font-black text-slate-100">
           {formatMatchup(pred) || pred.matchup || (pred.away_team && pred.home_team ? `${pred.away_team} @ ${pred.home_team}` : '—')}
         </div>
@@ -151,28 +151,28 @@ function PredictionRow({ pred }) {
           </div>
         )}
       </td>
-      <td className="py-3 px-4">
+      <td className="py-2.5 px-2.5 sm:px-3 whitespace-nowrap">
         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${MARKET_COLOR[market] || 'bg-slate-800 text-slate-400'}`}>
           {market}
         </span>
       </td>
-      <td className="py-3 px-4 text-xs font-bold text-slate-100">
+      <td className="py-2.5 px-2.5 sm:px-3 text-xs font-bold text-slate-100">
         {pred.selection || '—'}
         {effectivePrice != null && (
           <span className="ml-1.5 text-[10px] font-mono font-normal text-slate-400">({fmtOdds(effectivePrice)})</span>
         )}
       </td>
-      <td className="py-3 px-4 text-xs text-slate-300 font-mono tabular-nums">
+      <td className="py-2.5 px-2.5 sm:px-3 text-xs text-slate-300 font-mono tabular-nums whitespace-nowrap">
         {Number.isFinite(ev) ? `${ev >= 0 ? '+' : ''}${(ev * 100).toFixed(1)}%` : '—'}
       </td>
-      <td className="py-3 px-4">
+      <td className="py-2.5 px-2.5 sm:px-3 whitespace-nowrap">
         <span className={`text-xs font-black ${CONFIDENCE_COLOR[confLabel] || 'text-slate-400'}`}>{confLabel}</span>
       </td>
-      <td className={`py-3 px-4 text-xs ${outCls}`}>{outcome}</td>
-      <td className={`py-3 px-4 text-xs font-mono tabular-nums font-bold ${profit > 0 ? 'text-emerald-400' : profit < 0 ? 'text-red-400' : 'text-slate-500'}`}>
+      <td className={`py-2.5 px-2.5 sm:px-3 text-xs whitespace-nowrap ${outCls}`}>{outcome}</td>
+      <td className={`py-2.5 px-2.5 sm:px-3 text-xs font-mono tabular-nums font-bold whitespace-nowrap ${profit > 0 ? 'text-emerald-400' : profit < 0 ? 'text-red-400' : 'text-slate-500'}`}>
         {outcome === 'PENDING' ? '—' : (profit > 0 ? `+${profit.toFixed(2)}u` : `${profit.toFixed(2)}u`)}
       </td>
-      <td className="py-3 px-4 text-[10px] text-slate-400 max-w-[200px]">
+      <td className="py-2.5 px-2.5 sm:px-3 text-[10px] text-slate-400 max-w-[160px]">
         {inputs.weather || '—'}
       </td>
     </tr>
@@ -443,7 +443,15 @@ export default function MLB() {
           label="Win Rate"
           value={recordStats.winRate !== null ? `${recordStats.winRate.toFixed(1)}%` : '—'}
           sub="settled bets (excl. pushes)"
-          accent={recordStats.winRate !== null ? (recordStats.winRate >= 52.4 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-400'}
+          accent={
+            recordStats.winRate !== null
+              ? ((recordStats.roi > 0 || recordStats.winRate >= 52.4)
+                  ? 'text-emerald-400'
+                  : recordStats.winRate >= 50.0
+                    ? 'text-amber-300'
+                    : 'text-red-400')
+              : 'text-slate-400'
+          }
         />
         <StatTile
           label="Profit (Units)"
@@ -618,7 +626,7 @@ export default function MLB() {
                           key={i}
                           scope="col"
                           aria-sort={isSorted ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined}
-                          className="py-2 px-4 text-[10px] uppercase tracking-wider text-slate-400 font-black whitespace-nowrap"
+                          className="py-2 px-2.5 sm:px-3 text-[10px] uppercase tracking-wider text-slate-400 font-black whitespace-nowrap"
                         >
                           {col.key ? (
                             <button

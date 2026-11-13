@@ -795,10 +795,13 @@ def void_stale_postponed_predictions(
         JOIN events e ON m.event_id = e.id
         LEFT JOIN game_results gr ON gr.event_id = e.id
         WHERE (m.outcome IS NULL OR UPPER(TRIM(m.outcome)) IN ('PENDING', ''))
-          AND UPPER(COALESCE(m.market_type, '')) <> 'AUTO'
           AND UPPER(COALESCE(NULLIF(TRIM(m.pick), ''), NULLIF(TRIM(m.selection), ''), '')) NOT IN ('', 'NONE', 'NO BET', 'PASS')
           AND e.start_time < NOW() - (%s || ' days')::interval
-          AND COALESCE(gr.final, FALSE) IS NOT TRUE
+          AND NOT (
+              COALESCE(gr.final, FALSE) IS TRUE
+              AND COALESCE(gr.home_score, e.home_score) IS NOT NULL
+              AND COALESCE(gr.away_score, e.away_score) IS NOT NULL
+          )
         ORDER BY e.start_time DESC
         LIMIT 500
         """,

@@ -199,48 +199,44 @@ def normalize_history_row(row: dict) -> dict:
         except Exception:
             pass
 
-    if out["outcome"] == "PENDING" and out.get("score") and "-" in str(out.get("score")):
-        is_final = out.get("final") is True
-        if not is_final and out.get("start_time"):
-            try:
-                from datetime import datetime, timedelta, timezone
+    if out["outcome"] == "PENDING":
+        from datetime import datetime, timedelta, timezone
+        from src.services.grading_backfill import _parse_dt_utc
 
-                st = out["start_time"]
-                if isinstance(st, str):
-                    st_dt = datetime.fromisoformat(st.replace("Z", "+00:00"))
-                else:
-                    st_dt = st
-                if st_dt.tzinfo is None:
-                    st_dt = st_dt.replace(tzinfo=timezone.utc)
-                is_final = st_dt < datetime.now(timezone.utc) - timedelta(hours=8)
-            except Exception:
-                is_final = False
+        has_score = bool(out.get("score") and "-" in str(out.get("score")))
+        ref_dt = _parse_dt_utc(out.get("start_time")) or _parse_dt_utc(out.get("day_et"))
+        now_utc = datetime.now(timezone.utc)
 
-        if is_final:
-            try:
-                parts = str(out["score"]).split("-", 1)
-                a_sc = int(float(parts[0].strip()))
-                h_sc = int(float(parts[1].strip()))
-                from src.services.grading_backfill import grade_score_prediction
+        if has_score:
+            is_final = out.get("final") is True or (ref_dt is not None and ref_dt < now_utc - timedelta(hours=8))
+            if is_final:
+                try:
+                    parts = str(out["score"]).split("-", 1)
+                    a_sc = int(float(parts[0].strip()))
+                    h_sc = int(float(parts[1].strip()))
+                    from src.services.grading_backfill import grade_score_prediction
 
-                mkt = out["market_type"]
-                if mkt in ("SPREAD", "TOTAL", "MONEYLINE"):
-                    is_mlb = str(out.get("sport") or "").upper() == "MLB" or str(out.get("event_id") or "").startswith(("mlb:", "action:mlb:"))
-                    graded = grade_score_prediction(
-                        market_type=mkt,
-                        pick=out.get("pick"),
-                        selection=out.get("selection"),
-                        bet_line=out.get("bet_line"),
-                        home_team=out.get("home_team"),
-                        away_team=out.get("away_team"),
-                        home_score=h_sc,
-                        away_score=a_sc,
-                        is_mlb=is_mlb,
-                    )
-                    if graded in ("WON", "LOST", "PUSH", "VOID"):
-                        out["outcome"] = graded
-            except Exception:
-                pass
+                    mkt = out["market_type"]
+                    if mkt in ("SPREAD", "TOTAL", "MONEYLINE"):
+                        is_mlb = str(out.get("sport") or "").upper() == "MLB" or str(out.get("event_id") or "").startswith(("mlb:", "action:mlb:"))
+                        graded = grade_score_prediction(
+                            market_type=mkt,
+                            pick=out.get("pick"),
+                            selection=out.get("selection"),
+                            bet_line=out.get("bet_line"),
+                            home_team=out.get("home_team"),
+                            away_team=out.get("away_team"),
+                            home_score=h_sc,
+                            away_score=a_sc,
+                            is_mlb=is_mlb,
+                        )
+                        if graded in ("WON", "LOST", "PUSH", "VOID"):
+                            out["outcome"] = graded
+                except Exception:
+                    pass
+        elif out.get("final") is not True and ref_dt is not None and ref_dt < now_utc - timedelta(days=14):
+            # Genuinely postponed/cancelled legacy slate items (>14d old with no score reported)
+            out["outcome"] = "VOID"
 
     return out
 

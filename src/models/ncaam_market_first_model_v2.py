@@ -23,6 +23,11 @@ def _safe_float(x):
 
 
 from src.models.base_model import BaseModel
+from src.utils.model_calibration import (
+    interpolate_pava_prob,
+    load_winprob_calibration,
+    resolve_model_param_path,
+)
 from src.utils.naming import standardize_team_name
 
 # Phase gate: council qualitative adjustments are only applied to model outputs
@@ -1089,7 +1094,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         tempo_factor = math.sqrt(game_tempo / 68.0)
         
         base_sigma_spread = 10.5
-        base_sigma_total = 13.5  # Adjusted from 15.0 for accuracy
+        base_sigma_total = 15.0  # Restored D1 total scoring sigma to curb marginal O/U false positives
 
         early_season_sigma_mult = 1.08 if game_month == 11 else (1.04 if game_month == 12 else 1.0)
         if avg_continuity < 0.5:
@@ -1882,8 +1887,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 wp = prob_home if side == 'HOME' else prob_away
                 ev = ev_home if side == 'HOME' else ev_away
 
-                # Gate persistence similarly to straight picks
-                should_persist_ml = float(ev or 0.0) >= float(self.PUBLISH_MIN_EV)
+                # Gate Moneyline persistence strictly to curb unprofitable longshots / marginal noise
+                should_persist_ml = self._passes_ml_persist_gates(
+                    win_prob=wp,
+                    ev=ev,
+                    price=price,
+                )
                 should_persist_ml = should_persist_ml and team is not None and str(team).strip() != ''
 
                 # Apply same lock window
@@ -1943,10 +1952,37 @@ class NCAAMMarketFirstModelV2(BaseModel):
     # --- Publication gates (Research tab) ---
     # Straight bets only for now. (Correlation/parlays are handled elsewhere.)
     PUBLISH_MIN_EV = 0.02  # +2.0% per unit
+    PUBLISH_MIN_EV_ML = 0.05  # +5.0% EV required on Moneyline picks
+    MIN_ML_WIN_PROB = 0.45    # Exclude <45% longshots (historically ~31.8% win, -10.4% ROI)
+    MAX_ML_UNDERDOG_PRICE = 185
+    MAX_ML_FAVORITE_PRICE = -250
+    MIN_ML_PROB_EDGE = 0.03   # Require >= +3.0% calibrated win-prob edge vs market implied
     PUBLISH_CI_Z = 1.96    # 95% CI on archetype mean
     PUBLISH_MIN_N_TORVIK_OK = 40
     PUBLISH_MIN_N_TORVIK_MISSING = 60
     PUBLISH_MIN_EV_TORVIK_MISSING_BUMP = 0.005  # +0.5%
+
+    def _passes_ml_persist_gates(self, *, win_prob: Any, ev: Any, price: Any) -> bool:
+        """Apply calibrated Moneyline profitability & price-band gates before persisting."""
+        from src.utils.ev import implied_prob_american
+
+        try:
+            ev_val = float(ev)
+            wp_val = float(win_prob)
+            pr_val = int(price)
+        except Exception:
+            return False
+
+        if ev_val < float(self.PUBLISH_MIN_EV_ML):
+            return False
+        if wp_val < float(self.MIN_ML_WIN_PROB):
+            return False
+        if pr_val > int(self.MAX_ML_UNDERDOG_PRICE) or pr_val < int(self.MAX_ML_FAVORITE_PRICE):
+            return False
+        ip = implied_prob_american(pr_val)
+        if ip is not None and (wp_val - float(ip)) < float(self.MIN_ML_PROB_EDGE):
+            return False
+        return True
 
     _archetype_cache: Dict[str, Dict[str, Any]] = {}
 
@@ -1990,11 +2026,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     _action_network_stats: Optional[Dict[str, Any]] = None
 
     def _resolve_model_param_path(self, filename: str) -> str:
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        bundled_path = os.path.join(repo_root, 'src', 'services', 'model_params', filename)
-        if os.path.exists(bundled_path):
-            return bundled_path
-        return os.path.join(repo_root, 'data', 'model_params', filename)
+        return resolve_model_param_path(filename)
 
     def _load_action_network_stats(self) -> Dict[str, Any]:
         if self._action_network_stats is not None:
@@ -2149,63 +2181,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
         """Load piecewise-linear win_prob calibration mapping (DB store first, JSON fallback)."""
         if self._winprob_calibration is not None:
             return self._winprob_calibration
-
-        try:
-            from src.database import get_model_param
-            db_cal = get_model_param("winprob_calibration_ncaam")
-            if isinstance(db_cal, dict) and (db_cal.get("points") or []):
-                self._winprob_calibration = db_cal
-                return self._winprob_calibration
-        except Exception:
-            pass
-
-        path = self._resolve_model_param_path('winprob_calibration_ncaam.json')
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                self._winprob_calibration = json.load(f)
-        except Exception:
-            self._winprob_calibration = {"points": []}
+        self._winprob_calibration = load_winprob_calibration(
+            "winprob_calibration_ncaam",
+            "winprob_calibration_ncaam.json",
+        )
         return self._winprob_calibration
 
     def _calibrate_win_prob(self, p: float) -> float:
         """Calibrate raw win probability using a monotonic piecewise-linear mapping."""
         try:
-            p = float(p)
+            p_val = float(p)
         except Exception:
             return p
-
-        if p <= 0.0:
+        if p_val <= 0.0:
             return 0.0
-        if p >= 1.0:
+        if p_val >= 1.0:
             return 1.0
-
-        cal = self._load_winprob_calibration() or {}
-        pts = cal.get('points') or []
-        if not pts or len(pts) < 2:
-            return p
-
-        xs = [float(x.get('p')) for x in pts if x and x.get('p') is not None]
-        ys = [float(x.get('p_cal')) for x in pts if x and x.get('p_cal') is not None]
-        if len(xs) != len(ys) or len(xs) < 2:
-            return p
-
-        # If outside range, clamp to endpoints
-        if p <= xs[0]:
-            return max(0.0, min(1.0, ys[0]))
-        if p >= xs[-1]:
-            return max(0.0, min(1.0, ys[-1]))
-
-        # Linear interpolate
-        for i in range(1, len(xs)):
-            if p <= xs[i]:
-                x0, x1 = xs[i - 1], xs[i]
-                y0, y1 = ys[i - 1], ys[i]
-                if x1 == x0:
-                    return max(0.0, min(1.0, y1))
-                t = (p - x0) / (x1 - x0)
-                y = y0 + t * (y1 - y0)
-                return max(0.0, min(1.0, y))
-        return p
+        return interpolate_pava_prob(p_val, self._load_winprob_calibration())
 
     _model_conf_params: Optional[Dict[str, Any]] = None
 

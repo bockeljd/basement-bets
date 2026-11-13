@@ -35,7 +35,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python3 scripts/build_winprob_calibration_ncaam.py --league NCAAM --days 30 --min-obs 50
-          python3 scripts/build_winprob_calibration_ncaam.py --league MLB --days 60 --min-obs 50
+          python3 scripts/build_winprob_calibration_ncaam.py --league MLB --days 365 --min-obs 150
           python3 scripts/build_model_confidence_params_ncaam.py --days 365
 
       - name: Commit Updated Calibration Curve (if changed)

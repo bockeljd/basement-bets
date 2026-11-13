@@ -85,3 +85,59 @@ def test_pava_calibration_artifact_fit():
     assert art["n_obs"] == 20
     assert len(art["points"]) >= 2
     assert art["points"][0]["p_cal"] <= art["points"][-1]["p_cal"]
+
+
+def test_shared_pava_interpolation_and_min_obs_guard():
+    from src.utils.model_calibration import interpolate_pava_prob
+
+    cal = {
+        "n_obs": 250,
+        "points": [
+            {"p": 0.40, "p_cal": 0.35},
+            {"p": 0.60, "p_cal": 0.55},
+        ],
+    }
+    assert round(interpolate_pava_prob(0.50, cal, min_obs=200), 4) == 0.45
+    assert round(interpolate_pava_prob(0.50, cal, min_obs=200, blend_weight=0.5), 4) == 0.475
+    assert interpolate_pava_prob(0.50, {**cal, "n_obs": 116}, min_obs=200) == 0.50
+
+
+def test_ncaam_ml_persist_gate_blocks_longshots_and_thin_edges():
+    m = NCAAMMarketFirstModelV2.__new__(NCAAMMarketFirstModelV2)
+    # +320 longshot with weak win_prob fails even if raw EV > 0.05
+    assert m._passes_ml_persist_gates(win_prob=0.28, ev=0.176, price=320) is False
+    # Marginal +3% EV passes old 2% threshold but fails new 5% ML threshold
+    assert m._passes_ml_persist_gates(win_prob=0.56, ev=0.03, price=-118) is False
+    # Heavy favorite deeper than -250 fails
+    assert m._passes_ml_persist_gates(win_prob=0.80, ev=0.08, price=-300) is False
+    # Solid short favorite within -250..+185 with >=45% prob, >=5% EV, >=3% prob edge passes
+    assert m._passes_ml_persist_gates(win_prob=0.58, ev=0.06, price=-115) is True
+
+
+def test_stale_empty_score_history_row_voids_after_14_days():
+    from datetime import datetime, timedelta, timezone
+    from src.utils.model_performance import normalize_history_row
+
+    old_start = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    recent_start = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+
+    stale_postponed = normalize_history_row({
+        "sport": "NCAAM",
+        "market_type": "SPREAD",
+        "outcome": None,
+        "final": False,
+        "score": None,
+        "start_time": old_start,
+    })
+    assert stale_postponed["outcome"] == "VOID"
+
+    recent_ungraded = normalize_history_row({
+        "sport": "NCAAM",
+        "market_type": "SPREAD",
+        "outcome": None,
+        "final": False,
+        "score": None,
+        "start_time": recent_start,
+    })
+    assert recent_ungraded["outcome"] == "PENDING"
+

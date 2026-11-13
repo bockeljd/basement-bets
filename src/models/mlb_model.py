@@ -26,13 +26,14 @@ import math
 import json
 import os
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 from src.models.base_model import BaseModel
 from src.services.mlb_service import MLBService
 from src.services.mlb_nrfi_service import MLBNRFIService
 from src.services.ballpark_service import BallparkService
 from src.services.weather_service import WeatherService
+from src.utils.model_calibration import interpolate_pava_prob, load_winprob_calibration
 
 
 def _safe_float(x):
@@ -69,11 +70,11 @@ class MLBModel(BaseModel):
     # Standard deviations for probability calculations
     # MLB run margins have lower variance than basketball
     SIGMA_MARGIN = 3.8     # For spread/ML probability (MLB margin std dev)
-    SIGMA_TOTAL = 3.2      # For total runs probability
+    SIGMA_TOTAL = 4.0      # Realistic MLB combined runs std dev (~4.0-4.2 runs)
 
     # Edge thresholds (minimum edge to recommend a bet)
     MIN_EDGE_SPREAD = 0.3     # 0.3 runs on run line
-    MIN_EDGE_TOTAL = 0.4      # 0.4 runs on total
+    MIN_EDGE_TOTAL = 0.55     # 0.55 runs on total (curbs marginal -110 O/U noise)
     MIN_EDGE_ML_PROB = 0.06   # 6% probability edge on moneyline
     MIN_EDGE_NRFI_PROB = 0.06 # 6% probability edge on NRFI
 
@@ -469,6 +470,27 @@ class MLBModel(BaseModel):
 
     # ── Recommendation Generation ──────────────────────────────
 
+    _winprob_calibration: Optional[Dict[str, Any]] = None
+
+    def _load_winprob_calibration(self) -> Dict[str, Any]:
+        """Load MLB piecewise-linear win_prob calibration mapping (DB first, JSON fallback)."""
+        if self._winprob_calibration is not None:
+            return self._winprob_calibration
+        self._winprob_calibration = load_winprob_calibration(
+            "winprob_calibration_mlb",
+            "winprob_calibration_mlb.json",
+        )
+        return self._winprob_calibration
+
+    def _calibrate_win_prob(self, prob: float) -> float:
+        """Apply shrinkage-blended PAVA calibration when full-season observations (>=200) exist."""
+        return interpolate_pava_prob(
+            prob,
+            self._load_winprob_calibration(),
+            min_obs=200,
+            blend_weight=0.5,
+        )
+
     def _classify_confidence(self, prob: float, ev: float) -> Tuple[str, int]:
         """Classify pick confidence aligned with calibrated win probability and positive EV.
 
@@ -516,17 +538,18 @@ class MLBModel(BaseModel):
                     line = -mu_market
 
                 price = market_snapshot.get(f"spread_price_{side.lower()}", -110)
-                ev = self._calculate_ev(prob, price or -110)
+                prob_cal = self._calibrate_win_prob(prob)
+                ev = self._calculate_ev(prob_cal, price or -110)
 
                 if ev >= self.MIN_EV_PER_UNIT:
-                    conf_label, conf_score = self._classify_confidence(prob, ev)
+                    conf_label, conf_score = self._classify_confidence(prob_cal, ev)
                     recs.append({
                         "market_type": "SPREAD",
                         "pick": pick,
                         "side": side,
                         "line": round(line, 1),
                         "price": price,
-                        "prob": round(prob, 4),
+                        "prob": round(prob_cal, 4),
                         "edge": round(spread_edge, 2),
                         "ev_per_unit": round(ev, 4),
                         "selection": f"{pick} {line:+.1f}",
@@ -534,49 +557,28 @@ class MLBModel(BaseModel):
                         "confidence_0_100": conf_score,
                     })
 
-        # 2. Moneyline
-        ml_edge_home = kwargs["ml_edge_home"]
-        ml_edge_away = kwargs["ml_edge_away"]
-        ml_home_price = kwargs["ml_home_price"]
-        ml_away_price = kwargs["ml_away_price"]
+        # 2. Moneyline (symmetrical evaluation for home & away)
         home_conf = kwargs.get("home_data_conf", 0.0)
         away_conf = kwargs.get("away_data_conf", 0.0)
-
-        # ML filtering: good edge + profitable vig + solid data confidence
-        if ml_edge_home > self.MIN_EDGE_ML_PROB and ml_home_price:
-            if home_conf >= 0.5 and (isinstance(ml_home_price, int) and ml_home_price >= self.MAX_ML_PRICE):
-                ev = self._calculate_ev(kwargs["prob_home_win"], ml_home_price)
+        for side, team, ml_edge, raw_prob, ml_price, data_conf in (
+            ("HOME", home_team, kwargs["ml_edge_home"], kwargs["prob_home_win"], kwargs["ml_home_price"], home_conf),
+            ("AWAY", away_team, kwargs["ml_edge_away"], kwargs["prob_away_win"], kwargs["ml_away_price"], away_conf),
+        ):
+            if ml_edge > self.MIN_EDGE_ML_PROB and ml_price and data_conf >= 0.5 and (isinstance(ml_price, int) and ml_price >= self.MAX_ML_PRICE):
+                prob_cal = self._calibrate_win_prob(raw_prob)
+                ev = self._calculate_ev(prob_cal, ml_price)
                 if ev >= self.MIN_EV_PER_UNIT:
-                    conf_label, conf_score = self._classify_confidence(kwargs["prob_home_win"], ev)
+                    conf_label, conf_score = self._classify_confidence(prob_cal, ev)
                     recs.append({
                         "market_type": "MONEYLINE",
-                        "pick": home_team,
-                        "side": "HOME",
+                        "pick": team,
+                        "side": side,
                         "line": None,
-                        "price": ml_home_price,
-                        "prob": round(kwargs["prob_home_win"], 4),
-                        "edge": round(ml_edge_home, 4),
+                        "price": ml_price,
+                        "prob": round(prob_cal, 4),
+                        "edge": round(ml_edge, 4),
                         "ev_per_unit": round(ev, 4),
-                        "selection": f"{home_team} ML ({ml_home_price:+d})" if isinstance(ml_home_price, int) else f"{home_team} ML",
-                        "confidence": conf_label,
-                        "confidence_0_100": conf_score,
-                    })
-
-        if ml_edge_away > self.MIN_EDGE_ML_PROB and ml_away_price:
-            if away_conf >= 0.5 and (isinstance(ml_away_price, int) and ml_away_price >= self.MAX_ML_PRICE):
-                ev = self._calculate_ev(kwargs["prob_away_win"], ml_away_price)
-                if ev >= self.MIN_EV_PER_UNIT:
-                    conf_label, conf_score = self._classify_confidence(kwargs["prob_away_win"], ev)
-                    recs.append({
-                        "market_type": "MONEYLINE",
-                        "pick": away_team,
-                        "side": "AWAY",
-                        "line": None,
-                        "price": ml_away_price,
-                        "prob": round(kwargs["prob_away_win"], 4),
-                        "edge": round(ml_edge_away, 4),
-                        "ev_per_unit": round(ev, 4),
-                        "selection": f"{away_team} ML ({ml_away_price:+d})" if isinstance(ml_away_price, int) else f"{away_team} ML",
+                        "selection": f"{team} ML ({ml_price:+d})",
                         "confidence": conf_label,
                         "confidence_0_100": conf_score,
                     })
@@ -596,17 +598,18 @@ class MLBModel(BaseModel):
                     prob = kwargs["prob_under"]
 
                 price = market_snapshot.get("total_over_price" if pick == "OVER" else "total_under_price", -110)
-                ev = self._calculate_ev(prob, price or -110)
+                prob_cal = self._calibrate_win_prob(prob)
+                ev = self._calculate_ev(prob_cal, price or -110)
 
                 if ev >= self.MIN_EV_PER_UNIT:
-                    conf_label, conf_score = self._classify_confidence(prob, ev)
+                    conf_label, conf_score = self._classify_confidence(prob_cal, ev)
                     recs.append({
                         "market_type": "TOTAL",
                         "pick": pick,
                         "side": pick,
                         "line": mu_market_total,
                         "price": price,
-                        "prob": round(prob, 4),
+                        "prob": round(prob_cal, 4),
                         "edge": round(total_edge, 2),
                         "ev_per_unit": round(ev, 4),
                         "selection": f"{pick} {mu_market_total}",
