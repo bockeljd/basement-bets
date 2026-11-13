@@ -5627,9 +5627,19 @@ async def get_mlb_predictions(date: Optional[str] = None, lookback_days: int = 3
         rows = fetch_model_history(
             user_id=user_id,
             recommended_only=False,
-            limit=500,
+            limit=5000,
             lookback_days=lookback_days,
+            league="MLB",
         )
+
+        # Fallback query without league filter if legacy MLB rows have NULL/blank league
+        if not rows:
+            rows = fetch_model_history(
+                user_id=user_id,
+                recommended_only=False,
+                limit=5000,
+                lookback_days=lookback_days,
+            )
 
         # Filter to MLB only
         mlb_rows = []

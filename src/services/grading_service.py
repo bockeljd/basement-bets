@@ -17,11 +17,14 @@ from src.services.grading_backfill import (
     find_pending_backfill_dates,
     grade_nrfi_yrfi,
     grade_parlay_selection,
+    grade_score_prediction,
+    infer_market_type_and_line,
     ingest_mlb_finals_for_dates,
     match_mlb_schedule_game,
     match_team_names,
     parse_nrfi_yrfi_pick,
     resolve_team_side,
+    void_stale_postponed_predictions,
 )
 
 # Load env variables if not already loaded
@@ -64,6 +67,7 @@ class GradingService:
         """
         print("[GRADING] Starting grading process...")
         self._mlb_schedule_cache = {}
+        self._espn_parlay_cache = {}
 
         if backfill_pending and max_grade_rows < 5000:
             max_grade_rows = 5000
@@ -106,6 +110,25 @@ class GradingService:
             max_rows=max_grade_rows,
             include_all_ev=include_all_ev,
         )
+
+        # 3b) Void genuinely postponed/cancelled old events (>14d) after double-checking ESPN finals
+        voided_count = 0
+        if backfill_pending:
+            try:
+                with get_db_connection() as conn:
+                    voided_count = void_stale_postponed_predictions(
+                        conn,
+                        max_age_days=14,
+                        espn_cache=getattr(self, "_espn_parlay_cache", None),
+                    )
+                extra_graded, extra_results = self._evaluate_db_predictions(
+                    max_rows=max_grade_rows,
+                    include_all_ev=include_all_ev,
+                )
+                graded_count += extra_graded
+                graded_results.extend(extra_results)
+            except Exception as e:
+                print(f"[GRADING] Stale postponement sweep warning: {e}")
 
         # 4) Run Post-Mortem pipeline on a small recent slice (never block historical sweeps)
         orphaned_results = self._fetch_unreflected_graded_results(
@@ -412,15 +435,16 @@ class GradingService:
                gr.home_score, gr.away_score, gr.final
         FROM model_predictions m
         JOIN events e ON m.event_id = e.id
-        JOIN game_results gr ON e.id = gr.event_id
-        WHERE (m.outcome = 'PENDING' OR m.outcome IS NULL OR m.outcome = 'VOID')
-          AND gr.final = TRUE
+        LEFT JOIN game_results gr ON e.id = gr.event_id
+        WHERE (UPPER(COALESCE(m.outcome, 'PENDING')) IN ('PENDING', 'VOID', ''))
+          AND (
+              gr.final = TRUE
+              OR (UPPER(COALESCE(m.market_type, '')) = 'PARLAY' AND e.start_time < CURRENT_TIMESTAMP - INTERVAL '6 hours')
+              OR (gr.home_score IS NOT NULL AND gr.away_score IS NOT NULL AND e.start_time < CURRENT_TIMESTAMP - INTERVAL '8 hours')
+          )
           AND e.start_time < CURRENT_TIMESTAMP
           {ev_clause}
-          AND m.market_type IS NOT NULL
-          AND UPPER(m.market_type) <> 'AUTO'
-          AND m.pick IS NOT NULL
-          AND UPPER(TRIM(m.pick)) NOT IN ('', 'NONE', 'NO BET', 'PASS')
+          AND UPPER(COALESCE(NULLIF(TRIM(m.pick), ''), NULLIF(TRIM(m.selection), ''), '')) NOT IN ('', 'NONE', 'NO BET', 'PASS')
           AND m.selection IS NOT NULL
           AND TRIM(m.selection) <> ''
           AND m.selection NOT IN ('—', '-')
@@ -513,27 +537,23 @@ class GradingService:
         return self._mlb_schedule_cache[date_str]
 
     def _grade_row(self, row):
-        from src.utils.normalize import normalize_market
-        raw_market = str(row.get('market_type') or '').upper().strip()
-        market = normalize_market(raw_market)
-        if market in ('H2H', 'ML'):
-            market = 'MONEYLINE'
-        elif market in ('RUN LINE', 'RUNLINE', 'RL', 'SPREADS'):
-            market = 'SPREAD'
-        elif market == 'TOTALS':
-            market = 'TOTAL'
-
         pick = row.get('pick')
         selection = row.get('selection')
-        if ('parlay:' in str(selection or '').lower()) or ('parlay:' in str(pick or '').lower()):
-            market = 'PARLAY'
-
-        line = float(row['bet_line']) if row.get('bet_line') is not None else 0.0
+        pick_u = str(pick or '').strip().upper()
+        sel_u = str(selection or '').strip().upper()
 
         # Guardrails: ignore non-bet / placeholder predictions cleanly.
-        pick_u = str(pick or '').strip().upper()
-        if not pick or pick_u in ('NONE', 'NO BET', 'PASS'):
+        if pick_u in ('NONE', 'NO BET', 'PASS') or sel_u in ('NONE', 'NO BET', 'PASS'):
             return 'VOID'
+        if not pick_u and not sel_u:
+            return 'VOID'
+
+        market, _ = infer_market_type_and_line(
+            row.get('market_type'),
+            pick=pick,
+            selection=selection,
+            bet_line=row.get('bet_line'),
+        )
         if market not in ('SPREAD', 'TOTAL', 'MONEYLINE', 'NRFI', 'YRFI', 'PARLAY'):
             return 'VOID'
 
@@ -548,50 +568,26 @@ class GradingService:
             or market in ('NRFI', 'YRFI')
         )
 
-        if market == 'SPREAD':
-            side = resolve_team_side(pick, row.get('home_team'), row.get('away_team'), is_mlb=is_mlb)
-            if side is None and selection:
-                side = resolve_team_side(selection, row.get('home_team'), row.get('away_team'), is_mlb=is_mlb)
-            if side == 'HOME':
-                score, opp_score = float(h_score), float(a_score)
-            elif side == 'AWAY':
-                score, opp_score = float(a_score), float(h_score)
-            else:
-                return 'VOID'
-
-            if score + line > opp_score:
-                return 'WON'
-            if score + line < opp_score:
-                return 'LOST'
-            return 'PUSH'
-
-        if market == 'TOTAL':
-            total_score = float(h_score) + float(a_score)
-            tot_side = 'OVER' if 'OVER' in pick_u else ('UNDER' if 'UNDER' in pick_u else None)
-            if tot_side is None and selection:
-                sel_u = str(selection).upper()
-                tot_side = 'OVER' if 'OVER' in sel_u else ('UNDER' if 'UNDER' in sel_u else None)
-            if tot_side == 'OVER':
-                return 'WON' if total_score > line else ('LOST' if total_score < line else 'PUSH')
-            if tot_side == 'UNDER':
-                return 'WON' if total_score < line else ('LOST' if total_score > line else 'PUSH')
-            return 'VOID'
-
-        if market == 'MONEYLINE':
-            side = resolve_team_side(pick, row.get('home_team'), row.get('away_team'), is_mlb=is_mlb)
-            if side is None and selection:
-                side = resolve_team_side(selection, row.get('home_team'), row.get('away_team'), is_mlb=is_mlb)
-            if side is None:
-                return 'VOID'
-            if float(h_score) == float(a_score):
-                return 'PUSH'
-            if side == 'HOME':
-                return 'WON' if float(h_score) > float(a_score) else 'LOST'
-            return 'WON' if float(a_score) > float(h_score) else 'LOST'
+        if market in ('SPREAD', 'TOTAL', 'MONEYLINE'):
+            return grade_score_prediction(
+                market_type=market,
+                pick=pick,
+                selection=selection,
+                bet_line=row.get('bet_line'),
+                home_team=row.get('home_team'),
+                away_team=row.get('away_team'),
+                home_score=h_score,
+                away_score=a_score,
+                is_mlb=is_mlb,
+            )
 
         if market == 'PARLAY':
             ref_time = row.get('start_time') or row.get('analyzed_at')
-            return self._grade_parlay(selection or pick, ref_time=ref_time)
+            return self._grade_parlay(
+                selection or pick,
+                ref_time=ref_time,
+                league=str(row.get('league') or 'NCAAM'),
+            )
 
         if market in ('NRFI', 'YRFI'):
             nrfi_kind = parse_nrfi_yrfi_pick(pick, selection=selection)
@@ -641,12 +637,18 @@ class GradingService:
 
         return 'VOID'
 
-    def _grade_parlay(self, selection: str, ref_time=None) -> str:
-        """Grade a parlay against game_results near the event date without stale date caps."""
-        if not selection or 'parlay' not in str(selection).lower():
+    def _grade_parlay(self, selection: str, ref_time=None, league: str = 'NCAAM') -> str:
+        """Grade a parlay against game_results near the event date, falling back to ESPN scoreboard."""
+        if not selection or ('parlay' not in str(selection).lower() and '|' not in str(selection)):
             return 'PENDING'
         with get_db_connection() as conn:
-            return grade_parlay_selection(conn, selection, ref_time=ref_time)
+            return grade_parlay_selection(
+                conn,
+                selection,
+                ref_time=ref_time,
+                league=league,
+                espn_cache=getattr(self, '_espn_parlay_cache', None),
+            )
 
 if __name__ == "__main__":
     service = GradingService()

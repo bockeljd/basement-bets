@@ -462,6 +462,7 @@ def ingest_mlb_finals_for_dates(
             "home_score": int(h_score),
             "away_score": int(a_score),
             "final": True,
+            "period": "FINAL",
         })
         seen_ids.add(eid)
         ingested += 1
@@ -599,8 +600,139 @@ def grade_parlay_legs_from_games(legs: List[str], final_games: List[dict]) -> st
     return "VOID"
 
 
-def grade_parlay_selection(conn, selection: Optional[str], ref_time: Any = None) -> str:
-    """Grade a parlay prediction against game_results within +/- 7 days of ref_time."""
+def infer_market_type_and_line(
+    market_type: Optional[str],
+    pick: Optional[str] = None,
+    selection: Optional[str] = None,
+    bet_line: Any = None,
+) -> Tuple[str, Optional[float]]:
+    """Infer canonical market_type ('SPREAD', 'TOTAL', 'MONEYLINE', 'PARLAY', 'NRFI', 'YRFI') and numeric line."""
+    from src.utils.normalize import normalize_market
+
+    raw_mkt = str(market_type or "").upper().strip()
+    market = normalize_market(raw_mkt) if raw_mkt else ""
+    if market in ("H2H", "ML"):
+        market = "MONEYLINE"
+    elif market in ("RUN LINE", "RUNLINE", "RL", "SPREADS"):
+        market = "SPREAD"
+    elif market == "TOTALS":
+        market = "TOTAL"
+
+    pick_str = str(pick or "").strip()
+    sel_str = str(selection or "").strip()
+    combined = sel_str or pick_str
+    comb_low = combined.lower()
+
+    if "parlay:" in comb_low or "|" in comb_low or "parlay:" in pick_str.lower():
+        market = "PARLAY"
+    elif parse_nrfi_yrfi_pick(pick_str, selection=sel_str):
+        market = parse_nrfi_yrfi_pick(pick_str, selection=sel_str) or "NRFI"
+    elif market in ("", "OTHER", "AUTO", "UNKNOWN", "SIDE"):
+        if re.match(r"^(?:over|under)\b", combined, re.IGNORECASE) or re.match(r"^(?:over|under)\b", pick_str, re.IGNORECASE):
+            market = "TOTAL"
+        elif re.search(r"\b(?:ml|moneyline)\b", combined, re.IGNORECASE) or re.search(r"\b(?:ml|moneyline)\b", pick_str, re.IGNORECASE):
+            market = "MONEYLINE"
+        elif re.search(r"[+-]\d+(?:\.\d+)?\s*(?:\(|$)", combined) or re.search(r"[+-]\d+(?:\.\d+)?\s*(?:\(|$)", pick_str):
+            market = "SPREAD"
+
+    line_val: Optional[float] = None
+    if bet_line is not None and str(bet_line).strip() != "":
+        try:
+            line_val = float(bet_line)
+        except (TypeError, ValueError):
+            line_val = None
+
+    if line_val is None and combined:
+        if market == "TOTAL":
+            m = re.search(r"(?:over|under)\s+([0-9]+(?:\.[0-9]+)?)", combined, re.IGNORECASE)
+            if m:
+                line_val = float(m.group(1))
+        elif market == "SPREAD":
+            m = re.search(r"([+-]\d+(?:\.\d+)?)\b", combined)
+            if m:
+                line_val = float(m.group(1))
+
+    return market, line_val
+
+
+def grade_score_prediction(
+    *,
+    market_type: Optional[str],
+    pick: Optional[str],
+    selection: Optional[str],
+    bet_line: Any,
+    home_team: Optional[str],
+    away_team: Optional[str],
+    home_score: Any,
+    away_score: Any,
+    is_mlb: bool = False,
+) -> str:
+    """Grade SPREAD, TOTAL, or MONEYLINE pick strictly from final scores."""
+    pick_u = str(pick or "").strip().upper()
+    sel_u = str(selection or "").strip().upper()
+    if pick_u in ("NONE", "NO BET", "PASS") or sel_u in ("NONE", "NO BET", "PASS"):
+        return "VOID"
+    if not pick_u and not sel_u:
+        return "VOID"
+
+    market, line_val = infer_market_type_and_line(market_type, pick=pick, selection=selection, bet_line=bet_line)
+    if home_score is None or away_score is None:
+        return "PENDING"
+    h_sc, a_sc = float(home_score), float(away_score)
+
+    if market == "SPREAD":
+        side = resolve_team_side(pick, home_team, away_team, is_mlb=is_mlb)
+        if side is None and selection:
+            side = resolve_team_side(selection, home_team, away_team, is_mlb=is_mlb)
+        if side == "HOME":
+            score, opp = h_sc, a_sc
+        elif side == "AWAY":
+            score, opp = a_sc, h_sc
+        else:
+            return "VOID"
+        line = float(line_val or 0.0)
+        if score + line > opp:
+            return "WON"
+        if score + line < opp:
+            return "LOST"
+        return "PUSH"
+
+    if market == "TOTAL":
+        total_score = h_sc + a_sc
+        tot_side = "OVER" if "OVER" in pick_u else ("UNDER" if "UNDER" in pick_u else None)
+        if tot_side is None and sel_u:
+            tot_side = "OVER" if "OVER" in sel_u else ("UNDER" if "UNDER" in sel_u else None)
+        if line_val is None:
+            return "VOID"
+        if tot_side == "OVER":
+            return "WON" if total_score > line_val else ("LOST" if total_score < line_val else "PUSH")
+        if tot_side == "UNDER":
+            return "WON" if total_score < line_val else ("LOST" if total_score > line_val else "PUSH")
+        return "VOID"
+
+    if market == "MONEYLINE":
+        side = resolve_team_side(pick, home_team, away_team, is_mlb=is_mlb)
+        if side is None and selection:
+            side = resolve_team_side(selection, home_team, away_team, is_mlb=is_mlb)
+        if side is None:
+            return "VOID"
+        if h_sc == a_sc:
+            return "PUSH"
+        if side == "HOME":
+            return "WON" if h_sc > a_sc else "LOST"
+        return "WON" if a_sc > h_sc else "LOST"
+
+    return "VOID"
+
+
+def grade_parlay_selection(
+    conn,
+    selection: Optional[str],
+    ref_time: Any = None,
+    league: str = "NCAAM",
+    espn_cache: Optional[Dict[str, List[dict]]] = None,
+) -> str:
+    """Grade a parlay prediction against game_results within +/- 7 days, falling back to ESPN scoreboard."""
     from src.database import _exec
 
     legs = parse_parlay_legs(selection)
@@ -626,4 +758,83 @@ def grade_parlay_selection(conn, selection: Optional[str], ref_time: Any = None)
         (start_win, end_win, ref_dt),
     ).fetchall()
     final_games = [dict(r) for r in rows]
-    return grade_parlay_legs_from_games(legs, final_games)
+    outcome = grade_parlay_legs_from_games(legs, final_games)
+    if outcome != "PENDING":
+        return outcome
+
+    # ESPN fallback when one or more parlay legs are not in game_results
+    cache = espn_cache if espn_cache is not None else {}
+    lg = str(league or "NCAAM").upper().strip()
+    espn_games: List[dict] = []
+    for delta in (0, -1, 1):
+        ymd = (ref_dt + dt.timedelta(days=delta)).strftime("%Y%m%d")
+        cache_key = f"{lg}:{ymd}"
+        if cache_key not in cache:
+            cache[cache_key] = fetch_espn_scoreboard_finals(lg, ymd)
+        espn_games.extend(cache[cache_key])
+
+    return grade_parlay_legs_from_games(legs, final_games + espn_games)
+
+
+def void_stale_postponed_predictions(
+    conn,
+    max_age_days: int = 14,
+    espn_cache: Optional[Dict[str, List[dict]]] = None,
+) -> int:
+    """Verify old (>14d) pending predictions against ESPN finals and VOID genuinely postponed/cancelled events."""
+    from src.database import _exec, upsert_game_result
+
+    cache = espn_cache if espn_cache is not None else {}
+    rows = _exec(
+        conn,
+        """
+        SELECT m.id, m.event_id, e.league, e.home_team, e.away_team, e.start_time
+        FROM model_predictions m
+        JOIN events e ON m.event_id = e.id
+        LEFT JOIN game_results gr ON gr.event_id = e.id
+        WHERE (m.outcome IS NULL OR UPPER(TRIM(m.outcome)) IN ('PENDING', ''))
+          AND UPPER(COALESCE(m.market_type, '')) <> 'AUTO'
+          AND UPPER(COALESCE(NULLIF(TRIM(m.pick), ''), NULLIF(TRIM(m.selection), ''), '')) NOT IN ('', 'NONE', 'NO BET', 'PASS')
+          AND e.start_time < NOW() - (%s || ' days')::interval
+          AND COALESCE(gr.final, FALSE) IS NOT TRUE
+        ORDER BY e.start_time DESC
+        LIMIT 500
+        """,
+        (int(max_age_days),),
+    ).fetchall()
+
+    voided = 0
+    for r in rows:
+        row = dict(r)
+        lg = str(row.get("league") or "NCAAM").upper().strip()
+        st = _parse_dt_utc(row.get("start_time"))
+        found_final = None
+        if st and lg in ESPN_LEAGUE_PATHS:
+            for delta in (0, -1, 1):
+                ymd = (st + dt.timedelta(days=delta)).strftime("%Y%m%d")
+                cache_key = f"{lg}:{ymd}"
+                if cache_key not in cache:
+                    cache[cache_key] = fetch_espn_scoreboard_finals(lg, ymd)
+                for g in cache[cache_key]:
+                    is_mlb = lg == "MLB"
+                    if match_team_names(row.get("home_team"), g.get("home_team"), is_mlb=is_mlb) and match_team_names(
+                        row.get("away_team"), g.get("away_team"), is_mlb=is_mlb
+                    ):
+                        found_final = g
+                        break
+                if found_final:
+                    break
+
+        if found_final:
+            upsert_game_result({
+                "event_id": row["event_id"],
+                "home_score": int(found_final["home_score"]),
+                "away_score": int(found_final["away_score"]),
+                "final": True,
+                "period": "FINAL",
+            })
+        else:
+            _exec(conn, "UPDATE model_predictions SET outcome = 'VOID' WHERE id = %s", (row["id"],))
+            voided += 1
+
+    return voided

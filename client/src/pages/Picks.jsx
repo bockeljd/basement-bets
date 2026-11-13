@@ -67,7 +67,8 @@ export default function Picks() {
     return (recommendedHistory || []).filter((h) => {
       const day = getPerformanceDay(h);
       if (!day || day >= todayEt) return false;
-      return !isGradedOutcome(h.graded_result || h.outcome || h.result);
+      const norm = normalizeOutcome(h.graded_result || h.outcome || h.result);
+      return !isGradedOutcome(norm) && norm !== 'VOID';
     }).length;
   }, [recommendedHistory]);
 
@@ -1027,9 +1028,11 @@ export default function Picks() {
                   const recRank = rankByKey[keyFor(item)] || null;
                   const mainRec = recs[0] || {};
                   const resultStatus = item.graded_result || item.outcome;
+                  const normOut = normalizeOutcome(resultStatus);
                   const isWon = isWinOutcome(resultStatus);
                   const isLost = isLossOutcome(resultStatus);
-                  const isPush = normalizeOutcome(resultStatus) === 'PUSH';
+                  const isPush = normOut === 'PUSH';
+                  const isVoid = normOut === 'VOID';
 
                   const formatDateMDY = (rowOrTs) => {
                     const etDay = getPerformanceDay(rowOrTs);
@@ -1102,6 +1105,8 @@ export default function Picks() {
                           <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-xs font-semibold ring-1 ring-red-500/20">Lost</span>
                         ) : isPush ? (
                           <span className="px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-300 text-xs font-semibold ring-1 ring-slate-500/20">Push</span>
+                        ) : isVoid ? (
+                          <span className="px-2 py-0.5 rounded-full bg-slate-700/40 text-slate-300 text-xs font-medium ring-1 ring-slate-600/30">Void</span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full bg-slate-800/60 text-slate-400 text-xs font-medium">Pending</span>
                         )}

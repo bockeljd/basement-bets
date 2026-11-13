@@ -6,6 +6,7 @@ from src.services.grading_backfill import (
     fetch_espn_scoreboard_finals,
     grade_nrfi_yrfi,
     grade_parlay_legs_from_games,
+    ingest_mlb_finals_for_dates,
     match_mlb_schedule_game,
     normalize_mlb_team,
     parse_nrfi_yrfi_pick,
@@ -241,3 +242,132 @@ def test_evaluate_db_predictions_includes_low_ev_rows():
         mock_upd.assert_called_once_with(101, "WON")
         sql_executed = mock_exec.call_args[0][1]
         assert "ev_per_unit" not in sql_executed.split("WHERE", 1)[1]
+
+
+def test_ingest_mlb_finals_for_dates_includes_period_final():
+    mock_mlb = MagicMock()
+    mock_mlb.get_schedule.return_value = [
+        {
+            "game_pk": 777,
+            "away_team": "Los Angeles Dodgers",
+            "home_team": "San Diego Padres",
+            "away_score": 5,
+            "home_score": 2,
+            "status": "Final",
+            "game_date": "2026-05-22T23:40:00Z",
+        }
+    ]
+    mock_conn = MagicMock()
+    db_row = {
+        "id": "action:mlb:55555",
+        "home_team": "San Diego Padres",
+        "away_team": "Los Angeles Dodgers",
+        "start_time": datetime(2026, 5, 22, 23, 40, tzinfo=timezone.utc),
+    }
+
+    with patch("src.database._exec") as mock_exec, \
+         patch("src.database.upsert_game_result") as mock_upsert:
+        mock_exec.return_value.fetchall.return_value = [db_row]
+        ingested = ingest_mlb_finals_for_dates(mock_mlb, mock_conn, ["2026-05-22"], schedule_cache={})
+
+    assert ingested == 1
+    mock_upsert.assert_called_once_with({
+        "event_id": "action:mlb:55555",
+        "home_score": 2,
+        "away_score": 5,
+        "final": True,
+        "period": "FINAL",
+    })
+
+
+def test_infer_market_and_grade_orphaned_other_spread_total():
+    from src.services.grading_backfill import infer_market_type_and_line, grade_score_prediction
+    from src.utils.model_performance import norm_outcome, normalize_history_row
+
+    assert infer_market_type_and_line("OTHER", selection="Nevada Wolf Pack +2") == ("SPREAD", 2.0)
+    assert infer_market_type_and_line("AUTO", selection="OVER 151.5") == ("TOTAL", 151.5)
+    assert infer_market_type_and_line(None, selection="Parlay: UCLA Bruins -6.5 | Arizona Wildcats -10.5")[0] == "PARLAY"
+
+    assert grade_score_prediction(
+        market_type="OTHER",
+        pick="",
+        selection="Nevada Wolf Pack +2",
+        bet_line=2.5,
+        home_team="Grand Canyon Antelopes",
+        away_team="Nevada Wolf Pack",
+        home_score=80,
+        away_score=84,
+    ) == "WON"
+
+    assert norm_outcome("VOID") == "VOID"
+    assert norm_outcome("invalid") == "PENDING"
+
+    norm_row = normalize_history_row({
+        "market_type": "Other",
+        "selection": "Nevada Wolf Pack +2",
+        "bet_line": 2.5,
+        "home_team": "Grand Canyon Antelopes",
+        "away_team": "Nevada Wolf Pack",
+        "score": "84-80",
+        "final": True,
+        "outcome": None,
+    })
+    assert norm_row["market_type"] == "SPREAD"
+    assert norm_row["outcome"] == "WON"
+
+
+def test_grade_parlay_selection_espn_fallback():
+    from src.services.grading_backfill import grade_parlay_selection
+
+    mock_conn = MagicMock()
+    espn_finals = [
+        {
+            "home_team": "Arizona Wildcats",
+            "away_team": "Houston Cougars",
+            "home_score": 79,
+            "away_score": 74,
+            "start_time": "2026-03-14T22:10Z",
+        },
+        {
+            "home_team": "UCLA Bruins",
+            "away_team": "Purdue Boilermakers",
+            "home_score": 66,
+            "away_score": 73,
+            "start_time": "2026-03-14T19:30Z",
+        },
+    ]
+    with patch("src.database._exec") as mock_exec, \
+         patch("src.services.grading_backfill.fetch_espn_scoreboard_finals", return_value=espn_finals) as mock_espn:
+        mock_exec.return_value.fetchall.return_value = []
+        res = grade_parlay_selection(
+            mock_conn,
+            "Parlay: UCLA Bruins -6.5 | Arizona Wildcats -10.5",
+            ref_time=datetime(2026, 3, 14, 22, 0, tzinfo=timezone.utc),
+            league="NCAAM",
+            espn_cache={},
+        )
+
+    assert res == "LOST"
+    assert mock_espn.call_count == 3
+
+
+def test_void_stale_postponed_predictions_marks_void():
+    from src.services.grading_backfill import void_stale_postponed_predictions
+
+    mock_conn = MagicMock()
+    stale_row = {
+        "id": 999,
+        "event_id": "action:ncaam:999999",
+        "league": "NCAAM",
+        "home_team": "Grambling State Tigers",
+        "away_team": "Arkansas-Pine Bluff Golden Lions",
+        "start_time": datetime(2026, 1, 28, 23, 0, tzinfo=timezone.utc),
+    }
+
+    with patch("src.database._exec") as mock_exec, \
+         patch("src.services.grading_backfill.fetch_espn_scoreboard_finals", return_value=[]):
+        mock_exec.return_value.fetchall.return_value = [stale_row]
+        voided = void_stale_postponed_predictions(mock_conn, max_age_days=14, espn_cache={})
+
+    assert voided == 1
+    assert any("UPDATE model_predictions SET outcome = 'VOID'" in str(call.args[1]) for call in mock_exec.call_args_list if len(call.args) > 1)

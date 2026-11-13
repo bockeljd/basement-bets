@@ -19,16 +19,18 @@ def payout_per_unit(price) -> float:
 
 def norm_outcome(o: str) -> str:
     """
-    Standardizes outcome strings strictly to WON, LOST, PUSH or PENDING.
+    Standardizes outcome strings strictly to WON, LOST, PUSH, VOID, or PENDING.
     WIN/WON -> WON
     LOSS/LOST -> LOST
     PUSH -> PUSH
+    VOID -> VOID
     Anything else -> PENDING
     """
     s = str(o or '').upper().strip()
     if s in ('WIN', 'WON'): return 'WON'
     if s in ('LOSS', 'LOST'): return 'LOST'
     if s == 'PUSH': return 'PUSH'
+    if s == 'VOID': return 'VOID'
     return 'PENDING'
 
 def is_decided(o: str) -> bool:
@@ -179,6 +181,66 @@ def normalize_history_row(row: dict) -> dict:
 
     if out.get("ev_per_unit") is None and out.get("ev") is not None:
         out["ev_per_unit"] = out.get("ev")
+
+    if out["market_type"] in ("OTHER", "AUTO", "") and best_pick:
+        try:
+            from src.services.grading_backfill import infer_market_type_and_line
+
+            inferred_mkt, inferred_line = infer_market_type_and_line(
+                out.get("market_type"),
+                pick=out.get("pick"),
+                selection=out.get("selection"),
+                bet_line=out.get("bet_line"),
+            )
+            if inferred_mkt and inferred_mkt not in ("OTHER", "AUTO", ""):
+                out["market_type"] = inferred_mkt
+            if out.get("bet_line") is None and inferred_line is not None:
+                out["bet_line"] = inferred_line
+        except Exception:
+            pass
+
+    if out["outcome"] == "PENDING" and out.get("score") and "-" in str(out.get("score")):
+        is_final = out.get("final") is True
+        if not is_final and out.get("start_time"):
+            try:
+                from datetime import datetime, timedelta, timezone
+
+                st = out["start_time"]
+                if isinstance(st, str):
+                    st_dt = datetime.fromisoformat(st.replace("Z", "+00:00"))
+                else:
+                    st_dt = st
+                if st_dt.tzinfo is None:
+                    st_dt = st_dt.replace(tzinfo=timezone.utc)
+                is_final = st_dt < datetime.now(timezone.utc) - timedelta(hours=8)
+            except Exception:
+                is_final = False
+
+        if is_final:
+            try:
+                parts = str(out["score"]).split("-", 1)
+                a_sc = int(float(parts[0].strip()))
+                h_sc = int(float(parts[1].strip()))
+                from src.services.grading_backfill import grade_score_prediction
+
+                mkt = out["market_type"]
+                if mkt in ("SPREAD", "TOTAL", "MONEYLINE"):
+                    is_mlb = str(out.get("sport") or "").upper() == "MLB" or str(out.get("event_id") or "").startswith(("mlb:", "action:mlb:"))
+                    graded = grade_score_prediction(
+                        market_type=mkt,
+                        pick=out.get("pick"),
+                        selection=out.get("selection"),
+                        bet_line=out.get("bet_line"),
+                        home_team=out.get("home_team"),
+                        away_team=out.get("away_team"),
+                        home_score=h_sc,
+                        away_score=a_sc,
+                        is_mlb=is_mlb,
+                    )
+                    if graded in ("WON", "LOST", "PUSH", "VOID"):
+                        out["outcome"] = graded
+            except Exception:
+                pass
 
     return out
 

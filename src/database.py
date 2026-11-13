@@ -1727,6 +1727,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         (CASE WHEN COALESCE(gr.away_score, e.away_score) IS NOT NULL AND COALESCE(gr.home_score, e.home_score) IS NOT NULL
               THEN (COALESCE(gr.away_score, e.away_score) || '-' || COALESCE(gr.home_score, e.home_score))
               ELSE NULL END) AS score,
+        COALESCE(gr.final, FALSE) AS final,
         COALESCE(m1.id, m2.id) AS id,
         COALESCE(m1.analyzed_at, m2.analyzed_at) AS analyzed_at,
         COALESCE(m1.mu_final, m2.mu_final) AS mu_final,

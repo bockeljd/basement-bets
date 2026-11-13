@@ -11,6 +11,7 @@ export const normalizeOutcome = (value) => {
   if (v === 'WON' || v === 'WIN') return 'WON';
   if (v === 'LOST' || v === 'LOSS') return 'LOST';
   if (v === 'PUSH') return 'PUSH';
+  if (v === 'VOID') return 'VOID';
   return null;
 };
 
