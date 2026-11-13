@@ -231,3 +231,84 @@ export const buildWhyPickReasons = (rec, game) => {
 
   return reasons;
 };
+
+/**
+ * Build a portable javascript: bookmarklet that extracts #ratings-table (with colspan headers)
+ * from the user's own logged-in kenpom.com browser tab and opens Basement Bets with #kp_import=...
+ */
+export const buildKenpomBookmarklet = (appOrigin) => {
+  const cleanOrigin = String(appOrigin || '').replace(/\/+$/, '');
+  const destPrefix = JSON.stringify(`${cleanOrigin}/#kp_import=`);
+  const body = `(function(){
+    var t=document.querySelector('#ratings-table');
+    if(!t){
+      var ts=document.querySelectorAll('table');
+      for(var k=0;k<ts.length;k++){
+        var txt=(ts[k].innerText||'').slice(0,800);
+        if(/NetRtg|AdjEM|ORtg|AdjOE/i.test(txt)){t=ts[k];break;}
+      }
+    }
+    if(!t){
+      alert('Open kenpom.com while logged in so the ratings table is visible, then click this bookmark again.');
+      return;
+    }
+    var hTr=[].slice.call(t.querySelectorAll('thead tr')).pop();
+    var hdrs=[];
+    if(hTr){
+      [].slice.call(hTr.children).forEach(function(c){
+        var lb=(c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();
+        var sp=parseInt(c.getAttribute('colspan')||'1',10)||1;
+        hdrs.push(lb);
+        for(var j=1;j<sp;j++){hdrs.push(lb?lb+' Rank':'');}
+      });
+    }
+    var lines=[];
+    if(hdrs.length>=6){lines.push(hdrs.join('\\t'));}
+    var tb=t.querySelector('tbody')||t;
+    var trs=tb.querySelectorAll('tr');
+    for(var r=0;r<trs.length;r++){
+      if(trs[r].closest&&trs[r].closest('thead')){continue;}
+      var cls=[].slice.call(trs[r].querySelectorAll('td,th')).map(function(c){
+        return (c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();
+      });
+      if(cls.length>=6){lines.push(cls.join('\\t'));}
+    }
+    var tsv=lines.join('\\n');
+    if(lines.length<10){
+      alert('Found fewer than 10 rows. Make sure the full ratings table on kenpom.com is loaded.');
+      return;
+    }
+    var bytes=new TextEncoder().encode(tsv);
+    var bin='';
+    for(var i=0;i<bytes.length;i+=8192){
+      bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+    }
+    var b64=btoa(bin);
+    var w=window.open(${destPrefix}+encodeURIComponent(b64),'_blank');
+    try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(tsv).catch(function(){});}}catch(e){}
+    if(!w){
+      alert('Pop-up was blocked — your KenPom table was copied to clipboard instead. Paste it under Option 2 in Enable KenPom.');
+    }
+  })();`;
+  return `javascript:${body.replace(/\n\s*/g, '')}`;
+};
+
+/**
+ * Decode #kp_import=<base64> URL hash payload emitted by the KenPom bookmarklet into UTF-8 TSV text.
+ */
+export const decodeKenpomHashImport = (hashStr) => {
+  const raw = String(hashStr || '');
+  const idx = raw.indexOf('kp_import=');
+  if (idx === -1) return null;
+  let encoded = raw.slice(idx + 'kp_import='.length);
+  const ampIdx = encoded.indexOf('&');
+  if (ampIdx !== -1) encoded = encoded.slice(0, ampIdx);
+  if (!encoded) return null;
+  const b64 = decodeURIComponent(encoded);
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+};

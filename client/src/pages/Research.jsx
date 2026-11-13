@@ -25,6 +25,7 @@ import {
   makeMatchupKey,
   lookupTopPickForGame,
   getConfidenceMeta,
+  decodeKenpomHashImport,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
 
@@ -226,6 +227,76 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       setActiveSubTab('top_plays');
     }
   }, [leagueFilter, activeSubTab]);
+
+  // Auto-import KenPom ratings when opened via the 1-click browser bookmarklet (#kp_import=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let payloadText = null;
+    try {
+      const fromHash = decodeKenpomHashImport(window.location.hash);
+      if (fromHash) {
+        payloadText = fromHash;
+        sessionStorage.setItem('pending_kenpom_import', fromHash);
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } else {
+        payloadText = sessionStorage.getItem('pending_kenpom_import');
+      }
+    } catch (e) {
+      setToast({
+        tone: 'err',
+        text: `Could not read KenPom browser import: ${e?.message || 'invalid payload'}.`,
+      });
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    if (!payloadText) return;
+
+    let cancelled = false;
+    (async () => {
+      setToast({
+        tone: 'warn',
+        text: 'Importing KenPom ratings from your open browser tab...',
+      });
+      try {
+        const res = await api.post('/api/admin/kenpom/upload-csv', { csv_text: payloadText });
+        try {
+          sessionStorage.removeItem('pending_kenpom_import');
+        } catch {
+          // ignore
+        }
+        if (cancelled) return;
+        const rows = res?.data?.rows ?? 'all';
+        const asof = res?.data?.asof_date ? ` (${res.data.asof_date})` : '';
+        setToast({
+          tone: 'ok',
+          text: `KenPom updated from your browser tab: imported ${rows} teams${asof}. Refreshing model picks...`,
+        });
+        await fetchSchedule();
+      } catch (err) {
+        if (err?.response?.status !== 403) {
+          try {
+            sessionStorage.removeItem('pending_kenpom_import');
+          } catch {
+            // ignore
+          }
+        }
+        if (cancelled) return;
+        setToast({
+          tone: 'err',
+          text: `KenPom import failed: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleGradeResults = async () => {
     setLoading(true);

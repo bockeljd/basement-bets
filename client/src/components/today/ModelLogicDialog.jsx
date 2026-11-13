@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Info, Upload, RefreshCw, Key, ClipboardPaste, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Info, Upload, RefreshCw, Key, ClipboardPaste, X, CheckCircle2, AlertCircle, Bookmark, Copy } from 'lucide-react';
 import api from '../../api/axios';
+import { buildKenpomBookmarklet } from './todayHelpers';
 
 const FEED_LABELS = {
   torvik: 'BartTorvik',
@@ -13,6 +14,7 @@ const FEED_LABELS = {
 const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) => {
   const dialogRef = useRef(null);
   const fileInputRef = useRef(null);
+  const bookmarkletLinkRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [pastedText, setPastedText] = useState('');
   const [apiKeyInput, setApiKeyInput] = useState('');
@@ -20,6 +22,41 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
   const [statusLoading, setStatusLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [uploadState, setUploadState] = useState({ uploading: false, status: 'idle', message: '' });
+
+  const bookmarkletCode = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    return origin ? buildKenpomBookmarklet(origin) : '';
+  }, []);
+
+  useEffect(() => {
+    if (bookmarkletLinkRef.current && bookmarkletCode) {
+      // Set href imperatively via ref so React does not warn on javascript: bookmarklets
+      bookmarkletLinkRef.current.setAttribute('href', bookmarkletCode);
+    }
+  }, [bookmarkletCode, open]);
+
+  const handleCopyBookmarklet = async () => {
+    if (!bookmarkletCode) return;
+    try {
+      await navigator.clipboard.writeText(bookmarkletCode);
+      setUploadState({
+        uploading: false,
+        status: 'success',
+        message: 'Bookmarklet code copied. Create a new browser bookmark, paste this as its URL, open kenpom.com while logged in, and click the bookmark.',
+      });
+    } catch {
+      setUploadState({
+        uploading: false,
+        status: 'error',
+        message: 'Could not access clipboard — drag the "Sync KenPom to Basement Bets" button directly to your bookmarks bar instead.',
+      });
+    }
+  };
+
+  const handleBookmarkletClick = (e) => {
+    e.preventDefault();
+    handleCopyBookmarklet();
+  };
 
   const fetchKenpomStatus = async () => {
     setStatusLoading(true);
@@ -213,14 +250,107 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
               </div>
             )}
 
-            {/* Option A: Sync Now / Official API Key */}
+            {/* Option 1: 1-Click Browser Bookmarklet (Any User With a KenPom Login) */}
+            <div className="rounded-lg border border-emerald-500/35 bg-slate-950/60 p-3 space-y-2.5">
+              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                <Bookmark size={13} className="text-emerald-300" aria-hidden="true" />
+                <span>Option 1: 1-Click Sync From Open KenPom Tab (Any Login User)</span>
+              </div>
+              <p id="kenpom-bookmarklet-hint" className="text-[11px] text-slate-400">
+                No KenPom API needed and works for anyone with a KenPom login: drag this button onto your browser
+                bookmarks bar once, open{' '}
+                <a
+                  href="https://kenpom.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-emerald-300 underline hover:text-emerald-200"
+                >
+                  kenpom.com
+                </a>{' '}
+                while logged in, and click the bookmark to import straight into Basement Bets.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  ref={bookmarkletLinkRef}
+                  href="#kenpom-bookmarklet"
+                  draggable
+                  onClick={handleBookmarkletClick}
+                  aria-describedby="kenpom-bookmarklet-hint"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-grab active:cursor-grabbing"
+                >
+                  <Bookmark size={13} aria-hidden="true" />
+                  <span>Sync KenPom to Basement Bets</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={handleCopyBookmarklet}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs cursor-pointer"
+                >
+                  <Copy size={13} aria-hidden="true" />
+                  <span>Copy Bookmarklet Code</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Option 2: Paste Table or Upload CSV/TSV/HTML */}
+            <form onSubmit={handleKenpomUpload} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                <ClipboardPaste size={13} className="text-emerald-300" aria-hidden="true" />
+                <span>Option 2: Paste Table, Upload CSV/TSV, or Saved HTML Page</span>
+              </div>
+              <p id="kenpom-paste-hint" className="text-[11px] text-slate-400">
+                Log into kenpom.com, copy the ratings table (or save the page via File &rarr; Save Page As .html),
+                paste or upload below, and click Import KenPom.
+              </p>
+
+              <div>
+                <label htmlFor="kenpom-paste-input" className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Paste KenPom Ratings Table
+                </label>
+                <textarea
+                  id="kenpom-paste-input"
+                  rows={4}
+                  value={pastedText}
+                  onChange={(e) => setPastedText(e.target.value)}
+                  aria-describedby="kenpom-paste-hint"
+                  placeholder={"Rk\tTeam\tConf\tW-L\tNetRtg\tORtg\tDRtg\tAdjT\n1\tDuke\tACC\t3-0\t+31.4\t124.2\t92.8\t68.9"}
+                  className="w-full rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-[11px] font-mono text-slate-100 placeholder:text-slate-600"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <label htmlFor="kenpom-csv-file" className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Or Upload CSV / TSV / Saved KenPom .html File
+                  </label>
+                  <input
+                    id="kenpom-csv-file"
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt,.html,.htm"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-100 file:font-semibold hover:file:bg-slate-700"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={uploadState.uploading || (!pastedText.trim() && !selectedFile)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer"
+                >
+                  <Upload size={13} aria-hidden="true" />
+                  <span>{uploadState.uploading ? 'Importing...' : 'Import KenPom'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Option 3: Official API Key (Optional) */}
             <form onSubmit={handleKenpomSync} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-2.5">
               <div className="font-semibold text-slate-100 flex items-center gap-1.5">
                 <Key size={13} className="text-indigo-300" aria-hidden="true" />
-                <span>Option A: Sync Automatically with KenPom Official API</span>
+                <span>Option 3: Sync Automatically With Official API Key (Optional)</span>
               </div>
               <p id="kenpom-api-hint" className="text-[11px] text-slate-400">
-                If you have a KenPom subscription API key (from{' '}
+                If you have a separate KenPom API subscription key (from{' '}
                 <a
                   href="https://kenpom.com/register-api.php"
                   target="_blank"
@@ -229,7 +359,7 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
                 >
                   kenpom.com/register-api.php
                 </a>
-                ), paste it below for an immediate sync. To keep it running daily at 6:15 AM ET, add{' '}
+                ), paste it below for an immediate sync. To run daily at 6:15 AM ET, add{' '}
                 <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-200">KENPOM_API_KEY</code> to Vercel &amp; GitHub Secrets.
               </p>
               <div className="flex flex-wrap items-end gap-2">
@@ -255,56 +385,6 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
                 >
                   <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} aria-hidden="true" />
                   <span>{syncing ? 'Syncing...' : 'Sync Now'}</span>
-                </button>
-              </div>
-            </form>
-
-            {/* Option B: Paste Table or Upload CSV/TSV */}
-            <form onSubmit={handleKenpomUpload} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-3">
-              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                <ClipboardPaste size={13} className="text-emerald-300" aria-hidden="true" />
-                <span>Option B: Paste Copied Table from KenPom.com (or Upload CSV)</span>
-              </div>
-              <p id="kenpom-paste-hint" className="text-[11px] text-slate-400">
-                No API key needed: log into kenpom.com, highlight &amp; copy the main ratings table (or export CSV), paste below, and click Import.
-              </p>
-
-              <div>
-                <label htmlFor="kenpom-paste-input" className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  Paste KenPom Ratings Table
-                </label>
-                <textarea
-                  id="kenpom-paste-input"
-                  rows={4}
-                  value={pastedText}
-                  onChange={(e) => setPastedText(e.target.value)}
-                  aria-describedby="kenpom-paste-hint"
-                  placeholder={"Rk\tTeam\tConf\tW-L\tNetRtg\tORtg\tDRtg\tAdjT\n1\tDuke\tACC\t3-0\t+31.4\t124.2\t92.8\t68.9"}
-                  className="w-full rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-[11px] font-mono text-slate-100 placeholder:text-slate-600"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <label htmlFor="kenpom-csv-file" className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    Or Upload KenPom CSV / TSV File
-                  </label>
-                  <input
-                    id="kenpom-csv-file"
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv,.tsv,.txt"
-                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                    className="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-100 file:font-semibold hover:file:bg-slate-700"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={uploadState.uploading || (!pastedText.trim() && !selectedFile)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer"
-                >
-                  <Upload size={13} aria-hidden="true" />
-                  <span>{uploadState.uploading ? 'Importing...' : 'Import KenPom'}</span>
                 </button>
               </div>
             </form>

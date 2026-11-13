@@ -174,6 +174,23 @@ def trigger_init_db(request: Request):
     return {"status": "success", "message": "Database Initialized (Postgres)"}
 
 
+def _clear_model_caches():
+    """Clear in-memory prediction and HTTP caches after KenPom / rating updates."""
+    try:
+        _top_picks_cache.clear()
+    except Exception:
+        pass
+    try:
+        _HTTP_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        _research_cache["data"] = None
+        _research_cache["last_updated"] = None
+    except Exception:
+        pass
+
+
 @app.post("/api/admin/kenpom/upload-csv")
 async def upload_kenpom_csv(request: Request):
     """Upload KenPom ratings CSV/TSV (multipart file or JSON csv_text) to refresh KenPom ratings."""
@@ -228,7 +245,7 @@ async def upload_kenpom_csv(request: Request):
             raise HTTPException(status_code=400, detail="Missing KenPom CSV content.")
 
         result = ingest_kenpom_csv(str(csv_text), asof_date=asof_date)
-        _top_picks_cache.clear()
+        _clear_model_caches()
         return result
     except HTTPException:
         raise
@@ -267,7 +284,7 @@ async def sync_kenpom_admin(request: Request, user: dict = Depends(get_current_u
     try:
         res = run_kenpom_sync(api_key=api_key, asof_date=asof_date, include_extras=False)
         if int(res.get("rows") or 0) > 0:
-            _top_picks_cache.clear()
+            _clear_model_caches()
         return res
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -2353,7 +2370,7 @@ async def trigger_kenpom_ingestion(request: Request, authorized: bool = Depends(
             ctx.state["last_run_date"] = res.get("asof_date") or datetime.now().strftime("%Y-%m-%d")
             ctx.state["teams_count"] = rows
             ctx.state["method"] = res.get("method")
-            _top_picks_cache.clear()
+            _clear_model_caches()
 
             return {
                 "status": "success",

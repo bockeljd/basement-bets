@@ -482,3 +482,79 @@ def test_model_v2_populates_kenpom_fair_total_and_mu_total_final(monkeypatch):
     assert res["debug"]["mu_total_final"] is not None
     assert res["debug"]["mu_spread_final"] is not None
 
+
+def test_parse_kenpom_saved_html_with_colspan_and_upload_clears_caches(monkeypatch):
+    from fastapi.testclient import TestClient
+    import src.scripts.ingest_kenpom as ik
+    import src.scripts.update_data_health as udh
+    import src.api as api_mod
+    from src.config import settings
+
+    def _row(rk, team, conf, wl, em, o, o_rk, d, d_rk, t, t_rk):
+        return (
+            f"<tr><td>{rk}</td><td><a href='#'>{team}</a></td><td>{conf}</td><td>{wl}</td>"
+            f"<td>{em}</td><td>{o}</td><td>{o_rk}</td><td>{d}</td><td>{d_rk}</td>"
+            f"<td>{t}</td><td>{t_rk}</td></tr>"
+        )
+
+    rows_html = [
+        _row(1, "Duke 1*", "ACC", "28-4", "+32.14", "126.1", 1, "94.0", 4, "68.2", 110),
+        _row(2, "Brown", "Ivy", "14-14", "\u22124.15", "103.5", 195, "107.6", 180, "66.4", 240),
+    ] + [
+        _row(i, f"School {i}", "BE", "15-10", "+5.10", "110.0", i, "104.9", i, "67.5", i)
+        for i in range(3, 13)
+    ]
+
+    html_doc = (
+        "<!doctype html><html><body>"
+        "<table id='ratings-table'>"
+        "<thead>"
+        "<tr><th colspan='5'>Team Info</th><th colspan='6'>Efficiency</th></tr>"
+        "<tr><th>Rk</th><th>Team</th><th>Conf</th><th>W-L</th><th>NetRtg</th>"
+        "<th colspan='2'>ORtg</th><th colspan='2'>DRtg</th><th colspan='2'>AdjT</th></tr>"
+        "</thead>"
+        f"<tbody>{''.join(rows_html)}</tbody>"
+        "</table></body></html>"
+    )
+
+    parsed = ik.parse_kenpom_csv_text(html_doc)
+    assert len(parsed) == 12
+    assert parsed[0]["team_name"] == "Duke"
+    assert parsed[0]["adj_em"] == pytest.approx(32.14)
+    assert parsed[0]["adj_o"] == pytest.approx(126.1)
+    assert parsed[0]["adj_d"] == pytest.approx(94.0)
+    assert parsed[0]["adj_t"] == pytest.approx(68.2)
+    assert parsed[1]["team_name"] == "Brown"
+    assert parsed[1]["adj_em"] == pytest.approx(-4.15)
+    assert parsed[1]["adj_o"] == pytest.approx(103.5)
+    assert parsed[1]["adj_d"] == pytest.approx(107.6)
+
+    # scrape_team_ratings delegates to header-aware HTML parser cleanly
+    fake_sess = MagicMock()
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.text = html_doc
+    fake_sess.get.return_value = fake_resp
+    scraped = ik.scrape_team_ratings(fake_sess)
+    assert len(scraped) == 12
+    assert scraped[1]["adj_em"] == pytest.approx(-4.15)
+
+    # Multipart .html upload clears both _HTTP_CACHE and _top_picks_cache
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+    monkeypatch.setattr(ik, "ensure_tables", lambda: None)
+    monkeypatch.setattr(ik, "upsert_daily", lambda table, asof, rows, keys: len(rows))
+    monkeypatch.setattr(udh, "upsert", lambda *a, **kw: None)
+    api_mod._HTTP_CACHE["stale_key"] = (9999999999.0, {"old": True}, 'W/"old"')
+    api_mod._top_picks_cache["stale_tp"] = {"at": 0, "data": {}}
+
+    client = TestClient(api_mod.app)
+    resp = client.post(
+        "/api/admin/kenpom/upload-csv",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+        files={"file": ("kenpom_ratings.html", html_doc.encode("utf-8"), "text/html")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["rows"] == 12
+    assert "stale_key" not in api_mod._HTTP_CACHE
+    assert "stale_tp" not in api_mod._top_picks_cache
+

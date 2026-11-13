@@ -304,8 +304,22 @@ def fetch_html(sess: requests.Session, path: str, params: dict | None = None) ->
     return r.text
 
 
+def _expand_row_cells_with_colspan(tr) -> list[str]:
+    out: list[str] = []
+    for cell in tr.find_all(["th", "td"]):
+        txt = cell.get_text(" ", strip=True)
+        try:
+            span = max(1, int(cell.get("colspan") or 1))
+        except Exception:
+            span = 1
+        out.append(txt)
+        for _ in range(1, span):
+            out.append(f"{txt} Rank" if txt else "")
+    return out
+
+
 def _table_headers_and_rows(table) -> tuple[list[str], list[list[str]]]:
-    """Return (headers, rows). Headers best-effort."""
+    """Return (headers, rows). Expands header colspan attributes best-effort."""
     if not table:
         return [], []
 
@@ -315,8 +329,7 @@ def _table_headers_and_rows(table) -> tuple[list[str], list[list[str]]]:
         # Prefer last header row (often has the real column labels)
         trs = thead.find_all("tr")
         if trs:
-            ths = trs[-1].find_all(["th", "td"])
-            headers = [h.get_text(" ", strip=True) for h in ths]
+            headers = _expand_row_cells_with_colspan(trs[-1])
 
     rows: list[list[str]] = []
     tbody = table.find("tbody") or table
@@ -329,60 +342,38 @@ def _table_headers_and_rows(table) -> tuple[list[str], list[list[str]]]:
     if not headers and rows:
         first = rows[0]
         # Heuristic: header-ish if it contains non-numeric strings like 'Rank'/'Team'
-        if any(str(x).lower() in ("rank", "team", "player") for x in first):
+        if any(str(x).lower() in ("rank", "rk", "team", "player") for x in first):
             headers = first
             rows = rows[1:]
 
     return headers, rows
 
 
-def scrape_team_ratings(sess: requests.Session) -> list[dict]:
-    html = fetch_html(sess, "/")
-    soup = BeautifulSoup(html, "html.parser")
-
+def parse_kenpom_html_text(html_text: str, source_tag: str = "html_upload") -> list[dict]:
+    """Parse a KenPom ratings HTML page or table fragment using header-aware column detection."""
+    soup = BeautifulSoup(html_text or "", "html.parser")
     table = soup.find("table", {"id": "ratings-table"})
     if not table:
-        # If logged-in view changes, try any table containing "AdjEM".
         for t in soup.find_all("table"):
-            if "AdjEM" in (t.get_text(" ", strip=True)[:500] or ""):
+            snippet = (t.get_text(" ", strip=True)[:800] or "").lower()
+            if any(tok in snippet for tok in ("adjem", "netrtg", "adjoe", "ortg")):
                 table = t
                 break
+    if not table:
+        raise ValueError("Could not find a KenPom ratings table in the uploaded HTML.")
 
     headers, rows = _table_headers_and_rows(table)
-    teams = []
-    for cols in rows:
-        # Expect rank, team, conf, record, AdjEM, AdjO, ..., AdjD, ..., AdjT
-        if len(cols) < 10:
-            continue
-        try:
-            rank = int(cols[0])
-        except Exception:
-            continue
-        team = cols[1]
-        conf = cols[2] if len(cols) > 2 else None
-        record = cols[3] if len(cols) > 3 else None
-        def f(x):
-            try:
-                return float(str(x).replace("+", "").strip())
-            except Exception:
-                return None
-        adj_em = f(cols[4])
-        adj_o = f(cols[5])
-        # cols[6] is AdjO rank in the public table; skip
-        adj_d = f(cols[7])
-        adj_t = f(cols[9])
-        teams.append({
-            "team_name": team,
-            "rank": rank,
-            "adj_em": adj_em,
-            "adj_o": adj_o,
-            "adj_d": adj_d,
-            "adj_t": adj_t,
-            "conf": conf,
-            "record": record,
-            "raw": {"headers": headers, "cols": cols},
-        })
-    return teams
+    if not headers or not rows:
+        return []
+    return _parse_kenpom_rows(headers, rows, source_tag=source_tag, header_missing=False)
+
+
+def scrape_team_ratings(sess: requests.Session) -> list[dict]:
+    html = fetch_html(sess, "/")
+    try:
+        return parse_kenpom_html_text(html, source_tag="web_scrape")
+    except ValueError:
+        return []
 
 
 def scrape_home_court(sess: requests.Session) -> list[dict]:
@@ -860,10 +851,106 @@ def _looks_like_kp_rank_cell(val: str) -> bool:
     return s.isdigit() and 1 <= int(s) <= 400
 
 
+def _parse_kenpom_rows(
+    headers: list[str],
+    data_rows: list[list[str]],
+    source_tag: str = "csv_upload",
+    header_missing: bool = False,
+) -> list[dict]:
+    norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
+
+    def _find_col(candidates: tuple[str, ...]) -> int | None:
+        for cand in candidates:
+            if cand in norm_headers:
+                return norm_headers.index(cand)
+        return None
+
+    idx_team = _find_col(("teamname", "team", "school"))
+    if idx_team is None:
+        raise ValueError("Missing required 'Team' or 'TeamName' column in CSV")
+
+    idx_rank = _find_col(("rk", "rank", "rankadjem", "ranknetrtg"))
+    idx_conf = _find_col(("conf", "confshort", "conference"))
+    idx_rec = _find_col(("wl", "record"))
+    idx_wins = _find_col(("wins", "w"))
+    idx_losses = _find_col(("losses", "l"))
+    idx_em = _find_col(("adjem", "netrtg", "em"))
+    idx_o = _find_col(("adjo", "adjoe", "ortg", "oe"))
+    idx_d = _find_col(("adjd", "adjde", "drtg", "de"))
+    idx_t = _find_col(("adjt", "adjtempo", "tempo"))
+
+    if idx_em is None and (idx_o is None or idx_d is None):
+        raise ValueError("CSV must contain NetRtg/AdjEM or both ORtg/AdjO and DRtg/AdjD columns")
+
+    out: list[dict] = []
+    for row in data_rows:
+        if len(row) <= idx_team:
+            continue
+        team = _clean_kp_team_name(row[idx_team])
+        if not team or team.lower() in ("team", "teamname"):
+            continue
+        if idx_em is not None and len(row) > idx_em and str(row[idx_em]).strip().lower() in ("adjem", "netrtg"):
+            continue
+
+        # Detect interleaved integer rank cells when pasted directly from kenpom.com HTML table
+        row_has_interleaved_ranks = (
+            idx_o is not None
+            and idx_d is not None
+            and idx_d == idx_o + 1
+            and (header_missing or len(row) > len(headers) + 1)
+            and len(row) > idx_o + 2
+            and _looks_like_kp_rank_cell(row[idx_o + 1])
+            and (_parse_kp_float(row[idx_o + 2]) or 0.0) >= 65.0
+        )
+
+        eff_idx_o = idx_o
+        eff_idx_d = (idx_o + 2) if row_has_interleaved_ranks else idx_d
+        eff_idx_t = (idx_o + 4) if (row_has_interleaved_ranks and idx_t is not None) else idx_t
+
+        adj_o = _parse_kp_float(row[eff_idx_o]) if (eff_idx_o is not None and len(row) > eff_idx_o) else None
+        adj_d = _parse_kp_float(row[eff_idx_d]) if (eff_idx_d is not None and len(row) > eff_idx_d) else None
+        adj_em = _parse_kp_float(row[idx_em]) if (idx_em is not None and len(row) > idx_em) else None
+        if adj_em is None and adj_o is not None and adj_d is not None:
+            adj_em = round(adj_o - adj_d, 2)
+        adj_t = _parse_kp_float(row[eff_idx_t]) if (eff_idx_t is not None and len(row) > eff_idx_t) else None
+        rank = _parse_kp_int(row[idx_rank]) if (idx_rank is not None and len(row) > idx_rank) else None
+        conf = str(row[idx_conf]).strip() if (idx_conf is not None and len(row) > idx_conf and str(row[idx_conf]).strip()) else None
+
+        record = str(row[idx_rec]).strip() if (idx_rec is not None and len(row) > idx_rec and str(row[idx_rec]).strip()) else None
+        if not record and idx_wins is not None and idx_losses is not None and len(row) > max(idx_wins, idx_losses):
+            w_val = _parse_kp_int(row[idx_wins])
+            l_val = _parse_kp_int(row[idx_losses])
+            if w_val is not None and l_val is not None:
+                record = f"{w_val}-{l_val}"
+
+        if adj_em is None and adj_o is None and adj_d is None:
+            continue
+
+        out.append({
+            "team_name": team,
+            "rank": rank,
+            "adj_em": adj_em,
+            "adj_o": adj_o,
+            "adj_d": adj_d,
+            "adj_t": adj_t,
+            "conf": conf,
+            "record": record,
+            "raw": {"source": source_tag, "row": row},
+        })
+
+    if out and any(r.get("rank") is None for r in out):
+        out.sort(key=lambda r: float(r.get("adj_em") or -999), reverse=True)
+        for i, r in enumerate(out, start=1):
+            if r.get("rank") is None:
+                r["rank"] = i
+    return out
+
+
 def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
-    """Parse KenPom ratings CSV/TSV export or copied web table into canonical team rating rows.
+    """Parse KenPom ratings CSV/TSV export, saved HTML page, or copied web table into canonical rows.
 
     Supports:
+    - Saved KenPom HTML pages (File -> Save Page As... .html / .htm) with colspan headers
     - KenPom summary CSV headers (Season, TeamName, AdjTempo, AdjOE, AdjDE, AdjEM, ...)
     - Copied table headers (Rk/Rank, Team, Conf, W-L/Record, NetRtg/AdjEM, ORtg/AdjO, DRtg/AdjD, AdjT)
       including live kenpom.com HTML copy-paste where integer rank cells sit next to ORtg/DRtg/AdjT
@@ -883,6 +970,12 @@ def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
     )
     if not raw_text:
         return []
+
+    lower_head = raw_text[:4000].lower()
+    if (raw_text.startswith("<") and ("<table" in lower_head or "<!doctype html" in lower_head or "<html" in lower_head or "<tr" in lower_head)) or (
+        "<table" in lower_head and "</tr>" in raw_text.lower()
+    ):
+        return parse_kenpom_html_text(raw_text, source_tag="html_upload")
 
     sample_lines = raw_text.splitlines()[:8]
     sample = "\n".join(sample_lines)
@@ -929,93 +1022,12 @@ def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
         headers = [c.strip() for c in rows_raw[header_idx]]
         data_rows = rows_raw[header_idx + 1:]
 
-    norm_headers = ["".join(ch for ch in h.lower() if ch.isalnum()) for h in headers]
-
-    def _find_col(candidates: tuple[str, ...]) -> int | None:
-        for cand in candidates:
-            if cand in norm_headers:
-                return norm_headers.index(cand)
-        return None
-
-    idx_team = _find_col(("teamname", "team", "school"))
-    if idx_team is None:
-        raise ValueError("Missing required 'Team' or 'TeamName' column in CSV")
-
-    idx_rank = _find_col(("rk", "rank", "rankadjem", "ranknetrtg"))
-    idx_conf = _find_col(("conf", "confshort", "conference"))
-    idx_rec = _find_col(("wl", "record"))
-    idx_wins = _find_col(("wins", "w"))
-    idx_losses = _find_col(("losses", "l"))
-    idx_em = _find_col(("adjem", "netrtg", "em"))
-    idx_o = _find_col(("adjo", "adjoe", "ortg", "oe"))
-    idx_d = _find_col(("adjd", "adjde", "drtg", "de"))
-    idx_t = _find_col(("adjt", "adjtempo", "tempo"))
-
-    if idx_em is None and (idx_o is None or idx_d is None):
-        raise ValueError("CSV must contain NetRtg/AdjEM or both ORtg/AdjO and DRtg/AdjD columns")
-
-    out: list[dict] = []
-    for row in data_rows:
-        if len(row) <= idx_team:
-            continue
-        team = _clean_kp_team_name(row[idx_team])
-        if not team or team.lower() in ("team", "teamname"):
-            continue
-        if idx_em is not None and len(row) > idx_em and str(row[idx_em]).strip().lower() in ("adjem", "netrtg"):
-            continue
-
-        # Detect interleaved integer rank cells when pasted directly from kenpom.com HTML table
-        row_has_interleaved_ranks = (
-            idx_o is not None
-            and idx_d is not None
-            and idx_d == idx_o + 1
-            and (header_idx is None or len(row) > len(headers) + 1)
-            and len(row) > idx_o + 2
-            and _looks_like_kp_rank_cell(row[idx_o + 1])
-            and (_parse_kp_float(row[idx_o + 2]) or 0.0) >= 65.0
-        )
-
-        eff_idx_o = idx_o
-        eff_idx_d = (idx_o + 2) if row_has_interleaved_ranks else idx_d
-        eff_idx_t = (idx_o + 4) if (row_has_interleaved_ranks and idx_t is not None) else idx_t
-
-        adj_o = _parse_kp_float(row[eff_idx_o]) if (eff_idx_o is not None and len(row) > eff_idx_o) else None
-        adj_d = _parse_kp_float(row[eff_idx_d]) if (eff_idx_d is not None and len(row) > eff_idx_d) else None
-        adj_em = _parse_kp_float(row[idx_em]) if (idx_em is not None and len(row) > idx_em) else None
-        if adj_em is None and adj_o is not None and adj_d is not None:
-            adj_em = round(adj_o - adj_d, 2)
-        adj_t = _parse_kp_float(row[eff_idx_t]) if (eff_idx_t is not None and len(row) > eff_idx_t) else None
-        rank = _parse_kp_int(row[idx_rank]) if (idx_rank is not None and len(row) > idx_rank) else None
-        conf = row[idx_conf].strip() if (idx_conf is not None and len(row) > idx_conf and row[idx_conf].strip()) else None
-
-        record = row[idx_rec].strip() if (idx_rec is not None and len(row) > idx_rec and row[idx_rec].strip()) else None
-        if not record and idx_wins is not None and idx_losses is not None and len(row) > max(idx_wins, idx_losses):
-            w_val = _parse_kp_int(row[idx_wins])
-            l_val = _parse_kp_int(row[idx_losses])
-            if w_val is not None and l_val is not None:
-                record = f"{w_val}-{l_val}"
-
-        if adj_em is None and adj_o is None and adj_d is None:
-            continue
-
-        out.append({
-            "team_name": team,
-            "rank": rank,
-            "adj_em": adj_em,
-            "adj_o": adj_o,
-            "adj_d": adj_d,
-            "adj_t": adj_t,
-            "conf": conf,
-            "record": record,
-            "raw": {"source": "csv_upload", "row": row},
-        })
-
-    if out and any(r.get("rank") is None for r in out):
-        out.sort(key=lambda r: float(r.get("adj_em") or -999), reverse=True)
-        for i, r in enumerate(out, start=1):
-            if r.get("rank") is None:
-                r["rank"] = i
-    return out
+    return _parse_kenpom_rows(
+        headers,
+        data_rows,
+        source_tag="csv_upload",
+        header_missing=(header_idx is None),
+    )
 
 
 def fetch_kenpom_official_api(api_key: str, year: int | None = None, timeout: int = 20) -> list[dict]:
