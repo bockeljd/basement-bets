@@ -517,7 +517,7 @@ export default function Picks() {
     const isActive = sortConfig.key === colKey;
     const ariaSort = isActive ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined;
     return (
-      <th scope="col" aria-sort={ariaSort} className={`py-3 px-3 font-semibold text-xs uppercase tracking-wider text-slate-400 ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      <th scope="col" aria-sort={ariaSort} className={`py-2.5 px-2.5 font-semibold text-xs uppercase tracking-wider text-slate-400 ${align === 'right' ? 'text-right' : 'text-left'}`}>
         <button
           type="button"
           onClick={() => handleSort(colKey)}
@@ -947,7 +947,7 @@ export default function Picks() {
               No recent graded picks to show for this sport yet.
             </div>
           ) : (
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1 scrollbar-refined">
               {recentSlateDisplay.rows.map((item) => {
                 const badge = formatOutcomeBadge(item.outcome);
                 return (
@@ -1072,13 +1072,13 @@ export default function Picks() {
           <table className="w-full text-left border-collapse text-sm">
             <thead className="bg-slate-950/80 border-b border-slate-800">
               <tr>
-                {renderSortableHeader('created_at', 'Date (ET)')}
+                {renderSortableHeader('created_at', 'Date')}
                 {renderSortableHeader('sport', 'Sport')}
                 {renderSortableHeader('matchup', 'Matchup')}
                 {renderSortableHeader('pick', 'Pick & Odds')}
                 {renderSortableHeader('edge', 'Edge & Tier', 'right')}
                 {renderSortableHeader('result', 'Grade & Score')}
-                {renderSortableHeader('pl', 'Profit (1u)', 'right')}
+                {renderSortableHeader('pl', 'Profit', 'right')}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/70">
@@ -1119,18 +1119,18 @@ export default function Picks() {
 
                   return (
                     <tr key={h.id || h.prediction_id || `${h.event_id}-${idx}`} className="hover:bg-slate-900/55 transition-colors">
-                      <td className="py-3 px-3 font-mono text-xs text-slate-300 whitespace-nowrap">{day}</td>
-                      <td className="py-3 px-3 whitespace-nowrap">
+                      <td className="py-2.5 px-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{day}</td>
+                      <td className="py-2.5 px-2.5 whitespace-nowrap">
                         <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 text-xs font-bold">
                           {sp}
                         </span>
                       </td>
-                      <td className="py-3 px-3 font-medium text-slate-100 max-w-[240px]">
+                      <td className="py-2.5 px-2.5 font-medium text-slate-100 max-w-[190px]">
                         <div className="truncate" title={matchup}>
                           {matchup}
                         </div>
                       </td>
-                      <td className="py-3 px-3 max-w-[260px]">
+                      <td className="py-2.5 px-2.5 max-w-[200px]">
                         <div className="flex items-center gap-1.5">
                           {rankNum && rankNum <= 6 && (
                             <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-mono font-bold shrink-0">
@@ -1141,11 +1141,11 @@ export default function Picks() {
                             {pickLabel}
                           </span>
                         </div>
-                        <div className="text-xs text-slate-400">
+                        <div className="text-xs text-slate-400 truncate" title={`${lineOdds} • ${market}`}>
                           {lineOdds} • {market}
                         </div>
                       </td>
-                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                      <td className="py-2.5 px-2.5 text-right whitespace-nowrap">
                         <div className="font-mono text-xs font-semibold text-slate-200">
                           {evPct != null ? `${evPct >= 0 ? '+' : ''}${evPct.toFixed(1)}% EV` : '—'}
                         </div>
@@ -1153,8 +1153,8 @@ export default function Picks() {
                           {confTier}{confScore > 0 ? ` (${confScore})` : ''}
                         </span>
                       </td>
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
+                      <td className="py-2.5 px-2.5 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
                           <span className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${badge.cls}`}>
                             {badge.label}
                           </span>
@@ -1162,7 +1162,7 @@ export default function Picks() {
                         </div>
                       </td>
                       <td
-                        className={`py-3 px-3 text-right font-mono text-xs font-bold whitespace-nowrap ${
+                        className={`py-2.5 px-2.5 text-right font-mono text-xs font-bold whitespace-nowrap ${
                           badge.key === 'WON'
                             ? 'text-emerald-400'
                             : badge.key === 'LOST'

@@ -80,30 +80,25 @@ export const roiPerUnit = (outcome, price) => {
  */
 export const getNumericConfidence = (row) => {
   if (!row) return 0;
-  
-  // 1. Explicit clean field
-  let c = row.confidence_0_100;
-  if (c != null) {
-     const val = parseFloat(c);
-     if (val <= 1.0 && val > 0) return val * 100; // was 0.85
-     return val;
-  }
-  
-  // 2. Generic confidence field
-  if (row.confidence != null) {
-      const val = parseFloat(row.confidence);
-      if (val <= 1.0 && val > 0) return val * 100;
-      return val;
+
+  const normalizeValue = (raw) => {
+    const val = parseFloat(raw);
+    if (!Number.isFinite(val) || val <= 0) return 0;
+    const scaled = val <= 1.0 ? val * 100 : val;
+    return Math.min(100, Math.max(0, scaled));
+  };
+
+  if (row.confidence_0_100 != null) return normalizeValue(row.confidence_0_100);
+  if (row.confidence != null) return normalizeValue(row.confidence);
+
+  // Last resort: infer from EV if it's a recommendation
+  if (row.ev_per_unit != null) {
+    const ev = parseFloat(row.ev_per_unit);
+    if (ev >= 0.08) return 85;
+    if (ev >= 0.05) return 65;
+    if (ev >= 0.02) return 50;
   }
 
-  // 3. Last resort: infer from EV if it's a recommendation
-  if (row.ev_per_unit != null) {
-      const ev = parseFloat(row.ev_per_unit);
-      if (ev >= 0.08) return 85;
-      if (ev >= 0.05) return 65;
-      if (ev >= 0.02) return 50;
-  }
-  
   return 0;
 };
 
