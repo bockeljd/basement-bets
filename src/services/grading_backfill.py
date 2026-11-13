@@ -415,10 +415,12 @@ def ingest_mlb_finals_for_dates(
     ev_cursor = _exec(
         conn,
         """
-        SELECT id, home_team, away_team, start_time
-        FROM events
-        WHERE UPPER(COALESCE(league, '')) = 'MLB'
-          AND (start_time AT TIME ZONE 'America/New_York')::date
+        SELECT e.id, e.home_team, e.away_team, e.start_time
+        FROM events e
+        LEFT JOIN game_results gr ON gr.event_id = e.id
+        WHERE UPPER(COALESCE(e.league, '')) = 'MLB'
+          AND COALESCE(gr.final, FALSE) IS NOT TRUE
+          AND (e.start_time AT TIME ZONE 'America/New_York')::date
               BETWEEN (%s::date - INTERVAL '2 days') AND (%s::date + INTERVAL '2 days')
         """,
         (min_d, max_d),
