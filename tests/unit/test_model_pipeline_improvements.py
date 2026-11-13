@@ -5,6 +5,7 @@ today-scoped board health, Moneyline CLV SQL, walk-forward weight tuning, and JS
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
+import sys
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -94,7 +95,7 @@ def test_correlation_engine_handles_postgres_decimals():
     eng = NCAAMCorrelationEngine()
     eng.MIN_SAMPLE_SIZE = 2
 
-    df = pd.DataFrame([
+    rows = [
         {
             "home_pace": Decimal("71.5"),
             "away_pace": Decimal("70.5"),
@@ -115,12 +116,20 @@ def test_correlation_engine_handles_postgres_decimals():
             "margin": Decimal("2"),
             "total_score": Decimal("138"),
         },
-    ])
-    binned = eng.build_archetype_bins(df)
-    assert len(binned) == 2
-    metrics = eng.compute_metrics(binned)
-    assert isinstance(metrics, dict)
-    assert any(v.get("status") == "valid" for v in metrics.values())
+    ]
+
+    # Pure-Python list[dict] path (used on Vercel serverless runtime)
+    binned_py = eng.build_archetype_bins(rows)
+    assert isinstance(binned_py, list) and len(binned_py) == 2
+    metrics_py = eng.compute_metrics(binned_py)
+    assert any(v.get("status") == "valid" for v in metrics_py.values())
+
+    # Legacy DataFrame path
+    binned_df = eng.build_archetype_bins(pd.DataFrame(rows))
+    assert len(binned_df) == 2
+    metrics_df = eng.compute_metrics(binned_df)
+    assert isinstance(metrics_df, dict)
+    assert any(v.get("status") == "valid" for v in metrics_df.values())
 
 
 def test_board_health_separates_today_from_three_day_window():
@@ -241,6 +250,8 @@ def test_correlations_game_endpoint_sql_has_no_unescaped_percent_and_returns_200
         cur.fetchone.return_value = row_data
         return cur
 
+    monkeypatch.setitem(sys.modules, "pandas", None)
+    monkeypatch.setitem(sys.modules, "numpy", None)
     monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
     with patch("src.database.get_db_connection", return_value=mock_ctx), \
          patch("src.database._exec", side_effect=_fake_exec):

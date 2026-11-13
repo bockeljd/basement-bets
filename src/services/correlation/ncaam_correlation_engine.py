@@ -1,218 +1,274 @@
+"""Pure-Python empirical correlation engine for NCAAM matchup archetypes.
 
-import pandas as pd
-import numpy as np
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+Avoids importing pandas/numpy so serverless deployments (Vercel) stay under
+bundle limits while still accepting pandas DataFrames when callers pass them.
+"""
+
+from __future__ import annotations
+
 import math
+from typing import Any, Dict, List, Optional, Tuple
 
-from src.database import get_db_connection, _exec
+from src.database import _exec, get_db_connection
+
+
+def _to_float(val: Any, default: Optional[float] = None) -> Optional[float]:
+    """Coerce Postgres Decimal, numeric strings, or NaN safely to float."""
+    if val is None or val == "":
+        return default
+    try:
+        num = float(val)
+        return default if math.isnan(num) or math.isinf(num) else num
+    except Exception:
+        return default
+
+
+def _as_rows(data: Any) -> Tuple[List[Dict[str, Any]], Any]:
+    """Normalize DataFrame or list-of-dicts into mutable row dicts; returns (rows, df_cls)."""
+    if data is None:
+        return [], None
+    if hasattr(data, "to_dict") and callable(data.to_dict):
+        return [dict(r) for r in data.to_dict("records")], type(data)
+    return [dict(r) for r in list(data)], None
+
+
+def _tercile_thresholds(values: List[float]) -> Optional[Tuple[float, float]]:
+    """Compute (q33, q67) empirical breakpoints when values span at least 3 buckets."""
+    if len(values) < 3 or len(set(values)) < 3:
+        return None
+    s = sorted(values)
+    q1 = s[len(s) // 3]
+    q2 = s[(2 * len(s)) // 3]
+    if q1 == q2:
+        return None
+    return q1, q2
+
 
 class NCAAMCorrelationEngine:
     """
     Computes empirical joint probabilities and correlation metrics (Lift, Phi)
     for NCAAM betting markets, conditional on matchup archetypes.
-    
-    Hard constraints:
-    - Season: Current NCAAM season (Nov 1 to May 1)
-    - Min Sample: 40 games per archetype (or fallback)
     """
 
     from src.utils.ncaam_season import ncaam_season_date_bounds
+
     SEASON_START, SEASON_END = ncaam_season_date_bounds()
     del ncaam_season_date_bounds
     MIN_SAMPLE_SIZE = 40
-    
-    def fetch_season_data(self) -> pd.DataFrame:
+
+    def fetch_season_data(self) -> List[Dict[str, Any]]:
         """
-        Fetches all completed games + odds + metrics for the target season.
-        Returns DataFrame with cols: 
-        [event_id, home_score, away_score, close_spread, close_total, 
-         pace_index, eff_index, home_cover, total_over, etc.]
+        Fetch completed games, closing spread/total snapshots, and team metrics
+        for the target NCAAM season in pure Python.
         """
         query = """
         WITH game_metrics AS (
-            SELECT 
+            SELECT
                 e.id,
                 e.start_time,
                 e.home_team,
                 e.away_team,
                 gr.home_score,
                 gr.away_score,
-                -- Closing Lines (Approximate: Latest snapshot before start)
                 (
-                    SELECT line_value 
-                    FROM odds_snapshots os 
-                    WHERE os.event_id = e.id 
-                      AND os.market_type = 'SPREAD' 
+                    SELECT line_value
+                    FROM odds_snapshots os
+                    WHERE os.event_id = e.id
+                      AND os.market_type = 'SPREAD'
+                      AND os.side = 'HOME'
                       AND os.captured_at <= (e.start_time AT TIME ZONE 'UTC')
                     ORDER BY os.captured_at DESC LIMIT 1
                 ) as close_spread,
                 (
-                    SELECT line_value 
-                    FROM odds_snapshots os 
-                    WHERE os.event_id = e.id 
-                      AND os.market_type = 'TOTAL' 
+                    SELECT line_value
+                    FROM odds_snapshots os
+                    WHERE os.event_id = e.id
+                      AND os.market_type = 'TOTAL'
+                      AND os.side = 'OVER'
                       AND os.captured_at <= (e.start_time AT TIME ZONE 'UTC')
                     ORDER BY os.captured_at DESC LIMIT 1
                 ) as close_total,
-                -- Team Metrics (Home)
                 mh.adj_tempo as home_pace,
                 (mh.adj_off - mh.adj_def) as home_net_eff,
-                -- Team Metrics (Away)
                 ma.adj_tempo as away_pace,
                 (ma.adj_off - ma.adj_def) as away_net_eff
             FROM events e
             JOIN game_results gr ON e.id = gr.event_id
-            -- Fuzzy join for metrics (this is fragile but standard in this repo)
-            -- Use LATEST team metrics as proxy for season identity (since historical daily metrics might be missing)
-            LEFT JOIN (
-                SELECT team_text, adj_tempo, adj_off, adj_def
+            LEFT JOIN LATERAL (
+                SELECT adj_tempo, adj_off, adj_def
                 FROM bt_team_metrics_daily
                 WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
-            ) mh ON LOWER(e.home_team) LIKE '%%' || LOWER(mh.team_text) || '%%'
-            LEFT JOIN (
-                SELECT team_text, adj_tempo, adj_off, adj_def
+                  AND LENGTH(TRIM(team_text)) > 0
+                  AND STRPOS(LOWER(e.home_team), LOWER(team_text)) > 0
+                ORDER BY LENGTH(team_text) DESC
+                LIMIT 1
+            ) mh ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT adj_tempo, adj_off, adj_def
                 FROM bt_team_metrics_daily
                 WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
-            ) ma ON LOWER(e.away_team) LIKE '%%' || LOWER(ma.team_text) || '%%'
-            WHERE e.start_time >= %(start)s 
+                  AND LENGTH(TRIM(team_text)) > 0
+                  AND STRPOS(LOWER(e.away_team), LOWER(team_text)) > 0
+                ORDER BY LENGTH(team_text) DESC
+                LIMIT 1
+            ) ma ON TRUE
+            WHERE e.start_time >= %(start)s
               AND e.start_time < %(end)s
               AND (e.league = 'NCAAM' OR e.league = 'ncaab')
               AND gr.final = TRUE
         )
         SELECT * FROM game_metrics
-        WHERE close_spread IS NOT NULL 
+        WHERE close_spread IS NOT NULL
           AND close_total IS NOT NULL
         """
-        
+
         with get_db_connection() as conn:
-            # pandas read_sql with psycopg2 connection expects standard DBAPI params style specific to driver
-            # psycopg2 uses %(name)s for dict params
-            df = pd.read_sql_query(query, conn, params={"start": self.SEASON_START, "end": self.SEASON_END})
-            
-        # Post-processing
-        # 1. Calculate Outcomes
-        # Spread is usually "Home - X.X" or "Away + X.X" but DB stores line relative to selection?
-        # Standard: close_spread is Home line (e.g. -5.5).
-        # Win Condition: (HomeScore - AwayScore) + Spread > 0
-        df['margin'] = df['home_score'] - df['away_score']
-        df['total_score'] = df['home_score'] + df['away_score']
-        
-        # Assume close_spread is Home perspective (needs verification, but standard for 'spread' market w/o side)
-        # Actually odds_snapshots has 'side'. Subquery above is naive.
-        # FIX: The subquery above picks A line value. It might be Home or Away.
-        # We need to ensure we get Home line.
-        # If we can't easily fix SQL, we filter in python.
-        # Let's refine the SQL to be robust or do robust parsing here.
-        # For MVP, assume the snapshot query returns valid line. 
-        # Ideally we join odds_snapshots on side='home' or invert.
-        
-        return df
+            raw_rows = _exec(
+                conn,
+                query,
+                {"start": self.SEASON_START, "end": self.SEASON_END},
+            ).fetchall()
 
-    def build_archetype_bins(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Enriches DF with 'pace_bin', 'eff_bin', 'spread_bucket'.
-        """
-        if df.empty: return df
+        results: List[Dict[str, Any]] = []
+        for raw in raw_rows:
+            row = dict(raw)
+            hs = _to_float(row.get("home_score"))
+            aws = _to_float(row.get("away_score"))
+            if hs is None or aws is None:
+                continue
+            row["margin"] = hs - aws
+            row["total_score"] = hs + aws
+            results.append(row)
+        return results
 
-        # Coerce Postgres Decimal/object numerics to float before arithmetic.
-        for col in ('home_pace', 'away_pace', 'home_net_eff', 'away_net_eff', 'close_spread'):
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
-
-        # 1. Pace Index (Avg of teams)
-        df['pace_index'] = (df['home_pace'].fillna(68.0) + df['away_pace'].fillna(68.0)) / 2.0
-        
-        # 2. Efficiency Index ("Clash" proxy: sum of Net Efficiencies)
-        df['eff_index'] = (df['home_net_eff'].fillna(0.0) + df['away_net_eff'].fillna(0.0))
-        
-        # 3. Spread Bucket
-        df['abs_spread'] = df['close_spread'].abs()
-        df['spread_bucket'] = pd.cut(
-            df['abs_spread'], 
-            bins=[-1, 3.5, 9.5, 100], 
-            labels=['Close', 'Medium', 'Big']
-        )
-        
-        # 4. Tercile Binning (Season adaptive)
-        # Use qcut for equal sized bins based on THIS dataset
-        try:
-            df['pace_bin'] = pd.qcut(df['pace_index'], 3, labels=['Slow', 'Avg', 'Fast'])
-            df['eff_bin'] = pd.qcut(df['eff_index'], 3, labels=['Low', 'Avg', 'High'])
-        except ValueError:
-            # Fallback if too few unique values
-            df['pace_bin'] = 'Avg'
-            df['eff_bin'] = 'Avg'
-            
-        return df
-
-    def compute_metrics(self, df: pd.DataFrame) -> Dict:
+    def build_archetype_bins(self, data: Any) -> Any:
         """
-        Aggregates metrics by archetype.
+        Enrich rows with 'pace_index', 'eff_index', 'spread_bucket', 'pace_bin', 'eff_bin'.
+        Accepts list[dict] or pandas.DataFrame and preserves the input container type.
         """
-        if df.empty: return {}
-        
-        # Define Binary Legs (coerce Decimal/object Postgres numerics safely)
-        df = df.copy()
-        for col in ('margin', 'close_spread', 'total_score', 'close_total'):
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
-        df['home_cover'] = (df['margin'] + df['close_spread']) > 0
-        df['away_cover'] = (df['margin'] + df['close_spread']) < 0
-        df['total_over'] = df['total_score'] > df['close_total']
-        df['total_under'] = df['total_score'] < df['close_total']
-        
-        # Group by Archetypes
-        groups = df.groupby(['pace_bin', 'eff_bin', 'spread_bucket'], observed=True)
-        
-        results = {}
-        
-        for name, group in groups:
-            pace, eff, spread = name
+        rows, df_cls = _as_rows(data)
+        if not rows:
+            return data
+
+        pace_vals: List[float] = []
+        eff_vals: List[float] = []
+        for row in rows:
+            hp = _to_float(row.get("home_pace"), 68.0)
+            ap = _to_float(row.get("away_pace"), 68.0)
+            hne = _to_float(row.get("home_net_eff"), 0.0)
+            ane = _to_float(row.get("away_net_eff"), 0.0)
+            cs = _to_float(row.get("close_spread"))
+
+            pace_idx = (hp + ap) / 2.0
+            eff_idx = hne + ane
+            row["home_pace"] = hp
+            row["away_pace"] = ap
+            row["home_net_eff"] = hne
+            row["away_net_eff"] = ane
+            row["close_spread"] = cs
+            row["pace_index"] = pace_idx
+            row["eff_index"] = eff_idx
+            pace_vals.append(pace_idx)
+            eff_vals.append(eff_idx)
+
+            if cs is None:
+                row["abs_spread"] = None
+                row["spread_bucket"] = "Medium"
+            else:
+                abs_sp = abs(cs)
+                row["abs_spread"] = abs_sp
+                if abs_sp <= 3.5:
+                    row["spread_bucket"] = "Close"
+                elif abs_sp <= 9.5:
+                    row["spread_bucket"] = "Medium"
+                else:
+                    row["spread_bucket"] = "Big"
+
+        pace_thresh = _tercile_thresholds(pace_vals)
+        eff_thresh = _tercile_thresholds(eff_vals)
+
+        for row in rows:
+            if pace_thresh is None:
+                row["pace_bin"] = "Avg"
+            else:
+                q1, q2 = pace_thresh
+                p = row["pace_index"]
+                row["pace_bin"] = "Slow" if p <= q1 else ("Avg" if p <= q2 else "Fast")
+
+            if eff_thresh is None:
+                row["eff_bin"] = "Avg"
+            else:
+                q1, q2 = eff_thresh
+                e = row["eff_index"]
+                row["eff_bin"] = "Low" if e <= q1 else ("Avg" if e <= q2 else "High")
+
+        return df_cls(rows) if df_cls is not None else rows
+
+    def compute_metrics(self, data: Any) -> Dict[str, Any]:
+        """Aggregate joint probabilities and Lift per archetype without numpy/pandas."""
+        rows, _ = _as_rows(data)
+        if not rows:
+            return {}
+
+        groups: Dict[Tuple[str, str, str], List[Dict[str, bool]]] = {}
+        for row in rows:
+            margin = _to_float(row.get("margin"))
+            close_spread = _to_float(row.get("close_spread"))
+            total_score = _to_float(row.get("total_score"))
+            close_total = _to_float(row.get("close_total"))
+            if None in (margin, close_spread, total_score, close_total):
+                continue
+
+            key_tuple = (
+                str(row.get("pace_bin") or "Avg"),
+                str(row.get("eff_bin") or "Avg"),
+                str(row.get("spread_bucket") or "Medium"),
+            )
+            groups.setdefault(key_tuple, []).append({
+                "home_cover": (margin + close_spread) > 0,
+                "away_cover": (margin + close_spread) < 0,
+                "total_over": total_score > close_total,
+                "total_under": total_score < close_total,
+            })
+
+        results: Dict[str, Any] = {}
+        for (pace, eff, spread), group in groups.items():
             key = f"{pace}_{eff}_{spread}"
-            
             n = len(group)
             if n < self.MIN_SAMPLE_SIZE:
                 results[key] = {"status": "insufficient_data", "n": n}
                 continue
-                
-            # Pairs to Analyze
-            # 1. Over + Home Cover
-            metrics = self._calc_pair_stats(group, 'total_over', 'home_cover')
-            
             results[key] = {
                 "status": "valid",
                 "n": n,
                 "pairs": {
-                    "over_home_cover": metrics
-                }
+                    "over_home_cover": self._calc_pair_stats(group, "total_over", "home_cover"),
+                },
             }
-            
         return results
 
-    def _calc_pair_stats(self, df, leg_a, leg_b):
-        """Calculates Lift, Phi, Probs for two boolean series."""
-        n = len(df)
-        a_hits = df[leg_a].sum()
-        b_hits = df[leg_b].sum()
-        joint_hits = (df[leg_a] & df[leg_b]).sum()
-        
+    def _calc_pair_stats(self, rows: Any, leg_a: str, leg_b: str) -> Dict[str, float]:
+        """Calculate marginal probabilities, conditional probability, and empirical Lift."""
+        seq, _ = _as_rows(rows) if not isinstance(rows, list) else (rows, None)
+        n = len(seq)
+        if n == 0:
+            return {"p_a": 0.0, "p_b": 0.0, "p_joint": 0.0, "p_b_given_a": 0.0, "lift": 1.0}
+
+        a_hits = sum(1 for r in seq if bool(r.get(leg_a)))
+        b_hits = sum(1 for r in seq if bool(r.get(leg_b)))
+        joint_hits = sum(1 for r in seq if bool(r.get(leg_a)) and bool(r.get(leg_b)))
+
         p_a = a_hits / n
         p_b = b_hits / n
         p_joint = joint_hits / n
-        
-        # Conditional: P(B|A) = P(Joint)/P(A)
-        p_b_given_a = joint_hits / a_hits if a_hits > 0 else 0
-        
-        # Lift = P(Joint) / (P(A)*P(B))
+        p_b_given_a = (joint_hits / a_hits) if a_hits > 0 else 0.0
         expected_joint = p_a * p_b
-        lift = p_joint / expected_joint if expected_joint > 0 else 1.0
-        
+        lift = (p_joint / expected_joint) if expected_joint > 0 else 1.0
+
         return {
             "p_a": round(p_a, 3),
             "p_b": round(p_b, 3),
             "p_joint": round(p_joint, 3),
             "p_b_given_a": round(p_b_given_a, 3),
-            "lift": round(lift, 3)
+            "lift": round(lift, 3),
         }
-

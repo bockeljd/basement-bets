@@ -6131,7 +6131,6 @@ def get_game_correlation(event_id: str):
     """
     from src.services.correlation.ncaam_correlation_engine import NCAAMCorrelationEngine
     from src.database import get_db_connection, _exec
-    import pandas as pd
     
     # 1. Fetch Game Data to determine archetype
     query = """
@@ -6178,25 +6177,29 @@ def get_game_correlation(event_id: str):
     if row['close_spread'] is None:
          return {"archetype": None, "correlations": None, "status": "no_spread"}
 
-    # Convert to DataFrame row for binning (coerce psycopg2 Decimal/DictRow safely)
+    # Convert DB row dict cleanly without requiring pandas/numpy on Vercel runtime
     try:
-        d = {k: row[k] for k in row._index} if hasattr(row, '_index') else dict(row)
-        df = pd.DataFrame([d])
+        if hasattr(row, '_mapping'):
+            d = dict(row._mapping)
+        elif hasattr(row, '_index'):
+            d = {k: row[k] for k in row._index}
+        else:
+            d = dict(row)
     except Exception as e:
-        print(f"DEBUG DF Creation Error: {e}", flush=True)
-        raise HTTPException(status_code=500, detail=f"Correlation frame error: {e}")
+        print(f"DEBUG Correlation Row Error: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=f"Correlation row error: {e}")
 
-    # Compute bins
+    # Compute bins in pure Python
     engine = NCAAMCorrelationEngine()
-    df = engine.build_archetype_bins(df)
-    
-    if df.empty or 'pace_bin' not in df.columns:
+    binned_rows = engine.build_archetype_bins([d])
+
+    if not binned_rows or 'pace_bin' not in binned_rows[0]:
         return {"archetype": None, "correlations": None}
-        
-    # Identify Archetype (sanitize NaN/Categorical so JSON serialization never fails)
-    row_processed = df.iloc[0]
+
+    # Identify Archetype (sanitize None/NaN so JSON serialization never fails)
+    row_processed = binned_rows[0]
     def _clean_bin(val, fallback='Avg'):
-        return fallback if (val is None or pd.isna(val)) else str(val)
+        return fallback if (val is None or val == "" or str(val).lower() == "nan") else str(val)
 
     pace_bin = _clean_bin(row_processed.get('pace_bin'))
     eff_bin = _clean_bin(row_processed.get('eff_bin'))
@@ -6209,9 +6212,12 @@ def get_game_correlation(event_id: str):
     correlations = None
     
     if os.path.exists(cache_file):
-        with open(cache_file, "r") as f:
-            full_data = json.load(f)
-            correlations = full_data.get("archetypes", {}).get(archetype_key)
+        try:
+            with open(cache_file, "r") as f:
+                full_data = json.load(f)
+                correlations = full_data.get("archetypes", {}).get(archetype_key)
+        except Exception as e:
+            print(f"DEBUG Correlation Cache Read Error: {e}", flush=True)
             
     return {
         "archetype": {
