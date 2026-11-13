@@ -1592,39 +1592,46 @@ const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, fo
                             )}
 
                             {!loading && edges.length > 0 && boardTab === 'full' && (
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto" role="region" aria-label="Full betting board" tabIndex={0}>
                                     <table className="w-full text-left border-collapse">
+                                        <caption className="sr-only">Full betting board showing start time, league, matchup, spreads or moneylines, totals, and analysis actions</caption>
                                         <thead>
                                             <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('start_time')}>
-                                                    <div className="flex items-center">Time <SortIcon column="start_time" /></div>
+                                                <th scope="col" aria-sort={sortConfig.key === 'start_time' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                    <button type="button" onClick={() => handleSort('start_time')} className="flex items-center hover:text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-0.5">
+                                                        Time <SortIcon column="start_time" />
+                                                    </button>
                                                 </th>
-                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
-                                                    <div className="flex items-center">League <SortIcon column="sport" /></div>
+                                                <th scope="col" aria-sort={sortConfig.key === 'sport' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                    <button type="button" onClick={() => handleSort('sport')} className="flex items-center hover:text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-0.5">
+                                                        League <SortIcon column="sport" />
+                                                    </button>
                                                 </th>
-                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('game')}>
-                                                    <div className="flex items-center">Matchup <SortIcon column="game" /></div>
+                                                <th scope="col" aria-sort={sortConfig.key === 'game' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                    <button type="button" onClick={() => handleSort('game')} className="flex items-center hover:text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-0.5">
+                                                        Matchup <SortIcon column="game" />
+                                                    </button>
                                                 </th>
                                                 {leagueFilter === 'EPL' ? (
                                                     <>
-                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
                                                             <div className="flex items-center">Moneyline (1X2)</div>
                                                         </th>
-                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
                                                             <div className="flex items-center">Total Goals (O/U)</div>
                                                         </th>
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
                                                             <div className="flex items-center">Spread (both sides)</div>
                                                         </th>
-                                                        <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
+                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
                                                             <div className="flex items-center">Total (O/U)</div>
                                                         </th>
                                                     </>
                                                 )}
-                                                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
+                                                <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
                                                     <div className="flex items-center justify-center">Action</div>
                                                 </th>
                                             </tr>

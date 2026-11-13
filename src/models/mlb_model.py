@@ -277,30 +277,23 @@ class MLBModel(BaseModel):
             mu_final_spread = mu_market_spread + (self.CAP_MARGIN * math.copysign(1, mu_final_spread - mu_market_spread))
 
         # Total
+        # Total blend (park_factor_runs in run projections + market total already price altitude;
+        # avoid double-counting altitude_adj after blending with market total).
         diff_total = proj_total - mu_market_total
         mu_final_total = mu_market_total + (self.W_PROJ * diff_total)
 
         if abs(mu_final_total - mu_market_total) > self.CAP_TOTAL:
             mu_final_total = mu_market_total + (self.CAP_TOTAL * math.copysign(1, mu_final_total - mu_market_total))
 
-        # Altitude adjustment to total
-        mu_final_total += altitude_adj
-
         # ── Probability Calculations ───────────────────────────
 
-        # Spread (Run Line ±1.5)
-        # Home team covers -1.5 means home wins by 2+
+        # Spread (Run Line ±1.5): home covers mu_market_spread iff margin + spread > 0
         actual_margin = -mu_final_spread  # Convert spread to margin (positive = home winning)
-        prob_home_cover = norm_cdf(actual_margin - 1.5, mu=0, sigma=self.SIGMA_MARGIN)
+        prob_home_cover = norm_cdf(actual_margin + mu_market_spread, mu=0, sigma=self.SIGMA_MARGIN)
         prob_away_cover = 1.0 - prob_home_cover
 
-        # Moneyline
-        prob_home_win = norm_cdf(actual_margin, mu=0, sigma=self.SIGMA_MARGIN)
-        prob_away_win = 1.0 - prob_home_win
-
-        # Home field advantage built in to slight degree
-        HFA_BOOST = 0.015
-        prob_home_win = min(0.95, prob_home_win + HFA_BOOST)
+        # Moneyline (market spread & H/A pitcher splits already incorporate HFA)
+        prob_home_win = max(0.05, min(0.95, norm_cdf(actual_margin, mu=0, sigma=self.SIGMA_MARGIN)))
         prob_away_win = 1.0 - prob_home_win
 
         # Total (Over/Under)
@@ -476,6 +469,23 @@ class MLBModel(BaseModel):
 
     # ── Recommendation Generation ──────────────────────────────
 
+    def _classify_confidence(self, prob: float, ev: float) -> Tuple[str, int]:
+        """Classify pick confidence aligned with calibrated win probability and positive EV.
+
+        Returns (label, score_0_100) matching conf_bucket tiers (>=80 High, >=50 Medium, <50 Low)
+        so low-probability longshots cannot be misclassified as High Confidence.
+        """
+        p = max(0.0, min(1.0, float(prob or 0.0)))
+        ev_val = float(ev or 0.0)
+        if p >= 0.56 and ev_val >= 0.07:
+            score = min(95, 80 + int(round((p - 0.56) * 120)))
+            return "HIGH", score
+        if p >= 0.50 and ev_val >= 0.03:
+            score = 55 + int(round(((min(p, 0.559) - 0.50) / 0.06) * 23))
+            return "MEDIUM", min(78, max(50, score))
+        score = max(20, min(49, int(round(p * 90))))
+        return "LOW", score
+
     def _generate_recommendations(self, **kwargs) -> List[Dict]:
         """Generate actionable bet recommendations based on edges."""
         recs = []
@@ -493,13 +503,13 @@ class MLBModel(BaseModel):
             if spread_edge >= self.MIN_EDGE_SPREAD:
                 # Determine which side to bet
                 if mu_final < mu_market:
-                    # Model thinks home should be more favored → bet Home -1.5
+                    # Model thinks home should be more favored → bet Home spread
                     pick = home_team
                     side = "HOME"
                     prob = kwargs["prob_home_cover"]
                     line = mu_market
                 else:
-                    # Model thinks away should be closer → bet Away +1.5
+                    # Model thinks away should be closer → bet Away spread
                     pick = away_team
                     side = "AWAY"
                     prob = kwargs["prob_away_cover"]
@@ -509,6 +519,7 @@ class MLBModel(BaseModel):
                 ev = self._calculate_ev(prob, price or -110)
 
                 if ev >= self.MIN_EV_PER_UNIT:
+                    conf_label, conf_score = self._classify_confidence(prob, ev)
                     recs.append({
                         "market_type": "SPREAD",
                         "pick": pick,
@@ -519,7 +530,8 @@ class MLBModel(BaseModel):
                         "edge": round(spread_edge, 2),
                         "ev_per_unit": round(ev, 4),
                         "selection": f"{pick} {line:+.1f}",
-                        "confidence": "HIGH" if spread_edge > 0.8 else "MEDIUM" if spread_edge > 0.5 else "LOW",
+                        "confidence": conf_label,
+                        "confidence_0_100": conf_score,
                     })
 
         # 2. Moneyline
@@ -535,6 +547,7 @@ class MLBModel(BaseModel):
             if home_conf >= 0.5 and (isinstance(ml_home_price, int) and ml_home_price >= self.MAX_ML_PRICE):
                 ev = self._calculate_ev(kwargs["prob_home_win"], ml_home_price)
                 if ev >= self.MIN_EV_PER_UNIT:
+                    conf_label, conf_score = self._classify_confidence(kwargs["prob_home_win"], ev)
                     recs.append({
                         "market_type": "MONEYLINE",
                         "pick": home_team,
@@ -545,13 +558,15 @@ class MLBModel(BaseModel):
                         "edge": round(ml_edge_home, 4),
                         "ev_per_unit": round(ev, 4),
                         "selection": f"{home_team} ML ({ml_home_price:+d})" if isinstance(ml_home_price, int) else f"{home_team} ML",
-                        "confidence": "HIGH" if ml_edge_home > 0.10 else "MEDIUM" if ml_edge_home > 0.07 else "LOW",
+                        "confidence": conf_label,
+                        "confidence_0_100": conf_score,
                     })
 
         if ml_edge_away > self.MIN_EDGE_ML_PROB and ml_away_price:
             if away_conf >= 0.5 and (isinstance(ml_away_price, int) and ml_away_price >= self.MAX_ML_PRICE):
                 ev = self._calculate_ev(kwargs["prob_away_win"], ml_away_price)
                 if ev >= self.MIN_EV_PER_UNIT:
+                    conf_label, conf_score = self._classify_confidence(kwargs["prob_away_win"], ev)
                     recs.append({
                         "market_type": "MONEYLINE",
                         "pick": away_team,
@@ -562,7 +577,8 @@ class MLBModel(BaseModel):
                         "edge": round(ml_edge_away, 4),
                         "ev_per_unit": round(ev, 4),
                         "selection": f"{away_team} ML ({ml_away_price:+d})" if isinstance(ml_away_price, int) else f"{away_team} ML",
-                        "confidence": "HIGH" if ml_edge_away > 0.10 else "MEDIUM" if ml_edge_away > 0.07 else "LOW",
+                        "confidence": conf_label,
+                        "confidence_0_100": conf_score,
                     })
 
         # 3. Total (Over/Under)
@@ -583,6 +599,7 @@ class MLBModel(BaseModel):
                 ev = self._calculate_ev(prob, price or -110)
 
                 if ev >= self.MIN_EV_PER_UNIT:
+                    conf_label, conf_score = self._classify_confidence(prob, ev)
                     recs.append({
                         "market_type": "TOTAL",
                         "pick": pick,
@@ -593,7 +610,8 @@ class MLBModel(BaseModel):
                         "edge": round(total_edge, 2),
                         "ev_per_unit": round(ev, 4),
                         "selection": f"{pick} {mu_market_total}",
-                        "confidence": "HIGH" if total_edge > 0.8 else "MEDIUM" if total_edge > 0.5 else "LOW",
+                        "confidence": conf_label,
+                        "confidence_0_100": conf_score,
                     })
 
         # 4. NRFI
@@ -613,6 +631,7 @@ class MLBModel(BaseModel):
         if nrfi_edge > self.MIN_EDGE_NRFI_PROB and p_nrfi > 0.55:
             ev = self._calculate_ev(p_nrfi, nrfi_market_price)
             if ev >= self.MIN_EV_PER_UNIT:
+                conf_label, conf_score = self._classify_confidence(p_nrfi, ev)
                 recs.append({
                     "market_type": "NRFI",
                     "pick": "NRFI",
@@ -623,7 +642,8 @@ class MLBModel(BaseModel):
                     "edge": round(nrfi_edge, 4),
                     "ev_per_unit": round(ev, 4),
                     "selection": f"NRFI ({home_team} vs {away_team})",
-                    "confidence": "HIGH" if p_nrfi > 0.65 else "MEDIUM" if p_nrfi > 0.58 else "LOW",
+                    "confidence": conf_label,
+                    "confidence_0_100": conf_score,
                     "nrfi_detail": nrfi,
                 })
 

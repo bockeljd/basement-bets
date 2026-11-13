@@ -27,6 +27,7 @@ export default function Picks() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [isGrading, setIsGrading] = useState(false);
+  const [gradeMessage, setGradeMessage] = useState(null);
   const [yesterdayReco, setYesterdayReco] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
   const [historyScope, setHistoryScope] = useState('all');
@@ -61,13 +62,31 @@ export default function Picks() {
   }, [scopedHistory]);
 
 
+  const pastPendingCount = useMemo(() => {
+    const todayEt = toEtDay(new Date());
+    return (recommendedHistory || []).filter((h) => {
+      const day = getPerformanceDay(h);
+      if (!day || day >= todayEt) return false;
+      return !isGradedOutcome(h.graded_result || h.outcome || h.result);
+    }).length;
+  }, [recommendedHistory]);
+
   const gradeNow = async () => {
     try {
       setIsGrading(true);
-      await api.post('/api/research/grade');
+      setGradeMessage(null);
+      setErr(null);
+      const res = await api.post('/api/research/grade', {
+        backfill_pending: true,
+        max_grade_rows: 5000,
+      });
+      const data = res?.data || {};
+      const gradedCount = Number(data.graded_predictions ?? data.predictions_graded ?? 0);
+      const checkedGames = Number(data.ingested_games ?? data.games_checked ?? 0);
+      setGradeMessage(`Checked ${checkedGames.toLocaleString()} final game scores and updated ${gradedCount.toLocaleString()} pending pick(s).`);
       await load(); // Refresh data after grading
     } catch (e) {
-      // ignore
+      setErr(e?.response?.data?.detail || e?.message || 'Could not update past pick results right now.');
     } finally {
       setIsGrading(false);
     }
@@ -646,7 +665,7 @@ export default function Picks() {
         </div>
         <button
           type="button"
-          onClick={async () => { await gradeNow(); await load(); }}
+          onClick={gradeNow}
           disabled={isGrading || loading}
           className="inline-flex items-center gap-2 self-start px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-700 bg-slate-900/70 text-slate-200 hover:text-white hover:border-slate-500 disabled:opacity-50 transition-colors"
         >
@@ -654,6 +673,27 @@ export default function Picks() {
           {isGrading ? 'Checking Scores…' : 'Update Results'}
         </button>
       </div>
+
+      {gradeMessage && (
+        <div role="status" className="p-3 rounded-lg bg-emerald-900/20 border border-emerald-800/40 text-emerald-200 text-xs sm:text-sm">
+          {gradeMessage}
+        </div>
+      )}
+
+      {pastPendingCount > 0 && !isGrading && (
+        <div className="p-3 rounded-xl bg-amber-900/20 border border-amber-700/40 text-amber-200 text-xs flex flex-wrap items-center justify-between gap-2">
+          <span>
+            {pastPendingCount.toLocaleString()} past pick(s) from earlier dates are still waiting to be graded against final scores.
+          </span>
+          <button
+            type="button"
+            onClick={gradeNow}
+            className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 font-semibold transition"
+          >
+            Grade Past Picks
+          </button>
+        </div>
+      )}
 
       {err && <div className="p-3 rounded-lg bg-red-900/20 border border-red-800 text-red-200 text-sm">{err}</div>}
 

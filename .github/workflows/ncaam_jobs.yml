@@ -6,6 +6,12 @@ on:
     # Clean hourly schedule
     - cron: '0 * * * *'
   workflow_dispatch:
+    inputs:
+      backfill_pending:
+        description: 'Backfill and grade all historical pending predictions'
+        required: false
+        default: 'false'
+        type: boolean
 
 concurrency:
   group: ncaam-frequent-jobs
@@ -101,7 +107,13 @@ jobs:
       - name: Grade Predictions
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python3 src/scripts/grade_predictions.py
+          GRADING_BACKFILL_PENDING: ${{ inputs.backfill_pending == true && '1' || '0' }}
+        run: |
+          if [ "${GRADING_BACKFILL_PENDING}" = "1" ]; then
+            python3 src/scripts/grade_predictions.py --backfill-pending --max-grade-rows 5000
+          else
+            python3 src/scripts/grade_predictions.py
+          fi
 
       - name: Trigger Agent Council
         env:

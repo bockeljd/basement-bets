@@ -30,18 +30,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-worker.txt
 
-      - name: Build PAVA Win-Probability Calibration
+      - name: Build PAVA Win-Probability Calibration (NCAAM & MLB) & Confidence Params
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python3 scripts/build_winprob_calibration_ncaam.py --days 30 --min-obs 50
+        run: |
+          python3 scripts/build_winprob_calibration_ncaam.py --league NCAAM --days 30 --min-obs 50
+          python3 scripts/build_winprob_calibration_ncaam.py --league MLB --days 60 --min-obs 50
+          python3 scripts/build_model_confidence_params_ncaam.py --days 365
 
       - name: Commit Updated Calibration Curve (if changed)
         run: |
-          if [ -n "$(git status --porcelain data/model_params/winprob_calibration_ncaam.json src/services/model_params/winprob_calibration_ncaam.json)" ]; then
+          if [ -n "$(git status --porcelain data/model_params src/services/model_params)" ]; then
             git config user.name "Basement Bets Calibration Bot"
             git config user.email "actions@users.noreply.github.com"
-            git add data/model_params/winprob_calibration_ncaam.json src/services/model_params/winprob_calibration_ncaam.json
-            git commit -m "chore(model): weekly PAVA win-prob calibration refresh"
+            git add data/model_params/winprob_calibration_*.json src/services/model_params/winprob_calibration_*.json data/model_params/model_confidence_params_ncaam.json src/services/model_params/model_confidence_params_ncaam.json
+            git commit -m "chore(model): refresh PAVA win-prob calibration and confidence params"
             git push
           else
             echo "No calibration changes to commit."

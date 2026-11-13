@@ -1610,7 +1610,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     "sigma": sigma_val,
                     "win_prob": float(rec.get('win_prob') or 0.0),
                     "ev_per_unit": float(rec.get('ev') or 0.0),
-                    "confidence_0_100": int(round((rec.get('win_prob_lb10') or rec.get('win_prob') or 0.5) * 100)),
+                    "confidence_0_100": self._confidence_score_0_100(
+                        rec.get('win_prob_lb10'),
+                        fallback_win_prob=rec.get('win_prob'),
+                        ev_per_unit=rec.get('ev'),
+                    ),
                     "selection": selection,
                     "price": int(price) if price is not None else None,
                     "fair_line": mu_final_val,
@@ -1776,7 +1780,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "win_prob": best_rec['win_prob'] if best_rec else 0.5,
             "ev_per_unit": best_rec['ev'] if best_rec else 0.0,
             "kelly": best_rec['kelly'] if best_rec else 0.0,
-            "confidence_0_100": int(best_rec['ev'] * 100 * 5) if best_rec else 0,
+            "confidence_0_100": self._confidence_score_0_100(
+                best_rec.get('win_prob_lb10'),
+                fallback_win_prob=best_rec.get('win_prob'),
+                ev_per_unit=best_rec.get('ev'),
+            ) if best_rec else 0,
             "inputs_json": inputs_json_str,
             "outputs_json": outputs_json_str,
             "narrative": narrative,
@@ -1913,7 +1921,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         "book": book,
                         "win_prob": float(wp),
                         "ev_per_unit": float(ev),
-                        "confidence_0_100": int(float(ev) * 100 * 5),
+                        "confidence_0_100": self._confidence_score_0_100(None, fallback_win_prob=float(wp), ev_per_unit=float(ev)),
                         "selection": str(team),
                         "price": price,
                         # Store probability edge as edge_points for ML (not points).
@@ -2310,6 +2318,37 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if p >= 0.52:
             return 'Medium'
         return 'Low'
+
+    def _confidence_score_0_100(
+        self,
+        lb10: Optional[float],
+        fallback_win_prob: Optional[float] = None,
+        ev_per_unit: Optional[float] = None,
+    ) -> int:
+        """Compute calibrated 0-100 confidence score aligned with conf_bucket tiers.
+
+        Prevents high-EV longshots with low win probability from being scored >= 80
+        and misclassified into the High Confidence bucket.
+        """
+        p_raw = lb10 if lb10 is not None else fallback_win_prob
+        try:
+            p = max(0.0, min(1.0, float(p_raw)))
+        except Exception:
+            return 25
+
+        try:
+            ev_val = float(ev_per_unit) if ev_per_unit is not None else None
+        except Exception:
+            ev_val = None
+
+        if ev_val is not None and ev_val <= 0.0:
+            return max(15, min(49, int(round(p * 90))))
+
+        if p >= 0.55:
+            return min(95, 80 + int(round((p - 0.55) * 150)))
+        if p >= 0.52:
+            return 55 + int(round(((p - 0.52) / 0.03) * 23))
+        return max(15, min(49, int(round(p * 90))))
 
     def _apply_split_and_injury_signals(
         self,

@@ -1652,13 +1652,20 @@ async def backfill_event_text(
 
 
 @app.post("/api/research/grade")
-async def grade_research_history():
+async def grade_research_history(
+    backfill_days: int = 7,
+    backfill_pending: bool = False,
+):
     """
     Triggers the auto-grading process for pending model predictions.
     """
     from src.services.grading_service import GradingService
     service = GradingService()
-    return service.grade_predictions()
+    return service.grade_predictions(
+        backfill_days=backfill_days,
+        backfill_pending=backfill_pending,
+        max_grade_rows=1000,
+    )
 
 
 @app.get("/api/research/history")
@@ -5190,12 +5197,13 @@ async def trigger_dedupe_model_predictions(request: Request, authorized: bool = 
 
 @app.api_route("/api/jobs/grade_predictions", methods=["GET", "POST"])
 async def trigger_prediction_grading(
-    request: Request, 
-    fast: bool = True, 
-    backfill_days: int = 10, 
-    max_clv_rows: int = 250, 
-    max_grade_rows: int = 500, 
-    skip_clv: bool = False, 
+    request: Request,
+    fast: bool = True,
+    backfill_days: int = 10,
+    backfill_pending: bool = False,
+    max_clv_rows: int = 250,
+    max_grade_rows: int = 500,
+    skip_clv: bool = False,
     authorized: bool = Depends(verify_cron_secret)
 ):
     """Cron/manual: grade model_predictions using local game_results."""
@@ -5205,11 +5213,23 @@ async def trigger_prediction_grading(
         start_t = time.time()
         svc = GradingService()
         if fast:
-            res = svc.grade_predictions(backfill_days=backfill_days, max_clv_rows=max_clv_rows, max_grade_rows=max_grade_rows, skip_clv=skip_clv)
+            res = svc.grade_predictions(
+                backfill_days=backfill_days,
+                backfill_pending=backfill_pending,
+                max_clv_rows=max_clv_rows,
+                max_grade_rows=max_grade_rows,
+                skip_clv=skip_clv,
+            )
         else:
-            # Unbounded legacy behavior
-            res = svc.grade_predictions(backfill_days=10, max_clv_rows=2000, max_grade_rows=5000, skip_clv=skip_clv)
-        
+            # Unbounded backfill behavior
+            res = svc.grade_predictions(
+                backfill_days=max(int(backfill_days), 10),
+                backfill_pending=True,
+                max_clv_rows=max(int(max_clv_rows), 2000),
+                max_grade_rows=max(int(max_grade_rows), 5000),
+                skip_clv=skip_clv,
+            )
+
         print(f"[JOB DONE] grade_predictions finished in {time.time() - start_t:.1f}s. Updates: {res}")
         return JSONResponse(
             status_code=200,
@@ -5219,7 +5239,8 @@ async def trigger_prediction_grading(
                 "results": res,
                 "params": {
                     "fast": fast,
-                    "backfill_days": backfill_days
+                    "backfill_days": backfill_days,
+                    "backfill_pending": bool(backfill_pending or not fast),
                 }
             }
         )
@@ -5702,7 +5723,11 @@ async def trigger_run_mlb_predictions(
                     continue
 
                 confidence_raw = rec.get("confidence", "LOW")
-                confidence_int = {"HIGH": 85, "MEDIUM": 65, "LOW": 45}.get(confidence_raw, 50)
+                confidence_int = int(
+                    rec.get("confidence_0_100")
+                    if rec.get("confidence_0_100") is not None
+                    else {"HIGH": 85, "MEDIUM": 65, "LOW": 45}.get(confidence_raw, 50)
+                )
 
                 doc = {
                     "event_id": event_id,

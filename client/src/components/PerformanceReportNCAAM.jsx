@@ -17,9 +17,23 @@ export default function PerformanceReportNCAAM() {
   const [data, setData] = useState(null);
   const [series, setSeries] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [grading, setGrading] = useState(false);
   const [err, setErr] = useState(null);
   const [scatter, setScatter] = useState(null);
   const [parlayPerf, setParlayPerf] = useState(null);
+
+  const handleGrade = async () => {
+    setGrading(true);
+    setErr(null);
+    try {
+      await api.post('/api/research/grade', { backfill_pending: true, max_grade_rows: 5000 });
+      await load();
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e?.message || 'Failed to grade pending picks');
+    } finally {
+      setGrading(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -100,19 +114,19 @@ export default function PerformanceReportNCAAM() {
                       <div className={`font-bold ${w.roi_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmtPct(w.roi_pct)}</div>
                     </div>
                     <div>
-                      <div className="text-slate-400 text-xs">Avg EV/u</div>
+                      <div className="text-slate-400 text-xs">Expected Edge</div>
                       <div className="text-white font-mono font-bold">{fmtNum((w.avg_ev_per_unit ?? 0) * 100, 1)}%</div>
                     </div>
                     <div>
-                      <div className="text-slate-400 text-xs">Avg CLV (pts)</div>
+                      <div className="text-slate-400 text-xs">Beat Close (pts)</div>
                       <div className="text-white font-mono font-bold">{w.avg_clv_points ?? '—'}</div>
                     </div>
                     <div>
-                      <div className="text-slate-400 text-xs">+CLV Rate</div>
+                      <div className="text-slate-400 text-xs">Beat Close %</div>
                       <div className="text-white font-mono font-bold">{w.pos_clv_rate ?? '—'}</div>
                     </div>
                     <div>
-                      <div className="text-slate-400 text-xs">Decided</div>
+                      <div className="text-slate-400 text-xs">Settled</div>
                       <div className="text-white font-mono font-bold">{w.decided ?? 0}</div>
                     </div>
                   </div>
@@ -152,11 +166,23 @@ export default function PerformanceReportNCAAM() {
 
           <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
             <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-3">
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Total in play</div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Pending Results</div>
               <div className="mt-1 text-white font-black text-lg">{data?.coverage?.pending ?? 0} pending</div>
-              <div className="text-slate-500">(recommended bets not graded yet)</div>
-              {Number(data?.coverage?.pending_but_final_available || 0) > 0 ? (
-                <div className="mt-1 text-yellow-300">{data.coverage.pending_but_final_available} pending but finals exist (grading lag)</div>
+              <div className="text-slate-500">recommended picks waiting on grading</div>
+              {(Number(data?.coverage?.pending_but_final_available || 0) > 0 || Number(data?.coverage?.pending || 0) > 0) ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {Number(data?.coverage?.pending_but_final_available || 0) > 0 && (
+                    <span className="text-yellow-300">{data.coverage.pending_but_final_available} final score(s) ready</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleGrade}
+                    disabled={grading}
+                    className="px-2.5 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-200 font-semibold transition disabled:opacity-50"
+                  >
+                    {grading ? 'Grading…' : 'Grade Now'}
+                  </button>
+                </div>
               ) : null}
             </div>
             <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-3">
@@ -286,24 +312,25 @@ export default function PerformanceReportNCAAM() {
             </div>
 
             <div className="mt-6 flex items-center justify-between mb-2">
-              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Daily recommended bets (graded)</h3>
-              <div className="text-xs text-slate-500">(table; shows outcome/ROI when finals ingested)</div>
+              <h3 id="ncaam-daily-bets-title" className="text-sm font-bold text-slate-200 uppercase tracking-wider">Recent Recommended Picks</h3>
+              <div className="text-xs text-slate-500">shows outcome and profit once final scores arrive</div>
             </div>
 
-            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+            <div className="overflow-x-auto border border-slate-800 rounded-xl" role="region" aria-labelledby="ncaam-daily-bets-title" tabIndex={0}>
               <table className="min-w-full text-left text-sm">
+                <caption className="sr-only">Recent recommended college basketball bets with matchup, pick, odds, expected edge, confidence level, closing line comparison, unit profit, outcome, and final score</caption>
                 <thead className="bg-slate-900/60 border-b border-slate-800">
                   <tr className="text-[10px] uppercase tracking-wider text-slate-500">
-                    <th className="py-2 px-3">Day</th>
-                    <th className="py-2 px-3">Matchup</th>
-                    <th className="py-2 px-3">Recommended bet</th>
-                    <th className="py-2 px-3">Odds</th>
-                    <th className="py-2 px-3">EV%</th>
-                    <th className="py-2 px-3">Conf</th>
-                    <th className="py-2 px-3">CLV</th>
-                    <th className="py-2 px-3">ROI/u</th>
-                    <th className="py-2 px-3">Outcome</th>
-                    <th className="py-2 px-3">Final</th>
+                    <th scope="col" className="py-2 px-3">Date</th>
+                    <th scope="col" className="py-2 px-3">Matchup</th>
+                    <th scope="col" className="py-2 px-3">Pick</th>
+                    <th scope="col" className="py-2 px-3">Odds</th>
+                    <th scope="col" className="py-2 px-3">Edge</th>
+                    <th scope="col" className="py-2 px-3">Confidence</th>
+                    <th scope="col" className="py-2 px-3">Beat Close</th>
+                    <th scope="col" className="py-2 px-3">Profit / Bet</th>
+                    <th scope="col" className="py-2 px-3">Result</th>
+                    <th scope="col" className="py-2 px-3">Final Score</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">

@@ -1080,20 +1080,21 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                         </div>
                     </div>
 
-                    <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                    <div className="overflow-x-auto border border-slate-800 rounded-xl" role="region" aria-label="Sportsbook performance breakdown by sport and bet type" tabIndex={0}>
                         <table className="min-w-full text-left text-sm">
+                            <caption className="sr-only">Sportsbook performance by sport and bet type showing wager counts, average odds, stake, profit per bet, overall ROI, win rate, and 30-day trend</caption>
                             <thead className="bg-slate-900/60 border-b border-slate-800">
                                 <tr className="text-[10px] uppercase tracking-wider text-slate-500">
-                                    <th className="py-2 px-3">Segment</th>
-                                    <th className="py-2 px-3 text-right">Bets (all)</th>
-                                    <th className="py-2 px-3 text-right">Avg odds</th>
-                                    <th className="py-2 px-3 text-right">Avg stake</th>
-                                    <th className="py-2 px-3 text-right">P/B</th>
-                                    <th className="py-2 px-3 text-right">ROI (all)</th>
-                                    <th className="py-2 px-3 text-right">Win% (all)</th>
-                                    <th className="py-2 px-3 text-right">P/L (30d)</th>
-                                    <th className="py-2 px-3 text-right">ROI (30d)</th>
-                                    <th className="py-2 px-3 text-right">ROI Δ</th>
+                                    <th scope="col" className="py-2 px-3">Segment</th>
+                                    <th scope="col" className="py-2 px-3 text-right">Bets (all)</th>
+                                    <th scope="col" className="py-2 px-3 text-right">Avg odds</th>
+                                    <th scope="col" className="py-2 px-3 text-right">Avg stake</th>
+                                    <th scope="col" className="py-2 px-3 text-right">Avg Profit / Bet</th>
+                                    <th scope="col" className="py-2 px-3 text-right">ROI (all)</th>
+                                    <th scope="col" className="py-2 px-3 text-right">Win Rate</th>
+                                    <th scope="col" className="py-2 px-3 text-right">Profit (30d)</th>
+                                    <th scope="col" className="py-2 px-3 text-right">ROI (30d)</th>
+                                    <th scope="col" className="py-2 px-3 text-right">30-Day Trend</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60">

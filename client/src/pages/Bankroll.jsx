@@ -50,15 +50,16 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" role="region" aria-label="Sportsbook financials statement" tabIndex={0}>
           <table className="w-full text-left text-sm">
+            <caption className="sr-only">Sportsbook current balance, deposits, withdrawals, and realized profit by provider</caption>
             <thead className="bg-slate-950/50">
               <tr className="text-slate-400 border-b border-slate-800">
-                <th className="py-3 px-4">Sportsbook</th>
-                <th className="py-3 px-4 text-right">Current</th>
-                <th className="py-3 px-4 text-right">Deposits</th>
-                <th className="py-3 px-4 text-right">Withdrawals</th>
-                <th className="py-3 px-4 text-right">Realized P/L</th>
+                <th scope="col" className="py-3 px-4">Sportsbook</th>
+                <th scope="col" className="py-3 px-4 text-right">Current</th>
+                <th scope="col" className="py-3 px-4 text-right">Deposits</th>
+                <th scope="col" className="py-3 px-4 text-right">Withdrawals</th>
+                <th scope="col" className="py-3 px-4 text-right">Realized P/L</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -68,15 +69,17 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
 
                 return (
                   <React.Fragment key={p}>
-                    <tr
-                      className={`cursor-pointer hover:bg-slate-800/30 ${isOpen ? 'bg-slate-800/20' : ''}`}
-                      onClick={() => setExpandedBook(isOpen ? null : p)}
-                    >
+                    <tr className={`hover:bg-slate-800/30 ${isOpen ? 'bg-slate-800/20' : ''}`}>
                       <td className="py-3 px-4 font-black text-slate-100">
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-400">{isOpen ? '▾' : '▸'}</span>
+                        <button
+                          type="button"
+                          aria-expanded={isOpen}
+                          onClick={() => setExpandedBook(isOpen ? null : p)}
+                          className="flex items-center gap-2 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded px-1 py-0.5"
+                        >
+                          <span className="text-slate-400" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
                           <span>{p}</span>
-                        </div>
+                        </button>
                       </td>
                       <td className={`py-3 px-4 text-right font-black ${cur >= 0 ? 'text-green-300' : 'text-red-300'}`}>{fmt(cur)}</td>
                       <td className="py-3 px-4 text-right text-slate-300 font-mono">{fmt(top.deposited)}</td>

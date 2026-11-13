@@ -79,7 +79,7 @@ export default function Dashboard({ financials, periodStats }) {
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Model KPIs (NCAAM)</h2>
+          <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">College Basketball Model Summary</h2>
           <div className="text-xs text-slate-500">last 7d / 30d</div>
         </div>
 
@@ -91,14 +91,14 @@ export default function Dashboard({ financials, periodStats }) {
               const w7 = modelPerf.windows?.['7d'];
               const w30 = modelPerf.windows?.['30d'];
               const kpis = [
-                { label: '7d Win%', value: `${(w7?.win_rate ?? 0).toFixed(1)}%` },
-                { label: '7d ROI', value: `${(w7?.roi_pct ?? 0).toFixed(1)}%` },
-                { label: '30d Win%', value: `${(w30?.win_rate ?? 0).toFixed(1)}%` },
-                { label: '30d ROI', value: `${(w30?.roi_pct ?? 0).toFixed(1)}%` },
-                { label: '30d Avg EV/u', value: `${(((w30?.avg_ev_per_unit ?? 0) * 100)).toFixed(1)}%` },
-                { label: '30d Avg CLV', value: (w30?.avg_clv_points ?? null) === null ? '—' : `${Number(w30.avg_clv_points).toFixed(2)}` },
-                { label: '30d +CLV Rate', value: (w30?.pos_clv_rate ?? null) === null ? '—' : `${Number(w30.pos_clv_rate).toFixed(1)}%` },
-                { label: '30d Decided', value: `${w30?.decided ?? 0}` },
+                { label: '7d Win Rate', value: `${(w7?.win_rate ?? 0).toFixed(1)}%` },
+                { label: '7d Return (ROI)', value: `${(w7?.roi_pct ?? 0).toFixed(1)}%` },
+                { label: '30d Win Rate', value: `${(w30?.win_rate ?? 0).toFixed(1)}%` },
+                { label: '30d Return (ROI)', value: `${(w30?.roi_pct ?? 0).toFixed(1)}%` },
+                { label: '30d Expected Edge', value: `${(((w30?.avg_ev_per_unit ?? 0) * 100)).toFixed(1)}%` },
+                { label: '30d Beat Close (pts)', value: (w30?.avg_clv_points ?? null) === null ? '—' : `${Number(w30.avg_clv_points).toFixed(2)}` },
+                { label: '30d Beat Close %', value: (w30?.pos_clv_rate ?? null) === null ? '—' : `${Number(w30.pos_clv_rate).toFixed(1)}%` },
+                { label: '30d Settled Picks', value: `${w30?.decided ?? 0}` },
               ];
               return kpis;
             })().map((k, i) => (

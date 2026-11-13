@@ -45,16 +45,17 @@ def _std(xs: List[float]) -> float:
     return v ** 0.5
 
 
-def main(days: int = 14, out_path: str | None = None):
+def _fetch_tau_errors(days: int) -> tuple[List[float], List[float]]:
     q = """
-    SELECT market_type, mu_final, close_line
-    FROM model_predictions
-    WHERE analyzed_at >= NOW() - INTERVAL :days
-      AND close_line IS NOT NULL
-      AND mu_final IS NOT NULL
-      AND market_type IN ('SPREAD','TOTAL')
+    SELECT m.market_type, m.mu_final, m.close_line
+    FROM model_predictions m
+    JOIN events e ON m.event_id = e.id
+    WHERE m.analyzed_at >= NOW() - INTERVAL :days
+      AND UPPER(COALESCE(e.league, 'NCAAM')) = 'NCAAM'
+      AND m.close_line IS NOT NULL
+      AND m.mu_final IS NOT NULL
+      AND m.market_type IN ('SPREAD', 'TOTAL')
     """
-
     spread_err: List[float] = []
     total_err: List[float] = []
 
@@ -73,13 +74,37 @@ def main(days: int = 14, out_path: str | None = None):
             spread_err.append(err)
         elif mkt == 'TOTAL':
             total_err.append(err)
+    return spread_err, total_err
+
+
+def main(days: int = 14, out_path: str | None = None, min_obs: int = 20, auto_widen: bool = True):
+    windows = [int(days)]
+    if auto_widen:
+        for w in (60, 180, 365, 730):
+            if w > int(days):
+                windows.append(w)
+
+    spread_err: List[float] = []
+    total_err: List[float] = []
+    used_days = int(days)
+    for w in windows:
+        s_cand, t_cand = _fetch_tau_errors(w)
+        if len(s_cand) + len(t_cand) > len(spread_err) + len(total_err):
+            spread_err, total_err = s_cand, t_cand
+            used_days = w
+        if len(spread_err) >= min_obs and len(total_err) >= min_obs:
+            break
+
+    if len(spread_err) < 5 and len(total_err) < 5:
+        print(f"[confidence] Insufficient closing-line observations in last {used_days}d (spread={len(spread_err)}, total={len(total_err)}); keeping existing params.")
+        return
 
     tau_spread = _std(spread_err)
     tau_total = _std(total_err)
 
     artifact = {
         "sport": "ncaam",
-        "days": int(days),
+        "days": int(used_days),
         "n_spread": len(spread_err),
         "n_total": len(total_err),
         "tau_spread": float(tau_spread),
@@ -89,21 +114,29 @@ def main(days: int = 14, out_path: str | None = None):
     }
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    if out_path is None:
-        out_path = os.path.join(repo_root, 'data', 'model_params', 'model_confidence_params_ncaam.json')
+    out_paths = (
+        [out_path]
+        if out_path is not None
+        else [
+            os.path.join(repo_root, 'data', 'model_params', 'model_confidence_params_ncaam.json'),
+            os.path.join(repo_root, 'src', 'services', 'model_params', 'model_confidence_params_ncaam.json'),
+        ]
+    )
 
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, 'w', encoding='utf-8') as f:
-        json.dump(artifact, f, indent=2)
-        f.write('\n')
-
-    print(f"Wrote {out_path}")
+    for target in out_paths:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, 'w', encoding='utf-8') as f:
+            json.dump(artifact, f, indent=2)
+            f.write('\n')
+        print(f"Wrote {target}")
     print(json.dumps(artifact, indent=2))
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--days', type=int, default=14)
+    ap.add_argument('--min-obs', type=int, default=20)
+    ap.add_argument('--no-auto-widen', action='store_true')
     ap.add_argument('--out', type=str, default=None)
     args = ap.parse_args()
-    main(days=args.days, out_path=args.out)
+    main(days=args.days, out_path=args.out, min_obs=args.min_obs, auto_widen=not args.no_auto_widen)

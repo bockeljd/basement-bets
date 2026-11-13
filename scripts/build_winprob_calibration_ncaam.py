@@ -136,18 +136,21 @@ def fit_calibration_artifact(obs: List[Obs], days: int = 30, min_points: int = 1
     }
 
 
-def main(days: int = 30, out_path: str | None = None, min_obs: int = 50, allow_insufficient: bool = True):
+def _fetch_obs_for_window(days: int, league: str = "NCAAM") -> List[Obs]:
+    """Fetch decided model predictions with valid win_prob for the target league/window."""
     q = """
-    SELECT win_prob, outcome
-    FROM model_predictions
-    WHERE analyzed_at >= NOW() - INTERVAL :days
-      AND win_prob IS NOT NULL
-      AND outcome IS NOT NULL
+    SELECT m.win_prob, m.outcome
+    FROM model_predictions m
+    JOIN events e ON m.event_id = e.id
+    WHERE m.analyzed_at >= NOW() - INTERVAL :days
+      AND UPPER(COALESCE(e.league, 'NCAAM')) = :league
+      AND m.win_prob IS NOT NULL
+      AND m.outcome IS NOT NULL
+      AND UPPER(COALESCE(m.pick, '')) NOT IN ('', 'NONE', 'NO BET', 'PASS')
     """
-
     obs: List[Obs] = []
     with get_db_connection() as conn:
-        rows = _exec(conn, q, {"days": f"{int(days)} days"}).fetchall()
+        rows = _exec(conn, q, {"days": f"{int(days)} days", "league": str(league).upper()}).fetchall()
 
     for r in rows:
         rr = dict(r) if not isinstance(r, dict) else r
@@ -161,23 +164,53 @@ def main(days: int = 30, out_path: str | None = None, min_obs: int = 50, allow_i
         if not (0.0 < p < 1.0):
             continue
         obs.append(Obs(p=p, y=(1 if res == "W" else 0), w=1.0))
+    return obs
+
+
+def main(
+    days: int = 30,
+    out_path: str | None = None,
+    min_obs: int = 50,
+    allow_insufficient: bool = True,
+    league: str = "NCAAM",
+    auto_widen: bool = True,
+):
+    lg = str(league or "NCAAM").upper().strip()
+    windows = [int(days)]
+    if auto_widen:
+        for w in (90, 180, 365, 730):
+            if w > int(days):
+                windows.append(w)
+
+    obs: List[Obs] = []
+    used_days = int(days)
+    for w in windows:
+        candidate = _fetch_obs_for_window(days=w, league=lg)
+        if len(candidate) > len(obs):
+            obs = candidate
+            used_days = w
+        if len(obs) >= int(min_obs):
+            break
 
     if len(obs) < int(min_obs):
-        msg = f"[calibration] Only {len(obs)} decided observations in last {days}d (< min_obs={min_obs}); keeping existing curve."
+        msg = f"[calibration:{lg}] Only {len(obs)} decided observations in last {used_days}d (< min_obs={min_obs}); keeping existing curve."
         if allow_insufficient:
             print(msg)
             return
         raise SystemExit(msg)
 
-    artifact = fit_calibration_artifact(obs, days=days, min_points=12)
+    artifact = fit_calibration_artifact(obs, days=used_days, min_points=12)
+    artifact["league"] = lg
 
+    fname = f"winprob_calibration_{lg.lower()}.json"
+    param_key = f"winprob_calibration_{lg.lower()}"
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     out_paths = (
         [out_path]
         if out_path is not None
         else [
-            os.path.join(repo_root, "data", "model_params", "winprob_calibration_ncaam.json"),
-            os.path.join(repo_root, "src", "services", "model_params", "winprob_calibration_ncaam.json"),
+            os.path.join(repo_root, "data", "model_params", fname),
+            os.path.join(repo_root, "src", "services", "model_params", fname),
         ]
     )
 
@@ -190,20 +223,29 @@ def main(days: int = 30, out_path: str | None = None, min_obs: int = 50, allow_i
 
     try:
         from src.database import upsert_model_param
-        upsert_model_param("winprob_calibration_ncaam", artifact)
-        print("Persisted winprob_calibration_ncaam to DB model_params_store")
+        upsert_model_param(param_key, artifact)
+        print(f"Persisted {param_key} to DB model_params_store")
     except Exception as e:
-        print(f"[calibration] DB model_params_store update skipped: {e}")
+        print(f"[calibration:{lg}] DB model_params_store update skipped: {e}")
 
-    print(f"n_obs={artifact['n_obs']} points={len(artifact['points'])}")
+    print(f"league={lg} window={used_days}d n_obs={artifact['n_obs']} points={len(artifact['points'])}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--min-obs", type=int, default=50)
+    ap.add_argument("--league", type=str, default="NCAAM")
+    ap.add_argument("--no-auto-widen", action="store_true", help="Disable fallback window expansion")
     ap.add_argument("--strict", action="store_true", help="Exit non-zero if fewer than --min-obs samples")
     ap.add_argument("--out", type=str, default=None)
     args = ap.parse_args()
 
-    main(days=args.days, out_path=args.out, min_obs=args.min_obs, allow_insufficient=not args.strict)
+    main(
+        days=args.days,
+        out_path=args.out,
+        min_obs=args.min_obs,
+        allow_insufficient=not args.strict,
+        league=args.league,
+        auto_widen=not args.no_auto_widen,
+    )

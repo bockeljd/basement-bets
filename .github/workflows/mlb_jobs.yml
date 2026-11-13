@@ -5,6 +5,12 @@ on:
     # 15:00 UTC is ~11:00 AM ET (or 10:00 AM ET during EDT)
     - cron: '0 15 * * *'
   workflow_dispatch:
+    inputs:
+      backfill_pending:
+        description: 'Backfill and grade all historical pending MLB predictions'
+        required: false
+        default: 'false'
+        type: boolean
 
 concurrency:
   group: mlb-daily-jobs
@@ -15,6 +21,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install -r requirements-worker.txt
+
       - name: Trigger MLB Predictions
         env:
           BASEMENT_BETS_URL: ${{ secrets.BASEMENT_BETS_URL }}
@@ -29,3 +45,15 @@ jobs:
             -H "Authorization: Bearer ${BASEMENT_CRON_SECRET}" \
             -H "Content-Type: application/json" \
             --fail-with-body "${url}"
+
+      - name: Grade Pending Predictions
+        if: ${{ !cancelled() }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GRADING_BACKFILL_PENDING: ${{ inputs.backfill_pending == true && '1' || '0' }}
+        run: |
+          if [ "${GRADING_BACKFILL_PENDING}" = "1" ]; then
+            python3 src/scripts/grade_predictions.py --backfill-pending --max-grade-rows 5000
+          else
+            python3 src/scripts/grade_predictions.py
+          fi
