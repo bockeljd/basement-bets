@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -34,6 +35,17 @@ ROTOWIRE_HEADERS = {
     "Referer": "https://www.rotowire.com/cbasketball/injury-report.php",
     "Accept": "application/json, text/plain, */*",
 }
+
+
+def _safe_num(val: Any) -> Optional[float]:
+    """Safely coerce numeric player metrics to float, returning None if missing."""
+    if val is None or val == "":
+        return None
+    try:
+        num = float(val)
+        return num if num == num else None
+    except Exception:
+        return None
 
 
 def classify_injury_severity(status: Optional[str]) -> str:
@@ -211,16 +223,86 @@ class InjuryService:
             conn.commit()
         return saved
 
+    @staticmethod
+    def _norm_player(name: Any) -> str:
+        """Normalize a player name for tolerant roster matching."""
+        return re.sub(r"[^a-z0-9]+", "", str(name or "").lower())
+
+    @staticmethod
+    def _estimate_player_point_impact(
+        player_name: Any,
+        kp_players: Optional[List[Dict[str, Any]]] = None,
+        desc: str = "",
+    ) -> float:
+        """
+        Estimate single-player point value above bench replacement for NCAAM.
+
+        Uses KenPom player metrics (minutes %, usage, PPG) when available, falling
+        back to conservative positional/role defaults when roster splits are absent.
+        """
+        norm_target = InjuryService._norm_player(player_name)
+        matched_metrics: Optional[Dict[str, Any]] = None
+        if norm_target and kp_players:
+            for row in kp_players:
+                cand_name = row.get("player_name") or row.get("name") or ""
+                cand_norm = InjuryService._norm_player(cand_name)
+                if not cand_norm:
+                    continue
+                if cand_norm == norm_target or (
+                    len(norm_target) >= 5 and (norm_target in cand_norm or cand_norm in norm_target)
+                ):
+                    m = row.get("metrics") if isinstance(row.get("metrics"), dict) else row
+                    matched_metrics = m if isinstance(m, dict) else None
+                    break
+
+        if matched_metrics:
+            min_pct = _safe_num(matched_metrics.get("min_pct") or matched_metrics.get("min") or matched_metrics.get("mpg"))
+            usg = _safe_num(matched_metrics.get("usg") or matched_metrics.get("usg_pct"))
+            ppg = _safe_num(matched_metrics.get("ppg") or matched_metrics.get("pts"))
+            ortg = _safe_num(matched_metrics.get("ortg"))
+
+            # If min_pct looks like MPG (0..40) convert roughly to share (0..100)
+            if min_pct is not None and 0 < min_pct <= 40.0 and matched_metrics.get("min_pct") is None:
+                min_share = min(100.0, (min_pct / 40.0) * 100.0)
+            else:
+                min_share = min_pct
+
+            base = 0.0
+            if min_share is not None:
+                # Bench replacement covers ~65% of a low-usage minute; stars (>65% min, >22% usg) drive 1.5-3.0 pts.
+                base = max(0.0, (min_share - 20.0) / 30.0) * 1.15
+                if usg is not None and usg > 18.0:
+                    base *= 1.0 + min(0.8, (usg - 18.0) / 20.0)
+                if ortg is not None and ortg >= 112.0:
+                    base *= 1.1
+            elif ppg is not None:
+                base = max(0.25, (ppg - 3.0) * 0.16)
+
+            if base > 0:
+                return round(max(0.2, min(3.0, base)), 2)
+
+        desc_low = str(desc or "").lower()
+        if any(tok in desc_low for tok in ("star", "leading", "starter", "pg", "point guard")):
+            return 1.1
+        if any(tok in desc_low for tok in ("redshirt", "walk-on", "reserve")):
+            return 0.15
+        return 0.65
+
     def evaluate_injuries(
         self,
         injuries: List[Dict[str, Any]],
         home_team: str,
         away_team: str,
+        home_players: Optional[List[Dict[str, Any]]] = None,
+        away_players: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Compute uncertainty multiplier and UI summary from structured injury records."""
+        """Compute uncertainty multiplier, spread/total point impact, and UI summary."""
         home_out = 0
         away_out = 0
         gtd_count = 0
+        home_impact_pts = 0.0
+        away_impact_pts = 0.0
+        impact_players: List[Dict[str, Any]] = []
         cleaned: List[Dict[str, Any]] = []
 
         for item in injuries or []:
@@ -236,13 +318,42 @@ class InjuryService:
             elif _team_names_match(self.matcher, team_ref, away_team):
                 side = "away"
 
-            if sev in ("OUT", "DOUBTFUL"):
+            sev_weight = 0.0
+            if sev == "OUT":
+                sev_weight = 1.0
+                if side == "home":
+                    home_out += 1
+                elif side == "away":
+                    away_out += 1
+            elif sev == "DOUBTFUL":
+                sev_weight = 0.75
                 if side == "home":
                     home_out += 1
                 elif side == "away":
                     away_out += 1
             elif sev == "QUESTIONABLE":
+                sev_weight = 0.25
                 gtd_count += 1
+
+            est_pts = 0.0
+            if sev_weight > 0 and side in ("home", "away"):
+                roster = home_players if side == "home" else away_players
+                raw_pts = self._estimate_player_point_impact(player, roster, desc=desc)
+                est_pts = round(raw_pts * sev_weight, 2)
+                if side == "home":
+                    home_impact_pts += est_pts
+                else:
+                    away_impact_pts += est_pts
+                if est_pts >= 0.25:
+                    impact_players.append(
+                        {
+                            "player": player,
+                            "side": side,
+                            "status": status,
+                            "severity": sev,
+                            "est_pts": est_pts,
+                        }
+                    )
 
             cleaned.append(
                 {
@@ -252,8 +363,16 @@ class InjuryService:
                     "status": status,
                     "severity": sev,
                     "detail": desc,
+                    "est_pts": est_pts if est_pts > 0 else None,
                 }
             )
+
+        home_impact_pts = round(min(4.5, home_impact_pts), 2)
+        away_impact_pts = round(min(4.5, away_impact_pts), 2)
+        # Home spread sign convention: negative = home favored. Missing home points push spread +; away points push -.
+        spread_adj = round(max(-3.0, min(3.0, home_impact_pts - away_impact_pts)), 2)
+        # Missing primary scorers slightly depress scoring expectation (bounded; bench still fills possessions).
+        total_adj = round(max(-3.0, min(0.0, -0.35 * (home_impact_pts + away_impact_pts))), 2)
 
         # Conservative uncertainty inflation when active players are Out/Doubtful/GTD
         out_total = home_out + away_out
@@ -272,6 +391,11 @@ class InjuryService:
             "away_out_count": away_out,
             "gtd_count": gtd_count,
             "sigma_mult": sigma_mult,
+            "home_impact_pts": home_impact_pts,
+            "away_impact_pts": away_impact_pts,
+            "spread_adj": spread_adj,
+            "total_adj": total_adj,
+            "impact_players": impact_players,
         }
 
     def get_matchup_injuries(
@@ -280,6 +404,8 @@ class InjuryService:
         home_team: str,
         away_team: str,
         allow_live_fallback: bool = False,
+        home_players: Optional[List[Dict[str, Any]]] = None,
+        away_players: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Load injuries for an event from DB `action_injuries`, with optional Rotowire fallback."""
         rows = []
@@ -295,4 +421,10 @@ class InjuryService:
                 ):
                     rows.append(inj)
 
-        return self.evaluate_injuries(rows, home_team=home_team, away_team=away_team)
+        return self.evaluate_injuries(
+            rows,
+            home_team=home_team,
+            away_team=away_team,
+            home_players=home_players,
+            away_players=away_players,
+        )

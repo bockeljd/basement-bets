@@ -1,0 +1,101 @@
+/* Today Tab Dashboard Styles
+   Follows modern CSS container queries, responsive tables, and native <dialog> containment rules. */
+
+.today-play-card {
+  container-type: inline-size;
+}
+
+.today-play-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+@container (min-width: 440px) {
+  .today-play-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.today-board-container {
+  container-type: inline-size;
+}
+
+.today-board-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+@container (max-width: 720px) {
+  .today-board-table thead {
+    /* MANDATORY: Hide column header from layout and screen readers. */
+    display: none;
+  }
+
+  .today-board-table tbody {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .today-board-table tr {
+    display: grid;
+    gap: 0.45rem;
+    padding: 0.875rem;
+    border: 1px solid rgb(51 65 85 / 0.75);
+    border-radius: 0.875rem;
+    background: rgb(15 23 42 / 0.88);
+  }
+
+  .today-board-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.15rem 0;
+    border: 0;
+    text-align: right;
+    min-width: 0;
+  }
+
+  .today-board-table td[data-label]::before {
+    content: attr(data-label);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgb(148 163 184);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .today-board-table td[data-primary="true"] {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid rgb(30 41 59 / 0.9);
+  }
+
+  .today-board-table td[data-primary="true"]::before {
+    display: none;
+  }
+}
+
+/* Native <dialog> modals: NEVER set unconditional display on dialog; scope strictly to dialog[open] */
+dialog.today-modal[open] {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90dvh, 860px);
+  max-width: min(94dvw, 960px);
+}
+
+dialog.today-modal:modal {
+  overscroll-behavior: contain;
+}
+
+dialog.today-modal::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(2 6 23 / 0.78);
+  backdrop-filter: blur(6px);
+}

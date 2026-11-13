@@ -146,7 +146,7 @@ class ActionEnrichmentService:
         pass
 
     def _store_raw_enrichment(self, event_id: str, game_data: Dict):
-        payload_str = json.dumps(game_data)
+        payload_str = json.dumps(game_data, default=str)
         provider_game_id = str(game_data.get('id'))
         
         # Fingerprint: event_id + time_bucket (e.g. hourly) + payload_hash

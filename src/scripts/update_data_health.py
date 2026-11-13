@@ -129,8 +129,19 @@ def main():
     with get_admin_db_connection() as conn:
         with conn.cursor() as cur:
             try:
-                # bt_team_metrics_daily.date can be TEXT in some deployments; cast to date for comparison.
-                cur.execute("SELECT COUNT(*) FROM bt_team_metrics_daily WHERE (date::date) >= ((NOW() AT TIME ZONE 'America/New_York')::date - INTERVAL '2 days')")
+                # bt_team_metrics_daily.date can be TEXT (YYYY-MM-DD or YYYYMMDD); cast defensively.
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM bt_team_metrics_daily
+                    WHERE NULLIF(TRIM(date::text), '') IS NOT NULL
+                      AND (
+                        CASE
+                          WHEN TRIM(date::text) ~ '^\\d{8}$' THEN to_date(TRIM(date::text), 'YYYYMMDD')
+                          ELSE TRIM(date::text)::date
+                        END
+                      ) >= ((NOW() AT TIME ZONE 'America/New_York')::date - INTERVAL '2 days')
+                    """
+                )
                 n = cur.fetchone()[0]
                 status = 'ok' if n and n > 0 else 'stale'
             except Exception as e:

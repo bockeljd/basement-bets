@@ -276,6 +276,32 @@ const ModelPerformanceAnalytics = ({
       .map(finalizeBucket)
       .sort((a, b) => (b.settled + b.pending) - (a.settled + a.pending));
 
+    // 7. Flat 1u vs Quarter-Kelly Sizing Comparison & Closing Line Value (CLV)
+    let flatUnitsTotal = 0;
+    let kellyUnitsTotal = 0;
+    let kellyTaggedCount = 0;
+    let clvTotalSum = 0;
+    let clvTotalCount = 0;
+    let clvPositiveCount = 0;
+    for (const h of graded) {
+      const unitPl = roiPerUnit(getRawOutcome(h), getEffectivePrice(h));
+      flatUnitsTotal += unitPl;
+      const rawKelly = parseFloat(h?.kelly ?? h?.kelly_fraction);
+      const stakeU =
+        Number.isFinite(rawKelly) && rawKelly > 0
+          ? Math.max(0.25, Math.min(2.0, rawKelly <= 1 ? rawKelly * 25 : rawKelly / 4))
+          : 1.0;
+      if (Number.isFinite(rawKelly) && rawKelly > 0) kellyTaggedCount += 1;
+      kellyUnitsTotal += unitPl * stakeU;
+
+      const clv = parseFloat(h?.clv_points);
+      if (Number.isFinite(clv)) {
+        clvTotalSum += clv;
+        clvTotalCount += 1;
+        if (clv > 0) clvPositiveCount += 1;
+      }
+    }
+
     return {
       gradedCount: graded.length,
       settledDays,
@@ -287,6 +313,14 @@ const ModelPerformanceAnalytics = ({
       betTypes,
       sportBreakdown,
       latestCumulativeUnits: settledDays.length > 0 ? settledDays[settledDays.length - 1].cumulativeUnits : 0,
+      stakingComparison: {
+        flatUnits: Number(flatUnitsTotal.toFixed(2)),
+        kellyUnits: Number(kellyUnitsTotal.toFixed(2)),
+        kellyTaggedCount,
+        avgClv: clvTotalCount > 0 ? clvTotalSum / clvTotalCount : null,
+        clvCount: clvTotalCount,
+        clvBeatRate: clvTotalCount > 0 ? (clvPositiveCount / clvTotalCount) * 100 : null,
+      },
     };
   }, [history, allHistory]);
 
@@ -727,6 +761,49 @@ const ModelPerformanceAnalytics = ({
         </article>
       </div>
 
+      {/* Staking & CLV Summary Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <article className="ui-card p-4 space-y-1">
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Flat 1u P/L</h3>
+          <div className={`text-xl font-mono font-bold ${analytics.stakingComparison.flatUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {formatUnits(analytics.stakingComparison.flatUnits)}
+          </div>
+          <p className="text-[11px] text-slate-400">Uniform 1 unit risked per settled play</p>
+        </article>
+
+        <article className="ui-card p-4 space-y-1">
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Quarter-Kelly Simulated</h3>
+          <div className={`text-xl font-mono font-bold ${analytics.stakingComparison.kellyUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {formatUnits(analytics.stakingComparison.kellyUnits)}
+          </div>
+          <p className="text-[11px] text-slate-400">
+            Edge-weighted sizing ({analytics.stakingComparison.kellyTaggedCount} Kelly-sized plays)
+          </p>
+        </article>
+
+        <article className="ui-card p-4 space-y-1">
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Closing Line Value (CLV)</h3>
+          <div
+            className={`text-xl font-mono font-bold ${
+              analytics.stakingComparison.avgClv === null
+                ? 'text-slate-400'
+                : analytics.stakingComparison.avgClv >= 0
+                  ? 'text-emerald-400'
+                  : 'text-rose-400'
+            }`}
+          >
+            {analytics.stakingComparison.avgClv !== null
+              ? `${analytics.stakingComparison.avgClv > 0 ? '+' : ''}${analytics.stakingComparison.avgClv.toFixed(2)}`
+              : '—'}
+          </div>
+          <p className="text-[11px] text-slate-400">
+            {analytics.stakingComparison.clvCount > 0
+              ? `Beat close ${formatPct(analytics.stakingComparison.clvBeatRate)} across ${analytics.stakingComparison.clvCount} graded picks`
+              : 'No closing snapshot comparison recorded yet'}
+          </p>
+        </article>
+      </div>
+
       {/* Row 3: Bet Type Chart + By Sport Comparison */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card 4: Bet Type Performance */}
@@ -782,7 +859,8 @@ const ModelPerformanceAnalytics = ({
                       <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
                       <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
                       <th scope="col" className="py-1.5 px-3 font-medium text-right">Units</th>
-                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">ROI</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">ROI</th>
+                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Avg CLV</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
@@ -796,8 +874,11 @@ const ModelPerformanceAnalytics = ({
                         <td className={`py-1.5 px-3 text-right font-mono font-semibold ${m.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {formatUnits(m.profitUnits)}
                         </td>
-                        <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${m.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <td className={`py-1.5 px-3 text-right font-mono font-semibold ${m.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {formatSignedPct(m.roiPct)}
+                        </td>
+                        <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${m.avgClv === null ? 'text-slate-500' : m.avgClv >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {m.avgClv !== null ? `${m.avgClv > 0 ? '+' : ''}${m.avgClv.toFixed(2)}` : '—'}
                         </td>
                       </tr>
                     ))}

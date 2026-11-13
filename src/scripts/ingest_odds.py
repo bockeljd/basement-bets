@@ -14,8 +14,15 @@ def main():
     adapter = OddsAdapter()
     client = OddsFetcherService()
     
-    # Leagues to ingest
-    leagues = ['ncaab', 'nba'] # Add others if needed: 'nfl', 'nhl'
+    # Leagues to ingest (add MLB automatically during March-Nov season or explicit env override)
+    leagues = ['ncaab', 'nba']
+    try:
+        mlb_override = os.getenv('INGEST_MLB_ODDS', '').strip().lower()
+        in_mlb_window = datetime.datetime.now().month in (3, 4, 5, 6, 7, 8, 9, 10, 11)
+        if mlb_override in ('1', 'true', 'yes') or (mlb_override == '' and in_mlb_window):
+            leagues.append('mlb')
+    except Exception:
+        pass
     
     for league in leagues:
         print(f"Fetching odds for {league}...")

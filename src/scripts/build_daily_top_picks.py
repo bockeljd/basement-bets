@@ -108,7 +108,12 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
     is_actionable = bool(rec)
     reason = None
     if not is_actionable:
-        reason = (res.get('block_reason') or res.get('headline') or res.get('recommendation') or res.get('error') or 'No bet') if isinstance(res, dict) else 'No bet'
+        raw_reason = (res.get('block_reason') or res.get('headline') or res.get('recommendation') or res.get('error') or 'No bet') if isinstance(res, dict) else 'No bet'
+        r_str = str(raw_reason).strip()
+        if ('Object of type' in r_str and 'serializable' in r_str) or ('Traceback' in r_str) or len(r_str) > 140:
+            reason = 'Analysis unavailable — click Details to retry'
+        else:
+            reason = r_str or 'No bet'
 
     # context_json is a JSON string currently in the model; store as JSONB if possible
     ctx = None
@@ -251,7 +256,7 @@ def main():
                 diag['errors'] += 1
                 # still upsert a no-bet row with error reason
                 try:
-                    upsert_pick(ev_day_et, eid, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": str(e)}, conn=conn)
+                    upsert_pick(ev_day_et, eid, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": "Analysis unavailable — click Details to retry"}, conn=conn)
                 except Exception:
                     pass
 

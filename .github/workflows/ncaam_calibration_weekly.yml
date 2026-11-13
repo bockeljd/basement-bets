@@ -37,6 +37,15 @@ jobs:
           python3 scripts/build_winprob_calibration_ncaam.py --league NCAAM --days 180 --min-obs 75
           python3 scripts/build_winprob_calibration_ncaam.py --league MLB --days 365 --min-obs 150
           python3 scripts/build_model_confidence_params_ncaam.py --days 365
+          BACKTEST_DAYS=120 BACKTEST_LIMIT=400 BACKTEST_OUTPUT_PATH=/tmp/ncaam_walkforward_weights.json python3 src/scripts/backtest_ncaam_model.py --tune-weights || true
+
+      - name: Upload Walk-Forward Weight Recommendation Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncaam-walkforward-weight-recommendation
+          path: /tmp/ncaam_walkforward_weights.json
+          if-no-files-found: ignore
 
       - name: Commit Updated Calibration Curve (if changed)
         run: |

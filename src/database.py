@@ -189,6 +189,17 @@ def init_db():
     init_transactions_db()
     init_balance_snapshots_db()
 
+
+def _safe_json_dumps(value) -> str:
+    """Serialize Python objects to JSON, safely stringifying dates and Decimals."""
+    return json.dumps(value, default=str)
+
+
+def _pg_json(value):
+    """Wrap a value in psycopg2 Json using datetime-safe serialization."""
+    return psycopg2.extras.Json(value, dumps=_safe_json_dumps)
+
+
 def init_ncaam_bracket_cache_db():
     """
     Persistent cache for bracket simulation results.
@@ -1222,7 +1233,7 @@ def upsert_bt_daily_schedule(payload: list, date_yyyymmdd: str):
             DELETE FROM bt_daily_schedule_raw WHERE date = :date;
             INSERT INTO bt_daily_schedule_raw (date, payload_json, status, created_at)
             VALUES (:date, :json, 'OK', CURRENT_TIMESTAMP);
-        """, {"date": date_yyyymmdd, "json": json.dumps(payload)})
+        """, {"date": date_yyyymmdd, "json": _safe_json_dumps(payload)})
         conn.commit()
 
 def _sync_transaction_for_bet(bet_id, doc=None):
@@ -1880,7 +1891,7 @@ def update_user_preference(user_id: str, key: str, value: any):
 
         # 2. Update
         current_prefs[key] = value
-        new_json = json.dumps(current_prefs)
+        new_json = _safe_json_dumps(current_prefs)
 
         # 3. Save (Upsert user if needed? Usually user exists from Auth middleware, but let's be safe)
         # Assuming user exists.
@@ -2267,7 +2278,7 @@ def log_ingestion_run(data: dict):
     params = {
         "job_name": job_name,
         "status": data.get("run_status", "COMPLETED"),
-        "detail": psycopg2.extras.Json(detail)
+        "detail": _pg_json(detail)
     }
 
     with get_db_connection() as conn:
@@ -2290,7 +2301,7 @@ def set_job_state(job_name: str, state: dict):
         updated_at = CURRENT_TIMESTAMP
     """
     with get_db_connection() as conn:
-        _exec(conn, query, {"n": job_name, "s": psycopg2.extras.Json(state)})
+        _exec(conn, query, {"n": job_name, "s": _pg_json(state)})
         conn.commit()
 
 def get_latest_odds_for_diffing(sport_league: str) -> list:
@@ -2467,7 +2478,7 @@ def insert_balance_snapshot(snapshot: dict) -> bool:
         "source": snapshot.get("source") or 'manual',
         "user_id": snapshot.get("user_id"),
         "note": snapshot.get("note"),
-        "raw_data": psycopg2.extras.Json(snapshot.get("raw_data")) if snapshot.get("raw_data") is not None else None,
+        "raw_data": _pg_json(snapshot.get("raw_data")) if snapshot.get("raw_data") is not None else None,
     }
     try:
         with get_db_connection() as conn:
@@ -2825,7 +2836,7 @@ def insert_transaction(txn: dict) -> bool:
             return None
         if isinstance(x, (dict, list)):
             try:
-                return json.dumps(x)
+                return _safe_json_dumps(x)
             except Exception:
                 return str(x)
         return str(x)
@@ -3122,7 +3133,7 @@ def upsert_model_param(param_key: str, payload: dict) -> None:
       updated_at = NOW();
     """
     with get_admin_db_connection() as conn:
-        _exec(conn, sql, (param_key, json.dumps(payload)))
+        _exec(conn, sql, (param_key, _safe_json_dumps(payload)))
         conn.commit()
 
 

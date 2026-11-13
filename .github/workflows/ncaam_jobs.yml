@@ -3,8 +3,8 @@ name: NCAAM Frequent Jobs
 
 on:
   schedule:
-    # Clean hourly schedule
-    - cron: '0 * * * *'
+    # Twice-hourly schedule so late pre-tip odds & closing-line snapshots are fresh
+    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       backfill_pending:

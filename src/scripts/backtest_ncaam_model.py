@@ -67,10 +67,287 @@ def _grade_total(side: str, line: float, home_score: float, away_score: float) -
     return 'VOID'
 
 
+DEFAULT_WALKFORWARD_WEIGHT_GRID = [
+    (w_b, w_k, w_h)
+    for w_b in (0.15, 0.20, 0.25, 0.30, 0.35)
+    for w_k in (0.15, 0.20, 0.25)
+    for w_h in (0.04, 0.08, 0.12)
+    if (w_b + w_k + w_h) <= 0.62
+]
+
+
+def _score_spread_candidate(
+    records: list[dict],
+    weights: tuple[float, float, float],
+    min_edge: float = 1.5,
+) -> dict:
+    """Evaluate a (w_base, w_kenpom, w_hasla) weight triple on spread records."""
+    w_b, w_k, w_h = weights
+    n_bets = 0
+    wins = 0
+    losses = 0
+    pushes = 0
+    total_profit = 0.0
+    mae_sum = 0.0
+    n_mae = 0
+
+    for rec in records:
+        close_spread = rec.get("close_spread")
+        final_margin = rec.get("final_margin")
+        if close_spread is None or final_margin is None:
+            continue
+        close_spread = float(close_spread)
+        final_margin = float(final_margin)
+        mu_market = float(rec.get("mu_market_spread", close_spread))
+
+        pred_spread = (
+            mu_market
+            + (w_b * float(rec.get("diff_torvik", 0.0)))
+            + (w_k * float(rec.get("diff_kenpom", 0.0)))
+            + (w_h * float(rec.get("diff_hasla", 0.0)))
+            + float(rec.get("other_adj", 0.0))
+        )
+        mae_sum += abs((-pred_spread) - final_margin)
+        n_mae += 1
+
+        home_edge = close_spread - pred_spread
+        away_edge = pred_spread - close_spread
+        if home_edge >= min_edge:
+            side = "HOME"
+            price = float(rec.get("spread_price_home") or -110)
+        elif away_edge >= min_edge:
+            side = "AWAY"
+            price = float(rec.get("spread_price_away") or -110)
+        else:
+            continue
+
+        adj = final_margin + close_spread
+        if abs(adj) < 1e-9:
+            pushes += 1
+            n_bets += 1
+            continue
+
+        n_bets += 1
+        won = (adj > 0) if side == "HOME" else (adj < 0)
+        if won:
+            wins += 1
+            total_profit += _american_profit_per_unit(price)
+        else:
+            losses += 1
+            total_profit -= 1.0
+
+    roi = (total_profit / n_bets) if n_bets > 0 else 0.0
+    mae = (mae_sum / n_mae) if n_mae > 0 else 999.0
+    return {
+        "weights": {"NCAAM_W_BASE": w_b, "NCAAM_W_KENPOM": w_k, "NCAAM_W_HASLA": w_h},
+        "n_games": n_mae,
+        "n_bets": n_bets,
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
+        "profit_units": round(total_profit, 4),
+        "roi": round(roi, 4),
+        "mae_vs_final": round(mae, 4),
+    }
+
+
+def recommend_weights_walkforward(
+    records: list[dict],
+    min_bets: int = 75,
+    weight_grid: list[tuple[float, float, float]] | None = None,
+    min_edge: float = 1.5,
+) -> dict:
+    """
+    Run chronological expanding-window walk-forward evaluation across [W_BASE, W_KENPOM, W_HASLA].
+    Returns a non-destructive recommendation JSON summary only when sample >= min_bets.
+    """
+    baseline = (0.25, 0.20, 0.08)
+    grid = list(weight_grid or DEFAULT_WALKFORWARD_WEIGHT_GRID)
+    if baseline not in grid:
+        grid.insert(0, baseline)
+
+    valid = sorted(
+        [r for r in (records or []) if r.get("close_spread") is not None and r.get("final_margin") is not None],
+        key=lambda r: str(r.get("start_time") or ""),
+    )
+
+    baseline_full = _score_spread_candidate(valid, baseline, min_edge=min_edge)
+    if len(valid) < min_bets:
+        return {
+            "mode": "tune_weights",
+            "status": "insufficient_sample",
+            "non_destructive": True,
+            "min_bets": min_bets,
+            "n_games": len(valid),
+            "n_bets": baseline_full["n_bets"],
+            "baseline": baseline_full,
+            "recommended_weights": None,
+            "reason": f"Need at least {min_bets} completed games before recommending weight changes (got {len(valid)}).",
+        }
+
+    # 3 expanding chronological walk-forward folds starting after first 50% of games
+    n = len(valid)
+    split_points = [int(n * 0.50), int(n * 0.67), int(n * 0.84), n]
+    folds = []
+    oos_profits = []
+    oos_bets_total = 0
+    oos_baseline_profits = []
+    oos_baseline_bets = 0
+
+    for idx in range(3):
+        train_end = split_points[idx]
+        test_end = split_points[idx + 1]
+        train_slice = valid[:train_end]
+        test_slice = valid[train_end:test_end]
+        if not train_slice or not test_slice:
+            continue
+
+        best_train = max(
+            (_score_spread_candidate(train_slice, w, min_edge=min_edge) for w in grid),
+            key=lambda m: (m["n_bets"] >= 10, m["roi"] - 0.05 * m["mae_vs_final"], -m["mae_vs_final"]),
+        )
+        w_best = (
+            best_train["weights"]["NCAAM_W_BASE"],
+            best_train["weights"]["NCAAM_W_KENPOM"],
+            best_train["weights"]["NCAAM_W_HASLA"],
+        )
+        oos_best = _score_spread_candidate(test_slice, w_best, min_edge=min_edge)
+        oos_base = _score_spread_candidate(test_slice, baseline, min_edge=min_edge)
+        oos_profits.append(oos_best["profit_units"])
+        oos_bets_total += oos_best["n_bets"]
+        oos_baseline_profits.append(oos_base["profit_units"])
+        oos_baseline_bets += oos_base["n_bets"]
+        folds.append({
+            "fold": idx + 1,
+            "train_n": len(train_slice),
+            "test_n": len(test_slice),
+            "train_selected": best_train,
+            "oos_selected": oos_best,
+            "oos_baseline": oos_base,
+        })
+
+    if oos_bets_total < min_bets and baseline_full["n_bets"] < min_bets:
+        return {
+            "mode": "tune_weights",
+            "status": "insufficient_bets",
+            "non_destructive": True,
+            "min_bets": min_bets,
+            "n_games": len(valid),
+            "n_bets": max(oos_bets_total, baseline_full["n_bets"]),
+            "baseline": baseline_full,
+            "folds": folds,
+            "recommended_weights": None,
+            "reason": f"Qualified spread bets below {min_bets} minimum threshold.",
+        }
+
+    # Final candidate ranking across full sample while guarding against overfit using OOS lift
+    all_full = sorted(
+        (_score_spread_candidate(valid, w, min_edge=min_edge) for w in grid),
+        key=lambda m: (m["n_bets"] >= min_bets, m["roi"] - 0.05 * m["mae_vs_final"], -m["mae_vs_final"]),
+        reverse=True,
+    )
+    top_candidate = all_full[0]
+    oos_roi = (sum(oos_profits) / oos_bets_total) if oos_bets_total > 0 else 0.0
+    oos_base_roi = (sum(oos_baseline_profits) / oos_baseline_bets) if oos_baseline_bets > 0 else 0.0
+    improved = (top_candidate["n_bets"] >= min_bets) and (oos_roi > oos_base_roi) and (top_candidate["roi"] > baseline_full["roi"])
+
+    return {
+        "mode": "tune_weights",
+        "status": "recommendation_ready" if improved else "keep_defaults",
+        "non_destructive": True,
+        "min_bets": min_bets,
+        "n_games": len(valid),
+        "n_bets": top_candidate["n_bets"],
+        "oos_summary": {
+            "oos_bets": oos_bets_total,
+            "oos_profit_units": round(sum(oos_profits), 4),
+            "oos_roi": round(oos_roi, 4),
+            "oos_baseline_roi": round(oos_base_roi, 4),
+        },
+        "baseline": baseline_full,
+        "top_candidate": top_candidate,
+        "recommended_weights": top_candidate["weights"] if improved else None,
+        "folds": folds,
+        "top_5_grid": all_full[:5],
+    }
+
+
+def _collect_tune_records(model: NCAAMMarketFirstModelV2, games: list[dict], now: datetime) -> list[dict]:
+    """Build walk-forward spread evaluation records from completed NCAAM games."""
+    tune_records = []
+    with get_db_connection() as conn:
+        for g in games:
+            event_id = g["id"]
+            st = g["start_time"]
+            if isinstance(st, str):
+                try:
+                    st = datetime.fromisoformat(st.replace("Z", "+00:00"))
+                except Exception:
+                    st = now
+            if st.tzinfo is None:
+                st = st.replace(tzinfo=timezone.utc)
+            cutoff = st - timedelta(minutes=10)
+            s_home = _latest_line_before(conn, event_id, "SPREAD", "HOME", cutoff)
+            s_away = _latest_line_before(conn, event_id, "SPREAD", "AWAY", cutoff)
+            t_over = _latest_line_before(conn, event_id, "TOTAL", "OVER", cutoff)
+            t_under = _latest_line_before(conn, event_id, "TOTAL", "UNDER", cutoff)
+            if not s_home or not t_over or s_home.get("line_value") is None or t_over.get("line_value") is None:
+                continue
+
+            market_snapshot = {
+                "spread_home": float(s_home["line_value"]),
+                "spread_price_home": float(s_home.get("price") or -110),
+                "total": float(t_over["line_value"]),
+                "total_over_price": float(t_over.get("price") or -110),
+                "_best_spread_home": {"line_value": float(s_home["line_value"]), "price": float(s_home.get("price") or -110), "book": "bt"},
+                "_best_spread_away": {"line_value": float(s_away["line_value"]), "price": float(s_away.get("price") or -110), "book": "bt"} if s_away else None,
+                "_best_total_over": {"line_value": float(t_over["line_value"]), "price": float(t_over.get("price") or -110), "book": "bt"},
+                "_best_total_under": {"line_value": float(t_under["line_value"]), "price": float(t_under.get("price") or -110), "book": "bt"} if t_under else None,
+                "_raw_snaps": [],
+            }
+            try:
+                model.analyze(
+                    event_id,
+                    market_snapshot=market_snapshot,
+                    event_context={
+                        "id": event_id,
+                        "home_team": g["home_team"],
+                        "away_team": g["away_team"],
+                        "league": "NCAAM",
+                        "sport": "NCAAM",
+                        "start_time": st,
+                    },
+                    relax_gates=False,
+                    persist=False,
+                )
+            except Exception:
+                continue
+
+            comps = getattr(model, "_last_spread_components", None) or {}
+            if not comps:
+                continue
+            home_score = float(g["home_score"])
+            away_score = float(g["away_score"])
+            tune_records.append({
+                "event_id": event_id,
+                "start_time": st.isoformat(),
+                "close_spread": float(s_home["line_value"]),
+                "spread_price_home": float(s_home.get("price") or -110),
+                "spread_price_away": float(s_away.get("price") or -110) if s_away else -110.0,
+                "final_margin": home_score - away_score,
+                "mu_market_spread": comps.get("mu_market_spread", float(s_home["line_value"])),
+                "diff_torvik": comps.get("diff_torvik", 0.0),
+                "diff_kenpom": comps.get("diff_kenpom", 0.0),
+                "diff_hasla": comps.get("diff_hasla", 0.0),
+                "other_adj": comps.get("other_adj", 0.0),
+            })
+    return tune_records
+
+
 def main():
     days = int(os.getenv('BACKTEST_DAYS', '14'))
     limit = int(os.getenv('BACKTEST_LIMIT', '200'))
-    mode = str(os.getenv('BACKTEST_MODE', 'mae')).strip().lower()  # mae|simulate
+    mode = 'tune_weights' if '--tune-weights' in sys.argv else str(os.getenv('BACKTEST_MODE', 'mae')).strip().lower()  # mae|simulate|tune_weights
 
     # Use fixed weights if provided
     print('[backtest] env overrides:', {
@@ -103,6 +380,21 @@ def main():
 
     if not games:
         print('[backtest] no games found')
+        return
+
+    if mode == 'tune_weights':
+        tune_records = _collect_tune_records(model, games, now)
+        summary = recommend_weights_walkforward(
+            tune_records,
+            min_bets=int(os.getenv('BACKTEST_MIN_BETS', '75')),
+        )
+        print(json.dumps(summary, indent=2, default=str))
+        out_path = os.getenv('BACKTEST_OUTPUT_PATH', 'backtest_output.json')
+        try:
+            with open(out_path, 'w') as f:
+                json.dump(summary, f, indent=2, default=str)
+        except Exception as e:
+            print(f'[backtest] failed to write {out_path}: {e}')
         return
 
     # Metrics (MAE mode)

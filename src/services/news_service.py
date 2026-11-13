@@ -53,7 +53,12 @@ class NewsService:
         qs = urllib.parse.quote_plus(q)
         url = f"https://news.google.com/rss/search?q={qs}&hl=en-US&gl=US&ceid=US:en"
         try:
-            resp = requests.get(url, timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+            timeout_s = float(os.environ.get('NEWS_RSS_TIMEOUT_S', '2.0'))
+            resp = requests.get(url, timeout=timeout_s, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code in (403, 429):
+                # Cache brief empty result so serverless requests don't repeatedly stall on blocked RSS.
+                self._rss_cache[cache_key] = (now, [])
+                return []
             resp.raise_for_status()
             root = ET.fromstring(resp.text)
             items = root.findall('.//item')

@@ -30,13 +30,14 @@ def compute_board_health(league: str, days: int = 3) -> dict:
             conn,
             """
             WITH base_events AS (
-              SELECT e.id
+              SELECT e.id, DATE(e.start_time AT TIME ZONE 'America/New_York') AS day_et
               FROM events e
               WHERE e.league = %s
                 AND DATE(e.start_time AT TIME ZONE 'America/New_York') BETWEEN %s AND %s
             ),
             per_event AS (
               SELECT e.id AS event_id,
+                e.day_et,
                 MAX(CASE WHEN o.market_type='SPREAD' THEN 1 ELSE 0 END) AS has_spread,
                 MAX(CASE WHEN o.market_type='TOTAL' THEN 1 ELSE 0 END) AS has_total,
                 MAX(CASE WHEN o.market_type='MONEYLINE' THEN 1 ELSE 0 END) AS has_ml
@@ -48,16 +49,20 @@ def compute_board_health(league: str, days: int = 3) -> dict:
                 WHERE captured_at >= NOW() - INTERVAL '7 days'
                 ORDER BY event_id, market_type, captured_at DESC
               ) o ON o.event_id = e.id
-              GROUP BY e.id
+              GROUP BY e.id, e.day_et
             )
             SELECT
               COUNT(*)::int AS events_total,
               SUM(has_spread)::int AS with_spread,
               SUM(has_total)::int AS with_total,
-              SUM(has_ml)::int AS with_moneyline
+              SUM(has_ml)::int AS with_moneyline,
+              SUM(CASE WHEN day_et = %s THEN 1 ELSE 0 END)::int AS today_events_total,
+              SUM(CASE WHEN day_et = %s THEN has_spread ELSE 0 END)::int AS today_with_spread,
+              SUM(CASE WHEN day_et = %s THEN has_total ELSE 0 END)::int AS today_with_total,
+              SUM(CASE WHEN day_et = %s THEN has_ml ELSE 0 END)::int AS today_with_moneyline
             FROM per_event;
             """,
-            (league, start_et, end_et),
+            (league, start_et, end_et, start_et, start_et, start_et, start_et),
         ).fetchone()
 
         # row access is handled by _get() below (works for tuple + DictRow)
@@ -112,6 +117,10 @@ def compute_board_health(league: str, days: int = 3) -> dict:
     with_spread = int(_get(rows, 'with_spread', 1, 0) or 0)
     with_total = int(_get(rows, 'with_total', 2, 0) or 0)
     with_ml = int(_get(rows, 'with_moneyline', 3, 0) or 0)
+    today_events_total = int(_get(rows, 'today_events_total', 4, 0) or 0)
+    today_with_spread = int(_get(rows, 'today_with_spread', 5, 0) or 0)
+    today_with_total = int(_get(rows, 'today_with_total', 6, 0) or 0)
+    today_with_ml = int(_get(rows, 'today_with_moneyline', 7, 0) or 0)
 
     pct = lambda a, b: (float(a) / float(b)) if b else 0.0
 
@@ -139,16 +148,28 @@ def compute_board_health(league: str, days: int = 3) -> dict:
         'missing_spread_pct': round(1.0 - pct(with_spread, events_total), 4) if events_total else 0.0,
         'missing_total_pct': round(1.0 - pct(with_total, events_total), 4) if events_total else 0.0,
         'missing_moneyline_pct': round(1.0 - pct(with_ml, events_total), 4) if events_total else 0.0,
+        'today_events_total': today_events_total,
+        'today_with_spread': today_with_spread,
+        'today_with_total': today_with_total,
+        'today_with_moneyline': today_with_ml,
+        'today_pct_with_spread': round(pct(today_with_spread, today_events_total), 4),
+        'today_pct_with_total': round(pct(today_with_total, today_events_total), 4),
+        'today_missing_spread_pct': round(1.0 - pct(today_with_spread, today_events_total), 4) if today_events_total else 0.0,
+        'today_missing_total_pct': round(1.0 - pct(today_with_total, today_events_total), 4) if today_events_total else 0.0,
         'snapshots_last_6h_by_market': markets_6h,
         'generated_at': datetime.utcnow().isoformat() + 'Z',
     }
 
 
 def status_from_health(h: dict) -> str:
-    # Alert if totals coverage is too low.
+    # Alert if today's totals coverage (or window coverage if no today games) is too low.
     thresh = float(os.getenv('TOTALS_MISSING_ALERT_PCT', '0.40'))
     if not h or not h.get('events_total'):
         return 'stale'
+    if (h.get('today_events_total') or 0) > 0:
+        if float(h.get('today_missing_total_pct') or 0.0) > thresh:
+            return 'alert'
+        return 'ok'
     if float(h.get('missing_total_pct') or 0.0) > thresh:
         return 'alert'
     return 'ok'

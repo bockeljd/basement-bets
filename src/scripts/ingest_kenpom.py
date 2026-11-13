@@ -669,7 +669,7 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   record=EXCLUDED.record,
                   raw=EXCLUDED.raw,
                   updated_at=NOW();
-                """, {**payload, "raw": json.dumps(payload.get("raw") or {})})
+                """, {**payload, "raw": json.dumps(payload.get("raw") or {}, default=str)})
 
                 # ALSO update the live "kenpom_ratings" table
                 _exec(conn, """
@@ -695,7 +695,7 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   hca=EXCLUDED.hca,
                   raw=EXCLUDED.raw,
                   updated_at=NOW();
-                """, {**payload, "raw": json.dumps(payload.get("raw") or {})})
+                """, {**payload, "raw": json.dumps(payload.get("raw") or {}, default=str)})
                 n += 1
 
             elif table == 'kenpom_ref_ratings_daily':
@@ -708,8 +708,8 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   updated_at=NOW();
                 """, {
                     **payload,
-                    "metrics": json.dumps(payload.get("metrics") or {}),
-                    "raw": json.dumps(payload.get("raw") or {}),
+                    "metrics": json.dumps(payload.get("metrics") or {}, default=str),
+                    "raw": json.dumps(payload.get("raw") or {}, default=str),
                 })
                 n += 1
 
@@ -727,8 +727,8 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   updated_at=NOW();
                 """, {
                     **payload,
-                    "metrics": json.dumps(payload.get("metrics") or {}),
-                    "raw": json.dumps(payload.get("raw") or {}),
+                    "metrics": json.dumps(payload.get("metrics") or {}, default=str),
+                    "raw": json.dumps(payload.get("raw") or {}, default=str),
                 })
                 n += 1
 
@@ -767,7 +767,7 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   three_par=EXCLUDED.three_par,
                   raw=EXCLUDED.raw,
                   updated_at=NOW();
-                """, {**payload, "raw": json.dumps(payload.get('raw') or {})})
+                """, {**payload, "raw": json.dumps(payload.get('raw') or {}, default=str)})
                 n += 1
 
             elif table == 'kenpom_team_player_agg_daily':
@@ -807,7 +807,7 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   top7_minutes_pct=EXCLUDED.top7_minutes_pct,
                   raw=EXCLUDED.raw,
                   updated_at=NOW();
-                """, {**payload, "raw": json.dumps(payload.get('raw') or {})})
+                """, {**payload, "raw": json.dumps(payload.get('raw') or {}, default=str)})
                 n += 1
 
         conn.commit()

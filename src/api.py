@@ -2877,20 +2877,29 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 """,
                 (list(event_ids),),
             ).fetchall()
+        def _clean_no_bet_reason(raw):
+            txt = str(raw or '').strip()
+            if not txt:
+                return 'No bet'
+            if ('Object of type' in txt and 'serializable' in txt) or ('Traceback' in txt) or len(txt) > 140:
+                return 'Analysis unavailable — click Details to retry'
+            return txt
+
         cached = [r for r in cached if (dict(r).get('reason') or '') != 'Data Unavailable']
         if cached:
             picks = {}
             for r in cached:
                 d = dict(r)
                 eid = d.get('event_id')
+                is_act = bool(d.get('is_actionable'))
                 picks[eid] = {
                     'rec': d.get('rec_json'),
                     'analyzed_at': d.get('computed_at'),
                     'event': event_meta.get(eid),
                     'locked': False,
                     'source': 'cached',
-                    'is_actionable': bool(d.get('is_actionable')),
-                    'reason': d.get('reason'),
+                    'is_actionable': is_act,
+                    'reason': None if is_act else _clean_no_bet_reason(d.get('reason')),
                 }
             # Attach latest full-run status when available so the UI can show:
             # "Stale slate — latest full run produced NO BETS. Showing last cached picks." (option 2)
@@ -3065,7 +3074,11 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                     reason = None
                     if isinstance(res, dict):
                         reason = res.get('block_reason') or res.get('headline') or res.get('recommendation') or res.get('error')
-                    reason = str(reason or 'No bet')
+                    r_txt = str(reason or 'No bet').strip()
+                    if ('Object of type' in r_txt and 'serializable' in r_txt) or ('Traceback' in r_txt) or len(r_txt) > 140:
+                        reason = 'Analysis unavailable — click Details to retry'
+                    else:
+                        reason = r_txt or 'No bet'
 
                     # Preserve no-bet reasons per event so UI can show "No Bet" states.
                     picks[eid] = {
@@ -3220,7 +3233,7 @@ async def analyze_ncaam_game(request: Request):
         except Exception:
             pass
 
-        return result
+        return jsonable_encoder(result)
     except HTTPException:
         raise
     except Exception as e:
@@ -5430,8 +5443,8 @@ async def trigger_run_council_today(
                             (
                                 run_id,
                                 today_et,
-                                json.dumps({"event_ids": [e.event_id for e in events_ctx]}),
-                                json.dumps(oracle_out),
+                                json.dumps({"event_ids": [e.event_id for e in events_ctx]}, default=str),
+                                json.dumps(oracle_out, default=str),
                             ),
                         )
                         conn.commit()
@@ -5550,7 +5563,7 @@ async def trigger_build_daily_top_picks(
                 except Exception as e:
                     err += 1
                     try:
-                        upsert_pick(date, eid, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": str(e)}, conn=conn)
+                        upsert_pick(date, eid, {"recommendations": [], "error": str(e), "model_version": getattr(model, 'VERSION', None), "block_reason": "Analysis unavailable — click Details to retry"}, conn=conn)
                     except Exception:
                         pass
             conn.commit()
@@ -5813,14 +5826,14 @@ async def trigger_run_mlb_predictions(
                         "weather": ((result.get("context") or {}).get("weather") or {}).get("impact_summary"),
                         "proj_total": (result.get("projections") or {}).get("total_runs"),
                         "market_total": (result.get("market") or {}).get("total"),
-                    }),
+                    }, default=str),
                     "outputs_json": json.dumps({
                         "fair_spread": result.get("model", {}).get("fair_spread"),
                         "fair_total": result.get("model", {}).get("fair_total"),
                         "prob_home_win": result.get("model", {}).get("prob_home_win"),
                         "prob_over": result.get("model", {}).get("prob_over"),
                         "nrfi_prob": result.get("nrfi", {}).get("p_nrfi"),
-                    }),
+                    }, default=str),
                     "narrative_json": json.dumps({
                         "headline": result.get("headline"),
                         "pitching_matchup": {
@@ -5828,7 +5841,7 @@ async def trigger_run_mlb_predictions(
                             "away": (result.get("pitching_matchup") or {}).get("away_sp", {}).get("name"),
                         },
                         "context": result.get("context", {}),
-                    }),
+                    }, default=str),
                     "model_version": result.get("model_version", MLBModel.VERSION),
                 }
 
@@ -6127,7 +6140,7 @@ def get_game_correlation(event_id: str):
         e.start_time,
         (
             SELECT line_value FROM odds_snapshots os 
-            WHERE os.event_id = e.id AND os.market_type = 'SPREAD' AND os.captured_at <= NOW()
+            WHERE os.event_id = e.id AND os.market_type = 'SPREAD' AND os.side = 'HOME' AND os.captured_at <= NOW()
             ORDER BY os.captured_at DESC LIMIT 1
         ) as close_spread,
         mh.adj_tempo as home_pace,
@@ -6135,17 +6148,22 @@ def get_game_correlation(event_id: str):
         ma.adj_tempo as away_pace,
         (ma.adj_off - ma.adj_def) as away_net_eff
     FROM events e
-    -- Use LATEST team metrics as proxy for season identity (since historical daily metrics might be missing)
-    LEFT JOIN (
-        SELECT team_text, adj_tempo, adj_off, adj_def
+    LEFT JOIN LATERAL (
+        SELECT adj_tempo, adj_off, adj_def
         FROM bt_team_metrics_daily
         WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
-    ) mh ON LOWER(e.home_team) LIKE '%%' || LOWER(mh.team_text) || '%%'
-    LEFT JOIN (
-        SELECT team_text, adj_tempo, adj_off, adj_def
+          AND LOWER(e.home_team) LIKE '%' || LOWER(team_text) || '%'
+        ORDER BY LENGTH(team_text) DESC
+        LIMIT 1
+    ) mh ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT adj_tempo, adj_off, adj_def
         FROM bt_team_metrics_daily
         WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
-    ) ma ON LOWER(e.away_team) LIKE '%%' || LOWER(ma.team_text) || '%%'
+          AND LOWER(e.away_team) LIKE '%' || LOWER(team_text) || '%'
+        ORDER BY LENGTH(team_text) DESC
+        LIMIT 1
+    ) ma ON TRUE
     WHERE e.id = :eid
     """
     with get_db_connection() as conn:
@@ -6158,24 +6176,14 @@ def get_game_correlation(event_id: str):
     if row['close_spread'] is None:
          return {"archetype": None, "correlations": None, "status": "no_spread"}
 
-    # Convert to DataFrame row for binning
+    # Convert to DataFrame row for binning (coerce psycopg2 Decimal/DictRow safely)
     try:
-        if hasattr(row, '_index'):
-            d = {k: row[k] for k in row._index}
-        else:
-            d = dict(row) # Fallback
-            
+        d = {k: row[k] for k in row._index} if hasattr(row, '_index') else dict(row)
         df = pd.DataFrame([d])
     except Exception as e:
         print(f"DEBUG DF Creation Error: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        raise e
-    except Exception as e:
-        print(f"DEBUG DF Creation Error: {e}")
-        traceback.print_exc()
-        raise e
-    
+        raise HTTPException(status_code=500, detail=f"Correlation frame error: {e}")
+
     # Compute bins
     engine = NCAAMCorrelationEngine()
     df = engine.build_archetype_bins(df)
@@ -6183,13 +6191,17 @@ def get_game_correlation(event_id: str):
     if df.empty or 'pace_bin' not in df.columns:
         return {"archetype": None, "correlations": None}
         
-    # Identify Archetype
+    # Identify Archetype (sanitize NaN/Categorical so JSON serialization never fails)
     row_processed = df.iloc[0]
-    archetype_key = f"{row_processed['pace_bin']}_{row_processed['eff_bin']}_{row_processed['spread_bucket']}"
+    def _clean_bin(val, fallback='Avg'):
+        return fallback if (val is None or pd.isna(val)) else str(val)
+
+    pace_bin = _clean_bin(row_processed.get('pace_bin'))
+    eff_bin = _clean_bin(row_processed.get('eff_bin'))
+    spread_bucket = _clean_bin(row_processed.get('spread_bucket'), fallback='Medium')
+    archetype_key = f"{pace_bin}_{eff_bin}_{spread_bucket}"
     
     # Fetch Correlation Data from Cache or Engine
-    # For speed, load summary (or implement granular lookup)
-    # Using Summary Endpoint Logic reuse
     import json
     _, cache_file = _correlation_cache_target()
     correlations = None
@@ -6202,9 +6214,9 @@ def get_game_correlation(event_id: str):
     return {
         "archetype": {
             "key": archetype_key,
-            "pace": row_processed['pace_bin'],
-            "eff": row_processed['eff_bin'],
-            "spread": row_processed['spread_bucket']
+            "pace": pace_bin,
+            "eff": eff_bin,
+            "spread": spread_bucket
         },
         "correlations": correlations
     }

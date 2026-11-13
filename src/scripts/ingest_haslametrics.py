@@ -98,7 +98,7 @@ def main() -> int:
         """
         with get_admin_db_connection() as conn:
             for row in teams:
-                _exec(conn, sql, {**row, "raw": json.dumps(row.get("raw") or {})})
+                _exec(conn, sql, {**row, "raw": json.dumps(row.get("raw") or {}, default=str)})
             conn.commit()
 
         upsert_health(

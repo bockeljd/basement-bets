@@ -1,3119 +1,744 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  Info,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Award,
+  X,
+} from 'lucide-react';
 import api from '../api/axios';
 import { loadCache } from '../utils/httpCache';
-import { ArrowUpDown, ChevronUp, ChevronDown, Filter, RefreshCw, CheckCircle, AlertCircle, Info, Shield, ShieldAlert, ShieldCheck, PlusCircle, TrendingUp, Upload } from 'lucide-react';
-
-import OpenBetsPanel from '../components/OpenBetsPanel';
 import ParlayRecommendations from '../components/ParlayRecommendations';
 import MarchMadness from './MarchMadness';
+import TodayDataHealthStrip from '../components/today/TodayDataHealthStrip';
+import TodayPlayCard from '../components/today/TodayPlayCard';
+import TodayFullBoardTable from '../components/today/TodayFullBoardTable';
+import TodayMatchupModal from '../components/today/TodayMatchupModal';
+import ModelLogicDialog from '../components/today/ModelLogicDialog';
+import {
+  getTodayEtStr,
+  shiftEtDateStr,
+  makeMatchupKey,
+  lookupTopPickForGame,
+  getConfidenceMeta,
+} from '../components/today/todayHelpers';
+import '../styles/todayDashboard.css';
 
-const Research = ({ onAddBet, showModelPerformanceTab = true, formatCurrency, formatDateMDY }) => {
-    const [edges, setEdges] = useState([]);
-    const modelInfoDialogRef = useRef(null);
+const LEAGUES = ['NCAAM', 'MLB', 'NFL', 'EPL'];
 
-    const openModelInfoDialog = () => {
-        const dialog = modelInfoDialogRef.current;
-        if (dialog && typeof dialog.showModal === 'function') {
-            if (!dialog.open) {
-                dialog.showModal();
-            }
-        }
-    };
+const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
+  const [edges, setEdges] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [toast, setToast] = useState(null); // { tone: 'ok'|'err'|'warn', text }
+  const [authPromptOpen, setAuthPromptOpen] = useState(false);
+  const [authPassword, setAuthPassword] = useState('');
 
-    const handleModelInfoDialogBackdropClick = (event) => {
-        const dialog = modelInfoDialogRef.current;
-        if (!dialog) return;
-        if (typeof HTMLDialogElement !== 'undefined' && 'closedBy' in HTMLDialogElement.prototype) {
-            return;
-        }
-        if (event.target !== dialog) return;
-        const rect = dialog.getBoundingClientRect();
-        const isDialogContent = (
-            rect.top <= event.clientY &&
-            event.clientY <= rect.top + rect.height &&
-            rect.left <= event.clientX &&
-            event.clientX <= rect.left + rect.width
-        );
-        if (isDialogContent) return;
-        dialog.close();
-    };
-    // Top-level tabs: board vs history
-    const [activeTab, setActiveTab] = useState('live');
+  const [leagueFilter, setLeagueFilter] = useState('NCAAM');
+  const [selectedDate, setSelectedDate] = useState(getTodayEtStr());
+  const [activeSubTab, setActiveSubTab] = useState('top_plays'); // top_plays | board | parlays | march_madness
 
-    // Board sub-tabs: recommended vs full board
-    const [boardTab, setBoardTab] = useState('recommended');
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+  const [rowTopPicks, setRowTopPicks] = useState({});
+  const [rowTopPicksByKey, setRowTopPicksByKey] = useState({});
+  const [matchupProfiles, setMatchupProfiles] = useState({});
+  const [dataHealth, setDataHealth] = useState([]);
+  const [degradedMode, setDegradedMode] = useState(false);
+  const [degradedAsOf, setDegradedAsOf] = useState(null);
 
-    // (Balances removed from this page; tracked in Performance)
-    // Research tab focuses on board-backed leagues
-    const [leagueFilter, setLeagueFilter] = useState('NCAAM');
-    // Date Filtering
-    // Always drive date selection in America/New_York so it matches backend queries.
-    const getTodayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    const [selectedDate, setSelectedDate] = useState(getTodayStr());
+  // Top plays controls
+  const [pickTypeFilter, setPickTypeFilter] = useState('all'); // all | spread | total | high_conf | soon
+  const [pickViewMode, setPickViewMode] = useState('top6'); // top6 | all
+  const [expandedPickIds, setExpandedPickIds] = useState(new Set());
 
-    // Game Analysis Modal State
-    const [selectedGame, setSelectedGame] = useState(null);
-    const [analysisResult, setAnalysisResult] = useState(null);
-    const [correlationResult, setCorrelationResult] = useState(null);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Modals
+  const [selectedGame, setSelectedGame] = useState(null);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [correlationResult, setCorrelationResult] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [showModelLogicDialog, setShowModelLogicDialog] = useState(false);
 
-    // Manual referee entry (optional)
-    const [ref1, setRef1] = useState('');
-    const [ref2, setRef2] = useState('');
-    const [ref3, setRef3] = useState('');
-    const [refsSaving, setRefsSaving] = useState(false);
-    const [refsError, setRefsError] = useState(null);
+  const BOARD_DAYS_DEFAULT = showModelPerformanceTab ? 3 : 1;
 
-    // Quick-pick state (board row badges)
-    const [rowTopPicks, setRowTopPicks] = useState({}); // event_id -> { rec, analyzedAt }
-    const [rowTopPicksByKey, setRowTopPicksByKey] = useState({}); // matchup key -> { rec, analyzedAt }
-    const [topPicksError, setTopPicksError] = useState(null);
-    const [matchupProfiles, setMatchupProfiles] = useState({}); // event_id -> { home_kenpom, away_kenpom... }
-    const [dataHealth, setDataHealth] = useState([]);
-    const [topPicksStats, setTopPicksStats] = useState({ games: 0, withPick: 0, server: null, errors: [], actionable: 0, noBet: 0 });
+  const toggleWhyPick = (id) => {
+    setExpandedPickIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
-    // Degraded mode: show cached content if DB/API is down.
-    const [degradedMode, setDegradedMode] = useState(false);
-    const [degradedAsOf, setDegradedAsOf] = useState(null);
-    // Edge-engine recs removed: Today should use the core model (stored top picks) to avoid mismatches.
-    // const [edgeRecs, setEdgeRecs] = useState(null);
-    // const [edgeRecsError, setEdgeRecsError] = useState(null);
-    const [rowPickingId, setRowPickingId] = useState(null);
+  const fetchSchedule = async () => {
+    setLoading(true);
+    setError(null);
+    setDegradedMode(false);
+    setDegradedAsOf(null);
 
-    // Mobile UX: collapse recommended list to Top 6 by default (expandable)
-    const [showAllMobileRecs, setShowAllMobileRecs] = useState(false);
+    const boardParams = { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT };
+    const topPicksParams = { date: selectedDate, days: BOARD_DAYS_DEFAULT, limit_games: 250 };
 
-    // Quick slate filter & why-this-pick accordion state
-    const [pickTypeFilter, setPickTypeFilter] = useState('all'); // 'all' | 'spread' | 'total' | 'high_conf' | 'soon'
-    const [pickViewMode, setPickViewMode] = useState('top6'); // 'top6' | 'all'
-    const [expandedPickIds, setExpandedPickIds] = useState(new Set());
+    try {
+      const [boardRes, topPicksRes, healthRes, matchupRes, mlbRes] = await Promise.all([
+        api.get('/api/board', { params: boardParams }),
+        leagueFilter === 'NCAAM'
+          ? api
+              .get('/api/ncaam/top-picks', { params: topPicksParams })
+              .catch((e) => ({ data: null, _error: e }))
+          : Promise.resolve({ data: null }),
+        api.get('/api/data-health').catch(() => ({ data: { items: [] } })),
+        leagueFilter === 'NCAAM'
+          ? api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate } }).catch(() => ({ data: { profiles: [] } }))
+          : Promise.resolve({ data: { profiles: [] } }),
+        leagueFilter === 'MLB'
+          ? api.get('/api/mlb/predictions', { params: { lookback_days: BOARD_DAYS_DEFAULT } }).catch(() => ({ data: { predictions: [] } }))
+          : Promise.resolve({ data: { predictions: [] } }),
+      ]);
 
-    const toggleWhyPick = (id) => {
-        setExpandedPickIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
+      setEdges(Array.isArray(boardRes.data) ? boardRes.data : []);
+      setDataHealth(healthRes?.data?.items || []);
+
+      const mProfiles = {};
+      (matchupRes?.data?.profiles || []).forEach((p) => {
+        if (p?.event_id) mProfiles[p.event_id] = p;
+      });
+      setMatchupProfiles(mProfiles);
+
+      const mapped = {};
+      const mappedByKey = {};
+
+      if (leagueFilter === 'NCAAM' && topPicksRes?.data?.picks && typeof topPicksRes.data.picks === 'object') {
+        const tp = topPicksRes.data.picks;
+        Object.keys(tp).forEach((eid) => {
+          const item = tp[eid];
+          const recObj = {
+            rec: item?.rec,
+            analyzedAt: item?.analyzed_at,
+            isActionable: item?.is_actionable,
+            reason: item?.reason,
+            source: item?.source,
+            event: item?.event,
+          };
+          mapped[eid] = recObj;
+          const ev = item?.event || {};
+          const k = makeMatchupKey(String(ev.day_et || '').slice(0, 10), ev.away_team, ev.home_team);
+          if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
         });
-    };
-
-    // KenPom manual CSV upload state (inside How the Model Works dialog)
-    const kenpomFileInputRef = useRef(null);
-    const [kenpomCsvFile, setKenpomCsvFile] = useState(null);
-    const [kenpomUploadState, setKenpomUploadState] = useState({ uploading: false, status: 'idle', message: '' });
-
-    const handleKenpomCsvUpload = async (event) => {
-        event.preventDefault();
-        if (kenpomUploadState.uploading) return;
-        if (!kenpomCsvFile) {
-            setKenpomUploadState({
-                uploading: false,
-                status: 'error',
-                message: 'Please choose a KenPom CSV or TSV file first.',
-            });
-            return;
-        }
-        setKenpomUploadState({ uploading: true, status: 'uploading', message: 'Importing KenPom ratings...' });
-        try {
-            const formData = new FormData();
-            formData.append('file', kenpomCsvFile);
-            const res = await api.post('/api/admin/kenpom/upload-csv', formData);
-            const rowsCount = res?.data?.rows ?? 'all';
-            const asof = res?.data?.asof_date ? ` (as of ${res.data.asof_date})` : '';
-            setKenpomUploadState({
-                uploading: false,
-                status: 'success',
-                message: `Loaded ${rowsCount} teams into KenPom ratings${asof}. Refreshing board...`,
-            });
-            setKenpomCsvFile(null);
-            if (kenpomFileInputRef.current) {
-                kenpomFileInputRef.current.value = '';
-            }
-            await fetchSchedule();
-        } catch (err) {
-            const detail = err?.response?.data?.detail || err?.message || 'Upload failed';
-            setKenpomUploadState({
-                uploading: false,
-                status: 'error',
-                message: `Could not import KenPom file: ${detail}`,
-            });
-        }
-    };
-
-    // Sorting State
-    const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
-
-    // Data health hover tooltip (custom, fixed-position to avoid clipping)
-    const [dhTip, setDhTip] = useState({ open: false, pinned: false, x: 16, y: 16, text: '' });
-    const [dhHideTimer, setDhHideTimer] = useState(null);
-
-    const BOARD_DAYS_DEFAULT = showModelPerformanceTab ? 3 : 1;
-
-    useEffect(() => {
-        // reset mobile expansion and pick filters when the slate changes
-        setShowAllMobileRecs(false);
-        setExpandedPickIds(new Set());
-        setPickTypeFilter('all');
-        fetchSchedule();
-    }, [selectedDate, leagueFilter]); // Refetch when date/league changes
-
-    const fetchSchedule = async () => {
-        setLoading(true);
-        setError(null);
-        setDegradedMode(false);
-        setDegradedAsOf(null);
-
-        const boardParams = { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT };
-        const topPicksParams = { date: selectedDate, days: BOARD_DAYS_DEFAULT, limit_games: 250 };
-
-        try {
-            // Fetch board
-            const [boardRes, topPicksRes, healthRes, matchupRes, mlbRes] = await Promise.all([
-                api.get('/api/board', { params: boardParams }),
-                (leagueFilter === 'NCAAM'
-                    ? api.get('/api/ncaam/top-picks', { params: topPicksParams })
-                        .then((r) => ({ ...r, _error: null }))
-                        .catch((e) => ({ data: null, _error: e }))
-                    : Promise.resolve({ data: null, _error: null })
-                ),
-                api.get('/api/data-health').catch(() => ({ data: { items: [] } })),
-                (leagueFilter === 'NCAAM'
-                    ? api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate } })
-                        .catch((e) => ({ data: { matchups: [] } }))
-                    : Promise.resolve({ data: { matchups: [] } })
-                ),
-                (leagueFilter === 'MLB'
-                    ? api.get('/api/mlb/predictions', { params: { lookback_days: BOARD_DAYS_DEFAULT } })
-                        .catch((e) => ({ data: { predictions: [] } }))
-                    : Promise.resolve({ data: { predictions: [] } })
-                )
-            ]);
-
-            setDataHealth(healthRes?.data?.items || []);
-
-            setEdges(boardRes.data || []);
-
-            const mProfiles = {};
-            (matchupRes?.data?.matchups || []).forEach(m => {
-                mProfiles[m.event_id] = m;
-            });
-            setMatchupProfiles(mProfiles);
-
-            // Hydrate row badges from server-side top picks (avoid N analyze calls)
-            try {
-                const errTp = topPicksRes?._error;
-                if (errTp) {
-                    setTopPicksError(errTp?.response?.data?.detail || errTp?.response?.data?.message || errTp?.message || 'Top picks failed');
-                } else {
-                    setTopPicksError(null);
-                }
-
-                try {
-                    const rm = topPicksRes?.data?.run_meta || null;
-                    // Intentionally NOT setting degradedMode=true when there are simply 0 bets.
-                } catch (e) { }
-
-                const tp = topPicksRes?.data?.picks || null;
-                const mapped = {};
-                const mappedByKey = {};
-
-                const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
-                const makeKey = (dayEt, away, home) => {
-                    const d = String(dayEt || '').slice(0, 10);
-                    const a = norm(away);
-                    const h = norm(home);
-                    if (!d || !a || !h) return null;
-                    return `${d}|${a}|${h}`;
-                };
-
-                if (leagueFilter === 'NCAAM' && tp && typeof tp === 'object') {
-                    Object.keys(tp).forEach((eid) => {
-                        const recObj = {
-                            rec: tp[eid]?.rec,
-                            analyzedAt: tp[eid]?.analyzed_at,
-                            isActionable: tp[eid]?.is_actionable,
-                            reason: tp[eid]?.reason,
-                            source: tp[eid]?.source,
-                            event: tp[eid]?.event,
-                        };
-                        mapped[eid] = recObj;
-
-                        // Cross-provider dedupe: board event ids can differ (espn vs action).
-                        // Build a fallback map keyed by day_et + away/home names.
-                        const ev = tp[eid]?.event || {};
-                        const k = makeKey(ev?.day_et, ev?.away_team, ev?.home_team);
-                        if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
-                    });
-
-                    const nGames = Object.keys(tp).length;
-                    const vals = Object.values(tp);
-                    const nWith = vals.filter((x) => x && x.rec).length;
-                    const nAction = vals.filter((x) => x && x.isActionable).length;
-                    const nNoBet = vals.filter((x) => x && x.isActionable === false).length;
-                    const serverStats = topPicksRes?.data?.stats;
-                    setTopPicksStats({
-                        games: nGames,
-                        withPick: nWith,
-                        actionable: nAction,
-                        noBet: nNoBet,
-                        server: serverStats || null,
-                        errors: topPicksRes?.data?.errors || [],
-                    });
-                } else if (leagueFilter === 'MLB' && mlbRes?.data?.predictions) {
-                    const preds = mlbRes.data.predictions || [];
-                    
-                    // Deduplicate predictions: only keep the newest prediction per game + market
-                    const latestPredsMap = new Map();
-                    preds.forEach(p => {
-                        const key = `${p.away_team || ''}_${p.home_team || ''}_${(p.market_type || '').toUpperCase()}`;
-                        if (!latestPredsMap.has(key)) {
-                            latestPredsMap.set(key, p);
-                        } else {
-                            const existing = latestPredsMap.get(key);
-                            const existingTime = existing.analyzed_at ? new Date(existing.analyzed_at).getTime() : 0;
-                            const newTime = p.analyzed_at ? new Date(p.analyzed_at).getTime() : 0;
-                            if (newTime > existingTime) {
-                                latestPredsMap.set(key, p);
-                            }
-                        }
-                    });
-                    
-                    const deduplicatedPreds = Array.from(latestPredsMap.values());
-                    
-                    let actionableCount = 0;
-                    deduplicatedPreds.forEach((p) => {
-                        // Create a fake event ID so it renders in the board rows natively
-                        const fakeEid = `mlb-${p.id}`;
-                        const confVal = Number(p.confidence_0_100 || 0);
-                        const confLabel = confVal >= 75 ? 'HIGH' : confVal >= 50 ? 'MEDIUM' : 'LOW';
-                        
-                        // Treat the prediction as actionable if it has an EV advantage
-                        const isActionable = true;
-                        if (isActionable) actionableCount++;
-
-                        const recObj = {
-                            rec: {
-                                bet_type: String(p.market_type || 'MONEYLINE').toUpperCase(),
-                                selection: p.selection,
-                                market_line: null, 
-                                price: null, // the frontend falls back gracefully
-                                confidence: confLabel,
-                                edge: `${(Number(p.ev_per_unit || 0) * 100).toFixed(1)}%`
-                            },
-                            analyzedAt: p.analyzed_at,
-                            isActionable: isActionable,
-                            reason: 'MLB Core Model',
-                            source: 'MLB Analytics',
-                            event: {
-                                home_team: p.home_team || 'Home',
-                                away_team: p.away_team || 'Away',
-                                start_time: p.analyzed_at, 
-                                day_et: p.day_et,
-                                sport: 'MLB'
-                            }
-                        };
-                        mapped[fakeEid] = recObj;
-                        const k = makeKey(p.day_et, p.away_team, p.home_team);
-                        if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
-                    });
-                    
-                    setTopPicksStats({
-                        games: deduplicatedPreds.length,
-                        withPick: deduplicatedPreds.length,
-                        actionable: actionableCount,
-                        noBet: 0,
-                        server: null,
-                        errors: [],
-                    });
-                } else {
-                    setTopPicksStats({ games: 0, withPick: 0, server: null, errors: [] });
-                }
-
-                setRowTopPicks(mapped);
-                setRowTopPicksByKey(mappedByKey);
-
-                // Default board sub-tab to "Recommended" if we have at least one pick.
-                if (Object.keys(mapped).length > 0) {
-                    setBoardTab('recommended');
-                }
-            } catch (e) { }
-
-        } catch (err) {
-            console.error(err);
-            if (err.response?.status === 403) {
-                const pass = prompt("Authentication failed. Please enter the Basement Password:");
-                if (pass) {
-                    localStorage.setItem('basement_password', pass);
-                    window.location.reload();
-                }
-            }
-
-            // Degraded mode fallback: show last cached board/top-picks instead of a blank screen.
-            try {
-                const cachedBoard = loadCache('/api/board', boardParams);
-                const cachedTop = (leagueFilter === 'NCAAM') ? loadCache('/api/ncaam/top-picks', topPicksParams) : null;
-
-                if (cachedBoard?.payload) {
-                    setEdges(cachedBoard.payload || []);
-                    setDegradedMode(true);
-                    setDegradedAsOf(cachedBoard?.at || null);
-                }
-
-                if (cachedTop?.payload?.picks) {
-                    const tp = cachedTop.payload.picks;
-                    const mapped = {};
-                    Object.keys(tp).forEach((eid) => {
-                        mapped[eid] = {
-                            rec: tp[eid]?.rec,
-                            analyzedAt: tp[eid]?.analyzed_at,
-                            isActionable: tp[eid]?.is_actionable,
-                            reason: tp[eid]?.reason,
-                            source: tp[eid]?.source,
-                        };
-                    });
-                    setRowTopPicks(mapped);
-                }
-
-                if (cachedBoard?.payload || cachedTop?.payload) {
-                    setError(null);
-                } else {
-                    setError('Failed to load schedule.');
-                }
-            } catch {
-                setError('Failed to load schedule.');
-            }
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const runModels = async () => {
-        // For NCAAM v2, we don't "run models" globally. We just refresh the board.
-        // We can add a "Sync All" if needed, but the board fetch is cheap.
-        fetchSchedule();
-    };
-
-    const gradeResults = async () => {
-        try {
-            setLoading(true);
-            const res = await api.post('/api/research/grade');
-            const result = res.data;
-            alert(`Grading Complete! ${result.graded || 0} bets updated.`);
-            // Fetch layout/refresh data - CONSISTENT ENDPOINTS
-            const [boardRes, topPicksRes] = await Promise.all([
-                api.get('/api/board', { params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT } }),
-                (leagueFilter === 'NCAAM'
-                    ? api.get('/api/ncaam/top-picks', { params: { date: selectedDate, days: BOARD_DAYS_DEFAULT, limit_games: 200 } }).catch(() => ({ data: null }))
-                    : Promise.resolve({ data: null })
-                )
-            ]);
-            setEdges(boardRes.data || []);
-            try {
-                const tp = topPicksRes?.data?.picks || null;
-                if (tp && typeof tp === 'object') {
-                    const mapped = {};
-                    Object.keys(tp).forEach((eid) => {
-                        mapped[eid] = { rec: tp[eid]?.rec, analyzedAt: tp[eid]?.analyzed_at };
-                    });
-                    setRowTopPicks(mapped);
-                }
-            } catch (e) { }
-        } catch (err) {
-            console.error(err);
-            alert('Grading failed: ' + (err.response?.data?.message || err.message));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const analyzeGame = async (game) => {
-        setSelectedGame(game);
-        setIsAnalyzing(true);
-        setAnalysisResult(null);
-        setCorrelationResult(null);
-        setRefsError(null);
-        // Keep current manual refs in the inputs; user may want to set them before re-run.
-
-        try {
-            const [analysisRes, corrRes] = await Promise.all([
-                api.post('/api/ncaam/analyze', { event_id: game.id }),
-                api.get('/api/ncaam/correlations/game', { params: { event_id: game.id } }).catch(e => ({ data: null }))
-            ]);
-            // If analyze returns no recommendations but we already have a cached daily_top_picks rec
-            // for this event, fall back so the Details modal still shows *something*.
-            // (This happens when the cached pick was computed earlier, but current market/odds inputs
-            // are missing or have shifted, causing analyze() to gate it out.)
-            const apiData = analysisRes.data;
-            const apiTop = (apiData?.recommendations || [])[0] || null;
-            const cachedTop = (rowTopPicks?.[game.id]?.rec) || null;
-            const merged = (!apiTop && cachedTop)
-                ? {
-                    ...(apiData || {}),
-                    recommendations: [cachedTop],
-                    headline: (apiData?.headline || 'Cached pick (daily_top_picks)')
-                        + ' — live analyze returned no recommendations',
-                    _cached_fallback: true,
-                }
-                : apiData;
-
-            setAnalysisResult(merged);
-            setCorrelationResult(corrRes.data);
-
-            // Also surface the top pick back on the board row
-            try {
-                const top = (merged?.recommendations || [])[0] || null;
-                if (top) {
-                    setRowTopPicks(prev => ({
-                        ...prev,
-                        [game.id]: { rec: top, analyzedAt: new Date().toISOString() }
-                    }));
-                }
-            } catch (e) { }
-
-            // History refresh moved to ModelPerformanceAnalytics
-        } catch (err) {
-            console.error('Analysis error:', err);
-            setAnalysisResult({ error: err.response?.data?.detail || 'Analysis failed' });
-        } finally {
-            setIsAnalyzing(false);
-        }
-    };
-
-    const quickPick = async (game) => {
-        // Fetch analysis without opening the modal; then show badge + allow one-click add.
-        setRowPickingId(game.id);
-        try {
-            const analysisRes = await api.post('/api/ncaam/analyze', { event_id: game.id });
-            const top = (analysisRes.data?.recommendations || [])[0] || null;
-            if (top) {
-                setRowTopPicks(prev => ({
-                    ...prev,
-                    [game.id]: { rec: top, analyzedAt: new Date().toISOString() }
-                }));
-            }
-        } catch (err) {
-            console.warn('QuickPick failed:', err);
-        } finally {
-            setRowPickingId(null);
-        }
-    };
-
-    const closeAnalysisModal = () => {
-        setSelectedGame(null);
-        setAnalysisResult(null);
-        setCorrelationResult(null);
-        setRefsError(null);
-        setRef1('');
-        setRef2('');
-        setRef3('');
-    };
-
-    const refreshData = async () => {
-        try {
-            setLoading(true);
-            const res = await api.post('/api/jobs/ingest_torvik');
-            const result = res.data;
-            alert(`Data Refresh Complete! ${result.teams_count || 0} teams updated.`);
-            // Fresh fetch
-            const [scheduleRes] = await Promise.all([
-                api.get('/api/schedule?sport=all&days=3')
-            ]);
-            setEdges(scheduleRes.data || []);
-        } catch (err) {
-            console.error(err);
-            alert('Data refresh failed: ' + (err.response?.data?.message || err.message));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleSort = (key) => {
-        let direction = 'desc';
-        if (sortConfig.key === key && sortConfig.direction === 'desc') {
-            direction = 'asc';
-        }
-        setSortConfig({ key, direction });
-    };
-
-    const shiftDate = (days) => {
-        // selectedDate is YYYY-MM-DD (ET day). Avoid JS timezone pitfalls by doing pure UTC date math
-        // and returning a YYYY-MM-DD string.
-        try {
-            const [yy, mm, dd] = String(selectedDate || '').split('-').map(x => parseInt(x, 10));
-            if (!yy || !mm || !dd) return;
-            const base = Date.UTC(yy, mm - 1, dd, 12, 0, 0);
-            const next = new Date(base + (Number(days) * 86400000));
-            const y = next.getUTCFullYear();
-            const m = String(next.getUTCMonth() + 1).padStart(2, '0');
-            const d = String(next.getUTCDate()).padStart(2, '0');
-            setSelectedDate(`${y}-${m}-${d}`);
-        } catch (e) {
-            // fallback: no-op
-        }
-    };
-
-    const fmtSigned = (n, decimals = 1) => {
-        if (n === null || n === undefined || n === '') return '-';
-        const x = Number(n);
-        if (Number.isNaN(x)) return String(n);
-        const s = decimals >= 0 ? x.toFixed(decimals) : String(x);
-        return x > 0 ? `+${s}` : s;
-    };
-
-    // Simple context labels (Torvik-style). League avg AdjO/AdjD ~106.
-    const EFF_AVG = 106.0;
-    const labelOffense = (adjO) => {
-        const x = Number(adjO);
-        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
-        if (x >= EFF_AVG + 6) return { label: 'Strong', cls: 'text-green-400' };
-        if (x <= EFF_AVG - 6) return { label: 'Weak', cls: 'text-red-400' };
-        return { label: 'Average', cls: 'text-slate-200' };
-    };
-    const labelDefense = (adjD) => {
-        const x = Number(adjD);
-        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
-        // Lower AdjD is better
-        if (x <= EFF_AVG - 6) return { label: 'Strong', cls: 'text-green-400' };
-        if (x >= EFF_AVG + 6) return { label: 'Weak', cls: 'text-red-400' };
-        return { label: 'Average', cls: 'text-slate-200' };
-    };
-    const labelPace = (tempo) => {
-        const x = Number(tempo);
-        if (Number.isNaN(x)) return { label: '—', cls: 'text-slate-400' };
-        if (x >= 71) return { label: 'Fast', cls: 'text-amber-300' };
-        if (x <= 65) return { label: 'Slow', cls: 'text-blue-300' };
-        return { label: 'Average', cls: 'text-slate-200' };
-    };
-
-    const getEdgeColor = (edge, sport) => {
-        if (edge === null || edge === undefined) return 'text-gray-500';
-
-        // Percent-based (EPL)
-        if (sport === 'EPL') {
-            if (edge > 10) return 'text-green-400 font-bold';
-            if (edge > 5) return 'text-green-300';
-            if (edge > 0) return 'text-green-200';
-            return 'text-red-400';
-        }
-
-        // Point-based (NFL/NCAAM/NCAAF)
-        const threshold = (sport === 'NFL' || sport === 'NCAAF') ? 1.5 : 3.0;
-        if (edge >= threshold * 2) return 'text-green-400 font-bold';
-        if (edge >= threshold) return 'text-green-300';
-        if (edge > 0) return 'text-green-200';
-        return 'text-red-400';
-    };
-
-    const getProcessedEdges = () => {
-        let filtered = edges.filter(e => {
-            if (leagueFilter && e.sport !== leagueFilter) return false;
-            return true;
+      } else if (leagueFilter === 'MLB' && Array.isArray(mlbRes?.data?.predictions)) {
+        const latestPreds = new Map();
+        mlbRes.data.predictions.forEach((p) => {
+          const key = `${p.away_team || ''}_${p.home_team || ''}_${String(p.market_type || '').toUpperCase()}`;
+          const prev = latestPreds.get(key);
+          const prevT = prev?.analyzed_at ? new Date(prev.analyzed_at).getTime() : 0;
+          const nextT = p?.analyzed_at ? new Date(p.analyzed_at).getTime() : 0;
+          if (!prev || nextT > prevT) latestPreds.set(key, p);
         });
 
-        return [...filtered].sort((a, b) => {
-            let aVal = a[sortConfig.key];
-            let bVal = b[sortConfig.key];
-            if (aVal === undefined) aVal = '';
-            if (bVal === undefined) bVal = '';
-            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-            return 0;
+        Array.from(latestPreds.values()).forEach((p) => {
+          const fakeEid = `mlb-${p.id}`;
+          const confVal = Number(p.confidence_0_100 || 0);
+          const recObj = {
+            rec: {
+              bet_type: String(p.market_type || 'ML').toUpperCase(),
+              selection: p.selection || p.pick,
+              pick: p.pick,
+              market_line: p.bet_line,
+              fair_line: null,
+              price: p.bet_price,
+              book: p.book || 'Consensus',
+              ev: Number(p.ev_per_unit || 0),
+              win_prob: p.win_prob,
+              confidence_0_100: confVal,
+              confidence_tier: confVal >= 75 ? 'HIGH' : confVal >= 50 ? 'MEDIUM' : 'LOW',
+            },
+            analyzedAt: p.analyzed_at,
+            isActionable: true,
+            reason: 'MLB Core Model',
+            source: 'MLB Analytics',
+            event: {
+              home_team: p.home_team || 'Home',
+              away_team: p.away_team || 'Away',
+              start_time: p.analyzed_at,
+              day_et: p.day_et,
+              sport: 'MLB',
+            },
+          };
+          mapped[fakeEid] = recObj;
+          const k = makeMatchupKey(String(p.day_et || '').slice(0, 10), p.away_team, p.home_team);
+          if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
         });
+      }
+
+      setRowTopPicks(mapped);
+      setRowTopPicksByKey(mappedByKey);
+
+      if (topPicksRes?._error) {
+        setToast({ tone: 'warn', text: 'Board odds loaded, but top-picks cache returned a warning.' });
+      }
+    } catch (err) {
+      if (err?.response?.status === 403) {
+        setAuthPromptOpen(true);
+      }
+      try {
+        const cachedBoard = loadCache('/api/board', boardParams);
+        const cachedTop = leagueFilter === 'NCAAM' ? loadCache('/api/ncaam/top-picks', topPicksParams) : null;
+        if (cachedBoard?.payload) {
+          setEdges(cachedBoard.payload || []);
+          setDegradedMode(true);
+          setDegradedAsOf(cachedBoard?.at || null);
+        }
+        if (cachedTop?.payload?.picks) {
+          const tp = cachedTop.payload.picks;
+          const mapped = {};
+          Object.keys(tp).forEach((eid) => {
+            mapped[eid] = {
+              rec: tp[eid]?.rec,
+              analyzedAt: tp[eid]?.analyzed_at,
+              isActionable: tp[eid]?.is_actionable,
+              reason: tp[eid]?.reason,
+              source: tp[eid]?.source,
+              event: tp[eid]?.event,
+            };
+          });
+          setRowTopPicks(mapped);
+        }
+        if (!cachedBoard?.payload && !cachedTop?.payload) {
+          setError('Failed to load today’s slate. Please try refreshing.');
+        }
+      } catch {
+        setError('Failed to load today’s slate.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSchedule();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueFilter, selectedDate]);
+
+  useEffect(() => {
+    if (leagueFilter !== 'NCAAM' && (activeSubTab === 'march_madness' || activeSubTab === 'parlays')) {
+      setActiveSubTab('top_plays');
+    }
+  }, [leagueFilter, activeSubTab]);
+
+  const handleGradeResults = async () => {
+    setLoading(true);
+    try {
+      const res = await api.post('/api/research/grade');
+      setToast({
+        tone: 'ok',
+        text: `Grading complete: ${res?.data?.graded || 0} model predictions updated.`,
+      });
+      await fetchSchedule();
+    } catch (err) {
+      setToast({
+        tone: 'err',
+        text: `Grading failed: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
+      });
+      setLoading(false);
+    }
+  };
+
+  const handleOpenGameDetails = async (game) => {
+    setSelectedGame(game);
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+    setCorrelationResult(null);
+    try {
+      const [analysisRes, corrRes] = await Promise.all([
+        api.post('/api/ncaam/analyze', { event_id: game.id }),
+        api.get('/api/ncaam/correlations/game', { params: { event_id: game.id } }).catch(() => ({ data: null })),
+      ]);
+      const apiData = analysisRes.data;
+      const apiTop = (apiData?.recommendations || [])[0] || null;
+      const cachedMeta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
+      const cachedTop = cachedMeta?.rec || null;
+      const merged =
+        !apiTop && cachedTop
+          ? {
+              ...(apiData || {}),
+              recommendations: [cachedTop],
+              headline: `${apiData?.headline || 'Cached top play'} — using stored snapshot`,
+            }
+          : apiData;
+      setAnalysisResult(merged);
+      setCorrelationResult(corrRes?.data || null);
+
+      if ((merged?.recommendations || [])[0]) {
+        const freshRec = merged.recommendations[0];
+        setRowTopPicks((prev) => ({
+          ...prev,
+          [game.id]: {
+            ...(prev[game.id] || {}),
+            rec: freshRec,
+            isActionable: true,
+            analyzedAt: new Date().toISOString(),
+          },
+        }));
+      }
+    } catch (err) {
+      setToast({
+        tone: 'err',
+        text: `Failed to analyze ${game.away_team} @ ${game.home_team}: ${err?.response?.data?.detail || err?.message || 'timeout'}`,
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Build deduplicated list of actionable top plays for Today's Top Plays tab
+  const { actionablePlays, slateSummary } = useMemo(() => {
+    const gamesForLeague = (edges || []).filter((e) => !leagueFilter || e.sport === leagueFilter);
+    const seenIds = new Set();
+    const plays = [];
+
+    // First match against board events (so start_time & live scores come through cleanly)
+    gamesForLeague.forEach((game) => {
+      const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
+      if (meta?.isActionable && meta.rec) {
+        seenIds.add(game.id);
+        plays.push({ id: game.id, game, rec: meta.rec, conf: getConfidenceMeta(meta.rec) });
+      }
+    });
+
+    // Also surface any actionable stored picks whose event isn't on the active filtered board slice
+    Object.entries(rowTopPicks || {}).forEach(([eid, meta]) => {
+      if (seenIds.has(eid) || !meta?.isActionable || !meta?.rec) return;
+      const ev = meta.event || {};
+      const matchBoard = gamesForLeague.find(
+        (g) =>
+          makeMatchupKey(g.day_et, g.away_team, g.home_team) ===
+          makeMatchupKey(ev.day_et, ev.away_team, ev.home_team)
+      );
+      if (matchBoard && seenIds.has(matchBoard.id)) return;
+      const synthGame = matchBoard || {
+        id: eid,
+        sport: ev.sport || leagueFilter,
+        home_team: ev.home_team || 'Home',
+        away_team: ev.away_team || 'Away',
+        start_time: ev.start_time || null,
+        day_et: ev.day_et || selectedDate,
+      };
+      seenIds.add(eid);
+      plays.push({ id: eid, game: synthGame, rec: meta.rec, conf: getConfidenceMeta(meta.rec) });
+    });
+
+    plays.sort((a, b) => Number(b.rec?.ev || 0) - Number(a.rec?.ev || 0));
+
+    const highConf = plays.filter((p) => p.conf.tier === 'HIGH').length;
+    const sharpCount = plays.filter((p) => {
+      const tags = Array.isArray(p.rec?.movement_tags) ? p.rec.movement_tags : [];
+      return tags.includes('sharp_backing') || tags.includes('rlm_confirmed');
+    }).length;
+
+    return {
+      actionablePlays: plays,
+      slateSummary: {
+        totalGames: gamesForLeague.length,
+        actionableCount: plays.length,
+        highConfCount: highConf,
+        sharpCount,
+      },
     };
+  }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey, selectedDate]);
 
+  const filteredTopPlays = useMemo(() => {
+    const nowMs = Date.now();
+    const list = actionablePlays.filter(({ game, rec, conf }) => {
+      const mkt = String(rec?.bet_type || rec?.market_type || '').toUpperCase();
+      if (pickTypeFilter === 'spread') return mkt === 'SPREAD';
+      if (pickTypeFilter === 'total') return mkt === 'TOTAL';
+      if (pickTypeFilter === 'high_conf') return conf.tier === 'HIGH';
+      if (pickTypeFilter === 'soon') {
+        const st = game?.start_time ? new Date(game.start_time).getTime() : 0;
+        return st > nowMs - 30 * 60000 && st <= nowMs + 3 * 3600 * 1000;
+      }
+      return true;
+    });
+    return pickViewMode === 'top6' ? list.slice(0, 6) : list;
+  }, [actionablePlays, pickTypeFilter, pickViewMode]);
 
+  const tabs = useMemo(() => {
+    const base = [
+      { id: 'top_plays', label: `Today's Top Plays (${actionablePlays.length})` },
+      { id: 'board', label: `Full Board (${slateSummary.totalGames})` },
+    ];
+    if (leagueFilter === 'NCAAM') {
+      base.push({ id: 'parlays', label: '2-Leg Parlays' });
+      base.push({ id: 'march_madness', label: 'March Madness' });
+    }
+    return base;
+  }, [actionablePlays.length, slateSummary.totalGames, leagueFilter]);
 
+  return (
+    <div className="space-y-5 pb-12">
+      {/* Inline auth banner (replaces window.prompt) */}
+      {authPromptOpen && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-950/35 p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <span className="text-amber-200 font-medium">
+            Session authentication required to load protected research endpoints.
+          </span>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!authPassword.trim()) return;
+              localStorage.setItem('basement_password', authPassword.trim());
+              setAuthPromptOpen(false);
+              setAuthPassword('');
+              fetchSchedule();
+            }}
+            className="flex items-center gap-2"
+          >
+            <label htmlFor="today-auth-input" className="sr-only">
+              Basement Password
+            </label>
+            <input
+              id="today-auth-input"
+              type="password"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              placeholder="Password..."
+              className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-slate-100"
+            />
+            <button
+              type="submit"
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold cursor-pointer"
+            >
+              Unlock
+            </button>
+          </form>
+        </div>
+      )}
 
-    const SortIcon = ({ column }) => {
-        if (sortConfig.key !== column) return <ArrowUpDown size={12} className="ml-1 opacity-20" />;
-        return sortConfig.direction === 'asc' ? <ChevronUp size={12} className="ml-1 text-blue-400" /> : <ChevronDown size={12} className="ml-1 text-blue-400" />;
-    };
-
-    // Balance snapshot helpers removed from this page (tracked in Performance).
-
-    // Balances removed from this page (shown in Performance)
-
-    return (
-        <div className="p-4 md:p-6 bg-slate-900 min-h-screen text-white">
-            {/* Data health tooltip (fixed; rendered at top level to avoid clipping by overflow-hidden containers) */}
-            {dhTip?.open && (
-                <div
-                    className="fixed z-[9999] max-w-[560px] whitespace-pre-line rounded-lg border border-slate-700/70 bg-slate-950/95 px-3 py-2 text-[11px] text-slate-200 shadow-2xl pointer-events-auto"
-                    style={{ left: dhTip.x, top: dhTip.y, maxHeight: 360, overflow: 'auto' }}
-                    onMouseEnter={() => {
-                        if (dhHideTimer) { clearTimeout(dhHideTimer); setDhHideTimer(null); }
-                        setDhTip((p) => ({ ...p, open: true }));
-                    }}
-                    onMouseLeave={() => {
-                        if (dhTip?.pinned) return;
-                        const t = setTimeout(() => setDhTip((p) => ({ ...p, open: false })), 350);
-                        setDhHideTimer(t);
-                    }}
-                >
-                    <div className="flex items-center justify-between mb-1">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-black">
-                            {dhTip?.pinned ? 'System status (pinned)' : 'System status'}
-                        </div>
-                        <button
-                            className="text-slate-400 hover:text-white text-xs"
-                            onClick={() => setDhTip((p) => ({ ...p, open: false, pinned: false }))}
-                        >
-                            Close
-                        </button>
-                    </div>
-                    {dhTip.text}
-                </div>
+      {/* Dismissible Status Toast (replaces alert()) */}
+      {toast && (
+        <div
+          role="status"
+          className={`rounded-xl border px-4 py-2.5 text-xs flex items-center justify-between gap-3 ${
+            toast.tone === 'ok'
+              ? 'border-emerald-500/35 bg-emerald-950/35 text-emerald-200'
+              : toast.tone === 'warn'
+                ? 'border-amber-500/35 bg-amber-950/35 text-amber-200'
+                : 'border-rose-500/35 bg-rose-950/35 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {toast.tone === 'ok' ? (
+              <CheckCircle2 size={15} aria-hidden="true" />
+            ) : (
+              <AlertCircle size={15} aria-hidden="true" />
             )}
-            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
-                <div className="flex items-center gap-3">
-                    <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
-                        {showModelPerformanceTab ? 'Model Recommendations' : "Today's Recommended Bets"}
-                    </h1>
-                    <button
-                        type="button"
-                        onClick={openModelInfoDialog}
-                        title="View NCAAM Model Logic"
-                        aria-label="View NCAAM Model Logic"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-blue-300 text-xs font-semibold transition-all cursor-pointer"
-                    >
-                        <Info size={14} />
-                        <span>Model Logic</span>
-                    </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    {showModelPerformanceTab && (
-                        <button
-                            onClick={() => onAddBet?.()}
-                            className="px-4 py-2 bg-emerald-500/15 hover:bg-emerald-500/20 rounded-xl text-sm transition-all flex items-center gap-2 border border-emerald-500/25 text-emerald-200"
-                        >
-                            <PlusCircle size={14} /> Add Bet
-                        </button>
-                    )}
-                    <button
-                        onClick={fetchSchedule}
-                        disabled={loading}
-                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                        Refresh Board
-                    </button>
-                </div>
+            <span>{toast.text}</span>
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() => setToast(null)}
+            className="text-slate-400 hover:text-white cursor-pointer"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {/* Degraded Cache Notice */}
+      {degradedMode && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-950/25 px-4 py-2 text-xs text-amber-200">
+          Showing cached slate snapshot{degradedAsOf ? ` from ${new Date(degradedAsOf).toLocaleTimeString()}` : ''}. Live feed refresh will resume automatically.
+        </div>
+      )}
+
+      {/* Top Header + Controls */}
+      <section className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            Today&apos;s Slate &amp; Model Edges
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Market-first projections blending BartTorvik, Haslametrics &amp; KenPom with live injury and sharp money signals.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="today-league-select" className="text-xs font-semibold text-slate-400">
+              League
+            </label>
+            <select
+              id="today-league-select"
+              value={leagueFilter}
+              onChange={(e) => setLeagueFilter(e.target.value)}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            >
+              {LEAGUES.map((lg) => (
+                <option key={lg} value={lg}>
+                  {lg}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center rounded-xl bg-slate-900 border border-slate-700 p-0.5">
+            <button
+              type="button"
+              aria-label="Previous day"
+              onClick={() => setSelectedDate((d) => shiftEtDateStr(d, -1))}
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer"
+            >
+              <ChevronLeft size={14} aria-hidden="true" />
+            </button>
+            <label htmlFor="today-date-picker" className="sr-only">
+              Select slate date
+            </label>
+            <div className="relative flex items-center px-1">
+              <Calendar size={13} className="text-slate-400 mr-1.5 pointer-events-none" aria-hidden="true" />
+              <input
+                id="today-date-picker"
+                type="date"
+                value={selectedDate}
+                onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+                className="bg-transparent text-xs font-mono font-semibold text-slate-100 focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              aria-label="Next day"
+              onClick={() => setSelectedDate((d) => shiftEtDateStr(d, 1))}
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 cursor-pointer"
+            >
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchSchedule}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleGradeResults}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-xs font-semibold text-emerald-200 cursor-pointer disabled:opacity-50"
+          >
+            <Award size={13} aria-hidden="true" />
+            <span>Grade Results</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowModelLogicDialog(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-xs font-semibold text-blue-200 cursor-pointer"
+          >
+            <Info size={13} aria-hidden="true" />
+            <span>Model Logic</span>
+          </button>
+        </div>
+      </section>
+
+      {/* Slate Summary KPI Strip */}
+      <section aria-label="Slate summary metrics" className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: `${leagueFilter} Games`, value: slateSummary.totalGames, accent: 'text-white' },
+          { label: 'Actionable Plays', value: slateSummary.actionableCount, accent: 'text-emerald-300' },
+          { label: 'High Confidence', value: slateSummary.highConfCount, accent: 'text-indigo-300' },
+          { label: 'Sharp / RLM Signals', value: slateSummary.sharpCount, accent: 'text-amber-300' },
+        ].map((kpi) => (
+          <div
+            key={kpi.label}
+            className="rounded-2xl border border-slate-800 bg-slate-900/75 px-4 py-3"
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{kpi.label}</div>
+            <div className={`mt-1 text-2xl font-extrabold font-mono ${kpi.accent}`}>{kpi.value}</div>
+          </div>
+        ))}
+      </section>
+
+      {/* Data Health Pill Strip */}
+      <TodayDataHealthStrip
+        dataHealth={dataHealth}
+        edges={edges}
+        leagueFilter={leagueFilter}
+        onOpenKenpomUpload={() => setShowModelLogicDialog(true)}
+      />
+
+      {/* Single-Row Underline-Indicated Tabs (never wrap; underline shape + color; no aria-controls) */}
+      <div
+        role="tablist"
+        aria-label="Today dashboard views"
+        className="flex flex-nowrap overflow-x-auto items-center gap-1 border-b border-slate-800"
+      >
+        {tabs.map((tab) => {
+          const selected = activeSubTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setActiveSubTab(tab.id)}
+              className={`shrink-0 whitespace-nowrap px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
+                selected
+                  ? 'border-indigo-400 text-white bg-indigo-500/10'
+                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Main Error */}
+      {error && (
+        <div className="rounded-xl border border-rose-500/40 bg-rose-950/35 p-4 text-xs text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {/* Active Tab Panel */}
+      {activeSubTab === 'top_plays' && (
+        <section role="tabpanel" aria-label="Today's top plays" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter top plays">
+              {[
+                { id: 'all', label: 'All Plays' },
+                { id: 'spread', label: 'Spreads' },
+                { id: 'total', label: 'Totals' },
+                { id: 'high_conf', label: 'High Conf' },
+                { id: 'soon', label: 'Tipping Soon' },
+              ].map((pill) => {
+                const active = pickTypeFilter === pill.id;
+                return (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setPickTypeFilter(pill.id)}
+                    className={`px-3 py-1 rounded-full border text-xs font-semibold transition cursor-pointer ${
+                      active
+                        ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-200'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {pill.label}
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Tabs */}
-            {showModelPerformanceTab && (
-                <div className="inline-flex gap-1 mb-6 p-1 rounded-2xl bg-slate-900/40 border border-slate-700/40">
-                    <button
-                        onClick={() => setActiveTab('live')}
-                        className={`px-4 py-2 text-sm font-semibold rounded-xl transition ${activeTab === 'live' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                    >
-                        Board
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('march')}
-                        className={`px-4 py-2 text-sm font-semibold rounded-xl transition ${activeTab === 'march' ? 'bg-orange-600/80 text-white shadow-sm ring-1 ring-orange-400/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                    >
-                        🏀 March Madness
-                    </button>
-
-                </div>
-            )
-            }
-
-
-
-
-            {
-                activeTab === 'live' && (
-                    <>
-                        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4">
-                            <div className="flex flex-wrap items-center gap-3">
-                                {/* League Filter */}
-                                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 focus-within:border-blue-500/50 transition-all w-full sm:w-auto">
-                                    <Filter size={14} className="text-slate-500 mr-2" />
-                                    <select
-                                        value={leagueFilter}
-                                        onChange={(e) => setLeagueFilter(e.target.value)}
-                                        className="bg-transparent text-sm font-medium focus:outline-none cursor-pointer w-full"
-                                    >
-                                        <option value="NCAAM">NCAAM</option>
-                                        <option value="NFL">NFL</option>
-                                        <option value="EPL">EPL</option>
-                                    </select>
-                                </div>
-
-                                {/* Date Navigation */}
-                                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-1 py-1 w-full sm:w-auto">
-                                    <button onClick={() => shiftDate(-1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                                        ←
-                                    </button>
-                                    <input
-                                        type="date"
-                                        value={selectedDate}
-                                        onChange={(e) => setSelectedDate(e.target.value)}
-                                        className="bg-transparent text-sm font-bold text-center w-32 sm:w-32 focus:outline-none text-white appearance-none"
-                                    />
-                                    <button onClick={() => shiftDate(1)} className="p-1 px-2 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                                        →
-                                    </button>
-                                    <button onClick={() => setSelectedDate(getTodayStr())} className="ml-2 px-2 py-0.5 text-xs bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded">
-                                        Today
-                                    </button>
-                                </div>
-
-                                {/* Board tabs + Data health */}
-                                <div className="inline-flex items-center gap-2">
-                                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950/30 border border-slate-700/40">
-                                        <button
-                                            onClick={() => setBoardTab('recommended')}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${boardTab === 'recommended'
-                                                ? 'bg-slate-800/70 text-slate-100 border-white/10 shadow-sm'
-                                                : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800/40 hover:text-slate-200'
-                                                }`}
-                                        >
-                                            Recommended
-                                        </button>
-                                        <button
-                                            onClick={() => setBoardTab('full')}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${boardTab === 'full'
-                                                ? 'bg-slate-800/70 text-slate-100 border-white/10 shadow-sm'
-                                                : 'bg-transparent text-slate-400 border-transparent hover:bg-slate-800/40 hover:text-slate-200'
-                                                }`}
-                                        >
-                                            Full board
-                                        </button>
-                                    </div>
-
-                                    {/* Data health shield (hover) */}
-                                    {(() => {
-                                        let tooltip = 'System status';
-                                        let iconStatus = 'unknown';
-                                        try {
-                                            const fmtTime = (t) => {
-                                                if (!t) return '—';
-                                                try { return new Date(t).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', month: '2-digit', day: '2-digit' }); } catch { return String(t); }
-                                            };
-
-                                            // Filter out seasonal NFL rows (no longer relevant)
-                                            const items = (dataHealth || []).filter((x) => x && x.source && !String(x.source).includes('NFL'));
-                                            const by = {};
-                                            items.forEach((x) => { if (x?.source) by[x.source] = x; });
-
-                                            const hasErr = items.some((x) => x?.status === 'error');
-                                            const hasStale = items.some((x) => x?.status === 'stale');
-                                            const hasAlert = items.some((x) => x?.status === 'alert');
-
-                                            // Icon semantics:
-                                            // - error => red
-                                            // - stale => amber
-                                            // - alert => amber (warning)
-                                            // - ok => green
-                                            if (hasErr) iconStatus = 'error';
-                                            else if (hasStale) iconStatus = 'stale';
-                                            else if (hasAlert) iconStatus = 'alert';
-                                            else if (items.length) iconStatus = 'ok';
-                                            else iconStatus = 'unknown';
-
-                                            const ageMin = (t) => {
-                                                if (!t) return null;
-                                                try {
-                                                    const ms = (new Date(t)).getTime();
-                                                    if (!ms) return null;
-                                                    return Math.round((Date.now() - ms) / 60000);
-                                                } catch {
-                                                    return null;
-                                                }
-                                            };
-
-                                            const shortLine = (src) => {
-                                                const x = by[src];
-                                                if (!x) return `${src}: —`;
-                                                const st = x.status || '—';
-                                                const t = fmtTime(x.last_success_at);
-                                                const m = ageMin(x.last_success_at);
-                                                const ago = (m !== null && m >= 0) ? ` • ${m}m ago` : '';
-                                                return `${src}: ${st} (${t})${ago}`;
-                                            };
-
-                                            // Plain English summary (do NOT say "job failing" unless error)
-                                            if (iconStatus === 'ok') tooltip += `\nOK — everything updating.`;
-                                            else if (iconStatus === 'alert') tooltip += `\nWarning — coverage looks thin (not a failure).`;
-                                            else if (iconStatus === 'stale') tooltip += `\nStale — data not updating recently.`;
-                                            else if (iconStatus === 'error') tooltip += `\nError — one or more jobs failed.`;
-                                            else tooltip += `\nUnknown — no health data yet.`;
-
-                                            const boardKey = (leagueFilter === 'EPL') ? 'board:EPL' : 'board:NCAAM';
-                                            const key = ['odds', 'torvik', 'haslametrics', 'kenpom', 'action_splits', boardKey];
-                                            tooltip += `\n\nKey sources:`;
-                                            tooltip += `\n- ${key.map(shortLine).join('\n- ')}`;
-
-                                            const problems = items
-                                                .filter((x) => x?.status && x.status !== 'ok')
-                                                .slice();
-
-                                            const note = (x) => {
-                                                if (!x?.notes) return '';
-                                                const s = String(x.notes);
-                                                return s.length > 140 ? (s.slice(0, 140) + '…') : s;
-                                            };
-
-                                            if (problems.length) {
-                                                const errs = problems.filter((x) => x.status === 'error');
-                                                const stales = problems.filter((x) => x.status === 'stale');
-                                                const alerts = problems.filter((x) => x.status === 'alert');
-
-                                                if (errs.length) {
-                                                    tooltip += `\n\nErrors (jobs failing):`;
-                                                    errs.slice(0, 6).forEach((x) => {
-                                                        tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)}): ${note(x) || 'error'}`;
-                                                    });
-                                                }
-                                                if (stales.length) {
-                                                    tooltip += `\n\nStale (no recent data):`;
-                                                    stales.slice(0, 6).forEach((x) => {
-                                                        tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)})${note(x) ? ` — ${note(x)}` : ''}`;
-                                                    });
-                                                }
-                                                if (alerts.length) {
-                                                    tooltip += `\n\nWarnings (coverage):`;
-                                                    alerts.slice(0, 6).forEach((x) => {
-                                                        tooltip += `\n- ${x.source} (${fmtTime(x.last_success_at)})${note(x) ? ` — ${note(x)}` : ''}`;
-                                                    });
-                                                }
-                                            }
-
-                                            try {
-                                                const matched = (edges || []).filter((e) => (rowTopPicks?.[e?.id]?.rec)).length;
-                                                const tp = topPicksStats || {};
-                                                tooltip += `\n\nPicks:`
-                                                    + ` games=${edges.length}`
-                                                    + ` picks=${tp.withPick || 0}`
-                                                    + ` actionable=${tp.actionable || 0}`
-                                                    + ` matched=${matched}`
-                                                    + (topPicksError ? `\nTop-picks error: ${String(topPicksError).slice(0, 140)}` : '');
-                                            } catch { }
-
-                                        } catch {
-                                            // ignore
-                                        }
-
-                                        const Icon = (iconStatus === 'ok') ? ShieldCheck : (iconStatus === 'error') ? ShieldAlert : (iconStatus === 'stale' || iconStatus === 'alert') ? ShieldAlert : Shield;
-                                        const color = (iconStatus === 'ok') ? 'text-emerald-400' : (iconStatus === 'error') ? 'text-red-400' : (iconStatus === 'stale' || iconStatus === 'alert') ? 'text-amber-300' : 'text-slate-400';
-
-                                        return (
-                                            <span className="inline-flex items-center">
-                                                <span
-                                                    className="inline-flex items-center cursor-help"
-                                                    onMouseEnter={(e) => {
-                                                        try {
-                                                            const r = e.currentTarget.getBoundingClientRect();
-                                                            const maxW = 560;
-                                                            const pad = 12;
-                                                            const x = Math.max(pad, Math.min(r.left, window.innerWidth - maxW - pad));
-                                                            const y = Math.max(pad, Math.min(r.bottom + 8, window.innerHeight - 320));
-                                                            if (dhHideTimer) { clearTimeout(dhHideTimer); setDhHideTimer(null); }
-                                                            setDhTip({ open: true, pinned: false, x, y, text: tooltip });
-                                                        } catch {
-                                                            if (dhHideTimer) { clearTimeout(dhHideTimer); setDhHideTimer(null); }
-                                                            setDhTip({ open: true, pinned: false, x: 16, y: 16, text: tooltip });
-                                                        }
-                                                    }}
-                                                    onClick={() => setDhTip((p) => ({ ...p, open: true, pinned: !p?.pinned, text: tooltip }))}
-                                                    onMouseLeave={() => {
-                                                        if (dhTip?.pinned) return;
-                                                        const t = setTimeout(() => setDhTip((p) => ({ ...p, open: false })), 350);
-                                                        setDhHideTimer(t);
-                                                    }}
-                                                >
-                                                    <Icon size={16} className={color} />
-                                                </span>
-                                            </span>
-                                        );
-                                    })()}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-slate-900/40 rounded-2xl border border-slate-700/40 shadow-xl overflow-hidden">
-
-                            {loading && (
-                                <div className="flex flex-col justify-center items-center py-20 bg-slate-800/50">
-                                    <RefreshCw className="animate-spin text-blue-500 mb-4" size={32} />
-                                    <span className="text-slate-400 font-medium tracking-wide">Crunching Monte Carlo & Poisson Sims...</span>
-                                </div>
-                            )}
-
-                            {error && (
-                                <div className="m-6 p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-200 flex items-center">
-                                    <AlertCircle className="mr-3 text-red-400" size={20} />
-                                    {error}
-                                </div>
-                            )}
-
-                            {degradedMode && (
-                                <div className="m-6 p-4 bg-amber-900/20 border border-amber-500/40 rounded-lg text-amber-100 flex items-start">
-                                    <ShieldAlert className="mr-3 mt-0.5 text-amber-300" size={20} />
-                                    <div>
-                                        <div className="font-semibold">Offline Mode — Showing cached data.</div>
-                                        {degradedAsOf && (
-                                            <div className="text-xs text-amber-200/80 mt-1">As-of: {new Date(degradedAsOf).toLocaleString()}</div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {!loading && !error && edges.length === 0 && boardTab === 'full' && (
-                                <div className="text-center py-20 text-slate-500 flex flex-col items-center">
-                                    <div className="p-4 bg-slate-700/30 rounded-full mb-4">
-                                        <RefreshCw size={24} className="text-slate-600" />
-                                    </div>
-                                    <p>No active games found in current slate.</p>
-                                </div>
-                            )}
-
-
-
-                            {!loading && boardTab === 'recommended' && (
-                                <div className="p-6">
-
-                                    {/* Top 6 Plays + full recommended table (IIFE) */}
-                                    {(() => {
-                                        const isSameEtDay = (ts, ymd) => {
-                                            if (!ts || !ymd) return false;
-                                            try {
-                                                const d = new Date(ts);
-                                                const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                                return s === ymd;
-                                            } catch (e) {
-                                                return false;
-                                            }
-                                        };
-
-                                        // Build Top-5 rows directly from stored daily_top_picks (rowTopPicks).
-                                        // This decouples display from live board odds: if the morning model run
-                                        // found an edge, show it — no live odds required.
-                                        // If the evening run removes the edge (is_actionable=false), it disappears.
-                                        const rows = (() => {
-                                            const picks = rowTopPicks || {};
-                                            return Object.entries(picks)
-                                                .filter(([eid, meta]) => {
-                                                    if (!meta?.isActionable) return false;
-                                                    const top = meta?.rec;
-                                                    if (!top) return false;
-                                                    const bt = String(top.bet_type || '').toUpperCase();
-                                                    const sel = String(top.selection || '').trim();
-                                                    if (!bt || bt === 'AUTO') return false;
-                                                    if (!sel || sel === '—') return false;
-                                                    // Match selected ET date using event metadata stored in the pick
-                                                    const ev = meta?.event || {};
-                                                    const dayEt = ev?.day_et || '';
-                                                    if (dayEt) return String(dayEt) === String(selectedDate);
-                                                    // Fallback: parse start_time
-                                                    if (ev?.start_time) {
-                                                        try {
-                                                            const d = new Date(ev.start_time);
-                                                            const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                                            return s === String(selectedDate);
-                                                        } catch (e) { return false; }
-                                                    }
-                                                    return false;
-                                                })
-                                                .map(([eid, meta]) => {
-                                                    const ev = meta?.event || {};
-                                                    // Build a synthetic edge object from stored event metadata
-                                                    const edge = {
-                                                        id: eid,
-                                                        home_team: ev?.home_team || '',
-                                                        away_team: ev?.away_team || '',
-                                                        start_time: ev?.start_time || null,
-                                                        day_et: ev?.day_et || selectedDate,
-                                                        sport: ev?.sport || 'NCAAM',
-                                                    };
-                                                    return { edge, top: meta.rec, meta };
-                                                })
-                                                .sort((a, b) => {
-                                                    const aEv = Number(String(a.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                                    const bEv = Number(String(b.top?.edge ?? '').replace('%', '').trim()) || 0;
-                                                    return bEv - aEv;
-                                                });
-                                        })();
-
-                                        if (!rows.length) {
-                                            return (
-                                                <div className="text-slate-500">
-                                                    No recommendations available for this window.
-                                                </div>
-                                            );
-                                        }
-
-                                        const fmtPick = (edge, top) => {
-                                            let pickText = String(top.selection || '').trim();
-                                            try {
-                                                if (top.bet_type === 'SPREAD') {
-                                                    if (/^home\b/i.test(pickText)) pickText = pickText.replace(/^home\b/i, edge.home_team);
-                                                    if (/^away\b/i.test(pickText)) pickText = pickText.replace(/^away\b/i, edge.away_team);
-                                                }
-                                                if (top.bet_type === 'TOTAL') pickText = pickText.toUpperCase();
-                                            } catch (e) { }
-                                            return pickText;
-                                        };
-
-                                        const getImpliedProb = (odds) => {
-                                            if (!odds || isNaN(odds)) return null;
-                                            const n = Number(odds);
-                                            if (n === 0) return null;
-                                            if (n > 0) return 100 / (n + 100);
-                                            return Math.abs(n) / (Math.abs(n) + 100);
-                                        };
-
-                                        const getCuratedExplanation = (edge, top, pickText, edgePts) => {
-                                            const away = edge.away_team || 'Away team';
-                                            const home = edge.home_team || 'Home team';
-                                            const mkt = top.market_line;
-                                            const fair = top.fair_line;
-                                            const edgeStr = edgePts ? `${edgePts} points` : 'a clear statistical edge';
-                                            const sig = top?.signals || edge?.recommended_bet?.signals || {};
-                                            const ratingNames = ['BartTorvik'];
-                                            if (sig.haslametrics) ratingNames.push('Haslametrics');
-                                            if (sig.kenpom) ratingNames.push('KenPom');
-                                            const sourcePhrase = ratingNames.length > 1
-                                                ? `our blended ${ratingNames.join(' + ')} computer ratings`
-                                                : 'our BartTorvik power ratings';
-
-                                            if (top.bet_type === 'TOTAL') {
-                                                const isUnder = /^UNDER/i.test(pickText) || String(top.side || '').toLowerCase() === 'under';
-                                                if (isUnder) {
-                                                    if (mkt >= 170) {
-                                                        return `Sportsbooks set an unusually inflated total of ${mkt} points for ${away} at ${home}. Using ${sourcePhrase}, our model accounts for shooting efficiency and half-court tempo to project a combined score of ${fair} points—giving you a sizable ${edgeStr} cushion below the sportsbook line on UNDER ${mkt}.`;
-                                                    }
-                                                    if (mkt >= 155) {
-                                                        return `Sportsbooks set a high-tempo total of ${mkt} points for ${away} at ${home}. Comparing the market against ${sourcePhrase}, we project a combined score closer to ${fair} points—${edgeStr} lower than the betting total—leaving comfortable room on the UNDER.`;
-                                                    }
-                                                    return `In ${away} at ${home}, sportsbooks set the total at ${mkt} points. Based on ${sourcePhrase}, we project a tighter game around ${fair} combined points (${edgeStr} below the market), giving strong value on the UNDER.`;
-                                                } else {
-                                                    if (mkt <= 138) {
-                                                        return `Sportsbooks set a conservative total of ${mkt} points for ${away} at ${home}. Using ${sourcePhrase}, we expect faster pace and better scoring efficiency—projecting ${fair} combined points (${edgeStr} higher than the line) on the OVER.`;
-                                                    }
-                                                    return `For ${away} at ${home}, the sportsbook total is ${mkt} points. Combining pace and efficiency from ${sourcePhrase}, we project a fair combined score of ${fair} points (${edgeStr} higher than the market) for value on the OVER.`;
-                                                }
-                                            }
-
-                                            if (top.bet_type === 'SPREAD') {
-                                                const pickedTeam = top.selection ? top.selection.replace(/[+-]?\d+(\.\d+)?$/, '').trim() : edge.home_team;
-                                                const opponent = (pickedTeam === edge.home_team) ? edge.away_team : edge.home_team;
-                                                const isDog = (mkt !== null && mkt !== undefined && Number(mkt) > 0) || (typeof top.selection === 'string' && top.selection.includes('+'));
-                                                if (isDog) {
-                                                    return `${pickedTeam} is getting ${mkt ? `+${mkt}` : 'points'} against ${opponent}. Blending ${sourcePhrase} puts the fair line closer to ${fair ? fmtSigned(fair, 1) : 'pick-em'}, giving you a ${edgeStr} safety buffer on the spread.`;
-                                                } else {
-                                                    return `${pickedTeam} is favored by ${mkt ? Math.abs(mkt) : ''} points against ${opponent}. Using ${sourcePhrase}, we project ${pickedTeam} to win by around ${fair ? Math.abs(fair) : ''} points, creating a ${edgeStr} advantage over the sportsbook number.`;
-                                                }
-                                            }
-
-                                            if (top.bet_type === 'MONEYLINE') {
-                                                return `Sportsbooks price ${pickText} at ${top.price ? (top.price > 0 ? `+${top.price}` : top.price) : 'market odds'} against ${edge.home_team || 'the opponent'}. Using ${sourcePhrase}, our model estimates a higher true chance of winning outright than the odds reflect, creating positive expected value.`;
-                                            }
-
-                                            return `${sourcePhrase} project a fair line of ${fair} against the sportsbook's ${mkt}, giving ${pickText} a ${edgeStr} advantage.`;
-                                        };
-
-                                        const getCuratedSignals = (edge, top, pickText) => {
-                                            const sig = top?.signals || edge?.recommended_bet?.signals;
-                                            if (!sig || typeof sig !== 'object') return [];
-                                            const items = [];
-                                            const mktType = String(top.bet_type || '').toUpperCase();
-                                            const away = edge.away_team || 'Away';
-                                            const home = edge.home_team || 'Home';
-                                            const cleanPicked = top.selection ? top.selection.replace(/[+-]?\d+(\.\d+)?$/, '').trim().toLowerCase() : '';
-                                            const sideLower = String(top.side || '').toLowerCase();
-                                            const pickedIsHome = sideLower === 'home' || (cleanPicked && String(home).toLowerCase() === cleanPicked);
-
-                                            // 1. Computer Ratings Breakdown (BartTorvik + Haslametrics + KenPom)
-                                            const ratingParts = [];
-                                            if (mktType === 'TOTAL') {
-                                                if (sig.torvik?.fair_total != null) {
-                                                    ratingParts.push(`BartTorvik projects ${Number(sig.torvik.fair_total).toFixed(1)} total pts`);
-                                                }
-                                                if (sig.haslametrics?.fair_total != null) {
-                                                    ratingParts.push(`Haslametrics projects ${Number(sig.haslametrics.fair_total).toFixed(1)} total pts`);
-                                                }
-                                                if (sig.kenpom?.available) {
-                                                    ratingParts.push('KenPom ratings are also blended in');
-                                                }
-                                            } else {
-                                                const toSideFair = (homeSpread) => {
-                                                    if (homeSpread === null || homeSpread === undefined || Number.isNaN(Number(homeSpread))) return null;
-                                                    return pickedIsHome ? Number(homeSpread) : -Number(homeSpread);
-                                                };
-                                                const teamLabel = pickedIsHome ? home : away;
-                                                const tFair = toSideFair(sig.torvik?.fair_spread_home);
-                                                const hFair = toSideFair(sig.haslametrics?.fair_spread_home);
-                                                const kFair = toSideFair(sig.kenpom?.fair_spread_home);
-                                                if (tFair !== null) ratingParts.push(`BartTorvik: ${teamLabel} ${fmtSigned(tFair, 1)}`);
-                                                if (hFair !== null) ratingParts.push(`Haslametrics: ${teamLabel} ${fmtSigned(hFair, 1)}`);
-                                                if (kFair !== null) ratingParts.push(`KenPom: ${teamLabel} ${fmtSigned(kFair, 1)}`);
-                                            }
-                                            if (ratingParts.length > 0) {
-                                                items.push({
-                                                    key: 'ratings',
-                                                    icon: '📊',
-                                                    label: 'Rating Models',
-                                                    text: `${ratingParts.join(' • ')}.`,
-                                                    tone: 'blue',
-                                                });
-                                            }
-
-                                            // 2. Public Ticket % vs Money % (Action Network Splits)
-                                            const mktSplits = sig.public_splits?.[mktType] || sig.public_splits?.SPREAD;
-                                            if (mktSplits && typeof mktSplits === 'object') {
-                                                let sideKey = null;
-                                                let sideLabel = pickText;
-                                                if (mktType === 'TOTAL') {
-                                                    const isUnder = /^UNDER/i.test(pickText) || sideLower === 'under';
-                                                    sideKey = isUnder ? 'UNDER' : 'OVER';
-                                                    sideLabel = isUnder ? 'the UNDER' : 'the OVER';
-                                                } else {
-                                                    sideKey = pickedIsHome ? 'HOME' : 'AWAY';
-                                                    sideLabel = pickedIsHome ? home : away;
-                                                }
-                                                const sideSplit = mktSplits[sideKey];
-                                                const betPct = sideSplit?.bet_pct != null ? Number(sideSplit.bet_pct) : null;
-                                                const handlePct = sideSplit?.handle_pct != null ? Number(sideSplit.handle_pct) : null;
-                                                if (betPct !== null && handlePct !== null) {
-                                                    const sharpGap = handlePct - betPct;
-                                                    const sharpFlag = String(sideSplit?.sharp_indicator || '').toUpperCase();
-                                                    let splitMsg;
-                                                    let tone = 'slate';
-                                                    if (sharpFlag === 'RLM' || sharpFlag === 'SHARP_MONEY' || sharpGap >= 10) {
-                                                        splitMsg = `Only ${Math.round(betPct)}% of public tickets are on ${sideLabel}, yet ${Math.round(handlePct)}% of total dollars wagered back this side—showing bigger, sharper bets landing here.`;
-                                                        tone = 'emerald';
-                                                    } else if (betPct <= 36) {
-                                                        splitMsg = `${Math.round(100 - betPct)}% of public tickets are backing the other side (${Math.round(betPct)}% bets / ${Math.round(handlePct)}% money here), making this a low-public contrarian play.`;
-                                                        tone = 'emerald';
-                                                    } else if (betPct >= 68 && sharpGap <= -10) {
-                                                        splitMsg = `${Math.round(betPct)}% of tickets are on ${sideLabel}, though larger money is lighter (${Math.round(handlePct)}% handle), so our edge comes mostly from team ratings rather than sharp splits.`;
-                                                        tone = 'amber';
-                                                    } else {
-                                                        splitMsg = `Public betting check: ${Math.round(betPct)}% of tickets and ${Math.round(handlePct)}% of total money are backing ${sideLabel}.`;
-                                                    }
-                                                    items.push({
-                                                        key: 'splits',
-                                                        icon: '💰',
-                                                        label: 'Public vs. Big Money',
-                                                        text: splitMsg,
-                                                        tone,
-                                                    });
-                                                }
-                                            }
-
-                                            // 3. Pre-Game Injury Watch (Rotowire / ESPN)
-                                            if (Array.isArray(sig.injuries) && sig.injuries.length > 0) {
-                                                const topInj = sig.injuries
-                                                    .slice(0, 3)
-                                                    .map((inj) => {
-                                                        const p = inj.player || 'Player';
-                                                        const t = inj.team || (inj.side === 'home' ? home : away);
-                                                        const st = inj.status || 'Questionable';
-                                                        return `${p} (${t} — ${st})`;
-                                                    })
-                                                    .join(', ');
-                                                items.push({
-                                                    key: 'injuries',
-                                                    icon: '🩹',
-                                                    label: 'Injury Watch',
-                                                    text: `Reported status on the slate: ${topInj}. Our model automatically widens uncertainty around injured lineups before recommending a stake.`,
-                                                    tone: 'amber',
-                                                });
-                                            }
-
-                                            // 4. Pre-Game Referee Crew (ESPN)
-                                            if (sig.referees && ((Array.isArray(sig.referees.officials) && sig.referees.officials.length > 0) || sig.referees.crew_avg_fouls != null)) {
-                                                const crewNames = Array.isArray(sig.referees.officials) && sig.referees.officials.length > 0
-                                                    ? sig.referees.officials.join(', ')
-                                                    : 'Crew assigned';
-                                                const fouls = sig.referees.crew_avg_fouls != null ? Number(sig.referees.crew_avg_fouls) : null;
-                                                let foulNote = '';
-                                                if (fouls !== null) {
-                                                    if (fouls >= 37.5) foulNote = ` (averages ${fouls.toFixed(1)} fouls/game — extra whistle stoppages can nudge scoring higher)`;
-                                                    else if (fouls <= 33.5) foulNote = ` (averages ${fouls.toFixed(1)} fouls/game — tends to let teams play with fewer free throws)`;
-                                                    else foulNote = ` (averages ${fouls.toFixed(1)} fouls/game — right near national average)`;
-                                                }
-                                                items.push({
-                                                    key: 'referees',
-                                                    icon: '⚖️',
-                                                    label: 'Referee Crew',
-                                                    text: `${crewNames}${foulNote}.`,
-                                                    tone: 'slate',
-                                                });
-                                            }
-
-                                            return items;
-                                        };
-
-                                        const nowMs = Date.now();
-                                        const isStartingSoon = (st) => {
-                                            if (!st) return false;
-                                            try {
-                                                const diff = new Date(st).getTime() - nowMs;
-                                                return diff > 0 && diff < 3.5 * 3600 * 1000;
-                                            } catch { return false; }
-                                        };
-
-                                        const nTotal = rows.length;
-                                        const nSpreads = rows.filter(r => r.top.bet_type === 'SPREAD').length;
-                                        const nTotals = rows.filter(r => r.top.bet_type === 'TOTAL').length;
-                                        const nHigh = rows.filter(r => String(r.top.confidence).toUpperCase() === 'HIGH').length;
-                                        const nSoon = rows.filter(r => isStartingSoon(r.edge.start_time)).length;
-
-                                        let filteredRows = rows;
-                                        if (pickTypeFilter === 'spread') filteredRows = filteredRows.filter(r => r.top.bet_type === 'SPREAD');
-                                        else if (pickTypeFilter === 'total') filteredRows = filteredRows.filter(r => r.top.bet_type === 'TOTAL');
-                                        else if (pickTypeFilter === 'high_conf') filteredRows = filteredRows.filter(r => String(r.top.confidence).toUpperCase() === 'HIGH');
-                                        else if (pickTypeFilter === 'soon') filteredRows = filteredRows.filter(r => isStartingSoon(r.edge.start_time));
-
-                                        const displayedRows = (pickViewMode === 'top6' && pickTypeFilter === 'all')
-                                            ? filteredRows.slice(0, 6)
-                                            : filteredRows;
-
-                                        return (
-                                            <div className="mb-6">
-                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <TrendingUp className="text-emerald-400" size={18} />
-                                                        <div className="text-sm font-black text-slate-100 uppercase tracking-wider">
-                                                            {pickViewMode === 'top6' && pickTypeFilter === 'all' ? 'Top 6 Plays Today' : `Actionable Plays (${displayedRows.length})`}
-                                                        </div>
-                                                        <span className="text-[10px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full font-mono border border-slate-700/60">
-                                                            {displayedRows.length} of {rows.length} total
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="text-[10px] text-slate-500">{selectedDate} • Ranked by EV%</div>
-                                                        {rows.length > 6 && pickTypeFilter === 'all' && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setPickViewMode(v => v === 'top6' ? 'all' : 'top6')}
-                                                                className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
-                                                            >
-                                                                {pickViewMode === 'top6' ? `View All ${rows.length} Plays →` : '← Show Top 6 Only'}
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                {/* Quick Filter Pills */}
-                                                <div className="flex flex-wrap items-center gap-1.5 mb-4 p-2 rounded-xl bg-slate-900/60 border border-slate-800">
-                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1 flex items-center gap-1">
-                                                        <Filter size={11} /> Filter:
-                                                    </span>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPickTypeFilter('all')}
-                                                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                                                            pickTypeFilter === 'all'
-                                                                ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40'
-                                                                : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
-                                                        }`}
-                                                    >
-                                                        All Plays ({nTotal})
-                                                    </button>
-                                                    {nSpreads > 0 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPickTypeFilter('spread')}
-                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                                                                pickTypeFilter === 'spread'
-                                                                    ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40'
-                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
-                                                            }`}
-                                                        >
-                                                            Spreads ({nSpreads})
-                                                        </button>
-                                                    )}
-                                                    {nTotals > 0 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPickTypeFilter('total')}
-                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                                                                pickTypeFilter === 'total'
-                                                                    ? 'bg-amber-600/30 text-amber-300 border border-amber-500/40'
-                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
-                                                            }`}
-                                                        >
-                                                            Totals ({nTotals})
-                                                        </button>
-                                                    )}
-                                                    {nHigh > 0 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPickTypeFilter('high_conf')}
-                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                                                                pickTypeFilter === 'high_conf'
-                                                                    ? 'bg-teal-600/30 text-teal-300 border border-teal-500/40'
-                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
-                                                            }`}
-                                                        >
-                                                            High Conf ({nHigh})
-                                                        </button>
-                                                    )}
-                                                    {nSoon > 0 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPickTypeFilter('soon')}
-                                                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                                                                pickTypeFilter === 'soon'
-                                                                    ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
-                                                                    : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/40'
-                                                            }`}
-                                                        >
-                                                            Starting &lt; 3h ({nSoon})
-                                                        </button>
-                                                    )}
-                                                </div>
-
-                                                {displayedRows.length === 0 ? (
-                                                    <div className="p-8 text-center text-slate-400 bg-slate-900/40 rounded-xl border border-slate-800">
-                                                        <p className="text-sm font-medium">No plays match the selected "{pickTypeFilter}" filter.</p>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPickTypeFilter('all')}
-                                                            className="mt-2 text-xs text-blue-400 hover:underline cursor-pointer"
-                                                        >
-                                                            Reset filter to All Plays
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                        {displayedRows.map(({ edge, top }, i) => {
-                                                            const date = edge.start_time ? new Date(edge.start_time) : null;
-                                                            const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
-                                                            const pickText = fmtPick(edge, top);
-                                                            const evRaw = String(top.edge || '').replace('%', '').trim();
-                                                            const evNum = Number(evRaw);
-                                                            const evFormatted = `${evNum >= 0 ? '+' : ''}${evNum.toFixed(1)}%`;
-                                                            const isExpanded = expandedPickIds.has(edge.id);
-                                                            const edgePts = (top.edge_points !== null && top.edge_points !== undefined)
-                                                                ? Math.abs(Number(top.edge_points)).toFixed(1)
-                                                                : null;
-                                                            const kellyStake = top.kelly !== null && top.kelly !== undefined
-                                                                ? `${(Number(top.kelly) * 100).toFixed(1)}%`
-                                                                : null;
-                                                            const suggestedUnits = top.kelly !== null && top.kelly !== undefined
-                                                                ? `${Math.max(0.5, Math.min(3.0, Math.round(Number(top.kelly) * 100 * 0.7 * 2) / 2)).toFixed(1)}u`
-                                                                : '1.0u';
-                                                            const impProb = getImpliedProb(top.price);
-                                                            const impPct = impProb ? (impProb * 100).toFixed(1) : null;
-                                                            const winProb = (Number(top.win_prob || 0.5) * 100).toFixed(1);
-                                                            const winGap = (impPct && winProb) ? (Number(winProb) - Number(impPct)).toFixed(1) : null;
-                                                            const curatedWhy = getCuratedExplanation(edge, top, pickText, edgePts);
-                                                            const curatedSignals = getCuratedSignals(edge, top, pickText);
-
-                                                            return (
-                                                                <div key={edge.id} className="relative overflow-hidden p-4 rounded-xl border border-slate-700/60 bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50">
-                                                                    <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className={`flex items-center justify-center w-5 h-5 rounded-full ${edge.sport === 'MLB' ? 'bg-teal-500' : 'bg-emerald-500'} text-slate-950 text-[10px] font-black`}>{i + 1}</span>
-                                                                            <span className="text-xs font-bold text-slate-300">{edge.sport} Pick</span>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-1 bg-green-500/10 px-2 py-1 rounded-md border border-green-500/20">
-                                                                            <TrendingUp size={12} className="text-green-400" />
-                                                                            <span className="text-[11px] font-black text-green-400">{evFormatted} EV</span>
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="flex flex-col gap-1 min-w-0">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-[10px] text-slate-500 font-bold uppercase">{timeStr}</span>
-                                                                            <span className="text-xs text-slate-400 font-medium truncate">{edge.away_team} @ {edge.home_team}</span>
-                                                                        </div>
-                                                                        <div className="flex items-baseline justify-between gap-4">
-                                                                            <div className="flex flex-col min-w-0">
-                                                                                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{top.bet_type}</span>
-                                                                                <span className="text-sm font-bold text-slate-100 whitespace-normal leading-tight">{pickText}</span>
-                                                                            </div>
-                                                                            <div className="flex flex-col items-end shrink-0 gap-1">
-                                                                                <span className="text-xs font-mono font-bold text-slate-300">{(top.price !== null && top.price !== undefined) ? fmtSigned(top.price, 0) : '—'}</span>
-                                                                                {top.confidence && (() => {
-                                                                                    const confNorm = String(top.confidence).toUpperCase();
-                                                                                    const confCls = confNorm === 'HIGH'
-                                                                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                                                                                        : confNorm === 'MEDIUM'
-                                                                                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                                                                                            : 'bg-slate-800 text-slate-400 border-slate-700';
-                                                                                    const wpPct = (top.win_prob !== null && top.win_prob !== undefined)
-                                                                                        ? ` • ${(Number(top.win_prob) * 100).toFixed(0)}%`
-                                                                                        : '';
-                                                                                    return (
-                                                                                        <span
-                                                                                            title="Confidence tier based on calibrated win probability (High ≥ 55%, Medium 52–54.9%, Low < 52%)"
-                                                                                            className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${confCls}`}
-                                                                                        >
-                                                                                            {top.confidence} Conf{wpPct}
-                                                                                        </span>
-                                                                                    );
-                                                                                })()}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Line Metrics: Market vs Fair & Sizing */}
-                                                                    <div className="flex items-center justify-between text-[11px] bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80">
-                                                                        <div className="flex items-center gap-1.5 text-slate-400">
-                                                                            <span>Fair: <strong className="text-slate-200 font-mono">{top.fair_line !== null && top.fair_line !== undefined ? top.fair_line : '—'}</strong></span>
-                                                                            <span className="text-slate-600">•</span>
-                                                                            <span>Mkt: <span className="font-mono text-slate-300">{top.market_line !== null && top.market_line !== undefined ? top.market_line : '—'}</span></span>
-                                                                            {edgePts !== null && (
-                                                                                <span className="text-emerald-400 font-bold font-mono">({edgePts}pt edge)</span>
-                                                                            )}
-                                                                        </div>
-                                                                        {kellyStake && (
-                                                                            <div className="text-slate-400 text-[10px]" title="Recommended stake based on Quarter-Kelly formula">
-                                                                                Rec: <strong className="text-emerald-300 font-mono">{suggestedUnits}</strong>
-                                                                                <span className="text-slate-500 ml-1">({kellyStake})</span>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-
-                                                                    {/* Expandable Why This Pick Accordion */}
-                                                                    <button
-                                                                        type="button"
-                                                                        aria-expanded={isExpanded}
-                                                                        aria-controls={`why-pick-${edge.id}`}
-                                                                        onClick={() => toggleWhyPick(edge.id)}
-                                                                        className="text-left flex items-center justify-between text-[11px] text-blue-400/90 hover:text-blue-300 transition-colors font-semibold py-0.5 cursor-pointer mt-0.5"
-                                                                    >
-                                                                        <span className="flex items-center gap-1">
-                                                                            <Info size={12} />
-                                                                            <span>Why this pick?</span>
-                                                                        </span>
-                                                                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                                                                    </button>
-
-                                                                    {isExpanded && (
-                                                                        <div id={`why-pick-${edge.id}`} className="p-3.5 rounded-xl bg-slate-950/95 border border-blue-500/30 text-slate-300 space-y-2.5 shadow-inner">
-                                                                            <div className="flex justify-between items-center text-[10px] border-b border-slate-800/80 pb-1.5">
-                                                                                <span className="text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                                                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                                                                    {edge.away_team} @ {edge.home_team}
-                                                                                </span>
-                                                                                <span className="text-emerald-400 font-mono font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                                                                                    {edgePts ? `${edgePts} pt edge` : 'Model Edge'}
-                                                                                </span>
-                                                                            </div>
-
-                                                                            <p className="text-slate-200 text-xs leading-relaxed">
-                                                                                {curatedWhy}
-                                                                            </p>
-
-                                                                            {curatedSignals.length > 0 && (
-                                                                                <div className="space-y-1.5">
-                                                                                    {curatedSignals.map((sigItem) => {
-                                                                                        const toneCls = sigItem.tone === 'emerald'
-                                                                                            ? 'border-emerald-500/25 bg-emerald-950/25'
-                                                                                            : sigItem.tone === 'amber'
-                                                                                                ? 'border-amber-500/25 bg-amber-950/20'
-                                                                                                : sigItem.tone === 'blue'
-                                                                                                    ? 'border-blue-500/25 bg-blue-950/20'
-                                                                                                    : 'border-slate-800 bg-slate-900/75';
-                                                                                        return (
-                                                                                            <div key={sigItem.key} className={`p-2 rounded-lg border text-[11px] text-slate-300 flex items-start gap-2 ${toneCls}`}>
-                                                                                                <span className="text-xs shrink-0 mt-0.5" aria-hidden="true">{sigItem.icon}</span>
-                                                                                                <div className="leading-snug">
-                                                                                                    <strong className="text-slate-100">{sigItem.label}: </strong>
-                                                                                                    {sigItem.text}
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        );
-                                                                                    })}
-                                                                                </div>
-                                                                            )}
-
-                                                                            {impPct && winGap && Number(winGap) > 0 && (
-                                                                                <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex items-start gap-2">
-                                                                                    <span className="text-amber-400 text-xs shrink-0 mt-0.5">💡</span>
-                                                                                    <div className="leading-snug">
-                                                                                        <strong className="text-slate-100">The Edge in Plain English: </strong>
-                                                                                        Sportsbook odds ({top.price ? fmtSigned(top.price, 0) : '—'}) imply a {impPct}% chance to win. Our model calculates a higher <strong className="text-slate-100">{winProb}%</strong> true win probability, giving you a <strong className="text-emerald-400 font-mono">+{winGap}% edge</strong> over the bookmaker and a positive <strong className="text-emerald-400 font-mono">{evFormatted}</strong> profit margin.
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
-
-                                                                            <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400 pt-2 border-t border-slate-800/80 font-mono">
-                                                                                <div>Win Probability: <strong className="text-slate-100">{winProb}%</strong></div>
-                                                                                <div>Expected Profit: <strong className="text-emerald-400">{evFormatted}</strong></div>
-                                                                                {kellyStake && (
-                                                                                    <div className="col-span-2 text-slate-400">
-                                                                                        Recommended Bet: <strong className="text-emerald-300">{suggestedUnits}</strong> ({kellyStake} bankroll)
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-
-                                                                    <div className="flex gap-2 mt-auto pt-2 border-t border-slate-800/40">
-                                                                        <button
-                                                                            onClick={() => onAddBet?.({
-                                                                                sport: edge.sport,
-                                                                                game: `${edge.away_team} @ ${edge.home_team}`,
-                                                                                market: top.bet_type,
-                                                                                pick: pickText,
-                                                                                line: top.market_line,
-                                                                                odds: top.price,
-                                                                                book: top.book,
-                                                                            })}
-                                                                            className="flex-1 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-black border border-emerald-500/20 transition-colors uppercase tracking-widest cursor-pointer"
-                                                                        >
-                                                                            Add
-                                                                        </button>
-                                                                        {edge.sport === 'NCAAM' && (
-                                                                            <button
-                                                                                onClick={() => analyzeGame(edge)}
-                                                                                className="flex-1 py-1.5 rounded-lg bg-slate-800/40 hover:bg-slate-700/40 text-slate-300 text-[10px] font-black border border-slate-700/50 transition-colors uppercase tracking-widest cursor-pointer"
-                                                                            >
-                                                                                Details
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* 2-leg ML Parlay recommendations — below Top 6 Plays */}
-                                    {leagueFilter === 'NCAAM' && String(selectedDate) === String(getTodayStr()) && (
-                                        <ParlayRecommendations />
-                                    )}
-
-                                </div>
-                            )}
-
-                            {!loading && edges.length > 0 && boardTab === 'full' && (
-                                <div className="overflow-x-auto" role="region" aria-label="Full betting board" tabIndex={0}>
-                                    <table className="w-full text-left border-collapse">
-                                        <caption className="sr-only">Full betting board showing start time, league, matchup, spreads or moneylines, totals, and analysis actions</caption>
-                                        <thead>
-                                            <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                                                <th scope="col" aria-sort={sortConfig.key === 'start_time' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                    <button type="button" onClick={() => handleSort('start_time')} className="flex items-center hover:text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-0.5">
-                                                        Time <SortIcon column="start_time" />
-                                                    </button>
-                                                </th>
-                                                <th scope="col" aria-sort={sortConfig.key === 'sport' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                    <button type="button" onClick={() => handleSort('sport')} className="flex items-center hover:text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-0.5">
-                                                        League <SortIcon column="sport" />
-                                                    </button>
-                                                </th>
-                                                <th scope="col" aria-sort={sortConfig.key === 'game' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                    <button type="button" onClick={() => handleSort('game')} className="flex items-center hover:text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-0.5">
-                                                        Matchup <SortIcon column="game" />
-                                                    </button>
-                                                </th>
-                                                {leagueFilter === 'EPL' ? (
-                                                    <>
-                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                            <div className="flex items-center">Moneyline (1X2)</div>
-                                                        </th>
-                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                            <div className="flex items-center">Total Goals (O/U)</div>
-                                                        </th>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                            <div className="flex items-center">Spread (both sides)</div>
-                                                        </th>
-                                                        <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider">
-                                                            <div className="flex items-center">Total (O/U)</div>
-                                                        </th>
-                                                    </>
-                                                )}
-                                                <th scope="col" className="py-2 px-4 text-xs font-bold uppercase tracking-wider text-center">
-                                                    <div className="flex items-center justify-center">Action</div>
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-700/50">
-                                            {getProcessedEdges().length === 0 ? (
-                                                <tr>
-                                                    <td colSpan="9" className="py-12 text-center text-slate-500">
-                                                        <div className="flex flex-col items-center justify-center">
-                                                            <Filter size={32} className="mb-3 opacity-20" />
-                                                            <p className="text-lg font-medium text-slate-400">No games found for this league/date range.</p>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ) : (
-                                                (() => {
-                                                    const isSameEtDay = (ts, ymd) => {
-                                                        if (!ts || !ymd) return false;
-                                                        try {
-                                                            const d = new Date(ts);
-                                                            const s = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-                                                            return s === ymd;
-                                                        } catch (e) {
-                                                            return false;
-                                                        }
-                                                    };
-
-                                                    const boardEdges = (!showModelPerformanceTab)
-                                                        ? getProcessedEdges().filter((e) => isSameEtDay(e?.start_time, selectedDate))
-                                                        : getProcessedEdges();
-
-                                                    return boardEdges.map((edge, idx) => {
-                                                        const date = edge.start_time ? new Date(edge.start_time) : null;
-                                                        const dateStr = date ? date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: 'America/New_York' }) : '-';
-                                                        const timeStr = date ? date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : '';
-                                                        const isEdge = edge.is_actionable;
-
-                                                        return (
-                                                            <tr key={idx} className={`group hover:bg-slate-700/30 transition-all border-b border-slate-700/30`}>
-                                                                <td className="py-3 px-4 text-slate-400 text-xs whitespace-nowrap">
-                                                                    {edge.final ? (
-                                                                        <div className="flex flex-col">
-                                                                            <span className="font-bold text-slate-500 uppercase tracking-wider">Final</span>
-                                                                            <span className="text-white font-mono">{edge.home_score}-{edge.away_score}</span>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <>
-                                                                            <div className="font-bold text-slate-300">{dateStr}</div>
-                                                                            <div>{timeStr}</div>
-                                                                        </>
-                                                                    )}
-                                                                </td>
-                                                                <td className="py-3 px-4">
-                                                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-tighter uppercase
-                                                                ${edge.sport === 'NFL' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' :
-                                                                            edge.sport === 'NCAAM' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20' :
-                                                                                edge.sport === 'NCAAF' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/20' :
-                                                                                    'bg-slate-700/50 text-slate-400 border border-slate-600'
-                                                                        }`}>
-                                                                        {edge.sport}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="py-3 px-4 font-bold text-slate-100 text-sm tracking-tight">{edge.away_team} @ {edge.home_team}</td>
-                                                                {leagueFilter === 'EPL' ? (
-                                                                    <>
-                                                                        <td className="py-3 px-4">
-                                                                            {(edge.ml_home_odds !== null && edge.ml_home_odds !== undefined) || (edge.ml_away_odds !== null && edge.ml_away_odds !== undefined) || (edge.ml_draw_odds !== null && edge.ml_draw_odds !== undefined) ? (
-                                                                                <div className="flex flex-col gap-1">
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400 truncate">HOME</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_home_odds)}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400 truncate">DRAW</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_draw_odds)}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400 truncate">AWAY</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{fmtSigned(edge.ml_away_odds)}</span>
-                                                                                    </div>
-                                                                                    <div className="text-[10px] text-slate-600">1X2 market odds</div>
-                                                                                </div>
-                                                                            ) : (
-                                                                                <span className="text-slate-600 font-mono text-xs">No moneyline</span>
-                                                                            )}
-                                                                        </td>
-                                                                        <td className="py-3 px-4">
-                                                                            {edge.total_line !== null && edge.total_line !== undefined ? (
-                                                                                <div className="flex flex-col gap-1">
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400">OVER</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds)}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400">UNDER</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
-                                                                                    </div>
-                                                                                    <div className="text-[10px] text-slate-600">goals total (O/U)</div>
-                                                                                </div>
-                                                                            ) : (
-                                                                                <span className="text-slate-600 font-mono text-xs">No total</span>
-                                                                            )}
-                                                                        </td>
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <td className="py-3 px-4">
-                                                                            {(edge.home_spread !== null && edge.home_spread !== undefined) || (edge.away_spread !== null && edge.away_spread !== undefined) ? (
-                                                                                <div className="flex flex-col gap-1">
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400 truncate">{edge.away_team}</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">
-                                                                                            {fmtSigned(edge.away_spread ?? (edge.home_spread != null ? -Number(edge.home_spread) : null), 1)}
-                                                                                        </span>
-                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">
-                                                                                            {fmtSigned(edge.spread_away_odds)}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400 truncate">{edge.home_team}</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">
-                                                                                            {fmtSigned(edge.home_spread, 1)}
-                                                                                        </span>
-                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">
-                                                                                            {fmtSigned(edge.spread_home_odds ?? edge.moneyline_home)}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                    <div className="text-[10px] text-slate-600">team • line • odds</div>
-                                                                                </div>
-                                                                            ) : (
-                                                                                <span className="text-slate-600 font-mono text-xs">No spread</span>
-                                                                            )}
-                                                                        </td>
-                                                                        <td className="py-3 px-4">
-                                                                            {edge.total_line !== null && edge.total_line !== undefined ? (
-                                                                                <div className="flex flex-col gap-1">
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400">OVER</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_over_odds ?? edge.moneyline_away)}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between gap-2 text-xs">
-                                                                                        <span className="text-slate-400">UNDER</span>
-                                                                                        <span className="text-white font-mono font-bold whitespace-nowrap">{Number(edge.total_line).toFixed(1)}</span>
-                                                                                        <span className="text-slate-500 font-mono whitespace-nowrap">{fmtSigned(edge.total_under_odds)}</span>
-                                                                                    </div>
-                                                                                    <div className="text-[10px] text-slate-600">side • line • odds</div>
-                                                                                </div>
-                                                                            ) : (
-                                                                                <span className="text-slate-600 font-mono text-xs">No total</span>
-                                                                            )}
-                                                                        </td>
-                                                                    </>
-                                                                )}
-                                                                <td className="py-3 px-4 text-center">
-                                                                    {(() => {
-                                                                        const meta = rowTopPicks?.[edge.id] || null;
-                                                                        const top = meta?.rec || null;
-                                                                        if (top) {
-                                                                            return (
-                                                                                <div className="flex flex-col items-center gap-2">
-                                                                                    <div className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-widest">
-                                                                                        Top pick
-                                                                                    </div>
-                                                                                    <div className="text-xs font-bold text-white max-w-[180px] truncate" title={top.selection}>
-                                                                                        {top.selection}
-                                                                                    </div>
-                                                                                    <div className="text-[11px] text-green-300 font-mono font-bold">+{top.edge}</div>
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <button
-                                                                                            onClick={() => onAddBet?.({
-                                                                                                sport: edge.sport,
-                                                                                                game: `${edge.away_team} @ ${edge.home_team}`,
-                                                                                                market: top.bet_type,
-                                                                                                pick: top.selection,
-                                                                                                line: top.market_line,
-                                                                                                odds: top.price,
-                                                                                                book: top.book,
-                                                                                            })}
-                                                                                            className="px-3 py-1 bg-green-500/20 text-green-300 hover:bg-green-500/30 border border-green-500/30 rounded text-xs font-bold transition-colors"
-                                                                                        >
-                                                                                            Add
-                                                                                        </button>
-                                                                                        {edge.sport === 'NCAAM' && (
-                                                                                            <button
-                                                                                                onClick={() => analyzeGame(edge)}
-                                                                                                className="px-3 py-1 bg-slate-800/60 text-slate-200 hover:bg-slate-800 border border-slate-700 rounded text-xs font-bold transition-colors"
-                                                                                            >
-                                                                                                Details
-                                                                                            </button>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </div>
-                                                                            );
-                                                                        }
-
-                                                                        // If server computed a No-Bet state, show it.
-                                                                        if (meta && meta.isActionable === false) {
-                                                                            return (
-                                                                                <div className="flex flex-col items-center gap-2">
-                                                                                    <div className="px-2 py-0.5 rounded bg-slate-800/60 text-slate-300 text-[10px] font-black uppercase tracking-widest border border-slate-700/60">
-                                                                                        No Bet
-                                                                                    </div>
-                                                                                    <div className="text-[11px] text-slate-400 max-w-[220px] truncate" title={meta.reason || ''}>
-                                                                                        {meta.reason || 'Blocked'}
-                                                                                    </div>
-                                                                                    <button
-                                                                                        onClick={() => analyzeGame(edge)}
-                                                                                        disabled={leagueFilter !== 'NCAAM' || (isAnalyzing && selectedGame?.id === edge.id)}
-                                                                                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-lg ring-1 ring-white/10 flex items-center justify-center mx-auto ${(isAnalyzing && selectedGame?.id === edge.id)
-                                                                                            ? 'bg-slate-700 text-slate-400'
-                                                                                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                                                                                            }`}
-                                                                                    >
-                                                                                        {isAnalyzing && selectedGame?.id === edge.id ? <RefreshCw className="animate-spin" size={14} /> : 'Details'}
-                                                                                    </button>
-                                                                                </div>
-                                                                            );
-                                                                        }
-
-                                                                        // Default: show quick-pick + analyze
-                                                                        return (
-                                                                            <div className="flex flex-col items-center gap-2">
-                                                                                <button
-                                                                                    onClick={() => quickPick(edge)}
-                                                                                    disabled={leagueFilter !== 'NCAAM' || rowPickingId === edge.id}
-                                                                                    className={`px-3 py-1 rounded text-xs font-bold transition-colors border ${rowPickingId === edge.id
-                                                                                        ? 'bg-slate-700 text-slate-400 border-slate-600'
-                                                                                        : 'bg-indigo-500/20 text-indigo-200 hover:bg-indigo-500/30 border-indigo-500/30'
-                                                                                        }`}
-                                                                                >
-                                                                                    {rowPickingId === edge.id ? 'Picking…' : 'Quick pick'}
-                                                                                </button>
-                                                                                <button
-                                                                                    onClick={() => analyzeGame(edge)}
-                                                                                    disabled={leagueFilter !== 'NCAAM' || (isAnalyzing && selectedGame?.id === edge.id)}
-                                                                                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-lg ring-1 ring-white/10 flex items-center justify-center mx-auto ${(isAnalyzing && selectedGame?.id === edge.id)
-                                                                                        ? 'bg-slate-700 text-slate-400'
-                                                                                        : 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                                                                                        }`}
-                                                                                >
-                                                                                    {isAnalyzing && selectedGame?.id === edge.id ? <RefreshCw className="animate-spin" size={14} /> : 'Analyze'}
-                                                                                </button>
-                                                                            </div>
-                                                                        );
-                                                                    })()}
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    });
-                                                })()
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-                    </>
-                )
-            }
-
-
-
-
-
-
-
-
-
-            {/* Analysis Modal */}
-            {
-                selectedGame ? (
-                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl relative animate-in fade-in zoom-in duration-200">
-                            {/* Header */}
-                            <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-slate-700 px-6 py-4 flex justify-between items-center z-10">
-                                <div>
-                                    <h2 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-green-400 bg-clip-text text-transparent">
-                                        {selectedGame.game}
-                                    </h2>
-                                    <div className="text-xs text-slate-400 mt-1 flex gap-2">
-                                        <span>{new Date(selectedGame.start_time).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET</span>
-                                        <span>•</span>
-                                        <span className="uppercase font-bold">{selectedGame.sport} Analysis</span>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={closeAnalysisModal}
-                                    className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-
-                            {/* Content */}
-                            <div className="p-6">
-                                {/* Manual referee assignment (optional). Model uses aggregate ref tendencies if not set. */}
-                                {selectedGame?.sport === 'NCAAM' && (
-                                    <div className="mb-4 p-3 rounded-xl border border-slate-700/60 bg-slate-950/20">
-                                        <div className="flex items-center justify-between gap-3">
-                                            <div>
-                                                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Refs (manual override)</div>
-                                                <div className="text-xs text-slate-400 mt-1">If you know the crew, paste names here and re-run. Otherwise the model uses KenPom ref tendencies in aggregate.</div>
-                                            </div>
-                                            <button
-                                                disabled={refsSaving || !selectedGame?.id}
-                                                onClick={async () => {
-                                                    try {
-                                                        setRefsSaving(true);
-                                                        setRefsError(null);
-                                                        await api.post('/api/ncaam/referees', {
-                                                            event_id: selectedGame.id,
-                                                            referee_1: ref1 || null,
-                                                            referee_2: ref2 || null,
-                                                            referee_3: ref3 || null,
-                                                        });
-                                                        // re-run analysis in-place
-                                                        const analysisRes = await api.post('/api/ncaam/analyze', { event_id: selectedGame.id });
-                                                        setAnalysisResult(analysisRes.data);
-                                                    } catch (e) {
-                                                        setRefsError(e?.response?.data?.detail || e?.message || 'Failed to save refs');
-                                                    } finally {
-                                                        setRefsSaving(false);
-                                                    }
-                                                }}
-                                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800/60 hover:bg-slate-700/60 text-slate-200 border border-white/10"
-                                            >
-                                                {refsSaving ? 'Saving…' : 'Save & Re-run'}
-                                            </button>
-                                        </div>
-
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
-                                            <input value={ref1} onChange={(e) => setRef1(e.target.value)} placeholder="Referee 1" className="bg-slate-900/40 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none" />
-                                            <input value={ref2} onChange={(e) => setRef2(e.target.value)} placeholder="Referee 2" className="bg-slate-900/40 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none" />
-                                            <input value={ref3} onChange={(e) => setRef3(e.target.value)} placeholder="Referee 3" className="bg-slate-900/40 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none" />
-                                        </div>
-
-                                        {refsError && (
-                                            <div className="text-xs text-red-300 mt-2">{refsError}</div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {isAnalyzing && !analysisResult ? (
-                                    <div className="py-20 flex flex-col items-center justify-center text-slate-400">
-                                        <RefreshCw className="animate-spin w-12 h-12 text-blue-500 mb-4" />
-                                        <p className="font-medium">Crunching numbers...</p>
-                                        <p className="text-sm opacity-60 mt-2">Checking efficiency metrics & generating narrative</p>
-                                    </div>
-                                ) : analysisResult?.error ? (
-                                    <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-200">
-                                        <div className="font-bold flex items-center gap-2 mb-1">
-                                            <ShieldAlert size={16} /> Analysis Failed
-                                        </div>
-                                        {analysisResult.error}
-                                    </div>
-                                ) : analysisResult ? (
-                                    <div className="space-y-6">
-                                        {/* Final Score Banner (for completed games) */}
-                                        {selectedGame?.final && (
-                                            <div className="bg-slate-800/80 p-4 rounded-xl border border-green-500/30">
-                                                <div className="flex justify-between items-center">
-                                                    <div>
-                                                        <div className="text-[10px] text-green-400 uppercase font-black tracking-widest mb-1">Game Complete</div>
-                                                        <div className="text-xl font-bold text-white">
-                                                            {selectedGame.away_team} <span className="font-mono">{selectedGame.away_score}</span> @ {selectedGame.home_team} <span className="font-mono">{selectedGame.home_score}</span>
-                                                        </div>
-                                                        <div className="text-xs text-slate-400 mt-1">
-                                                            Final Margin: <span className="font-mono font-bold text-white">{Number(selectedGame.home_score) - Number(selectedGame.away_score) > 0 ? '+' : ''}{Number(selectedGame.home_score) - Number(selectedGame.away_score)}</span> (Home perspective)
-                                                        </div>
-                                                    </div>
-                                                    {(() => {
-                                                        // Determine outcome: WON/LOST/PUSH/NO BET
-                                                        const rec = analysisResult.recommendations?.[0];
-
-                                                        if (!rec) {
-                                                            return (
-                                                                <div className="text-right">
-                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Model Pick</div>
-                                                                    <div className="px-3 py-1 rounded-lg text-sm font-black inline-block bg-slate-700/50 text-slate-400 border border-slate-600/30">
-                                                                        NO BET
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        }
-
-                                                        const homeMargin = Number(selectedGame.home_score) - Number(selectedGame.away_score);
-                                                        const selection = String(rec.selection || '');
-                                                        const lineMatch = selection.match(/[-+]?\d+(\.\d+)?$/);
-                                                        const line = lineMatch ? Number(lineMatch[0]) : 0;
-                                                        const isHome = selection.includes(selectedGame.home_team);
-
-                                                        // Build display string for the bet
-                                                        let betDisplay = '';
-                                                        if (rec.bet_type === 'SPREAD') {
-                                                            const teamName = isHome ? selectedGame.home_team : selectedGame.away_team;
-                                                            const rawLine = rec.line;
-                                                            if (rawLine != null && !isNaN(Number(rawLine))) {
-                                                                const spreadLine = isHome ? Number(rawLine) : -Number(rawLine);
-                                                                betDisplay = `${teamName} ${spreadLine > 0 ? '+' : ''}${spreadLine.toFixed(1)}`;
-                                                            } else {
-                                                                betDisplay = `${teamName} (Spread)`;
-                                                            }
-                                                        } else if (rec.bet_type === 'MONEYLINE') {
-                                                            const teamName = isHome ? selectedGame.home_team : selectedGame.away_team;
-                                                            betDisplay = `${teamName} ML`;
-                                                        } else if (rec.bet_type === 'TOTAL') {
-                                                            const isOver = selection.toLowerCase().includes('over');
-                                                            const totalLine = rec.line != null && !isNaN(Number(rec.line)) ? Number(rec.line).toFixed(1) : 'N/A';
-                                                            betDisplay = `${isOver ? 'Over' : 'Under'} ${totalLine}`;
-                                                        } else {
-                                                            betDisplay = selection || rec.bet_type || 'Unknown';
-                                                        }
-
-                                                        // Add Correlations Card
-                                                        // (Removed floating/malformed logic)
-
-                                                        let result = 'PENDING';
-                                                        if (rec.bet_type === 'SPREAD') {
-                                                            const effectiveMargin = isHome ? homeMargin : -homeMargin;
-                                                            const spread = isHome ? line : -line;
-                                                            if (effectiveMargin + spread > 0) result = 'WON';
-                                                            else if (effectiveMargin + spread < 0) result = 'LOST';
-                                                            else result = 'PUSH';
-                                                        } else if (rec.bet_type === 'MONEYLINE') {
-                                                            if (isHome) {
-                                                                result = homeMargin > 0 ? 'WON' : homeMargin < 0 ? 'LOST' : 'PUSH';
-                                                            } else {
-                                                                result = homeMargin < 0 ? 'WON' : homeMargin > 0 ? 'LOST' : 'PUSH';
-                                                            }
-                                                        } else if (rec.bet_type === 'TOTAL') {
-                                                            const totalScore = Number(selectedGame.home_score) + Number(selectedGame.away_score);
-                                                            const totalLine = Number(rec.line || 0);
-                                                            const isOver = selection.toLowerCase().includes('over');
-                                                            if (isOver) {
-                                                                result = totalScore > totalLine ? 'WON' : totalScore < totalLine ? 'LOST' : 'PUSH';
-                                                            } else {
-                                                                result = totalScore < totalLine ? 'WON' : totalScore > totalLine ? 'LOST' : 'PUSH';
-                                                            }
-                                                        }
-
-                                                        return (
-                                                            <div className="text-right">
-                                                                <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Model Pick</div>
-                                                                <div className="text-sm font-bold text-white mb-1">{betDisplay}</div>
-                                                                <div className={`px-3 py-1 rounded-lg text-sm font-black inline-block ${result === 'WON' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                                    result === 'LOST' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                                                                        result === 'PUSH' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                                                                            'bg-slate-700 text-slate-400'
-                                                                    }`}>
-                                                                    {result}
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })()}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Recommended Bet (make it painfully obvious) */}
-                                        {(() => {
-                                            const top = (analysisResult.recommendations || [])[0] || null;
-                                            if (!top) return null;
-
-                                            const priceStr = top.price !== null && top.price !== undefined ? fmtSigned(top.price, 0) : '—';
-                                            const wp = (top.win_prob !== null && top.win_prob !== undefined) ? `${Math.round(Number(top.win_prob) * 100)}%` : '—';
-                                            const kelly = (top.kelly !== null && top.kelly !== undefined) ? `${Math.max(0, Math.round(Number(top.kelly) * 100))}%` : '—';
-
-                                            return (
-                                                <div className="bg-gradient-to-br from-indigo-900/30 to-slate-900/70 p-4 rounded-xl border border-indigo-500/30">
-                                                    <div className="flex items-start gap-3">
-                                                        <div className="px-2 py-1 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-widest">Recommended Bet</div>
-                                                        <div className="ml-auto flex gap-2">
-                                                            <button
-                                                                onClick={() => onAddBet?.({
-                                                                    sport: selectedGame.sport,
-                                                                    game: `${selectedGame.away_team} @ ${selectedGame.home_team}`,
-                                                                    market: top.bet_type,
-                                                                    pick: top.selection,
-                                                                    line: top.market_line,
-                                                                    odds: top.price,
-                                                                    book: top.book,
-                                                                })}
-                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-500/20 text-green-300 hover:bg-green-500/30 border border-green-500/30 transition-colors"
-                                                            >
-                                                                Add to slip
-                                                            </button>
-                                                            <button
-                                                                onClick={() => navigator.clipboard?.writeText(`${top.selection} @ ${priceStr} (${top.book || 'book'})`)}
-                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800/60 text-slate-200 hover:bg-slate-800 border border-slate-700 transition-colors"
-                                                            >
-                                                                Copy
-                                                            </button>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="mt-3 text-3xl font-black text-white leading-tight">
-                                                        {(() => {
-                                                            try {
-                                                                if (top.bet_type === 'SPREAD') {
-                                                                    const m = String(top.selection || '').match(/^(.*)\s([-+]?\d+(?:\.\d+)?)$/);
-                                                                    if (!m) return top.selection;
-                                                                    const team = m[1].trim();
-                                                                    const line = Number(m[2]);
-                                                                    return `${team} ${fmtSigned(line, 1)}`;
-                                                                }
-                                                            } catch (e) { }
-                                                            return top.selection;
-                                                        })()}
-                                                    </div>
-
-                                                    <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-                                                        <div className="bg-slate-900/40 p-2 rounded border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black">Book</div>
-                                                            <div className="text-slate-200 font-bold truncate">{top.book || '—'}</div>
-                                                        </div>
-                                                        <div className="bg-slate-900/40 p-2 rounded border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black">Odds</div>
-                                                            <div className="text-slate-200 font-mono font-bold">{priceStr}</div>
-                                                        </div>
-                                                        <div className="bg-slate-900/40 p-2 rounded border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black">EV</div>
-                                                            <div className="text-green-300 font-mono font-bold">+{top.edge}</div>
-                                                        </div>
-                                                        <div className="bg-slate-900/40 p-2 rounded border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black">Win Prob</div>
-                                                            <div className="text-slate-200 font-mono font-bold">{wp}</div>
-                                                        </div>
-                                                        <div className="bg-slate-900/40 p-2 rounded border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black">Stake (Kelly)</div>
-                                                            <div className="text-slate-200 font-mono font-bold">{kelly}</div>
-                                                        </div>
-                                                    </div>
-
-                                                    {(analysisResult.key_factors?.length || analysisResult.game_script?.length) ? (
-                                                        <div className="mt-3 text-xs text-slate-300">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Narrative</div>
-                                                            <ul className="list-disc list-inside space-y-1">
-                                                                {(analysisResult.key_factors || []).slice(0, 3).map((x, i) => <li key={`rkf-${i}`}>{x}</li>)}
-                                                                {(analysisResult.game_script || []).slice(0, 2).map((x, i) => <li key={`rgs-${i}`}>{x}</li>)}
-                                                            </ul>
-                                                            {analysisResult.news_summary ? (
-                                                                <div className="mt-2 text-[11px] text-slate-400">News: {analysisResult.news_summary}</div>
-                                                            ) : null}
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* Quick Read (removed — duplicated by Recommended Bet / Narrative) */}
-                                        {false && (() => {
-                                            const rec = (analysisResult.recommendations || [])[0] || null;
-                                            if (!rec) return null;
-                                            const ms = String(analysisResult.narrative?.market_summary || '').trim();
-                                            const kf = (analysisResult.key_factors || []).filter(Boolean);
-                                            const rk = (analysisResult.risks || []).filter(Boolean);
-
-                                            return (
-                                                <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
-                                                    <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Quick Read</div>
-                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                                                        <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">The bet</div>
-                                                            <div className="text-slate-200 font-black break-words">{rec.selection}</div>
-                                                            <div className="mt-1 text-[11px] text-slate-400 break-words">
-                                                                {rec.bet_type} • EV {rec.edge ? `+${rec.edge}` : '—'} • {rec.confidence || '—'} confidence
-                                                            </div>
-                                                        </div>
-                                                        <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Why</div>
-                                                            {ms ? (
-                                                                <div className="text-slate-300 text-xs leading-snug whitespace-pre-wrap break-words">{ms}</div>
-                                                            ) : (
-                                                                <ul className="list-disc list-inside text-xs text-slate-300 space-y-1 break-words">
-                                                                    {kf.slice(0, 3).map((x, i) => <li key={`qk-${i}`} className="break-words">{x}</li>)}
-                                                                </ul>
-                                                            )}
-                                                        </div>
-                                                        <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Risks</div>
-                                                            {rk.length ? (
-                                                                <ul className="list-disc list-inside text-xs text-slate-300 space-y-1 break-words">
-                                                                    {rk.slice(0, 3).map((x, i) => <li key={`qr-${i}`} className="break-words">{x}</li>)}
-                                                                </ul>
-                                                            ) : (
-                                                                <div className="text-xs text-slate-500">No major risks flagged.</div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* Market (clean, compact) */}
-                                        <div className="bg-slate-900/40 p-5 rounded-2xl border border-slate-700/40">
-                                            <div className="text-sm font-semibold text-slate-200 mb-3">Market</div>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
-                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Spread (team / line / odds)</div>
-                                                    {(selectedGame.home_spread !== null && selectedGame.home_spread !== undefined) || (selectedGame.away_spread !== null && selectedGame.away_spread !== undefined) ? (() => {
-                                                        const hs = selectedGame.home_spread !== null && selectedGame.home_spread !== undefined ? Number(selectedGame.home_spread) : null;
-                                                        const as = selectedGame.away_spread !== null && selectedGame.away_spread !== undefined ? Number(selectedGame.away_spread) : (hs !== null ? -hs : null);
-                                                        const favored = hs !== null ? (hs < 0 ? selectedGame.home_team : (hs > 0 ? selectedGame.away_team : 'Pick')) : '—';
-                                                        return (
-                                                            <div className="space-y-1 text-xs">
-                                                                <div className="flex justify-between gap-2">
-                                                                    <span className="text-slate-400 break-words">{selectedGame.away_team}</span>
-                                                                    <span className="text-slate-200 font-mono font-bold">{fmtSigned(as, 1)}</span>
-                                                                    <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.spread_away_odds)}</span>
-                                                                </div>
-                                                                <div className="flex justify-between gap-2">
-                                                                    <span className="text-slate-400 break-words">{selectedGame.home_team}</span>
-                                                                    <span className="text-slate-200 font-mono font-bold">{fmtSigned(hs, 1)}</span>
-                                                                    <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.spread_home_odds ?? selectedGame.moneyline_home)}</span>
-                                                                </div>
-                                                                <div className="text-[10px] text-slate-600">Favored: <span className="text-slate-300 font-bold">{favored}</span></div>
-                                                            </div>
-                                                        );
-                                                    })() : <div className="text-slate-500">No spread found</div>}
-                                                </div>
-                                                <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-700/50">
-                                                    <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Total (side / line / odds)</div>
-                                                    {selectedGame.total_line !== null && selectedGame.total_line !== undefined ? (
-                                                        <div className="space-y-1 text-xs">
-                                                            <div className="flex justify-between gap-2">
-                                                                <span className="text-slate-400">OVER</span>
-                                                                <span className="text-slate-200 font-mono font-bold">{Number(selectedGame.total_line).toFixed(1)}</span>
-                                                                <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.total_over_odds ?? selectedGame.moneyline_away)}</span>
-                                                            </div>
-                                                            <div className="flex justify-between gap-2">
-                                                                <span className="text-slate-400">UNDER</span>
-                                                                <span className="text-slate-200 font-mono font-bold">{Number(selectedGame.total_line).toFixed(1)}</span>
-                                                                <span className="text-slate-500 font-mono">{fmtSigned(selectedGame.total_under_odds)}</span>
-                                                            </div>
-                                                        </div>
-                                                    ) : <div className="text-slate-500">No total found</div>}
-                                                    <div className="text-[10px] text-slate-500 mt-1">Market total (O/U)</div>
-                                                </div>
-                                                {/* Model Summary removed (shown in Quick Read / Why the model likes it) */}
-                                            </div>
-                                        </div>
-
-                                        {/* Recommendations (avoid repetition: only show "Other leans" if multiple) */}
-                                        {(() => {
-                                            const recs = analysisResult.recommendations || [];
-                                            if (!recs.length) {
-                                                return <div className="text-center py-4 text-slate-500">No recommendations generated.</div>;
-                                            }
-                                            if (recs.length <= 1) return null;
-
-                                            return (
-                                                <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                                                    <div className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Other leans</div>
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                        {recs.slice(1, 5).map((rec, idx) => (
-                                                            <div key={idx} className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                                <div className="flex items-center justify-between">
-                                                                    <div className="text-white font-bold text-sm">{rec.selection}</div>
-                                                                    <div className="text-xs text-green-300 font-mono font-bold">+{rec.edge}</div>
-                                                                </div>
-                                                                <div className="mt-1 text-[11px] text-slate-400">
-                                                                    {rec.bet_type} • win {rec.win_prob !== null && rec.win_prob !== undefined ? `${Math.round(rec.win_prob * 100)}%` : '—'}
-                                                                    {rec.price !== null && rec.price !== undefined ? ` • ${fmtSigned(rec.price, 0)}` : ''}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* Narrative & Torvik View */}
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700/50 relative overflow-hidden">
-                                                <h3 className="font-bold text-slate-200 mb-3 flex items-center gap-2 text-sm uppercase tracking-wider">
-                                                    <Info size={16} className="text-blue-400" />
-                                                    Why the model likes it
-                                                </h3>
-
-                                                {(() => {
-                                                    const rec = (analysisResult.recommendations || [])[0] || null;
-                                                    if (!rec) return <div className="text-slate-500 text-sm">No recommendation summary available.</div>;
-
-                                                    const marketSummary = analysisResult.narrative?.market_summary || '';
-                                                    const kf = analysisResult.key_factors || [];
-                                                    const gs = analysisResult.game_script || [];
-
-                                                    return (
-                                                        <div className="text-slate-300 text-sm leading-relaxed space-y-3">
-                                                            {marketSummary ? (
-                                                                <div className="text-blue-300 font-semibold">{marketSummary}</div>
-                                                            ) : null}
-
-                                                            <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                                <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Reasoning (matchup-specific)</div>
-
-                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-slate-500">Market line</span>
-                                                                        <span className="text-slate-200 font-mono font-bold">{rec.market_line ?? '—'}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-slate-500">Model fair</span>
-                                                                        <span className="text-slate-200 font-mono font-bold">{rec.fair_line ?? '—'}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-slate-500">Line value</span>
-                                                                        <span className={`${(rec.edge_points ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'} font-mono font-bold`}>{rec.edge_points !== null && rec.edge_points !== undefined ? `${rec.edge_points >= 0 ? '+' : ''}${rec.edge_points} pts` : '—'}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-slate-500">Win prob</span>
-                                                                        <span className="text-slate-200 font-mono font-bold">{rec.win_prob !== null && rec.win_prob !== undefined ? `${Math.round(rec.win_prob * 100)}%` : '—'}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-slate-500">EV</span>
-                                                                        <span className="text-green-400 font-mono font-bold">+{rec.edge ?? '—'}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-slate-500">Confidence</span>
-                                                                        <span className="text-slate-200 font-bold">{rec.confidence ?? '—'}</span>
-                                                                    </div>
-                                                                </div>
-
-                                                                {(kf.length || gs.length) ? (
-                                                                    <ul className="mt-3 list-disc list-inside space-y-1 opacity-90 text-xs">
-                                                                        {kf.slice(0, 3).map((x, i) => <li key={`kf-${i}`}>{x}</li>)}
-                                                                        {gs.slice(0, 2).map((x, i) => <li key={`gs-${i}`}>{x}</li>)}
-                                                                    </ul>
-                                                                ) : (
-                                                                    <div className="mt-3 text-slate-500 text-xs">No matchup-specific factors available yet.</div>
-                                                                )}
-
-                                                                {analysisResult.risks?.length ? (
-                                                                    <div className="mt-3 text-[10px] text-slate-500">Risks: {analysisResult.risks.slice(0, 2).join(' • ')}</div>
-                                                                ) : null}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })()}
-                                            </div>
-
-                                            <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700/40">
-                                                <h3 className="font-semibold text-slate-200 mb-4 flex items-center gap-2 text-sm group relative">
-                                                    <ShieldCheck size={16} className="text-green-400" />
-                                                    Torvik View
-                                                    <span className="ml-auto text-[9px] text-slate-500 font-normal normal-case cursor-help" title={`Data from BartTorvik.com\n\nScraped Fields:\n• Adj Offensive Efficiency\n• Adj Defensive Efficiency\n• Adj Tempo\n• Luck Factor\n\nLast Refresh: ${analysisResult.torvik_view?.data_date || analysisResult.debug_info?.torvik_refresh || 'Live fetch'}`}>
-                                                        ⓘ Data Source
-                                                    </span>
-                                                </h3>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    {/* Model Inputs (Torvik team metrics used in narrative) */}
-                                                    <div className="col-span-2 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
-                                                        <div className="text-[11px] text-slate-400 font-semibold mb-2">Team inputs</div>
-                                                        {(() => {
-                                                            const ts = analysisResult.torvik_team_stats || {};
-                                                            const h = ts.home || {};
-                                                            const a = ts.away || {};
-                                                            const tempo = ts.game_tempo;
-
-                                                            const fmt = (v, d = 1) => {
-                                                                const n = Number(v);
-                                                                if (!Number.isFinite(n)) return '—';
-                                                                return n.toFixed(d);
-                                                            };
-
-                                                            const rows = [
-                                                                { k: 'AdjO', a: (a.adj_off ?? a.adjO), h: (h.adj_off ?? h.adjO), tip: 'Adjusted Offensive Efficiency (pts / 100 poss)' },
-                                                                { k: 'AdjD', a: (a.adj_def ?? a.adjD), h: (h.adj_def ?? h.adjD), tip: 'Adjusted Defensive Efficiency (pts allowed / 100 poss; lower is better)' },
-                                                                { k: 'Tempo', a: (a.tempo ?? a.adj_tempo), h: (h.tempo ?? h.adj_tempo), tip: 'Adjusted tempo (possessions / 40)' },
-                                                                { k: 'Luck', a: a.luck, h: h.luck, tip: 'Torvik luck factor' },
-                                                                { k: 'Continuity', a: a.continuity, h: h.continuity, tip: 'Roster continuity factor' },
-                                                            ];
-
-                                                            const awayName = selectedGame?.away_team || analysisResult.away_team || 'Away';
-                                                            const homeName = selectedGame?.home_team || analysisResult.home_team || 'Home';
-
-                                                            return (
-                                                                <>
-                                                                    <div className="grid grid-cols-3 gap-2 text-[11px]">
-                                                                        <div className="text-slate-500 font-semibold">Metric</div>
-                                                                        <div className="text-slate-300 font-semibold min-w-0 whitespace-normal break-words">{awayName}</div>
-                                                                        <div className="text-slate-300 font-semibold min-w-0 whitespace-normal break-words">{homeName}</div>
-
-                                                                        {/* Team context */}
-                                                                        <div className="text-slate-500 text-[10px] font-semibold">Context</div>
-                                                                        <div className="text-slate-400 text-[10px] font-semibold min-w-0 whitespace-normal break-words">
-                                                                            {a?.record ? `Rec ${a.record}` : 'Rec —'}
-                                                                            {analysisResult?.net_data?.away?.rank ? ` • NET #${analysisResult.net_data.away.rank}` : ''}
-                                                                        </div>
-                                                                        <div className="text-slate-400 text-[10px] font-semibold min-w-0 whitespace-normal break-words">
-                                                                            {h?.record ? `Rec ${h.record}` : 'Rec —'}
-                                                                            {analysisResult?.net_data?.home?.rank ? ` • NET #${analysisResult.net_data.home.rank}` : ''}
-                                                                        </div>
-
-                                                                        {rows.map((r) => {
-                                                                            const dec = (r.k === 'Luck' || r.k === 'Continuity') ? 2 : 1;
-                                                                            return (
-                                                                                <React.Fragment key={r.k}>
-                                                                                    <div className="text-slate-500" title={r.tip}>{r.k}</div>
-                                                                                    <div className="text-slate-200 font-mono font-bold">{fmt(r.a, dec)}</div>
-                                                                                    <div className="text-slate-200 font-mono font-bold">{fmt(r.h, dec)}</div>
-                                                                                </React.Fragment>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-
-                                                                    <div className="mt-2 text-[11px] text-slate-400">
-                                                                        Avg possessions (est.): <span className="text-slate-100 font-mono font-semibold">{tempo !== undefined && tempo !== null ? fmt(tempo, 1) : '—'}</span>
-                                                                    </div>
-
-                                                                    {(() => {
-                                                                        // Pace context: translate tempo into what it means for totals.
-                                                                        const t = Number(tempo);
-
-                                                                        // Prefer the bet line we're recommending (if this is a TOTAL pick), otherwise fall back to market total.
-                                                                        const topRec = (analysisResult?.recommendations || [])[0] || null;
-                                                                        const recTotal = topRec && String(topRec.bet_type || '').toUpperCase() === 'TOTAL'
-                                                                            ? Number(topRec.market_line ?? topRec.line ?? null)
-                                                                            : null;
-
-                                                                        const totalLine = Number(
-                                                                            (Number.isFinite(recTotal) ? recTotal : null)
-                                                                            ?? selectedGame?.total_line
-                                                                            ?? selectedGame?.total
-                                                                            ?? null
-                                                                        );
-
-                                                                        if (!Number.isFinite(t) || !Number.isFinite(totalLine) || t <= 1) return null;
-
-                                                                        // Combined points per possession (both teams) implied by the market total.
-                                                                        const pppCombined = totalLine / t;
-                                                                        const pppTeam = pppCombined / 2;
-
-                                                                        // Approx scoring-trip rate assuming ~2.05 pts per scoring trip (2s + 3s + FTs blend).
-                                                                        const ptsPerScoringTrip = 2.05;
-                                                                        const scoringTripRate = Math.min(1, Math.max(0, totalLine / (ptsPerScoringTrip * t)));
-
-                                                                        // Simple qualitative labels vs typical D1 averages (~1.02–1.06 PPP per team).
-                                                                        const lbl = (pppTeam >= 1.10) ? { txt: 'high-efficiency game', cls: 'text-emerald-300' }
-                                                                            : (pppTeam >= 1.03) ? { txt: 'around average efficiency', cls: 'text-slate-300' }
-                                                                                : { txt: 'lower-efficiency game', cls: 'text-amber-300' };
-
-                                                                        const paceLbl = (t >= 71) ? { txt: 'fast', cls: 'text-emerald-300' }
-                                                                            : (t >= 67) ? { txt: 'average', cls: 'text-slate-300' }
-                                                                                : { txt: 'slow', cls: 'text-amber-300' };
-
-                                                                        return (
-                                                                            <div className="mt-2 text-[11px] text-slate-500 space-y-1 leading-snug">
-                                                                                <div>
-                                                                                    Pace: <span className={`${paceLbl.cls} font-semibold`}>{paceLbl.txt}</span> • Total implies <span className="text-slate-200 font-mono font-semibold">{pppTeam.toFixed(2)}</span> pts/poss/team.
-                                                                                </div>
-                                                                                <div>
-                                                                                    Rough scoring-trip rate: <span className="text-slate-200 font-mono font-semibold">{(scoringTripRate * 100).toFixed(0)}%</span>
-                                                                                    <span className="text-slate-600"> (assumes ~{ptsPerScoringTrip.toFixed(2)} pts per scoring trip)</span>.
-                                                                                </div>
-                                                                                <div>
-                                                                                    Read: slow pace means fewer possessions—totals need more efficiency per trip. This looks like <span className={`${lbl.cls} font-semibold`}>{lbl.txt}</span>.
-                                                                                </div>
-                                                                            </div>
-                                                                        );
-                                                                    })()}
-                                                                </>
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 cursor-help" title="Projected final score computed from Torvik efficiency ratings (AdjO, AdjD) and tempo">
-                                                        <div className="text-[11px] text-slate-400 font-semibold mb-1">Projected score</div>
-                                                        {(() => {
-                                                            // torvik_view.projected_score is often "AwayScore-HomeScore"; make it explicit.
-                                                            const ps = String(analysisResult.torvik_view?.projected_score || '').trim();
-                                                            const parts = ps ? ps.split('-').map(x => x.trim()) : [];
-                                                            const awayScore = parts.length === 2 ? parts[0] : (ps || '—');
-                                                            const homeScore = parts.length === 2 ? parts[1] : (parts.length === 1 ? '—' : '');
-                                                            const awayName = selectedGame?.away_team || analysisResult.away_team || 'Away';
-                                                            const homeName = selectedGame?.home_team || analysisResult.home_team || 'Home';
-                                                            return (
-                                                                <div className="space-y-1">
-                                                                    <div className="flex justify-between text-white font-bold gap-2">
-                                                                        <span className="min-w-0 whitespace-normal break-words">{awayName}</span>
-                                                                        <span className="font-mono">{awayScore}</span>
-                                                                    </div>
-                                                                    <div className="flex justify-between text-white font-bold gap-2">
-                                                                        <span className="min-w-0 whitespace-normal break-words">{homeName}</span>
-                                                                        <span className="font-mono">{homeScore}</span>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 cursor-help" title="Expected margin based on efficiency differential and home court advantage">
-                                                        <div className="text-[11px] text-slate-400 font-semibold mb-1">Projected margin</div>
-                                                        <div className="text-lg font-bold text-white">
-                                                            {analysisResult.torvik_view?.margin !== undefined && analysisResult.torvik_view.margin !== null
-                                                                ? `${Number(analysisResult.torvik_view.margin) > 0 ? '+' : ''}${Number(analysisResult.torvik_view.margin).toFixed(1)}`
-                                                                : '—'}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="mt-4 text-[10px] text-slate-500 italic">
-                                                    {analysisResult.torvik_view?.lean || 'No data available'}
-                                                </div>
-                                                {/* Data freshness indicator */}
-                                                <div className="mt-3 pt-3 border-t border-slate-700/50 text-[9px] text-slate-500 flex items-center gap-2">
-                                                    <span className={`inline-block w-2 h-2 rounded-full ${analysisResult.torvik_view ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                                    {analysisResult.torvik_view ? 'Computed from Raw Efficiency' : 'Data Missing'} • {analysisResult.debug_info?.torvik_refresh || new Date().toLocaleDateString()}
-                                                </div>
-                                            </div>
-
-                                            {/* KenPom View */}
-                                            {analysisResult.kenpom_data && (
-                                                <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700/40">
-                                                    <h3 className="font-semibold text-slate-200 mb-4 flex items-center gap-2 text-sm">
-                                                        <Shield size={16} className="text-purple-400" />
-                                                        KenPom
-                                                    </h3>
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Spread Adj</div>
-                                                            <div className="text-lg font-bold text-white">
-                                                                {(analysisResult.kenpom_data.spread_adj || 0) > 0 ? '+' : ''}
-                                                                {Math.round((analysisResult.kenpom_data.spread_adj || 0) * 10) / 10}
-                                                            </div>
-                                                        </div>
-                                                        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                                            <div className="text-[10px] text-slate-500 uppercase font-black mb-1">Total Adj</div>
-                                                            <div className="text-lg font-bold text-white">
-                                                                {(analysisResult.kenpom_data.total_adj || 0) > 0 ? '+' : ''}
-                                                                {Math.round((analysisResult.kenpom_data.total_adj || 0) * 10) / 10}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-4 text-[10px] text-slate-500 italic">
-                                                        {analysisResult.kenpom_data.summary || 'No Summary'}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* News View */}
-                                            {analysisResult.news_summary && (
-                                                <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700/40">
-                                                    <h3 className="font-semibold text-slate-200 mb-4 flex items-center gap-2 text-sm">
-                                                        <AlertCircle size={16} className="text-amber-400" />
-                                                        News
-                                                    </h3>
-                                                    <div className="text-sm text-slate-300 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50 min-h-[80px]">
-                                                        {analysisResult.news_summary}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Torvik Team Stats + Game Script (removed — duplicated by Torvik View above) */}
-                                        {false && (analysisResult.torvik_team_stats || analysisResult.game_script) && (
-                                            <div>
-                                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Team Efficiency (Torvik) + Game Script</h3>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
-                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Efficiency snapshot</div>
-                                                        {(() => {
-                                                            const ts = analysisResult.torvik_team_stats || {};
-                                                            const h = ts.home || {};
-                                                            const a = ts.away || {};
-                                                            const tempo = ts.game_tempo;
-                                                            const paceLbl = labelPace(tempo);
-                                                            const hOff = labelOffense(h.adj_off);
-                                                            const hDef = labelDefense(h.adj_def);
-                                                            const aOff = labelOffense(a.adj_off);
-                                                            const aDef = labelDefense(a.adj_def);
-                                                            return (
-                                                                <div className="space-y-2 text-xs">
-                                                                    <div className="flex justify-between items-center">
-                                                                        <span className="text-slate-500">Avg possessions / team</span>
-                                                                        <span className={`${paceLbl.cls} font-bold`}>{tempo ? `${tempo}` : '—'}</span>
-                                                                    </div>
-                                                                    <div className="text-[10px] text-slate-500">Pace label: <span className={`${paceLbl.cls} font-bold`}>{paceLbl.label}</span></div>
-
-                                                                    <div className="border-t border-slate-700/50 pt-2">
-                                                                        <div className="flex items-center justify-between gap-2 mb-1">
-                                                                            <div className="text-slate-300 font-bold">{selectedGame?.home_team}</div>
-                                                                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
-                                                                                {h.torvik_rank ? <span>Torvik #{h.torvik_rank}</span> : null}
-                                                                                {analysisResult?.kenpom_data?.home_rank ? <span>KenPom #{analysisResult.kenpom_data.home_rank}</span> : null}
-                                                                                {analysisResult?.net_data?.home?.rank ? <span>NET #{analysisResult.net_data.home.rank}</span> : null}
-                                                                                {analysisResult?.net_data?.home?.rank && Number(analysisResult.net_data.home.rank) <= 25 ? <span className="px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">Top 25</span> : null}
-                                                                                {analysisResult?.kenpom_data?.home_rank && Number(analysisResult.kenpom_data.home_rank) <= 25 ? <span className="px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">KenPom Top 25</span> : null}
-                                                                            </div>
-                                                                        </div>
-                                                                        {h.record ? <div className="text-[11px] text-slate-400 mb-1">Record: <span className="text-slate-200 font-bold">{h.record}</span></div> : null}
-                                                                        {analysisResult?.net_data?.home ? (
-                                                                            <div className="text-[11px] text-slate-500 mb-1">
-                                                                                Q1 {analysisResult.net_data.home.quad1 || '—'} • Q2 {analysisResult.net_data.home.quad2 || '—'} • Q3 {analysisResult.net_data.home.quad3 || '—'} • Q4 {analysisResult.net_data.home.quad4 || '—'}
-                                                                                <span className="text-slate-600"> • </span>
-                                                                                H {analysisResult.net_data.home.home || '—'} / A {analysisResult.net_data.home.road || '—'} / N {analysisResult.net_data.home.neutral || '—'}
-                                                                            </div>
-                                                                        ) : null}
-                                                                        <div className="flex justify-between"><span className="text-slate-500">Offense</span><span className={`${hOff.cls} font-bold`}>{hOff.label}</span></div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">Defense</span><span className={`${hDef.cls} font-bold`}>{hDef.label}</span></div>
-                                                                        <div className="text-[10px] text-slate-500 mt-1">AdjO {h.adj_off?.toFixed ? h.adj_off.toFixed(1) : (h.adj_off ?? '—')} • AdjD {h.adj_def?.toFixed ? h.adj_def.toFixed(1) : (h.adj_def ?? '—')} • AdjT {h.adj_tempo?.toFixed ? h.adj_tempo.toFixed(1) : (h.adj_tempo ?? '—')}</div>
-                                                                    </div>
-
-                                                                    <div className="border-t border-slate-700/50 pt-2">
-                                                                        <div className="flex items-center justify-between gap-2 mb-1">
-                                                                            <div className="text-slate-300 font-bold">{selectedGame?.away_team}</div>
-                                                                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
-                                                                                {a.torvik_rank ? <span>Torvik #{a.torvik_rank}</span> : null}
-                                                                                {analysisResult?.kenpom_data?.away_rank ? <span>KenPom #{analysisResult.kenpom_data.away_rank}</span> : null}
-                                                                                {analysisResult?.net_data?.away?.rank ? <span>NET #{analysisResult.net_data.away.rank}</span> : null}
-                                                                                {analysisResult?.net_data?.away?.rank && Number(analysisResult.net_data.away.rank) <= 25 ? <span className="px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">Top 25</span> : null}
-                                                                                {analysisResult?.kenpom_data?.away_rank && Number(analysisResult.kenpom_data.away_rank) <= 25 ? <span className="px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-200">KenPom Top 25</span> : null}
-                                                                            </div>
-                                                                        </div>
-                                                                        {a.record ? <div className="text-[11px] text-slate-400 mb-1">Record: <span className="text-slate-200 font-bold">{a.record}</span></div> : null}
-                                                                        {analysisResult?.net_data?.away ? (
-                                                                            <div className="text-[11px] text-slate-500 mb-1">
-                                                                                Q1 {analysisResult.net_data.away.quad1 || '—'} • Q2 {analysisResult.net_data.away.quad2 || '—'} • Q3 {analysisResult.net_data.away.quad3 || '—'} • Q4 {analysisResult.net_data.away.quad4 || '—'}
-                                                                                <span className="text-slate-600"> • </span>
-                                                                                H {analysisResult.net_data.away.home || '—'} / A {analysisResult.net_data.away.road || '—'} / N {analysisResult.net_data.away.neutral || '—'}
-                                                                            </div>
-                                                                        ) : null}
-                                                                        <div className="flex justify-between"><span className="text-slate-500">Offense</span><span className={`${aOff.cls} font-bold`}>{aOff.label}</span></div>
-                                                                        <div className="flex justify-between"><span className="text-slate-500">Defense</span><span className={`${aDef.cls} font-bold`}>{aDef.label}</span></div>
-                                                                        <div className="text-[10px] text-slate-500 mt-1">AdjO {a.adj_off?.toFixed ? a.adj_off.toFixed(1) : (a.adj_off ?? '—')} • AdjD {a.adj_def?.toFixed ? a.adj_def.toFixed(1) : (a.adj_def ?? '—')} • AdjT {a.adj_tempo?.toFixed ? a.adj_tempo.toFixed(1) : (a.adj_tempo ?? '—')}</div>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </div>
-
-                                                    <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/50">
-                                                        <div className="text-[10px] text-slate-500 uppercase font-black mb-2">Game script (model view)</div>
-                                                        <div className="space-y-2">
-                                                            {(analysisResult.game_script || []).length ? (
-                                                                (analysisResult.game_script || []).slice(0, 5).map((x, i) => (
-                                                                    <div key={i} className="flex items-start gap-3 text-sm text-slate-300">
-                                                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-2"></div>
-                                                                        <div>{x}</div>
-                                                                    </div>
-                                                                ))
-                                                            ) : (
-                                                                <div className="text-slate-500 text-sm">No game script available yet.</div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Market Correlations */}
-                                                    {correlationResult && (
-                                                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 mt-4">
-                                                            <div className="flex items-center justify-between mb-3">
-                                                                <h3 className="font-bold text-white flex items-center gap-2">
-                                                                    <RefreshCw size={16} className="text-blue-400" />
-                                                                    Market Correlations
-                                                                </h3>
-                                                                {correlationResult.archetype && (
-                                                                    <div className="flex gap-2">
-                                                                        <span className="px-2 py-1 rounded bg-slate-700 text-xs font-mono text-slate-300">
-                                                                            {correlationResult.archetype.pace}
-                                                                        </span>
-                                                                        <span className="px-2 py-1 rounded bg-slate-700 text-xs font-mono text-slate-300">
-                                                                            {correlationResult.archetype.eff}
-                                                                        </span>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                            {correlationResult.correlations?.pairs?.over_home_cover ? (
-                                                                <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 flex justify-between items-center">
-                                                                    <div>
-                                                                        <div className="text-xs text-slate-500 uppercase font-bold">If OVER Hits → Home Cover %</div>
-                                                                        <div className="text-xl font-bold text-white">
-                                                                            {(correlationResult.correlations.pairs.over_home_cover.p_b_given_a * 100).toFixed(1)}%
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="text-right">
-                                                                        <div className="text-xs text-slate-500">Lift</div>
-                                                                        <div className={`text-lg font-bold ${correlationResult.correlations.pairs.over_home_cover.lift >= 1.2 ? 'text-green-400' : 'text-slate-200'}`}>
-                                                                            {correlationResult.correlations.pairs.over_home_cover.lift}x
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="text-sm text-slate-500">Insufficient data for archetype.</div>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Key Factors (removed — shown in Recommended Bet narrative above) */}
-                                        {false && analysisResult.key_factors && (
-                                            <div>
-                                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Key Factors</h3>
-                                                <div className="space-y-2">
-                                                    {analysisResult.key_factors?.map((factor, i) => (
-                                                        <div key={i} className="flex items-center gap-3 text-sm text-slate-300">
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                                                            {factor}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Risks (removed — shown in Recommended Bet narrative above) */}
-                                        {false && analysisResult.risks && (
-                                            <div>
-                                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Risk Factors</h3>
-                                                <div className="space-y-2">
-                                                    {analysisResult.risks?.map((risk, i) => (
-                                                        <div key={i} className="flex items-center gap-3 text-sm text-slate-300">
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-                                                            {risk}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : null}
-                            </div>
-                        </div>
-                    </div>
-                ) : null}
-
-            {activeTab === 'march' && (
-                <div className="mt-2">
-                    <MarchMadness />
-                </div>
+            {actionablePlays.length > 6 && (
+              <button
+                type="button"
+                onClick={() => setPickViewMode((m) => (m === 'top6' ? 'all' : 'top6'))}
+                className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
+              >
+                {pickViewMode === 'top6' ? `Show all ${actionablePlays.length} plays` : 'Show Top 6 only'}
+              </button>
             )}
+          </div>
 
-            {/* Native Modal Dialog: NCAAM Model Weighting & Logic */}
-            <dialog
-                ref={modelInfoDialogRef}
-                {...({ closedby: 'any' })}
-                aria-labelledby="modelInfoDialogTitle"
-                onClick={handleModelInfoDialogBackdropClick}
-                className="backdrop:bg-black/70 backdrop:backdrop-blur-sm bg-slate-900 text-slate-100 border border-slate-700/80 rounded-2xl shadow-2xl max-w-3xl w-[94vw] max-h-[88vh] p-0 overflow-hidden m-auto"
-            >
-                <div className="flex flex-col max-h-[88vh]">
-                    <div className="flex items-center justify-between px-6 py-4 bg-slate-950/80 border-b border-slate-800">
-                        <div className="flex items-center gap-2.5">
-                            <div className="p-2 rounded-lg bg-blue-500/15 border border-blue-400/30 text-blue-400">
-                                <Info size={18} />
-                            </div>
-                            <div>
-                                <h2 id="modelInfoDialogTitle" className="text-lg font-bold text-white">
-                                    How the Model Works
-                                </h2>
-                                <p className="text-xs text-slate-400">
-                                    A plain-English guide to our college basketball betting picks, ratings, and value scores
-                                </p>
-                            </div>
-                        </div>
-                        <form method="dialog">
-                            <button
-                                type="submit"
-                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
-                            >
-                                Close
-                            </button>
-                        </form>
-                    </div>
+          {loading ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-44 rounded-2xl border border-slate-800 bg-slate-900/50 animate-pulse" />
+              ))}
+            </div>
+          ) : filteredTopPlays.length === 0 ? (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-2">
+              <h3 className="text-base font-bold text-slate-200">
+                No Qualifying Top Plays Match This Filter
+              </h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Switch filters above or open the Full Board tab to inspect every game&apos;s fair line, injuries, and public splits.
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('board')}
+                className="mt-2 inline-flex px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white cursor-pointer"
+              >
+                View Full Board ({slateSummary.totalGames} games)
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredTopPlays.map((item, idx) => (
+                <TodayPlayCard
+                  key={item.id}
+                  rank={idx + 1}
+                  game={item.game}
+                  rec={item.rec}
+                  isExpanded={expandedPickIds.has(item.id)}
+                  onToggleExpand={() => toggleWhyPick(item.id)}
+                  onOpenDetails={handleOpenGameDetails}
+                  onAddBet={onAddBet}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
-                    <div className="p-6 overflow-y-auto space-y-6 text-sm leading-relaxed">
-                        {/* 1. Core Idea: Market-First Betting */}
-                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
-                            <h3 className="text-xs font-black uppercase tracking-wider text-blue-400 mb-2">
-                                1. The Core Idea: Market-First Betting
-                            </h3>
-                            <p className="text-slate-300 text-xs mb-3">
-                                Sportsbooks are very good at setting lines, so we don't try to predict final scores out of thin air. Instead, we start with the live sportsbook consensus line as our baseline and compare it against multiple independent college basketball rating systems (<strong>BartTorvik</strong>, <strong>Haslametrics</strong>, and <strong>KenPom</strong>), alongside live public money splits, injury reports, and referee crews.
-                            </p>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-950/70 p-3 rounded-lg border border-slate-800">
-                                <div>
-                                    <div className="text-slate-400 font-semibold mb-1">Point Spreads:</div>
-                                    <div className="text-emerald-300">
-                                        Sportsbook Spread + Adjustment (team efficiency difference, home court advantage, and rest).
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-slate-400 font-semibold mb-1">Over/Under Totals:</div>
-                                    <div className="text-amber-300">
-                                        Sportsbook Total + Adjustment (expected game pace and offensive vs. defensive scoring rates).
-                                    </div>
-                                </div>
-                            </div>
-                            <p className="text-slate-400 text-xs mt-2.5">
-                                If the computer ratings show a team is noticeably better or worse than the sportsbook thinks, the model calculates what the line <em>should</em> be (our <strong>Fair Line</strong>). The difference between the sportsbook line and our fair line is our <strong>Edge</strong>.
-                            </p>
-                        </section>
+      {activeSubTab === 'board' && (
+        <section role="tabpanel" aria-label="Full daily betting board">
+          <TodayFullBoardTable
+            edges={edges}
+            leagueFilter={leagueFilter}
+            rowTopPicks={rowTopPicks}
+            rowTopPicksByKey={rowTopPicksByKey}
+            onOpenDetails={handleOpenGameDetails}
+            onAddBet={onAddBet}
+          />
+        </section>
+      )}
 
-                        {/* 2. Why Season Timing Matters */}
-                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
-                            <h3 className="text-xs font-black uppercase tracking-wider text-emerald-400 mb-2">
-                                2. Why the Time of Year Matters
-                            </h3>
-                            <p className="text-slate-300 text-xs mb-3">
-                                College basketball teams change drastically every off-season with the transfer portal and freshmen. The model automatically adjusts how much it trusts computer models versus sportsbooks depending on the month:
-                            </p>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs border-collapse">
-                                    <thead>
-                                        <tr className="border-b border-slate-700 text-slate-400 uppercase text-[10px]">
-                                            <th className="py-2 pr-3">Time of Season</th>
-                                            <th className="py-2 px-2">Sportsbook Trust</th>
-                                            <th className="py-2 px-2">Model Trust</th>
-                                            <th className="py-2 pl-2">How It Works</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-800 text-slate-200">
-                                        <tr>
-                                            <td className="py-2 pr-3 font-semibold text-blue-300">November (Early Season)</td>
-                                            <td className="py-2 px-2 font-mono text-emerald-300">78%</td>
-                                            <td className="py-2 px-2 font-mono">22%</td>
-                                            <td className="py-2 pl-2 text-slate-300">Heavy trust in sportsbooks while rosters settle; small, cautious model adjustments.</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 pr-3 font-semibold">December (Non-Conference)</td>
-                                            <td className="py-2 px-2 font-mono text-emerald-300">67%</td>
-                                            <td className="py-2 px-2 font-mono">33%</td>
-                                            <td className="py-2 pl-2 text-slate-300">Ratings begin updating as teams play real opponents.</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 pr-3 font-semibold">January (Conference Play)</td>
-                                            <td className="py-2 px-2 font-mono text-emerald-300">55%</td>
-                                            <td className="py-2 px-2 font-mono">45%</td>
-                                            <td className="py-2 pl-2 text-slate-300">Conference matchups provide reliable, head-to-head game data.</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 pr-3 font-semibold">February (Late Season)</td>
-                                            <td className="py-2 px-2 font-mono text-emerald-300">48%</td>
-                                            <td className="py-2 px-2 font-mono">52%</td>
-                                            <td className="py-2 pl-2 text-slate-300">Rotations and team identities are clear; computer data takes the lead.</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-2 pr-3 font-semibold text-orange-300">March (Tournament Time)</td>
-                                            <td className="py-2 px-2 font-mono text-emerald-300">42%</td>
-                                            <td className="py-2 px-2 font-mono">58%</td>
-                                            <td className="py-2 pl-2 text-slate-300">Full season sample size; neutral-court adjustments for March Madness.</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="mt-2.5 text-[11px] text-slate-400">
-                                <strong>Roster Turnover Safety Rule:</strong> If a team returned less than half its players from last year, the model automatically reduces its adjustment size to protect against early-season volatility.
-                            </div>
-                        </section>
+      {activeSubTab === 'parlays' && leagueFilter === 'NCAAM' && (
+        <section role="tabpanel" aria-label="2-Leg Parlay Recommendations">
+          <ParlayRecommendations date={selectedDate} />
+        </section>
+      )}
 
-                        {/* 3. Extra Matchup & Situational Signals */}
-                        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
-                                <h3 className="text-xs font-black uppercase tracking-wider text-purple-400 mb-2">
-                                    3. Matchup Factors
-                                </h3>
-                                <ul className="space-y-2 text-xs text-slate-300 list-disc pl-4">
-                                    <li><strong>Home Court Advantage:</strong> Gives home teams about +3.2 points (0 on neutral courts), plus extra boosts for high-altitude arenas (like Colorado or Utah).</li>
-                                    <li><strong>Pace of Play (Tempo):</strong> Fast-tempo teams create more possessions (higher totals and wider score swings), while slow-tempo teams grind out low-possession games.</li>
-                                    <li><strong>Travel Fatigue:</strong> Adds a penalty when visiting teams travel cross-country (&gt;1,000 miles) or play with less rest than their opponent.</li>
-                                </ul>
-                            </div>
+      {activeSubTab === 'march_madness' && leagueFilter === 'NCAAM' && (
+        <section role="tabpanel" aria-label="March Madness Bracket">
+          <MarchMadness />
+        </section>
+      )}
 
-                            <div className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
-                                <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 mb-2">
-                                    4. Situational Spots
-                                </h3>
-                                <ul className="space-y-2 text-xs text-slate-300 list-disc pl-4">
-                                    <li><strong>3-Point Shooting Streaks:</strong> Fades teams that have been unsustainably hot from 3-point range over recent games, anticipating a return to their normal average.</li>
-                                    <li><strong>Letdown / Trap Games:</strong> Flags teams coming off huge emotional upsets against top-ranked rivals who may come out flat in their next game.</li>
-                                    <li><strong>Late-Game Fouling:</strong> Total adjustments account for referee whistle tendencies and end-game intentional foul strategies.</li>
-                                </ul>
-                            </div>
-                        </section>
+      {/* Native <dialog> Modals */}
+      <TodayMatchupModal
+        game={selectedGame}
+        analysisResult={analysisResult}
+        correlationResult={correlationResult}
+        matchupProfile={selectedGame ? matchupProfiles[selectedGame.id] : null}
+        isAnalyzing={isAnalyzing}
+        onClose={() => {
+          setSelectedGame(null);
+          setAnalysisResult(null);
+          setCorrelationResult(null);
+        }}
+        onAddBet={onAddBet}
+        onAnalysisUpdated={(fresh) => setAnalysisResult(fresh)}
+      />
 
-                        {/* 4. Safety Guardrails */}
-                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
-                            <h3 className="text-xs font-black uppercase tracking-wider text-rose-400 mb-2">
-                                5. Safety Guardrails
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
-                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                                    <div className="font-bold text-white mb-1">Strict Deviation Caps</div>
-                                    The model can never move a spread by more than <strong>2.0 to 3.0 points</strong> or a total by more than <strong>3.0 to 4.5 points</strong>. This ensures a single outlier projection can never hijack a pick.
-                                </div>
-                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                                    <div className="font-bold text-white mb-1">Market Line Checks</div>
-                                    We compare lines across multiple sportsbooks. If books disagree widely or sharp money is aggressively moving the other way, the model flags or blocks the play.
-                                </div>
-                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
-                                    <div className="font-bold text-white mb-1">Publish Standards</div>
-                                    A bet is only recommended when it has at least a <strong>1.5-point edge</strong> against the market and at least a <strong>+2.0% expected profit margin</strong>.
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* 5. EV, Confidence & Top 6 Selection */}
-                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
-                            <h3 className="text-xs font-black uppercase tracking-wider text-sky-400 mb-3">
-                                6. EV%, Confidence Levels &amp; Top 6 Ranking
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
-                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
-                                    <div className="font-bold text-white">What Is EV (Expected Value %)?</div>
-                                    <p>
-                                        <strong className="text-emerald-300">EV%</strong> measures your expected return per dollar wagered based on the difference between our model's win probability and the sportsbook odds:
-                                    </p>
-                                    <div className="text-[11px] text-slate-200 bg-slate-900/90 p-2 rounded border border-slate-800">
-                                        <strong>Example:</strong> A pick with <span className="text-emerald-300 font-bold">+8.5% EV</span> means that if you placed 100 bets like this for $100 each ($10,000 total), you would expect to earn about <strong>+$850 in net profit</strong> over the long haul.
-                                    </div>
-                                    <p className="text-slate-400">
-                                        Better odds give you more value. Getting <code className="text-slate-200">-105</code> instead of <code className="text-slate-200">-110</code> directly boosts your EV% because you risk less to win the same payout.
-                                    </p>
-                                </div>
-
-                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
-                                    <div className="font-bold text-white">Confidence Levels (High / Medium / Low)</div>
-                                    <p>
-                                        Confidence tells you how frequently the model expects the bet to win:
-                                    </p>
-                                    <ul className="space-y-1 pl-1">
-                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] mr-1">HIGH</span> Win chance of <strong>55% or higher</strong></li>
-                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold text-[10px] mr-1">MEDIUM</span> Win chance of <strong>52.0% – 54.9%</strong></li>
-                                        <li><span className="inline-block px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-bold text-[10px] mr-1">LOW</span> Win chance under 52% (near break-even)</li>
-                                    </ul>
-                                    <p className="text-slate-400">
-                                        <strong>Confidence</strong> is <em>how often</em> the bet wins; <strong>EV%</strong> is <em>how much value</em> you get for the price you pay.
-                                    </p>
-                                </div>
-
-                                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
-                                    <div className="font-bold text-white">Why Are These the Top 6 Plays?</div>
-                                    <p>
-                                        The model reviews every college basketball game scheduled for today. For each game, it identifies whether the Spread or Over/Under is the better opportunity.
-                                    </p>
-                                    <p>
-                                        It filters out any game that doesn't meet its minimum edge and quality standards, and then <strong>ranks all qualifying bets from highest EV% to lowest</strong>.
-                                    </p>
-                                    <p className="text-slate-400">
-                                        The <strong>Top 6 Plays</strong> are simply the 6 bets on today's board offering the greatest mathematical advantage against the sportsbooks.
-                                    </p>
-                                </div>
-                            </div>
-                        </section>
-
-                        {/* 7. Live Data Sources & Manual KenPom CSV Import */}
-                        <section className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 space-y-4">
-                            <div>
-                                <h3 className="text-xs font-black uppercase tracking-wider text-indigo-400 mb-2">
-                                    7. Live Data Sources &amp; KenPom Import
-                                </h3>
-                                <p className="text-xs text-slate-300 mb-3">
-                                    Every game is checked against multiple feeds. When KenPom isn&apos;t uploaded yet, the model automatically blends <strong>BartTorvik</strong> (65%) and <strong>Haslametrics</strong> (35%), then layers in public ticket vs. money splits, pre-game injuries, and assigned referees.
-                                </p>
-                                {(() => {
-                                    const by = {};
-                                    (dataHealth || []).forEach((item) => {
-                                        if (item?.source) by[item.source] = item;
-                                    });
-                                    const feedDefs = [
-                                        { key: 'torvik', label: 'BartTorvik' },
-                                        { key: 'haslametrics', label: 'Haslametrics' },
-                                        { key: 'kenpom', label: 'KenPom' },
-                                        { key: 'odds', label: 'Sportsbook Odds' },
-                                        { key: 'action_splits', label: 'Public Splits' },
-                                    ];
-                                    const fmtAge = (iso) => {
-                                        if (!iso) return 'No data yet';
-                                        const ms = Date.now() - new Date(iso).getTime();
-                                        if (!Number.isFinite(ms) || ms < 0) return 'Updated';
-                                        const mins = Math.round(ms / 60000);
-                                        if (mins < 60) return `${mins}m ago`;
-                                        const hrs = Math.round(mins / 60);
-                                        if (hrs < 48) return `${hrs}h ago`;
-                                        return `${Math.round(hrs / 24)}d ago`;
-                                    };
-                                    return (
-                                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                                            {feedDefs.map((feed) => {
-                                                const row = by[feed.key];
-                                                const st = String(row?.status || 'unknown').toLowerCase();
-                                                const badgeCls = st === 'ok'
-                                                    ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
-                                                    : (st === 'warning' || st === 'alert' || st === 'stale')
-                                                        ? 'border-amber-500/35 bg-amber-500/10 text-amber-300'
-                                                        : st === 'error'
-                                                            ? 'border-rose-500/35 bg-rose-500/10 text-rose-300'
-                                                            : 'border-slate-700 bg-slate-900/80 text-slate-400';
-                                                const labelText = st === 'ok'
-                                                    ? 'Fresh'
-                                                    : (st === 'warning' || st === 'alert')
-                                                        ? 'Check'
-                                                        : st === 'stale'
-                                                            ? 'Stale'
-                                                            : st === 'error'
-                                                                ? 'Issue'
-                                                                : 'Pending';
-                                                return (
-                                                    <div key={feed.key} className={`rounded-lg border px-2.5 py-2 text-[11px] ${badgeCls}`}>
-                                                        <div className="font-bold text-slate-100 truncate">{feed.label}</div>
-                                                        <div className="flex items-center justify-between gap-1 mt-0.5 text-[10px]">
-                                                            <span className="font-semibold">{labelText}</span>
-                                                            <span className="opacity-80">{fmtAge(row?.last_success_at)}</span>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    );
-                                })()}
-                            </div>
-
-                            <form
-                                aria-labelledby="kenpomUploadHeading"
-                                method="POST"
-                                onSubmit={handleKenpomCsvUpload}
-                                className="bg-slate-900/80 border border-slate-700/70 rounded-lg p-3.5 space-y-2.5"
-                            >
-                                <div className="flex items-center justify-between gap-2">
-                                    <h4 id="kenpomUploadHeading" className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
-                                        <Upload size={14} className="text-purple-400" aria-hidden="true" />
-                                        <span>Import Your KenPom Ratings (CSV / TSV)</span>
-                                    </h4>
-                                    <span className="text-[10px] text-slate-400">Optional boost</span>
-                                </div>
-
-                                <div className="flex flex-col sm:flex-row sm:items-end gap-2.5">
-                                    <div className="flex-1 min-w-0">
-                                        <label htmlFor="kenpom-csv-file" className="block text-[11px] font-medium text-slate-300 mb-1">
-                                            KenPom ratings file (.csv or .tsv)
-                                        </label>
-                                        <input
-                                            ref={kenpomFileInputRef}
-                                            id="kenpom-csv-file"
-                                            name="file"
-                                            type="file"
-                                            accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain"
-                                            aria-describedby="kenpom-csv-help"
-                                            onChange={(e) => {
-                                                const f = e.target.files?.[0] || null;
-                                                setKenpomCsvFile(f);
-                                                if (kenpomUploadState.status !== 'idle') {
-                                                    setKenpomUploadState({ uploading: false, status: 'idle', message: '' });
-                                                }
-                                            }}
-                                            className="block w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-slate-600 file:bg-slate-800 file:text-xs file:font-semibold file:text-slate-100 hover:file:bg-slate-700 cursor-pointer"
-                                        />
-                                    </div>
-                                    <button
-                                        type="submit"
-                                        disabled={kenpomUploadState.uploading || !kenpomCsvFile}
-                                        className="shrink-0 inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 disabled:opacity-45 disabled:cursor-not-allowed text-white transition-colors cursor-pointer"
-                                    >
-                                        <Upload size={13} aria-hidden="true" />
-                                        <span>{kenpomUploadState.uploading ? 'Importing...' : 'Upload KenPom CSV'}</span>
-                                    </button>
-                                </div>
-
-                                <p id="kenpom-csv-help" className="text-[11px] text-slate-400 leading-snug">
-                                    Export the main summary ratings table from your KenPom subscription as a CSV (or paste table rows into a .tsv file) and upload it here to immediately feed KenPom efficiency &amp; tempo numbers into today&apos;s picks.
-                                </p>
-
-                                <div
-                                    role="status"
-                                    aria-live="polite"
-                                    className={kenpomUploadState.message
-                                        ? `text-xs rounded-md px-2.5 py-1.5 border ${kenpomUploadState.status === 'success'
-                                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                                            : kenpomUploadState.status === 'error'
-                                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                                                : 'bg-blue-500/10 border-blue-500/30 text-blue-300'}`
-                                        : 'sr-only'}
-                                >
-                                    {kenpomUploadState.message || ''}
-                                </div>
-                            </form>
-                        </section>
-                    </div>
-                </div>
-            </dialog>
-        </div>
-    )
-}
+      <ModelLogicDialog
+        open={showModelLogicDialog}
+        onClose={() => setShowModelLogicDialog(false)}
+        dataHealth={dataHealth}
+        onKenpomUploaded={fetchSchedule}
+      />
+    </div>
+  );
+};
 
 export default Research;

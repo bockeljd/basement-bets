@@ -839,15 +839,34 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 print(f"[MODEL] Haslametrics fetch error: {e}")
                 haslametrics_view = None
 
-        injury_context = {"has_injuries": False, "injuries": [], "sigma_mult": 1.0}
+        # KenPom player stats (used for injury point impact + UI/debug context)
+        kp_players_home = []
+        kp_players_away = []
+        try:
+            kp_players_home = self.kenpom_client.get_player_stats_for_team(event['home_team'], limit=50) or []
+            kp_players_away = self.kenpom_client.get_player_stats_for_team(event['away_team'], limit=50) or []
+        except Exception as e:
+            print(f"[MODEL] KenPom player stats fetch error: {e}")
+
+        injury_context = {"has_injuries": False, "injuries": [], "sigma_mult": 1.0, "spread_adj": 0.0, "total_adj": 0.0}
         if getattr(self, 'injury_service', None) is not None:
             try:
-                injury_context = self.injury_service.get_matchup_injuries(
-                    event_id=event['id'],
-                    home_team=event['home_team'],
-                    away_team=event['away_team'],
-                    allow_live_fallback=False,
-                )
+                try:
+                    injury_context = self.injury_service.get_matchup_injuries(
+                        event_id=event['id'],
+                        home_team=event['home_team'],
+                        away_team=event['away_team'],
+                        allow_live_fallback=False,
+                        home_players=kp_players_home,
+                        away_players=kp_players_away,
+                    )
+                except TypeError:
+                    injury_context = self.injury_service.get_matchup_injuries(
+                        event_id=event['id'],
+                        home_team=event['home_team'],
+                        away_team=event['away_team'],
+                        allow_live_fallback=False,
+                    )
             except Exception as e:
                 print(f"[MODEL] Injury lookup error: {e}")
 
@@ -964,11 +983,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if avg_continuity < 0.5:
             w_base = min(w_base, 0.10)
         w_kp_target = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity)
+        w_hasla_override = os.getenv('NCAAM_W_HASLA')
         w_hasla = 0.0
         if kp_available and hasla_available:
             # Blend all 3 rating sources (Torvik + KenPom + Haslametrics) within calibrated projection budget
             total_budget = min(w_base + w_kp_target, 0.58)
-            if os.getenv('NCAAM_W_BASE') is None:
+            if w_hasla_override is not None:
+                w_kp = round(w_kp_target * 0.70, 4)
+                w_hasla = float(w_hasla_override)
+            elif os.getenv('NCAAM_W_BASE') is None:
                 w_kp = round(w_kp_target * 0.70, 4)
                 w_hasla = round(w_kp_target * 0.30 + (w_base * 0.15), 4)
                 w_base = round(max(0.05, total_budget - w_kp - w_hasla), 4)
@@ -980,7 +1003,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
         elif hasla_available:
             # No KenPom available: split projection budget 65% Torvik / 35% Haslametrics
             w_kp = 0.0
-            if os.getenv('NCAAM_W_BASE') is None:
+            if w_hasla_override is not None:
+                w_hasla = float(w_hasla_override)
+            elif os.getenv('NCAAM_W_BASE') is None:
                 total_budget = min(w_base + w_kp_target, 0.45)
                 w_hasla = round(total_budget * 0.35, 4)
                 w_base = round(total_budget - w_hasla, 4)
@@ -1001,6 +1026,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
             + (w_hasla * diff_hasla)
             + luck_adjustment
         )
+        self._last_spread_components = {
+            "mu_market_spread": float(mu_market_spread),
+            "diff_torvik": float(diff_torvik),
+            "diff_kenpom": float(diff_kenpom),
+            "diff_hasla": float(diff_hasla),
+            "other_adj": float((self.W_SCHED * diff_sched) + luck_adjustment),
+            "w_base": float(w_base),
+            "w_kp": float(w_kp),
+            "w_hasla": float(w_hasla),
+        }
         
         # --- Feature: Agent Council Qualitative Adjustment ---
         # Explanations-only mode: we still fetch and persist council narratives for UI,
@@ -1215,6 +1250,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
         fatigue_adj = h_fatigue - a_fatigue
         mu_spread_final += fatigue_adj
 
+        # -- Automated Player-Level Injury Impact (bounded) --
+        inj_spread_adj = float((injury_context or {}).get('spread_adj') or 0.0)
+        inj_total_adj = float((injury_context or {}).get('total_adj') or 0.0)
+        inj_spread_adj = max(-3.0, min(3.0, inj_spread_adj))
+        inj_total_adj = max(-3.0, min(0.5, inj_total_adj))
+        if inj_spread_adj != 0.0:
+            mu_spread_final += inj_spread_adj
+        if inj_total_adj != 0.0:
+            mu_total_final += inj_total_adj
+
         # Re-clamp automated spread adjustments so micro-signals cannot exceed CAP_SPREAD + 1.0
         max_auto_spread_dev = self.CAP_SPREAD + 1.0
         if abs(mu_spread_final - mu_market_spread) > max_auto_spread_dev:
@@ -1258,15 +1303,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
             except Exception as e:
                 print(f"[NEWS] fetch_game_context failed: {e}")
                 news_context = {}
-        
-        # KenPom player stats (best-effort): currently used for UI/debug only.
-        kp_players_home = []
-        kp_players_away = []
-        try:
-            kp_players_home = self.kenpom_client.get_player_stats_for_team(event['home_team'], limit=50) or []
-            kp_players_away = self.kenpom_client.get_player_stats_for_team(event['away_team'], limit=50) or []
-        except Exception as e:
-            print(f"[MODEL] KenPom player stats fetch error: {e}")
 
         ref_summary = None
         try:
@@ -1308,6 +1344,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
             },
             "public_splits": action_splits or None,
             "injuries": (injury_context or {}).get("injuries") or [],
+            "injuries_impact": {
+                "spread_adj": inj_spread_adj,
+                "total_adj": inj_total_adj,
+                "home_impact_pts": float((injury_context or {}).get("home_impact_pts") or 0.0),
+                "away_impact_pts": float((injury_context or {}).get("away_impact_pts") or 0.0),
+                "impact_players": (injury_context or {}).get("impact_players") or [],
+            } if ((injury_context or {}).get("has_injuries") or inj_spread_adj != 0.0 or inj_total_adj != 0.0) else None,
             "referees": ref_summary,
             "weights": {
                 "torvik": round(float(w_base), 3),
@@ -1331,6 +1374,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "shooting_adj": shooting_adj,
             "spot_adj": spot_adj,
             "fatigue_adj": fatigue_adj,
+            "injury_spread_adj": inj_spread_adj,
+            "injury_total_adj": inj_total_adj,
             "bell_curve_spread": bell_curve_spread,
             "bell_curve_total": bell_curve_total,
             "torvik_refresh": datetime.now().strftime('%Y-%m-%d %H:%M'),  # When Torvik data was fetched
@@ -2381,14 +2426,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
         recs: List[Dict],
         action_splits: Optional[Dict] = None,
         injury_context: Optional[Dict] = None,
+        market_consensus: Optional[Dict] = None,
         relax_gates: bool = False,
     ) -> List[Dict]:
-        """Adjust/annotate recommendations with Action Network ticket vs money splits."""
+        """Adjust/annotate recommendations with Action Network splits, RLM alignment, and injuries."""
         if not recs:
             return recs
 
         splits = action_splits or {}
         inj_count = len((injury_context or {}).get("injuries") or [])
+        inj_spread = abs(float((injury_context or {}).get("spread_adj") or 0.0))
+        inj_total = abs(float((injury_context or {}).get("total_adj") or 0.0))
+        mc = market_consensus or {}
         filtered: List[Dict] = []
 
         for r in recs:
@@ -2412,14 +2461,30 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 opp_bets = opp_s.get("bet_pct")
                 opp_money = opp_s.get("handle_pct")
 
-                if (
+                is_sharp_split = (
                     pick_bets is not None
                     and pick_money is not None
                     and float(pick_money) >= 55.0
                     and (float(pick_money) - float(pick_bets)) >= 12.0
-                ):
+                )
+                if is_sharp_split:
                     if "sharp_backing" not in tags:
                         tags.append("sharp_backing")
+
+                    # Check line direction relative to pick without chasing heavy steam (>1.5 pts)
+                    line_aligned = False
+                    if mkt == "SPREAD" and mc.get("open_spread_home") is not None and mc.get("current_spread_home") is not None:
+                        move_home = float(mc["current_spread_home"]) - float(mc["open_spread_home"])
+                        move_toward_pick = (-move_home) if side == "HOME" else move_home
+                        line_aligned = 0.0 <= move_toward_pick <= 1.5
+                    elif mkt == "TOTAL" and mc.get("open_total") is not None and mc.get("current_total") is not None:
+                        move_t = float(mc["current_total"]) - float(mc["open_total"])
+                        line_aligned = (0.0 <= move_t <= 1.5) if side == "OVER" else (-1.5 <= move_t <= 0.0)
+
+                    if line_aligned:
+                        if "rlm_confirmed" not in tags:
+                            tags.append("rlm_confirmed")
+                        rec["ev"] = round(float(rec.get("ev") or 0.0) + 0.005, 4)
 
                 if (
                     opp_bets is not None
@@ -2438,6 +2503,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             if inj_count > 0 and "injury_report_active" not in tags:
                 tags.append("injury_report_active")
+            if (inj_spread >= 0.4 or inj_total >= 0.4) and "injury_line_adjusted" not in tags:
+                tags.append("injury_line_adjusted")
 
             if tags:
                 rec["movement_tags"] = tags
@@ -2907,6 +2974,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             recs,
             action_splits=action_splits,
             injury_context=injury_context,
+            market_consensus=(snap.get('_market_consensus') if isinstance(snap, dict) else None),
             relax_gates=relax_gates,
         )
 
@@ -3027,10 +3095,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 )
 
         inj_list = signals.get('injuries') or []
+        inj_impact = signals.get('injuries_impact') or {}
         if inj_list:
             names = [f"{i.get('player')} ({i.get('status')})" for i in inj_list[:3] if i.get('player')]
             if names:
                 risks.append(f"Injury watch: {', '.join(names)}")
+        if isinstance(inj_impact, dict):
+            isa = float(inj_impact.get('spread_adj') or 0.0)
+            ita = float(inj_impact.get('total_adj') or 0.0)
+            if abs(isa) >= 0.4:
+                side_lbl = "away" if isa < 0 else "home"
+                key_factors.append(f"Injury line adjustment: {abs(isa):.1f} pts against {side_lbl} from reported absences")
+            if abs(ita) >= 0.4:
+                key_factors.append(f"Injury scoring impact: {ita:+.1f} pts on projected total")
 
         ref_info = signals.get('referees') or {}
         if isinstance(ref_info, dict) and ref_info.get('officials'):

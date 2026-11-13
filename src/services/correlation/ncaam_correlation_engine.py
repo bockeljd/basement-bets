@@ -114,18 +114,19 @@ class NCAAMCorrelationEngine:
         Enriches DF with 'pace_bin', 'eff_bin', 'spread_bucket'.
         """
         if df.empty: return df
-        
+
+        # Coerce Postgres Decimal/object numerics to float before arithmetic.
+        for col in ('home_pace', 'away_pace', 'home_net_eff', 'away_net_eff', 'close_spread'):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
+
         # 1. Pace Index (Avg of teams)
-        # Fill missing with mean
-        df['pace_index'] = (df['home_pace'].fillna(68.0) + df['away_pace'].fillna(68.0)) / 2
+        df['pace_index'] = (df['home_pace'].fillna(68.0) + df['away_pace'].fillna(68.0)) / 2.0
         
-        # 2. Efficiency Index (Sum of net ratings? Or average quality?)
-        # "Clash" index: (HomeOff - AwayDef) + (AwayOff - HomeDef)?
-        # Simple proxy: Sum of Net Efficiencies (Good vs Good game vs Bad vs Bad)
-        df['eff_index'] = (df['home_net_eff'].fillna(0) + df['away_net_eff'].fillna(0))
+        # 2. Efficiency Index ("Clash" proxy: sum of Net Efficiencies)
+        df['eff_index'] = (df['home_net_eff'].fillna(0.0) + df['away_net_eff'].fillna(0.0))
         
         # 3. Spread Bucket
-        # Absolute spread size
         df['abs_spread'] = df['close_spread'].abs()
         df['spread_bucket'] = pd.cut(
             df['abs_spread'], 
@@ -151,11 +152,11 @@ class NCAAMCorrelationEngine:
         """
         if df.empty: return {}
         
-        # Define Binary Legs
-        # Note: We need to know if spread is Home or Away line.
-        # Simplification: Assume 'close_spread' from DB is "Home Line".
-        # Real logic needs 'side' from snapshot.
-        # Let's fix the SQL in next iteration if needed.
+        # Define Binary Legs (coerce Decimal/object Postgres numerics safely)
+        df = df.copy()
+        for col in ('margin', 'close_spread', 'total_score', 'close_total'):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
         df['home_cover'] = (df['margin'] + df['close_spread']) > 0
         df['away_cover'] = (df['margin'] + df['close_spread']) < 0
         df['total_over'] = df['total_score'] > df['close_total']
