@@ -1687,35 +1687,30 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = 
 
     # Combined History: Canonical Slate-backed + User Fallback
     from src.database import fetch_recommended_history_canonical, fetch_model_history
+    from src.utils.model_performance import dedupe_and_merge_history
+
     canonical_rows = fetch_recommended_history_canonical(limit=limit, lookback_days=lookback_days, user_id=user_id)
-    canonical_rows = [dict(r) for r in canonical_rows]
-    for r in canonical_rows:
-        r['source_type'] = 'canonical_slate'
-    
-    seen_ids = {r['id'] for r in canonical_rows if r.get('id')}
-    
-    # Legacy User Fallback
     user_rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
-    user_rows = [dict(r) for r in user_rows if dict(r).get('id') not in seen_ids]
     for r in user_rows:
         r['source_type'] = 'fallback_prediction'
-    
-    rows = canonical_rows + user_rows
-    seen_ids.update({r['id'] for r in user_rows if r.get('id')})
+
+    rows = dedupe_and_merge_history(canonical_rows, user_rows)
 
     # Global Fallback
     if not rows:
         global_rows = fetch_model_history(user_id=None, recommended_only=True, limit=limit, lookback_days=lookback_days)
-        global_rows = [dict(r) for r in global_rows if dict(r).get('id') not in seen_ids]
         for r in global_rows:
             r['source_type'] = 'legacy_fallback'
-        rows += global_rows
-    
+        rows = dedupe_and_merge_history([], global_rows)
+
     # Sort combined results by strongest date marker descending
     def sort_key(x):
-        val = x.get('day_et') or x.get('analyzed_at') or x.get('start_time') or ''
-        return str(val)
-    
+        day = str(x.get('day_et') or '')[:10]
+        ts = str(x.get('start_time') or x.get('analyzed_at') or x.get('created_at') or '')
+        if not day and len(ts) >= 10:
+            day = ts[:10]
+        return (day, ts)
+
     rows.sort(key=sort_key, reverse=True)
     return rows[:limit]
 
@@ -3832,20 +3827,169 @@ async def ncaam_top6_rank_performance(days: int = 365):
     }
 
 
+def _yesterday_items_from_daily_top_picks(conn, yday: str):
+    """Fallback yesterday slate builder from daily_top_picks + events + game_results."""
+    from src.database import _exec
+    from src.utils.model_performance import normalize_history_row
+
+    picks_rows = _exec(conn, """
+        SELECT d.event_id, d.computed_at, d.rec_json,
+               e.away_team, e.home_team, e.start_time, e.league AS sport,
+               gr.away_score, gr.home_score,
+               m.id AS prediction_id, m.outcome, m.ev_per_unit AS pred_ev,
+               m.confidence_0_100 AS pred_conf, m.clv_points,
+               m.bet_line AS pred_line, COALESCE(m.bet_price, m.price) AS pred_price,
+               m.selection AS pred_selection, m.market_type AS pred_market, m.pick AS pred_pick
+        FROM daily_top_picks d
+        JOIN events e ON e.id = d.event_id
+        LEFT JOIN game_results gr ON gr.event_id = d.event_id
+        LEFT JOIN LATERAL (
+            SELECT id, outcome, ev_per_unit, confidence_0_100, clv_points,
+                   bet_line, bet_price, price, selection, market_type, pick
+            FROM model_predictions mp
+            WHERE mp.event_id = d.event_id
+            ORDER BY mp.analyzed_at DESC
+            LIMIT 1
+        ) m ON TRUE
+        WHERE d.league = 'NCAAM'
+          AND d.date_et = %s
+          AND d.is_actionable = TRUE
+        """, (yday,)).fetchall()
+
+    items = []
+    latest_ts = None
+    for row in picks_rows:
+        r = dict(row)
+        rec = r.get('rec_json') or {}
+        if isinstance(rec, str):
+            try:
+                rec = json.loads(rec)
+            except Exception:
+                rec = {}
+        if not isinstance(rec, dict):
+            rec = {}
+
+        ca = r.get('computed_at')
+        if ca is not None and (latest_ts is None or str(ca) > str(latest_ts)):
+            latest_ts = ca
+
+        aw = r.get('away_score')
+        hs = r.get('home_score')
+        score = f"{aw}-{hs}" if aw is not None and hs is not None else None
+        ev_val = rec.get('ev_per_unit') if rec.get('ev_per_unit') is not None else r.get('pred_ev')
+        try:
+            ev_num = float(ev_val) if ev_val is not None else 0.0
+        except Exception:
+            ev_num = 0.0
+        conf_val = rec.get('confidence') if rec.get('confidence') is not None else r.get('pred_conf')
+        price_val = rec.get('odds') if rec.get('odds') is not None else (rec.get('price') if rec.get('price') is not None else r.get('pred_price'))
+        line_val = rec.get('line') if rec.get('line') is not None else r.get('pred_line')
+
+        items.append(normalize_history_row({
+            'rank': 0,
+            'prediction_id': r.get('prediction_id'),
+            'linked_prediction_id': r.get('prediction_id'),
+            'event_id': r.get('event_id'),
+            'sport': r.get('sport') or 'NCAAM',
+            'market_type': rec.get('bet_type') or rec.get('market_type') or r.get('pred_market'),
+            'selection': rec.get('side') or rec.get('selection') or r.get('pred_selection') or r.get('pred_pick'),
+            'bet_line': line_val,
+            'price': price_val,
+            'bet_price': price_val,
+            'ev_per_unit': ev_num,
+            'confidence_0_100': conf_val,
+            'clv_points': r.get('clv_points'),
+            'outcome': r.get('outcome') or 'PENDING',
+            'away_team': r.get('away_team'),
+            'home_team': r.get('home_team'),
+            'start_time': r.get('start_time'),
+            'score': score,
+            'day_et': yday,
+        }))
+
+    items.sort(key=lambda x: float(x.get('ev_per_unit') or 0.0), reverse=True)
+    items = items[:6]
+    for idx, it in enumerate(items, start=1):
+        it['rank'] = idx
+    if not items:
+        return None, []
+    return {'id': f'daily_top_picks:{yday}', 'source': 'daily_top_picks', 'created_at': latest_ts}, items
+
+
+def _yesterday_items_from_predictions(conn, yday: str):
+    """Last-resort yesterday slate builder from actionable model_predictions."""
+    from src.database import _exec
+    from src.utils.model_performance import normalize_history_row
+
+    pred_rows = _exec(conn, """
+        SELECT m.id AS prediction_id, m.event_id, m.market_type, m.selection, m.pick,
+               m.bet_line, COALESCE(m.bet_price, m.price) AS price,
+               m.ev_per_unit, m.confidence_0_100, m.clv_points, m.outcome, m.analyzed_at,
+               e.league AS sport, e.away_team, e.home_team, e.start_time,
+               gr.away_score, gr.home_score
+        FROM model_predictions m
+        JOIN events e ON e.id = m.event_id
+        LEFT JOIN game_results gr ON gr.event_id = e.id
+        WHERE e.league = 'NCAAM'
+          AND DATE(e.start_time AT TIME ZONE 'America/New_York') = %s::date
+          AND COALESCE(m.ev_per_unit, 0) >= 0.02
+          AND m.market_type IS NOT NULL
+          AND UPPER(m.market_type) <> 'AUTO'
+          AND m.pick IS NOT NULL
+          AND UPPER(m.pick) <> 'NONE'
+          AND m.selection IS NOT NULL
+          AND TRIM(m.selection) <> ''
+          AND m.selection <> '-'
+        ORDER BY m.analyzed_at DESC
+    """, (yday,)).fetchall()
+
+    seen = set()
+    items = []
+    latest_ts = None
+    for row in pred_rows:
+        r = dict(row)
+        norm = normalize_history_row(r)
+        key = (norm.get('event_id'), norm.get('market_type'))
+        if key in seen:
+            continue
+        seen.add(key)
+        ca = r.get('analyzed_at')
+        if ca is not None and (latest_ts is None or str(ca) > str(latest_ts)):
+            latest_ts = ca
+        aw = r.get('away_score')
+        hs = r.get('home_score')
+        norm['score'] = f"{aw}-{hs}" if aw is not None and hs is not None else None
+        norm['linked_prediction_id'] = r.get('prediction_id')
+        norm['day_et'] = yday
+        items.append(norm)
+
+    items.sort(key=lambda x: float(x.get('ev_per_unit') or 0.0), reverse=True)
+    items = items[:6]
+    for idx, it in enumerate(items, start=1):
+        it['rank'] = idx
+    if not items:
+        return None, []
+    return {'id': f'model_predictions:{yday}', 'source': 'model_predictions', 'created_at': latest_ts}, items
+
+
 @app.get("/api/ncaam/recommended-slate/yesterday")
 async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current_user)):
-    """Return the exact slate that was recommended yesterday (Top N) and its outcomes.
-
-    This is the source of truth for aligning "recommended" vs "graded".
+    """Return yesterday's recommended picks (Top N) and their outcomes.
 
     Selection rule:
-    - Use latest recommended_slates row for yesterday (prefer source='full' if it exists), else latest of any source.
-
-    Returns:
-      { date_et, slate: {id,source,created_at}, straight: [...], ml_parlay: [...], record: {...} }
+    - Prefer persisted recommended_slates row for yesterday.
+    - Fall back cleanly to yesterday's actionable daily_top_picks, then model_predictions.
     """
     from src.database import get_db_connection, _exec
+    from src.utils.model_performance import (
+        is_decided,
+        norm_outcome,
+        normalize_history_row,
+        normalize_market_type,
+    )
 
+    slate = None
+    items = []
     with get_db_connection() as conn:
         yday = _exec(conn, "SELECT ((NOW() AT TIME ZONE 'America/New_York')::date - INTERVAL '1 day')::date::text").fetchone()[0]
 
@@ -3859,65 +4003,62 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
           LIMIT 1
         """, (yday,)).fetchone()
 
-
         slate = dict(s) if s else None
-        if not slate:
-            return {"status": "success", "date_et": yday, "slate": None, "straight": [], "ml_parlay": [], "record": {"straight": None, "ml_parlay": None}}
+        if slate:
+            rows = _exec(conn, """
+              SELECT r.rank,
+                     r.prediction_id,
+                     COALESCE(m1.id, m2.id) as linked_prediction_id,
+                     COALESCE(m1.event_id, m2.event_id, r.event_id) as event_id,
+                     COALESCE(NULLIF(TRIM(r.market_type), ''), m1.market_type, m2.market_type) as market_type,
+                     COALESCE(NULLIF(TRIM(r.selection), ''), m1.selection, m2.selection) as selection,
+                     COALESCE(r.bet_line, m1.bet_line, m2.bet_line) as bet_line,
+                     COALESCE(COALESCE(m1.bet_price, m1.price), COALESCE(m2.bet_price, m2.price), r.bet_price) as price,
+                     COALESCE(m1.ev_per_unit, m2.ev_per_unit) as ev_per_unit,
+                     COALESCE(m1.confidence_0_100, m2.confidence_0_100) as confidence_0_100,
+                     COALESCE(m1.clv_points, m2.clv_points) as clv_points,
+                     COALESCE(m1.outcome, m2.outcome) as outcome,
+                     COALESCE(m1.pick, m2.pick) as pick,
+                     e.league as sport,
+                     e.away_team, e.home_team, e.start_time,
+                     (CASE WHEN gr.away_score IS NOT NULL AND gr.home_score IS NOT NULL THEN (gr.away_score || '-' || gr.home_score) ELSE NULL END) as score
+              FROM recommended_slate_items r
+              LEFT JOIN model_predictions m1 ON m1.id=r.prediction_id
+              LEFT JOIN LATERAL (
+                SELECT m.*
+                FROM model_predictions m
+                WHERE r.event_id IS NOT NULL
+                  AND m.event_id=r.event_id
+                  AND (r.selection IS NULL OR m.selection=r.selection)
+                  AND (r.bet_price IS NULL OR COALESCE(m.bet_price, m.price)=r.bet_price)
+                ORDER BY m.analyzed_at DESC
+                LIMIT 1
+              ) m2 ON TRUE
+              JOIN events e ON e.id=COALESCE(m1.event_id, m2.event_id, r.event_id)
+              LEFT JOIN game_results gr ON gr.event_id = e.id
+              WHERE r.slate_id=%s
+              ORDER BY r.rank ASC
+            """, (slate['id'],)).fetchall()
+            items = [normalize_history_row({**dict(r), 'day_et': yday}) for r in rows]
 
-        rows = _exec(conn, """
-          SELECT r.rank,
-                 r.prediction_id,
-                 COALESCE(m1.id, m2.id) as linked_prediction_id,
-                 COALESCE(m1.event_id, m2.event_id, r.event_id) as event_id,
-                 COALESCE(m1.market_type, m2.market_type, r.market_type) as market_type,
-                 COALESCE(m1.selection, m2.selection, r.selection) as selection,
-                 COALESCE(COALESCE(m1.bet_price, m1.price), COALESCE(m2.bet_price, m2.price), r.bet_price) as price,
-                 COALESCE(m1.ev_per_unit, m2.ev_per_unit) as ev_per_unit,
-                 COALESCE(m1.confidence_0_100, m2.confidence_0_100) as confidence_0_100,
-                 COALESCE(m1.outcome, m2.outcome) as outcome,
-                 e.away_team, e.home_team, e.start_time
-          FROM recommended_slate_items r
-          LEFT JOIN model_predictions m1 ON m1.id=r.prediction_id
-          LEFT JOIN LATERAL (
-            SELECT m.*
-            FROM model_predictions m
-            WHERE r.event_id IS NOT NULL
-              AND m.event_id=r.event_id
-              AND (r.selection IS NULL OR m.selection=r.selection)
-              AND (r.bet_price IS NULL OR COALESCE(m.bet_price, m.price)=r.bet_price)
-            ORDER BY m.analyzed_at DESC
-            LIMIT 1
-          ) m2 ON TRUE
-          JOIN events e ON e.id=COALESCE(m1.event_id, m2.event_id, r.event_id)
-          WHERE r.slate_id=%s
-          ORDER BY r.rank ASC
-        """, (slate['id'],)).fetchall()
+        if not slate or not items:
+            fb_slate, fb_items = _yesterday_items_from_daily_top_picks(conn, yday)
+            if fb_slate and fb_items:
+                slate, items = fb_slate, fb_items
 
-    def norm_outcome(o: str) -> str:
-        s = str(o or '').upper()
-        if s in ('WIN', 'WON'): return 'WON'
-        if s in ('LOSS', 'LOST'): return 'LOST'
-        if s == 'PUSH': return 'PUSH'
-        return 'PENDING'
+        if not slate or not items:
+            fb_slate, fb_items = _yesterday_items_from_predictions(conn, yday)
+            if fb_slate and fb_items:
+                slate, items = fb_slate, fb_items
 
-    def is_decided(o: str) -> bool:
-        return norm_outcome(o) in ('WON', 'LOST', 'PUSH')
+    if not slate or not items:
+        return {"status": "success", "date_et": yday, "slate": None, "straight": [], "ml_parlay": [], "record": {"straight": None, "ml_parlay": None}}
 
     def classify(mt: str) -> str:
-        t = str(mt or '').upper()
-        if 'SPREAD' in t:
-            return 'SPREAD'
-        if 'TOTAL' in t:
-            return 'TOTAL'
-        if 'MONEYLINE' in t or t == 'ML':
-            return 'MONEYLINE'
-        if 'PARLAY' in t:
-            return 'PARLAY'
-        return 'OTHER'
+        norm = normalize_market_type(mt)
+        return norm if norm in ('SPREAD', 'TOTAL', 'MONEYLINE', 'PARLAY') else 'OTHER'
 
-    items = [dict(r) for r in rows]
-
-    straight = [x for x in items if classify(x.get('market_type')) in ('SPREAD','TOTAL')]
+    straight = [x for x in items if classify(x.get('market_type')) in ('SPREAD', 'TOTAL')]
     ml_parlay = [x for x in items if classify(x.get('market_type')) in ('MONEYLINE', 'PARLAY')]
 
     def record(xs):

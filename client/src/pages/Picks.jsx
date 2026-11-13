@@ -3,6 +3,16 @@ import api from '../api/axios';
 import { RefreshCw, BarChart3, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine, ComposedChart, Line, Cell, LabelList } from 'recharts';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
+import {
+  formatMatchup,
+  formatPickLabel,
+  formatLineAndOdds,
+  formatMarketLabel,
+  getRawOutcome,
+  getNumericEdge,
+  selectTopPicksPerDay,
+  computeRecordStats,
+} from '../utils/modelPerformance';
 
 import {
   normalizeOutcome, isGradedOutcome, isWinOutcome, isLossOutcome,
@@ -19,6 +29,36 @@ export default function Picks() {
   const [isGrading, setIsGrading] = useState(false);
   const [yesterdayReco, setYesterdayReco] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+  const [historyScope, setHistoryScope] = useState('all');
+  const [historyRowLimit, setHistoryRowLimit] = useState(100);
+
+  const recommendedHistory = useMemo(() => {
+    const base = Array.isArray(history) ? history : [];
+    const usable = base.filter((h) => {
+      if (!h) return false;
+      const mt = String(h.market_type || '').toUpperCase();
+      if (mt === 'AUTO') return false;
+      const pk = formatPickLabel(h);
+      const ev = getNumericEdge(h);
+      return Boolean((h.id || h.prediction_id || h.event_id) && (pk !== '—' || (ev !== null && ev >= 0.02)));
+    });
+    return usable.length > 0 ? usable : base;
+  }, [history]);
+
+  const top6History = useMemo(() => selectTopPicksPerDay(recommendedHistory, 6), [recommendedHistory]);
+
+  const scopedHistory = useMemo(
+    () => (historyScope === 'top6' ? top6History : recommendedHistory),
+    [historyScope, top6History, recommendedHistory]
+  );
+
+  const scopedStats = useMemo(() => {
+    const finished = scopedHistory.filter((h) => {
+      const out = String(getRawOutcome(h) || '').toUpperCase();
+      return out === 'WON' || out === 'WIN' || out === 'LOST' || out === 'LOSS' || out === 'PUSH';
+    });
+    return computeRecordStats(finished);
+  }, [scopedHistory]);
 
 
   const gradeNow = async () => {
@@ -531,13 +571,28 @@ export default function Picks() {
   };
 
   const getSortedHistory = () => {
-    return [...history].sort((a, b) => {
+    return [...scopedHistory].sort((a, b) => {
       let key = sortConfig.key;
       // Fix 'edge' sort: sort numerically by ev_per_unit
       if (key === 'edge') {
         const aVal = parseFloat(a.ev_per_unit ?? a.ev ?? a.edge ?? 0);
         const bVal = parseFloat(b.ev_per_unit ?? b.ev ?? b.edge ?? 0);
         return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      if (key === 'matchup') {
+        const am = formatMatchup(a);
+        const bm = formatMatchup(b);
+        return sortConfig.direction === 'asc' ? am.localeCompare(bm) : bm.localeCompare(am);
+      }
+      if (key === 'bet_on') {
+        const ap = formatPickLabel(a);
+        const bp = formatPickLabel(b);
+        return sortConfig.direction === 'asc' ? ap.localeCompare(bp) : bp.localeCompare(ap);
+      }
+      if (key === 'created_at') {
+        const ad = getPerformanceDay(a) || String(a.start_time || a.analyzed_at || a.created_at || '');
+        const bd = getPerformanceDay(b) || String(b.start_time || b.analyzed_at || b.created_at || '');
+        return sortConfig.direction === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
       }
       
       let aVal = a[key] || '';
@@ -550,7 +605,6 @@ export default function Picks() {
 
   const getRecommendedHistory = () => {
     const sorted = getSortedHistory()
-      .filter(isRecommendedHistoryItem)
       .filter(h => {
         // Exclude games that haven't started yet (Strict Date check)
         const st = h?.start_time;
@@ -583,6 +637,24 @@ export default function Picks() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Model Performance</h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+            Track how our recommended picks have performed overall, by confidence level, and day by day.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={async () => { await gradeNow(); await load(); }}
+          disabled={isGrading || loading}
+          className="inline-flex items-center gap-2 self-start px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-700 bg-slate-900/70 text-slate-200 hover:text-white hover:border-slate-500 disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw size={14} className={isGrading || loading ? 'animate-spin' : ''} />
+          {isGrading ? 'Checking Scores…' : 'Update Results'}
+        </button>
+      </div>
+
       {err && <div className="p-3 rounded-lg bg-red-900/20 border border-red-800 text-red-200 text-sm">{err}</div>}
 
       {!loading && !err && (!history || history.length === 0) && (
@@ -596,7 +668,7 @@ export default function Picks() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-2">
             <BarChart3 size={18} className="text-emerald-300" />
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Yesterday (graded) — Recommended Spreads & Totals</div>
+            <div className="text-sm font-bold text-slate-100">Yesterday’s Picks — Spreads & Over/Unders</div>
             <div className="ml-auto flex items-center gap-2">
               <div className="text-xs text-slate-500">{yesterdayEt}</div>
               {pendingYesterday > 0 && (
@@ -606,7 +678,7 @@ export default function Picks() {
                   className={`px-2 py-1 rounded-lg text-xs font-bold border transition ${isGrading ? 'text-slate-500 border-slate-800 bg-slate-900/40' : 'text-amber-200 border-amber-900/40 bg-amber-900/20 hover:bg-amber-900/30'}`}
                   title="Run grading now"
                 >
-                  {isGrading ? 'Grading…' : 'Grade now'}
+                  {isGrading ? 'Updating…' : 'Update Results'}
                 </button>
               )}
             </div>
@@ -663,16 +735,16 @@ export default function Picks() {
             const pending = total - decided;
 
             if (total === 0) {
-              return <div className="mt-3 text-xs text-slate-500">No recommended picks found for yesterday.</div>;
+              return <div className="mt-3 text-xs text-slate-400">No picks were recommended yesterday.</div>;
             }
             if (decided === 0 && pending > 0) {
-              return <div className="mt-3 text-xs text-slate-500">Yesterday has {pending} pick(s) still pending / ungraded. Click “Grade now”.</div>;
+              return <div className="mt-3 text-xs text-slate-400">Yesterday has {pending} pick(s) still waiting on final scores. Click “Update Results”.</div>;
             }
             if (decided === 0) {
-              return <div className="mt-3 text-xs text-slate-500">No graded recommended picks found for yesterday.</div>;
+              return <div className="mt-3 text-xs text-slate-400">Yesterday’s picks have not been graded yet.</div>;
             }
             if (pending > 0) {
-              return <div className="mt-3 text-xs text-slate-500">Also pending: {pending}</div>;
+              return <div className="mt-3 text-xs text-slate-400">Still waiting on final scores: {pending}</div>;
             }
             return null;
           })()}
@@ -697,7 +769,7 @@ export default function Picks() {
                           <span className="text-slate-400 mr-2">#{h.rank || idx + 1}</span>
                           {h.sport || '—'} • {(h.away_team && h.home_team) ? `${h.away_team} @ ${h.home_team}` : (h.matchup || '—')}
                         </div>
-                        <div className="text-xs text-slate-400 whitespace-normal break-words leading-snug">{h.market_type || h.bet_type || '—'} • {h.selection || '—'}</div>
+                        <div className="text-xs text-slate-300 whitespace-normal break-words leading-snug">{formatMarketLabel(h)} • {formatPickLabel(h)} ({formatLineAndOdds(h)})</div>
                       </div>
                       <div className={`text-xs font-mono font-black ${isWinOutcome(h.graded_result || h.outcome || h.result) ? 'text-green-300' : isLossOutcome(h.graded_result || h.outcome || h.result) ? 'text-red-300' : 'text-slate-500'}`}>
                         {normalizeOutcome(h.graded_result || h.outcome || h.result) || 'PENDING'}
@@ -715,13 +787,20 @@ export default function Picks() {
 
         {/* Top 6 recommended: win% by rank */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <div className="flex items-end justify-between gap-3 mb-2">
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Top 6 recommended ({CURRENT_ET_YEAR} YTD) — win% by rank</div>
-            <div className="text-[11px] text-slate-500">Avg: {top6RankPerformance?.avg !== null && top6RankPerformance?.avg !== undefined ? `${top6RankPerformance.avg.toFixed(1)}%` : '—'}</div>
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <div className="text-sm font-bold text-slate-100">How Our Top 6 Daily Picks Perform ({CURRENT_ET_YEAR} Season)</div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Rank #1 is the highest-edge pick each day. Bars show win rate on finished picks.
+              </p>
+            </div>
+            <div className="text-xs text-slate-300 font-semibold whitespace-nowrap tabular-nums">
+              Avg: {top6RankPerformance?.avg !== null && top6RankPerformance?.avg !== undefined ? `${top6RankPerformance.avg.toFixed(1)}%` : '—'}
+            </div>
           </div>
           <div className="h-[220px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={top6RankPerformance.rows} layout="vertical" margin={{ top: 8, right: 34, left: 10, bottom: 8 }}>
+              <BarChart data={top6RankPerformance.rows} layout="vertical" margin={{ top: 8, right: 44, left: 10, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} interval={0} tick={{ fill: '#94a3b8', fontSize: 11 }} />
                 <YAxis
@@ -758,7 +837,7 @@ export default function Picks() {
                     <Cell key={`cell-${index}`} fill={entry._fill || '#60a5fa'} />
                   ))}
                   <LabelList dataKey="winRate" position="right" formatter={(v) => (v === null || v === undefined ? '' : `${v}%`)} fill="#94a3b8" fontSize={11} />
-                  <LabelList dataKey="n" position="insideRight" formatter={(v) => (v ? `N=${v}` : '')} fill="#0b1220" fontSize={10} />
+                  <LabelList dataKey="n" position="insideRight" formatter={(v) => (v ? `${v} picks` : '')} fill="#0b1220" fontSize={10} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -767,40 +846,94 @@ export default function Picks() {
       </div>
 
       {/* Existing analytics (kept) */}
-      <ModelPerformanceAnalytics history={history || []} />
+      <div className="ui-card p-4 sm:p-5 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold text-white">Filter Performance View</h2>
+          <p className="text-xs text-slate-400">
+            Choose whether the charts, breakdowns, and pick history below show every recommended bet or just the Top 6 daily best bets.
+          </p>
+        </div>
+        <div className="inline-flex rounded-xl bg-slate-950/60 p-1 border border-slate-700/50 self-start" role="group" aria-label="Pick scope filter">
+          <button
+            type="button"
+            onClick={() => { setHistoryScope('all'); setHistoryRowLimit(100); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              historyScope === 'all'
+                ? 'bg-sky-500 text-slate-950'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            All Picks ({recommendedHistory.length.toLocaleString()})
+          </button>
+          <button
+            type="button"
+            onClick={() => { setHistoryScope('top6'); setHistoryRowLimit(100); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              historyScope === 'top6'
+                ? 'bg-sky-500 text-slate-950'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Top 6 Daily Best ({top6History.length.toLocaleString()})
+          </button>
+        </div>
+      </div>
 
-      {/* Full Audit Table (Moved from Today tab) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mt-10">
-        <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
-          <h3 className="text-white font-black text-lg">Full Recommended Pick History</h3>
-          <div className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Audit & Performance Logs</div>
+      <ModelPerformanceAnalytics
+        history={scopedHistory}
+        scopeLabel={historyScope === 'top6' ? 'Top 6 daily best bets' : 'all recommended picks'}
+      />
+
+      {/* Full Pick History Table */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mt-8">
+        <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h3 id="history-table-title" className="text-white font-bold text-lg">Past Picks History</h3>
+            <p className="text-xs text-slate-400 mt-0.5 tabular-nums">
+              {scopedStats.total.toLocaleString()} finished ({scopedStats.wins}-{scopedStats.losses}-{scopedStats.pushes}, {scopedStats.winRate.toFixed(1)}% win rate) • {scopedHistory.length.toLocaleString()} total in view
+            </p>
+          </div>
+          <div className="text-xs text-slate-400 font-medium">Click column headers to sort</div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto" role="region" aria-labelledby="history-table-title" tabIndex={0}>
+          <table className="w-full text-left border-collapse min-w-[760px]">
+            <caption className="sr-only">Past recommended picks history with matchup, pick, odds, edge, result, and final score</caption>
             <thead>
-              <tr className="text-slate-400 border-b border-slate-700 bg-slate-800/50">
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('created_at')}>
-                  <div className="flex items-center">Date <SortIcon column="created_at" /></div>
+              <tr className="text-slate-300 border-b border-slate-700 bg-slate-800/50 text-xs font-semibold">
+                <th scope="col" aria-sort={sortConfig.key === 'created_at' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                  <button type="button" onClick={() => handleSort('created_at')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
+                    Date <SortIcon column="created_at" />
+                  </button>
                 </th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Rec#</th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('sport')}>
-                  <div className="flex items-center">Sport <SortIcon column="sport" /></div>
+                <th scope="col" className="py-2.5 px-4">Rank</th>
+                <th scope="col" aria-sort={sortConfig.key === 'sport' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                  <button type="button" onClick={() => handleSort('sport')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
+                    Sport <SortIcon column="sport" />
+                  </button>
                 </th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('matchup')}>
-                  <div className="flex items-center">Matchup <SortIcon column="matchup" /></div>
+                <th scope="col" aria-sort={sortConfig.key === 'matchup' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                  <button type="button" onClick={() => handleSort('matchup')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
+                    Matchup <SortIcon column="matchup" />
+                  </button>
                 </th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('bet_on')}>
-                  <div className="flex items-center">Pick <SortIcon column="bet_on" /></div>
+                <th scope="col" aria-sort={sortConfig.key === 'bet_on' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                  <button type="button" onClick={() => handleSort('bet_on')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
+                    Pick & Type <SortIcon column="bet_on" />
+                  </button>
                 </th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Lines</th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('edge')}>
-                  <div className="flex items-center">Edge <SortIcon column="edge" /></div>
+                <th scope="col" className="py-2.5 px-4">Odds & Line</th>
+                <th scope="col" aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                  <button type="button" onClick={() => handleSort('edge')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
+                    Edge <SortIcon column="edge" />
+                  </button>
                 </th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('result')}>
-                  <div className="flex items-center">Result <SortIcon column="result" /></div>
+                <th scope="col" aria-sort={sortConfig.key === 'result' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                  <button type="button" onClick={() => handleSort('result')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
+                    Result <SortIcon column="result" />
+                  </button>
                 </th>
-                <th className="py-2 px-4 text-xs font-bold uppercase tracking-wider">Score</th>
+                <th scope="col" className="py-2.5 px-4">Final Score</th>
               </tr>
             </thead>
             <tbody>
@@ -832,10 +965,11 @@ export default function Picks() {
                   });
                 });
 
-                // Filter to only Top 6 per day
-                const histAll = histRaw.filter(h => rankByKey[keyFor(h)] <= 6);
+                // Respect active scope (All Picks vs Top 6 Daily Best); render up to historyRowLimit rows
+                const histAll = histRaw;
+                const visibleRows = histAll.slice(0, historyRowLimit);
 
-                return histAll.map((item) => {
+                return visibleRows.map((item) => {
                   let recs = [];
                   try {
                     if (item.outputs_json) {
@@ -857,18 +991,23 @@ export default function Picks() {
                   const isLost = isLossOutcome(resultStatus);
                   const isPush = normalizeOutcome(resultStatus) === 'PUSH';
 
-                  const formatDateMDY = (ts) => {
-                    if (!ts) return '';
+                  const formatDateMDY = (rowOrTs) => {
+                    const etDay = getPerformanceDay(rowOrTs);
+                    if (etDay && /^\d{4}-\d{2}-\d{2}$/.test(etDay)) {
+                      const [yy, mm, dd] = etDay.split('-');
+                      return `${Number(mm)}/${Number(dd)}/${yy.slice(2)}`;
+                    }
+                    if (!rowOrTs) return '—';
                     try {
-                      const d = new Date(ts);
+                      const d = new Date(rowOrTs);
                       return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: '2-digit' });
-                    } catch (e) { return ts; }
+                    } catch (e) { return String(rowOrTs); }
                   };
 
                   return (
                     <tr key={keyFor(item)} className="border-b border-slate-700/40 hover:bg-slate-800/20 transition-colors text-[13px]">
-                      <td className="py-2 px-4 text-slate-400 font-mono whitespace-nowrap">
-                        {formatDateMDY(item.start_time || item.analyzed_at || item.created_at)}
+                      <td className="py-2 px-4 text-slate-400 font-mono tabular-nums whitespace-nowrap">
+                        {formatDateMDY(item)}
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
                         {recRank ? (
@@ -882,16 +1021,14 @@ export default function Picks() {
                         {item.sport || item.league || '—'}
                       </td>
                       <td className="py-2 px-4 text-slate-200 font-semibold whitespace-nowrap">
-                        {item.matchup || item.game || '—'}
+                        {formatMatchup(item)}
                       </td>
-                      <td className="py-2 px-4 font-black whitespace-nowrap">
-                        <span className="text-white">{item.bet_on || mainRec.side || '—'}</span>
-                        {mainRec.line && mainRec.line !== 0 && (
-                          <span className="text-slate-400 ml-1">({mainRec.line > 0 ? '+' : ''}{mainRec.line})</span>
-                        )}
+                      <td className="py-2 px-4 whitespace-nowrap">
+                        <span className="text-white font-semibold">{formatPickLabel(item)}</span>
+                        <span className="ml-1.5 text-[11px] font-medium text-slate-400">({formatMarketLabel(item)})</span>
                       </td>
                       <td className="py-2 px-4 text-slate-400 whitespace-nowrap">
-                        <span className="font-mono">{item.bet_price || '—'}</span>
+                        <span className="font-mono tabular-nums">{formatLineAndOdds(item)}</span>
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
                         {(() => {
@@ -920,16 +1057,16 @@ export default function Picks() {
                       </td>
                       <td className="py-2 px-4 whitespace-nowrap">
                         {isWon ? (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-black tracking-tighter ring-1 ring-emerald-500/20">WON</span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-semibold ring-1 ring-emerald-500/20">Won</span>
                         ) : isLost ? (
-                          <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 font-black tracking-tighter ring-1 ring-red-500/20">LOST</span>
+                          <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-xs font-semibold ring-1 ring-red-500/20">Lost</span>
                         ) : isPush ? (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-400 font-black tracking-tighter ring-1 ring-slate-500/20">PUSH</span>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-300 text-xs font-semibold ring-1 ring-slate-500/20">Push</span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-800/50 text-slate-500 font-bold tracking-tighter">PENDING</span>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-800/60 text-slate-400 text-xs font-medium">Pending</span>
                         )}
                       </td>
-                      <td className="py-2 px-4 text-slate-400 font-mono text-xs whitespace-nowrap">
+                      <td className="py-2 px-4 text-slate-300 font-mono tabular-nums text-xs whitespace-nowrap">
                         {item.score || '—'}
                       </td>
                     </tr>
@@ -939,8 +1076,31 @@ export default function Picks() {
             </tbody>
           </table>
         </div>
-        {getRecommendedHistory().length === 0 && (
-          <div className="py-12 text-center text-slate-500 italic">No historical recommended picks found in logs.</div>
+        {scopedHistory.length > historyRowLimit && (
+          <div className="px-5 py-3 border-t border-slate-800 bg-slate-900/40 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+            <span>
+              Showing {Math.min(historyRowLimit, scopedHistory.length).toLocaleString()} of {scopedHistory.length.toLocaleString()} picks
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHistoryRowLimit((n) => n + 150)}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-slate-200 hover:text-white font-semibold"
+              >
+                Show 150 More
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryRowLimit(scopedHistory.length)}
+                className="px-3 py-1.5 rounded-lg border border-slate-700/70 text-slate-300 hover:text-white font-medium"
+              >
+                Show All ({scopedHistory.length.toLocaleString()})
+              </button>
+            </div>
+          </div>
+        )}
+        {scopedHistory.length === 0 && (
+          <div className="py-12 text-center text-slate-400">No historical recommended picks found for this filter yet.</div>
         )}
       </div>
     </div>

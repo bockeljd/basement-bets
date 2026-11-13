@@ -1616,9 +1616,11 @@ def fetch_model_history(limit=100, league=None, user_id=None, recommended_only: 
         # Postgres DISTINCT ON keeps first row per group based on ORDER BY.
         query = f"""
         WITH base AS (
-            SELECT {_LIGHT_COLS}, e.league as sport, e.home_team, e.away_team, e.start_time
+            SELECT {_LIGHT_COLS}, e.league as sport, e.home_team, e.away_team, e.start_time,
+                (CASE WHEN gr.away_score IS NOT NULL AND gr.home_score IS NOT NULL THEN (gr.away_score || '-' || gr.home_score) ELSE NULL END) AS score
             FROM model_predictions m
             JOIN events e ON m.event_id = e.id
+            LEFT JOIN game_results gr ON gr.event_id = m.event_id
             {where_sql}
             -- Do not exclude recs that were computed close to (or even after) start_time.
             -- Start times can be corrected/shifted and we still want to display the recommendation.
@@ -1634,24 +1636,40 @@ def fetch_model_history(limit=100, league=None, user_id=None, recommended_only: 
         LIMIT %s
         """
         params2 = list(params) + [limit]
+        from src.utils.model_performance import normalize_history_row
         with get_db_connection() as conn:
             cursor = _exec(conn, query, tuple(params2))
-            return [dict(r) for r in cursor.fetchall()]
+            raw_rows = [normalize_history_row(dict(r)) for r in cursor.fetchall()]
+            seen_sem = set()
+            out = []
+            for row in raw_rows:
+                eid = row.get('event_id')
+                mt = row.get('market_type')
+                sem = (eid, mt) if (eid and mt and mt != 'OTHER') else (eid, mt, row.get('selection'))
+                if eid and sem in seen_sem:
+                    continue
+                if eid:
+                    seen_sem.add(sem)
+                out.append(row)
+            return out
 
     # Non-deduped path
     base_query = f"""
-    SELECT {_LIGHT_COLS}, e.league as sport, e.home_team, e.away_team, e.start_time
+    SELECT {_LIGHT_COLS}, e.league as sport, e.home_team, e.away_team, e.start_time,
+        (CASE WHEN gr.away_score IS NOT NULL AND gr.home_score IS NOT NULL THEN (gr.away_score || '-' || gr.home_score) ELSE NULL END) AS score
     FROM model_predictions m
     JOIN events e ON m.event_id = e.id
+    LEFT JOIN game_results gr ON gr.event_id = m.event_id
     {where_sql}
     ORDER BY m.analyzed_at DESC
     LIMIT %s
     """
     params.append(limit)
 
+    from src.utils.model_performance import normalize_history_row
     with get_db_connection() as conn:
         cursor = _exec(conn, base_query, tuple(params))
-        return [dict(r) for r in cursor.fetchall()]
+        return [normalize_history_row(dict(r)) for r in cursor.fetchall()]
 
 
 def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lookback_days=120):
@@ -1665,6 +1683,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
     4. Relink to model_predictions (m1 by prediction_id, m2 by lateral match on event+selection).
     """
     from src.database import get_db_connection, _exec
+    from src.utils.model_performance import normalize_history_row
     
     params = []
     
@@ -1696,15 +1715,18 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         rsi.rank,
         rsi.prediction_id,
         rsi.event_id,
-        rsi.market_type,
-        rsi.selection,
-        rsi.bet_line,
-        rsi.bet_price,
+        COALESCE(NULLIF(TRIM(rsi.market_type), ''), m1.market_type, m2.market_type) AS market_type,
+        COALESCE(NULLIF(TRIM(rsi.selection), ''), m1.selection, m2.selection) AS selection,
+        COALESCE(rsi.bet_line, m1.bet_line, m2.bet_line) AS bet_line,
+        COALESCE(rsi.bet_price, m1.bet_price, m1.price, m2.bet_price, m2.price) AS bet_price,
+        COALESCE(m1.price, m1.bet_price, m2.price, m2.bet_price, rsi.bet_price) AS price,
         e.league AS sport,
         e.home_team,
         e.away_team,
         e.start_time,
-        (CASE WHEN e.home_score IS NOT NULL AND e.away_score IS NOT NULL THEN (e.home_score || '-' || e.away_score) ELSE NULL END) as score,
+        (CASE WHEN COALESCE(gr.away_score, e.away_score) IS NOT NULL AND COALESCE(gr.home_score, e.home_score) IS NOT NULL
+              THEN (COALESCE(gr.away_score, e.away_score) || '-' || COALESCE(gr.home_score, e.home_score))
+              ELSE NULL END) AS score,
         COALESCE(m1.id, m2.id) AS id,
         COALESCE(m1.analyzed_at, m2.analyzed_at) AS analyzed_at,
         COALESCE(m1.mu_final, m2.mu_final) AS mu_final,
@@ -1714,18 +1736,24 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         COALESCE(m1.outcome, m2.outcome) AS outcome,
         COALESCE(m1.clv_points, m2.clv_points) AS clv_points,
         COALESCE(m1.edge_points, m2.edge_points) AS edge_points,
-        COALESCE(m1.pick, m2.pick) as pick,
+        COALESCE(m1.pick, m2.pick) AS pick,
         ws.source,
         ws.created_at
     FROM winner_slates ws
     JOIN recommended_slate_items rsi ON ws.id = rsi.slate_id
     JOIN events e ON rsi.event_id = e.id
+    LEFT JOIN game_results gr ON gr.event_id = e.id
     LEFT JOIN model_predictions m1 ON rsi.prediction_id = m1.id
     LEFT JOIN LATERAL (
-        SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100, outcome, clv_points, edge_points, pick
+        SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100, outcome, clv_points, edge_points, pick,
+               market_type, selection, bet_line, bet_price, price
         FROM model_predictions m
         WHERE m.event_id = rsi.event_id
-          AND m.market_type = rsi.market_type
+          AND (
+              rsi.market_type IS NULL
+              OR UPPER(m.market_type) = UPPER(rsi.market_type)
+              OR (UPPER(rsi.market_type) IN ('H2H', 'ML', 'MONEYLINE') AND UPPER(m.market_type) IN ('H2H', 'ML', 'MONEYLINE'))
+          )
           -- Match selection and line if available
           AND (rsi.selection IS NULL OR m.selection = rsi.selection)
           AND (rsi.bet_line IS NULL OR ABS(m.bet_line - rsi.bet_line) < 0.01)
@@ -1742,7 +1770,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
     
     with get_db_connection() as conn:
         cursor = _exec(conn, query, tuple(params))
-        return [dict(r) for r in cursor.fetchall()]
+        return [normalize_history_row(dict(r)) for r in cursor.fetchall()]
 
 
 def fetch_bet_detail(bet_id: int, user_id: str = None):
