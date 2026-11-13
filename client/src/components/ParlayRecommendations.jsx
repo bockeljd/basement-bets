@@ -167,7 +167,7 @@ export default function ParlayRecommendations() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Today's 2-Leg ML Parlays</div>
+            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Today's 2-Team Moneyline Parlays</div>
             <div className="text-[11px] text-slate-500">Model-sourced combinations</div>
           </div>
           <button

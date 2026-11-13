@@ -169,7 +169,7 @@ const TodayMatchupModal = ({
               <div className="py-14 flex flex-col items-center justify-center gap-3 text-slate-300">
                 <Loader2 size={28} className="animate-spin text-indigo-400" aria-hidden="true" />
                 <p className="text-sm font-medium">Running multi-source matchup analysis...</p>
-                <p className="text-xs text-slate-500">Combining sportsbook lines, BartTorvik, Haslametrics, KenPom, injuries & splits.</p>
+                <p className="text-xs text-slate-500">Combining sportsbook lines, BartTorvik, Haslametrics, KenPom, injuries &amp; betting splits.</p>
               </div>
             ) : !analysisResult ? (
               <div className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-4 text-xs text-rose-200">
@@ -190,17 +190,17 @@ const TodayMatchupModal = ({
                           <span className="font-mono text-emerald-300 text-base">({fmtOdds(topRec.price)})</span>
                         </h3>
                         <p className="text-xs text-slate-300 mt-0.5">
-                          {topRec.book || 'Consensus'} · Fair {topRec.fair_line ?? '—'} vs Market {topRec.market_line ?? '—'} ·{' '}
+                          {topRec.book || 'Consensus'} · Fair Line {topRec.fair_line ?? '—'} vs Market {topRec.market_line ?? '—'} ·{' '}
                           <strong className="text-emerald-300">
-                            +{Number((topRec.ev || 0) * 100).toFixed(1)}% EV
+                            +{Number((topRec.ev || 0) * 100).toFixed(1)}% expected value
                           </strong>{' '}
-                          · Win Prob {fmtPct(topRec.calibrated_win_prob ?? topRec.win_prob, 1)}
+                          · Win Chance {fmtPct(topRec.calibrated_win_prob ?? topRec.win_prob, 1)}
                         </p>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <span className={`px-2.5 py-1 rounded-full border text-xs font-bold ${conf.badgeCls}`}>
-                          {conf.tier} CONF
+                          {conf.tier} CONFIDENCE
                         </span>
                         <button
                           type="button"
@@ -283,11 +283,12 @@ const TodayMatchupModal = ({
                           spread: sig.kenpom?.fair_spread_home,
                           total: sig.kenpom?.fair_total,
                           score: null,
+                          emptyNote: 'Off — needs 2026-27 KenPom data',
                         },
                         {
                           label: 'Final Model Blend',
-                          spread: dbg.mu_spread_power ?? topRec?.fair_line,
-                          total: dbg.mu_total_power,
+                          spread: dbg.mu_spread_final ?? dbg.mu_spread_power ?? analysisResult.outputs?.mu_spread ?? topRec?.fair_line,
+                          total: dbg.mu_total_final ?? dbg.mu_total_power ?? analysisResult.outputs?.mu_total,
                           score: null,
                           highlight: true,
                         },
@@ -299,11 +300,15 @@ const TodayMatchupModal = ({
                           }`}
                         >
                           <span className="text-slate-200">{row.label}</span>
-                          <span className="font-mono text-slate-300">
-                            Home {row.spread != null ? fmtSigned(row.spread, 1) : '—'} · Total{' '}
-                            {row.total != null ? Number(row.total).toFixed(1) : '—'}
-                            {row.score ? ` (${row.score})` : ''}
-                          </span>
+                          {row.spread == null && row.total == null && row.emptyNote ? (
+                            <span className="text-[11px] text-amber-300/90">{row.emptyNote}</span>
+                          ) : (
+                            <span className="font-mono text-slate-300">
+                              Home {row.spread != null ? fmtSigned(row.spread, 1) : '—'} · Total{' '}
+                              {row.total != null ? Number(row.total).toFixed(1) : '—'}
+                              {row.score ? ` (${row.score})` : ''}
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -311,7 +316,7 @@ const TodayMatchupModal = ({
 
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                      Team Efficiency Comparison
+                      Team Strength Comparison
                     </h3>
                     <table className="w-full text-xs border-collapse">
                       <thead>
@@ -323,17 +328,17 @@ const TodayMatchupModal = ({
                       </thead>
                       <tbody className="divide-y divide-slate-800/70 font-mono">
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Adj Offense</td>
+                          <td className="py-1.5 font-sans text-slate-300">Offense (Pts / 100 poss.)</td>
                           <td className="py-1.5 text-right">{awayStats.adj_off ?? '—'}</td>
                           <td className="py-1.5 text-right">{homeStats.adj_off ?? '—'}</td>
                         </tr>
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Adj Defense</td>
+                          <td className="py-1.5 font-sans text-slate-300">Defense (Allowed / 100 poss.)</td>
                           <td className="py-1.5 text-right">{awayStats.adj_def ?? '—'}</td>
                           <td className="py-1.5 text-right">{homeStats.adj_def ?? '—'}</td>
                         </tr>
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Tempo (Pace)</td>
+                          <td className="py-1.5 font-sans text-slate-300">Game Pace (Poss. / 40m)</td>
                           <td className="py-1.5 text-right">{awayStats.adj_tempo ?? torvikStats.game_tempo ?? '—'}</td>
                           <td className="py-1.5 text-right">{homeStats.adj_tempo ?? torvikStats.game_tempo ?? '—'}</td>
                         </tr>
@@ -376,7 +381,7 @@ const TodayMatchupModal = ({
                       <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2">
                         <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-300">
                           <Users size={13} aria-hidden="true" />
-                          <span>Action Public Tickets vs Money</span>
+                          <span>Public Bets vs. Big Money</span>
                         </h3>
                         <div className="space-y-2 text-xs">
                           {['SPREAD', 'TOTAL'].map((mkt) => {
@@ -409,7 +414,7 @@ const TodayMatchupModal = ({
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2">
                     <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-purple-300">
                       <ShieldCheck size={13} aria-hidden="true" />
-                      <span>Archetype Correlation Profile</span>
+                      <span>Similar Matchup History</span>
                     </h3>
                     {correlationResult ? (() => {
                       const archObj = correlationResult.archetype;
@@ -421,27 +426,27 @@ const TodayMatchupModal = ({
                       return (
                         <div className="text-xs text-slate-300 space-y-1">
                           <p>
-                            Archetype: <strong className="text-white">{archLabel}</strong>
-                            {corrData?.n != null ? ` (n = ${corrData.n} similar games)` : ''}
+                            Matchup style: <strong className="text-white">{archLabel}</strong>
+                            {corrData?.n != null ? ` (based on ${corrData.n} past games)` : ''}
                           </p>
                           {corrData?.status === 'valid' && overHome ? (
                             <p className="text-emerald-300">
-                              Over + Home Cover joint hit rate:{' '}
+                              Over + Home Cover hit rate:{' '}
                               <strong>{fmtPct(overHome.p_joint ?? overHome.p_ab, 1)}</strong>
-                              {overHome.lift != null ? ` (Lift ${Number(overHome.lift).toFixed(2)}x)` : ''}
+                              {overHome.lift != null ? ` (${Number(overHome.lift).toFixed(2)}x more likely than average)` : ''}
                             </p>
                           ) : (
                             <p className="text-slate-400">
                               {correlationResult.status === 'no_spread'
-                                ? 'Waiting on market spread snapshot to classify game archetype.'
-                                : 'Correlation telemetry loaded (sample building toward threshold).'}
+                                ? 'Waiting on a live sportsbook spread to match similar past games.'
+                                : 'Building sample size — not enough similar past games yet for parlay trends.'}
                             </p>
                           )}
                         </div>
                       );
                     })() : (
                       <p className="text-xs text-slate-400">
-                        Historical correlation metrics unavailable for this matchup archetype.
+                        Not enough past games with a similar style to show historical trends yet.
                       </p>
                     )}
                   </section>

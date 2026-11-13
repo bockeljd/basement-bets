@@ -597,7 +597,7 @@ export default function Picks() {
         <div>
           <h1>Model Performance</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Track pick accuracy, unit profit, and ROI across sports. Winning over <strong className="text-slate-200 font-semibold">52.4%</strong> at standard -110 odds is profitable.
+            Track how often picks win, units won/lost, and overall return across sports. Winning over <strong className="text-slate-200 font-semibold">52.4%</strong> at standard -110 odds is profitable.
           </p>
         </div>
 
@@ -663,7 +663,7 @@ export default function Picks() {
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
               <div className="font-bold text-indigo-300">1. Which Picks Are Graded?</div>
               <p className="text-xs text-slate-300">
-                Only picks passing positive expected-value gates (<strong className="text-slate-100">+2.0% EV or higher</strong>; Moneylines <strong className="text-slate-100">+5.0% EV &amp; 45%+ win chance</strong>) are saved and graded. <strong className="text-slate-100">No Bet</strong> games are skipped, while <strong className="text-slate-100">all confidence levels</strong> (High, Medium, Low) on recommended picks are graded.
+                Only picks with a clear expected edge (<strong className="text-slate-100">+2.0% edge or higher</strong>; Moneylines <strong className="text-slate-100">+5.0% edge &amp; 45%+ win chance</strong>) are saved and graded. <strong className="text-slate-100">No Bet</strong> games are skipped, while <strong className="text-slate-100">all confidence levels</strong> (High, Medium, Low) on recommended picks are graded.
               </p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
@@ -890,7 +890,7 @@ export default function Picks() {
           </article>
 
           <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Profit &amp; ROI</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Unit Profit &amp; Return</div>
             <div
               className={`text-2xl font-extrabold font-mono ${
                 scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
@@ -900,13 +900,13 @@ export default function Picks() {
             </div>
             <div className="text-xs text-slate-400">
               {scopedStats.settled > 0
-                ? `${formatSignedPct(scopedStats.roiPct)} ROI across 1u flat stakes`
+                ? `${formatSignedPct(scopedStats.roiPct)} return on flat 1-unit bets`
                 : 'Awaiting settled bets'}
             </div>
           </article>
 
           <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Closing Line Edge (CLV)</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Beating the Closing Line</div>
             <div
               className={`text-2xl font-extrabold font-mono ${
                 clvStats.avg === null
@@ -947,7 +947,7 @@ export default function Picks() {
               Daily Best Picks by Rank (#1 to #6)
             </h2>
             <p className="text-xs text-slate-400">
-              Ranks each day&apos;s picks by highest projected EV (#1 = strongest play of the day) for {sportLabel}.
+              Ranks each day&apos;s picks by strongest edge (#1 = top pick of the day) for {sportLabel}.
             </p>
           </div>
 

@@ -1,12 +1,37 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Info, Upload, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Info, Upload, RefreshCw, Key, ClipboardPaste, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../../api/axios';
+
+const FEED_LABELS = {
+  torvik: 'BartTorvik',
+  kenpom: 'KenPom',
+  haslametrics: 'Haslametrics',
+  odds: 'Sportsbook Odds',
+  action_splits: 'Public Betting Splits',
+};
 
 const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) => {
   const dialogRef = useRef(null);
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [pastedText, setPastedText] = useState('');
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [kenpomStatus, setKenpomStatus] = useState(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [uploadState, setUploadState] = useState({ uploading: false, status: 'idle', message: '' });
+
+  const fetchKenpomStatus = async () => {
+    setStatusLoading(true);
+    try {
+      const res = await api.get('/api/admin/kenpom/status');
+      setKenpomStatus(res.data || null);
+    } catch {
+      setKenpomStatus(null);
+    } finally {
+      setStatusLoading(false);
+    }
+  };
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -15,6 +40,7 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
       if (!dialog.open && typeof dialog.showModal === 'function') {
         dialog.showModal();
       }
+      fetchKenpomStatus();
     } else if (dialog.open) {
       dialog.close();
     }
@@ -34,29 +60,73 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
     }
   };
 
+  const handleKenpomSync = async (e) => {
+    e.preventDefault();
+    setSyncing(true);
+    setUploadState({ uploading: false, status: 'idle', message: '' });
+    try {
+      const payload = apiKeyInput.trim() ? { api_key: apiKeyInput.trim() } : {};
+      const res = await api.post('/api/admin/kenpom/sync', payload);
+      const data = res?.data || {};
+      if (data.status === 'ok') {
+        setUploadState({
+          uploading: false,
+          status: 'success',
+          message: data.message || `Synced ${data.rows} KenPom teams. Refreshing today's games...`,
+        });
+        setApiKeyInput('');
+        await fetchKenpomStatus();
+        onKenpomUploaded?.();
+      } else {
+        setUploadState({
+          uploading: false,
+          status: 'error',
+          message: data.message || 'Could not sync automatically. Try pasting the ratings table below.',
+        });
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || 'KenPom sync failed';
+      setUploadState({ uploading: false, status: 'error', message: String(detail) });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleKenpomUpload = async (e) => {
     e.preventDefault();
-    if (!selectedFile) {
-      setUploadState({ uploading: false, status: 'error', message: 'Please choose a KenPom CSV or TSV file first.' });
+    const trimmedPaste = pastedText.trim();
+    if (!trimmedPaste && !selectedFile) {
+      setUploadState({
+        uploading: false,
+        status: 'error',
+        message: 'Paste the ratings table from kenpom.com OR choose a CSV/TSV file first.',
+      });
       return;
     }
     setUploadState({ uploading: true, status: 'uploading', message: '' });
     try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      const res = await api.post('/api/admin/kenpom/upload-csv', formData);
+      let res;
+      if (trimmedPaste) {
+        res = await api.post('/api/admin/kenpom/upload-csv', { csv_text: trimmedPaste });
+      } else {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        res = await api.post('/api/admin/kenpom/upload-csv', formData);
+      }
       const rowsCount = res?.data?.rows ?? 'all';
-      const asof = res?.data?.asof_date ? ` (as of ${res.data.asof_date})` : '';
+      const asof = res?.data?.asof_date ? ` for ${res.data.asof_date}` : '';
       setUploadState({
         uploading: false,
         status: 'success',
-        message: `Uploaded ${rowsCount} KenPom rows${asof}. Refreshing board predictions...`,
+        message: `Imported ${rowsCount} teams${asof}. Updating today's predictions...`,
       });
       setSelectedFile(null);
+      setPastedText('');
       if (fileInputRef.current) fileInputRef.current.value = '';
+      await fetchKenpomStatus();
       onKenpomUploaded?.();
     } catch (err) {
-      const detail = err?.response?.data?.detail || err?.message || 'Upload failed';
+      const detail = err?.response?.data?.detail || err?.message || 'Import failed';
       setUploadState({ uploading: false, status: 'error', message: String(detail) });
     }
   };
@@ -65,6 +135,9 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
   (dataHealth || []).forEach((item) => {
     if (item?.source) bySource[item.source] = item;
   });
+
+  const kpActive = kenpomStatus ? Boolean(kenpomStatus.active) : String(bySource.kenpom?.status || '').toLowerCase() === 'ok';
+  const kpMethods = kenpomStatus?.configured_methods || {};
 
   return (
     <dialog
@@ -86,10 +159,10 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
             </div>
             <div>
               <h2 id="modelInfoDialogTitle" className="text-lg font-bold text-white">
-                How the Model Works & Data Sources
+                How Picks Are Built &amp; KenPom Setup
               </h2>
               <p className="text-xs text-slate-400">
-                Plain-English guide to our multi-source projections, player injury pricing, and KenPom CSV import
+                Plain-English guide to our projections, injury pricing, and turning KenPom on
               </p>
             </div>
           </div>
@@ -98,7 +171,7 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
             <button
               type="submit"
               onClick={onClose}
-              aria-label="Close model logic guide"
+              aria-label="Close model guide and KenPom setup"
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 cursor-pointer"
             >
               <X size={14} aria-hidden="true" />
@@ -108,87 +181,187 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
         </div>
 
         <div className="p-5 overflow-y-auto space-y-5 text-xs leading-relaxed">
+          {/* KenPom Setup & Import prioritized first when currently inactive */}
+          <section className={`rounded-xl border p-4 space-y-4 ${
+            kpActive ? 'border-emerald-500/30 bg-emerald-950/15' : 'border-amber-500/40 bg-amber-950/15'
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className={`font-bold uppercase tracking-wider ${kpActive ? 'text-emerald-300' : 'text-amber-300'}`}>
+                1. KenPom Status &amp; Quick Activation
+              </h3>
+              <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                kpActive
+                  ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-200'
+                  : 'bg-amber-500/15 border-amber-500/35 text-amber-200'
+              }`}>
+                {statusLoading ? 'Checking...' : kpActive ? 'Active for 2026-27' : 'Off (Needs 2026-27 Data)'}
+              </span>
+            </div>
+
+            {kenpomStatus && (
+              <div className="rounded-lg border border-slate-800 bg-slate-950/75 p-3 space-y-1.5">
+                <p className="text-slate-200 font-medium">{kenpomStatus.human_summary}</p>
+                <p className="text-slate-400">{kenpomStatus.next_step}</p>
+                <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+                  <span className={`px-2 py-0.5 rounded border ${kpMethods.official_api_key ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
+                    Official API Key on Server: {kpMethods.official_api_key ? 'Configured' : 'Not set'}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded border ${kpMethods.credentials || kpMethods.cookie ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
+                    Web Login / Cookie: {kpMethods.credentials || kpMethods.cookie ? 'Set' : 'Not set'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Option A: Sync Now / Official API Key */}
+            <form onSubmit={handleKenpomSync} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-2.5">
+              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                <Key size={13} className="text-indigo-300" aria-hidden="true" />
+                <span>Option A: Sync Automatically with KenPom Official API</span>
+              </div>
+              <p id="kenpom-api-hint" className="text-[11px] text-slate-400">
+                If you have a KenPom subscription API key (from{' '}
+                <a
+                  href="https://kenpom.com/register-api.php"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-indigo-300 underline hover:text-indigo-200"
+                >
+                  kenpom.com/register-api.php
+                </a>
+                ), paste it below for an immediate sync. To keep it running daily at 6:15 AM ET, add{' '}
+                <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-200">KENPOM_API_KEY</code> to Vercel &amp; GitHub Secrets.
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[200px]">
+                  <label htmlFor="kenpom-api-key" className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    KenPom Official API Key (not saved in browser)
+                  </label>
+                  <input
+                    id="kenpom-api-key"
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder={kpMethods.official_api_key ? 'Leave blank to use server key' : 'Paste API key or leave blank if saved on server'}
+                    aria-describedby="kenpom-api-hint"
+                    autoComplete="off"
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder:text-slate-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={syncing || (!apiKeyInput.trim() && !kpMethods.official_api_key && !kpMethods.credentials && !kpMethods.cookie)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer"
+                >
+                  <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} aria-hidden="true" />
+                  <span>{syncing ? 'Syncing...' : 'Sync Now'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Option B: Paste Table or Upload CSV/TSV */}
+            <form onSubmit={handleKenpomUpload} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                <ClipboardPaste size={13} className="text-emerald-300" aria-hidden="true" />
+                <span>Option B: Paste Copied Table from KenPom.com (or Upload CSV)</span>
+              </div>
+              <p id="kenpom-paste-hint" className="text-[11px] text-slate-400">
+                No API key needed: log into kenpom.com, highlight &amp; copy the main ratings table (or export CSV), paste below, and click Import.
+              </p>
+
+              <div>
+                <label htmlFor="kenpom-paste-input" className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Paste KenPom Ratings Table
+                </label>
+                <textarea
+                  id="kenpom-paste-input"
+                  rows={4}
+                  value={pastedText}
+                  onChange={(e) => setPastedText(e.target.value)}
+                  aria-describedby="kenpom-paste-hint"
+                  placeholder={"Rk\tTeam\tConf\tW-L\tNetRtg\tORtg\tDRtg\tAdjT\n1\tDuke\tACC\t3-0\t+31.4\t124.2\t92.8\t68.9"}
+                  className="w-full rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-[11px] font-mono text-slate-100 placeholder:text-slate-600"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <label htmlFor="kenpom-csv-file" className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Or Upload KenPom CSV / TSV File
+                  </label>
+                  <input
+                    id="kenpom-csv-file"
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-100 file:font-semibold hover:file:bg-slate-700"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={uploadState.uploading || (!pastedText.trim() && !selectedFile)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer"
+                >
+                  <Upload size={13} aria-hidden="true" />
+                  <span>{uploadState.uploading ? 'Importing...' : 'Import KenPom'}</span>
+                </button>
+              </div>
+            </form>
+
+            <div aria-live="polite">
+              {uploadState.message && (
+                <div
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
+                    uploadState.status === 'success'
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-200'
+                      : 'bg-rose-500/15 border border-rose-500/30 text-rose-200'
+                  }`}
+                >
+                  {uploadState.status === 'success' ? (
+                    <CheckCircle2 size={14} aria-hidden="true" />
+                  ) : (
+                    <AlertCircle size={14} aria-hidden="true" />
+                  )}
+                  <span>{uploadState.message}</span>
+                </div>
+              )}
+            </div>
+          </section>
+
           <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-2">
             <h3 className="font-bold uppercase tracking-wider text-indigo-300">
-              1. Market-First Multi-Source Blending
+              2. How Each Pick Is Built
             </h3>
             <p className="text-slate-300">
-              We anchor on the live sportsbook consensus line and blend independent adjustments from{' '}
-              <strong>BartTorvik</strong>, <strong>Haslametrics</strong>, and <strong>KenPom</strong>, layered with
-              player-level injury impacts, Action Network ticket/money RLM splits, and referee whistle tendencies. A play
-              is published only when edge reaches at least <strong>1.5 points</strong> and{' '}
-              <strong>+2.0% EV</strong> after calibration.
+              Every prediction starts from the live sportsbook line and blends team strength ratings from{' '}
+              <strong>BartTorvik</strong>, <strong>Haslametrics</strong>, and <strong>KenPom</strong>, plus missing-player
+              injury adjustments, betting money vs. ticket splits, and referee foul tendencies. A bet is only posted when
+              our projected line disagrees with the sportsbook by at least <strong>1.5 points</strong> and clears{' '}
+              <strong>+2.0% expected value</strong>.
             </p>
           </section>
 
           <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-3">
             <h3 className="font-bold uppercase tracking-wider text-emerald-300">
-              2. Live Feed Health Status
+              3. Data Sources Overview
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {['torvik', 'kenpom', 'haslametrics', 'odds', 'action_splits'].map((src) => {
                 const row = bySource[src];
                 const ok = String(row?.status || '').toLowerCase() === 'ok';
+                const cnt = row?.last_row_count ?? row?.row_count;
                 return (
                   <div key={src} className="rounded-lg border border-slate-800 bg-slate-900/90 px-3 py-2">
-                    <div className="font-bold uppercase text-[10px] text-slate-400">{src}</div>
+                    <div className="font-bold text-[11px] text-slate-300">{FEED_LABELS[src] || src}</div>
                     <div className={`mt-0.5 font-semibold ${ok ? 'text-emerald-300' : 'text-amber-300'}`}>
-                      {row?.status || 'unknown'}
-                      {row?.row_count != null ? ` (${row.row_count} rows)` : ''}
+                      {ok ? 'Active' : src === 'kenpom' ? 'Needs 2026-27 Update' : 'Needs Refresh'}
+                      {cnt != null ? ` (${cnt} rows)` : ''}
                     </div>
                   </div>
                 );
               })}
             </div>
-          </section>
-
-          <section className="rounded-xl border border-indigo-500/30 bg-indigo-950/20 p-4 space-y-3">
-            <h3 className="font-bold uppercase tracking-wider text-indigo-300">
-              3. Upload KenPom Ratings (CSV / TSV)
-            </h3>
-            <p className="text-slate-300">
-              Export your daily ratings CSV or TSV from KenPom and upload it here to refresh team ratings immediately.
-            </p>
-            <form onSubmit={handleKenpomUpload} className="flex flex-wrap items-center gap-3">
-              <div>
-                <label htmlFor="kenpom-csv-file" className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  KenPom CSV / TSV File
-                </label>
-                <input
-                  id="kenpom-csv-file"
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,.tsv,.txt"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  className="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-100 file:font-semibold hover:file:bg-slate-700"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={uploadState.uploading || !selectedFile}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer self-end"
-              >
-                <Upload size={13} aria-hidden="true" />
-                <span>{uploadState.uploading ? 'Uploading...' : 'Import KenPom'}</span>
-              </button>
-            </form>
-
-            {uploadState.message && (
-              <div
-                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
-                  uploadState.status === 'success'
-                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-200'
-                    : 'bg-rose-500/15 border border-rose-500/30 text-rose-200'
-                }`}
-              >
-                {uploadState.status === 'success' ? (
-                  <CheckCircle2 size={14} aria-hidden="true" />
-                ) : (
-                  <AlertCircle size={14} aria-hidden="true" />
-                )}
-                <span>{uploadState.message}</span>
-              </div>
-            )}
           </section>
         </div>
       </div>

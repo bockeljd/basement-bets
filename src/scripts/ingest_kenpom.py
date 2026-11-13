@@ -277,8 +277,14 @@ def ensure_tables():
 
 
 def _asof_date_et() -> str:
-    with get_db_connection() as conn:
-        return _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+    try:
+        with get_db_connection() as conn:
+            return _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+    except Exception:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
 
 
 def fetch_html(sess: requests.Session, path: str, params: dict | None = None) -> str:
@@ -817,14 +823,25 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
 def _clean_kp_team_name(raw_name: str) -> str:
     """Clean trailing tournament seed numbers/markers (e.g. 'Duke 1*' -> 'Duke')."""
     import re
-    s = str(raw_name or "").strip().strip('"').strip("'")
-    return re.sub(r"([A-Za-z\).'])\s+\d{1,2}\*?$", r"\1", s).strip()
+    s = str(raw_name or "").replace("\xa0", " ").strip().strip('"').strip("'")
+    s = re.sub(r"([A-Za-z\).'])\s+\d{1,2}\*?$", r"\1", s).strip()
+    s = re.sub(r"\*+$", "", s).strip()
+    return s
 
 
 def _parse_kp_float(val) -> float | None:
     if val is None:
         return None
-    s = str(val).replace("+", "").replace(",", "").strip()
+    s = (
+        str(val)
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\xa0", " ")
+        .replace("+", "")
+        .replace(",", "")
+        .strip()
+    )
     if not s or s in ("-", "N/A", "NA", "--"):
         return None
     try:
@@ -838,34 +855,80 @@ def _parse_kp_int(val) -> int | None:
     return int(round(f)) if f is not None else None
 
 
-def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
-    """Parse KenPom ratings CSV/TSV export into canonical team rating rows.
+def _looks_like_kp_rank_cell(val: str) -> bool:
+    s = str(val or "").strip()
+    return s.isdigit() and 1 <= int(s) <= 400
 
-    Supports both KenPom summary CSV headers (Season, TeamName, AdjTempo, AdjOE, AdjDE, AdjEM, ...)
-    and table copy/export headers (Rk/Rank, Team, Conf, W-L/Record, NetRtg/AdjEM, ORtg/AdjO, DRtg/AdjD, AdjT).
+
+def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
+    """Parse KenPom ratings CSV/TSV export or copied web table into canonical team rating rows.
+
+    Supports:
+    - KenPom summary CSV headers (Season, TeamName, AdjTempo, AdjOE, AdjDE, AdjEM, ...)
+    - Copied table headers (Rk/Rank, Team, Conf, W-L/Record, NetRtg/AdjEM, ORtg/AdjO, DRtg/AdjD, AdjT)
+      including live kenpom.com HTML copy-paste where integer rank cells sit next to ORtg/DRtg/AdjT
+    - Unicode minus signs (U+2212) and headerless tab/multi-space table pastes
     """
     import csv
     import io
+    import re
 
-    text = (csv_text or "").lstrip("\ufeff").strip()
-    if not text:
+    raw_text = (
+        (csv_text or "")
+        .lstrip("\ufeff")
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\xa0", " ")
+        .strip()
+    )
+    if not raw_text:
         return []
 
-    sample = "\n".join(text.splitlines()[:5])
-    delimiter = "\t" if sample.count("\t") > sample.count(",") else ","
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    rows_raw = [r for r in reader if r and any(c.strip() for c in r)]
+    sample_lines = raw_text.splitlines()[:8]
+    sample = "\n".join(sample_lines)
+    if sample.count("\t") >= max(1, sample.count(",")):
+        reader = csv.reader(io.StringIO(raw_text), delimiter="\t")
+        rows_raw = [r for r in reader if r and any(c.strip() for c in r)]
+    elif sample.count(",") >= len(sample_lines):
+        reader = csv.reader(io.StringIO(raw_text), delimiter=",")
+        rows_raw = [r for r in reader if r and any(c.strip() for c in r)]
+    else:
+        rows_raw = [
+            re.split(r"\s{2,}", line.strip())
+            for line in raw_text.splitlines()
+            if line.strip()
+        ]
+        if rows_raw and max(len(r) for r in rows_raw) < 4:
+            reader = csv.reader(io.StringIO(raw_text), delimiter=",")
+            rows_raw = [r for r in reader if r and any(c.strip() for c in r)]
+
     if not rows_raw:
         return []
 
-    header_idx = 0
-    for idx, r in enumerate(rows_raw[:5]):
+    header_idx = None
+    for idx, r in enumerate(rows_raw[:15]):
         joined = " ".join(c.strip().lower() for c in r)
         if any(tok in joined for tok in ("team", "adjem", "netrtg", "adjoe", "ortg")):
             header_idx = idx
             break
 
-    headers = [c.strip() for c in rows_raw[header_idx]]
+    if header_idx is None:
+        # Check for headerless KenPom web-table paste: Rk | Team | Conf | W-L | NetRtg | ORtg | ...
+        first_row = rows_raw[0]
+        looks_headerless = (
+            len(first_row) >= 6
+            and _looks_like_kp_rank_cell(first_row[0])
+            and re.match(r"^\d+-\d+$", str(first_row[3] or "").strip())
+            and _parse_kp_float(first_row[4]) is not None
+        )
+        if not looks_headerless:
+            raise ValueError("Missing required 'Team' or 'TeamName' column in KenPom table")
+        headers = ["Rk", "Team", "Conf", "W-L", "NetRtg", "ORtg", "DRtg", "AdjT"]
+        data_rows = rows_raw
+    else:
+        headers = [c.strip() for c in rows_raw[header_idx]]
+        data_rows = rows_raw[header_idx + 1:]
+
     norm_headers = ["".join(ch for ch in h.lower() if ch.isalnum()) for h in headers]
 
     def _find_col(candidates: tuple[str, ...]) -> int | None:
@@ -892,7 +955,7 @@ def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
         raise ValueError("CSV must contain NetRtg/AdjEM or both ORtg/AdjO and DRtg/AdjD columns")
 
     out: list[dict] = []
-    for row in rows_raw[header_idx + 1:]:
+    for row in data_rows:
         if len(row) <= idx_team:
             continue
         team = _clean_kp_team_name(row[idx_team])
@@ -901,12 +964,27 @@ def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
         if idx_em is not None and len(row) > idx_em and str(row[idx_em]).strip().lower() in ("adjem", "netrtg"):
             continue
 
-        adj_o = _parse_kp_float(row[idx_o]) if (idx_o is not None and len(row) > idx_o) else None
-        adj_d = _parse_kp_float(row[idx_d]) if (idx_d is not None and len(row) > idx_d) else None
+        # Detect interleaved integer rank cells when pasted directly from kenpom.com HTML table
+        row_has_interleaved_ranks = (
+            idx_o is not None
+            and idx_d is not None
+            and idx_d == idx_o + 1
+            and (header_idx is None or len(row) > len(headers) + 1)
+            and len(row) > idx_o + 2
+            and _looks_like_kp_rank_cell(row[idx_o + 1])
+            and (_parse_kp_float(row[idx_o + 2]) or 0.0) >= 65.0
+        )
+
+        eff_idx_o = idx_o
+        eff_idx_d = (idx_o + 2) if row_has_interleaved_ranks else idx_d
+        eff_idx_t = (idx_o + 4) if (row_has_interleaved_ranks and idx_t is not None) else idx_t
+
+        adj_o = _parse_kp_float(row[eff_idx_o]) if (eff_idx_o is not None and len(row) > eff_idx_o) else None
+        adj_d = _parse_kp_float(row[eff_idx_d]) if (eff_idx_d is not None and len(row) > eff_idx_d) else None
         adj_em = _parse_kp_float(row[idx_em]) if (idx_em is not None and len(row) > idx_em) else None
         if adj_em is None and adj_o is not None and adj_d is not None:
             adj_em = round(adj_o - adj_d, 2)
-        adj_t = _parse_kp_float(row[idx_t]) if (idx_t is not None and len(row) > idx_t) else None
+        adj_t = _parse_kp_float(row[eff_idx_t]) if (eff_idx_t is not None and len(row) > eff_idx_t) else None
         rank = _parse_kp_int(row[idx_rank]) if (idx_rank is not None and len(row) > idx_rank) else None
         conf = row[idx_conf].strip() if (idx_conf is not None and len(row) > idx_conf and row[idx_conf].strip()) else None
 
@@ -944,17 +1022,39 @@ def fetch_kenpom_official_api(api_key: str, year: int | None = None, timeout: in
     """Fetch KenPom ratings via official subscription API (kenpom.com/register-api.php)."""
     from src.utils.ncaam_season import current_ncaam_season_end_year
 
+    key = (api_key or "").strip()
+    if not key:
+        raise ValueError("KenPom API key is empty.")
+
     y = int(year or current_ncaam_season_end_year())
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+        "User-Agent": "BasementBets/1.0",
+    }
     resp = requests.get(
         "https://kenpom.com/api.php",
         params={"endpoint": "ratings", "y": y},
-        headers={
-            "Authorization": f"Bearer {api_key.strip()}",
-            "Accept": "application/json",
-            "User-Agent": "BasementBets/1.0",
-        },
+        headers=headers,
         timeout=timeout,
     )
+    if resp.status_code == 403:
+        # Retry with cloudscraper if installed (handles Cloudflare bot challenges in local/CI environments)
+        try:
+            sess = _make_cloudscraper()
+            resp = sess.get(
+                "https://kenpom.com/api.php",
+                params={"endpoint": "ratings", "y": y},
+                headers=headers,
+                timeout=timeout,
+            )
+        except Exception:
+            pass
+
+    if resp.status_code == 401:
+        raise ValueError("KenPom rejected that API key (HTTP 401). Double-check the key from kenpom.com/register-api.php.")
+    if resp.status_code == 403:
+        raise RuntimeError("KenPom blocked this server request (HTTP 403 Cloudflare challenge). Paste the ratings table directly or run via GitHub Actions.")
     resp.raise_for_status()
     payload = resp.json()
     rows = payload.get("data", payload) if isinstance(payload, dict) else payload
@@ -993,6 +1093,211 @@ def fetch_kenpom_official_api(api_key: str, year: int | None = None, timeout: in
     return out
 
 
+def get_kenpom_status() -> dict:
+    """Return plain-English diagnostic status of KenPom activation & server configuration (never exposes secrets)."""
+    from datetime import date as _date
+    from src.utils.ncaam_season import current_ncaam_season_end_year, season_start_date_for_game
+
+    end_year = int(current_ncaam_season_end_year())
+    season_label = f"{end_year - 1}-{str(end_year)[-2:]}"
+    season_floor = str(season_start_date_for_game(_date.today()))
+
+    has_api_key = bool((os.getenv("KENPOM_API_KEY") or "").strip())
+    has_creds = bool((os.getenv("KENPOM_EMAIL") or "").strip() and (os.getenv("KENPOM_PASSWORD") or "").strip())
+    has_cookie = bool((os.getenv("KENPOM_COOKIE") or "").strip())
+
+    latest_asof_date = None
+    team_count = 0
+    health_status = "missing"
+    health_notes = None
+    db_error = None
+
+    try:
+        with get_db_connection() as conn:
+            row = _exec(
+                conn,
+                """
+                SELECT asof_date::text AS asof_date, COUNT(*) AS n
+                FROM kenpom_team_ratings_daily
+                GROUP BY asof_date
+                ORDER BY asof_date DESC
+                LIMIT 1
+                """,
+            ).fetchone()
+            if row:
+                d_row = dict(row)
+                latest_asof_date = str(d_row.get("asof_date") or "")[:10] or None
+                team_count = int(d_row.get("n") or 0)
+
+            dh = _exec(
+                conn,
+                "SELECT status, notes, last_success_at FROM data_health WHERE source = 'kenpom' LIMIT 1",
+            ).fetchone()
+            if dh:
+                dh_d = dict(dh)
+                health_status = str(dh_d.get("status") or "missing").lower()
+                health_notes = dh_d.get("notes")
+    except Exception as e:
+        db_error = str(e)
+
+    active_for_season = bool(latest_asof_date and latest_asof_date >= season_floor and team_count > 0)
+
+    if active_for_season:
+        human_summary = (
+            f"KenPom is active for the {season_label} season "
+            f"(latest snapshot {latest_asof_date}, {team_count} teams)."
+        )
+        next_step = "Daily ratings are active in the model blend. You can refresh anytime below."
+    elif latest_asof_date:
+        human_summary = (
+            f"KenPom is turned off for {season_label} games because the newest ratings in your database "
+            f"are from {latest_asof_date} (prior season)."
+        )
+        if has_api_key:
+            next_step = "A KenPom API key is configured on the server — click Sync Now to pull 2026-27 ratings."
+        else:
+            next_step = (
+                "Paste the ratings table from kenpom.com below for an instant update, or enter a KenPom Official API key "
+                "(from kenpom.com/register-api.php) to enable automatic daily sync."
+            )
+    else:
+        human_summary = f"KenPom is turned off because no {season_label} team ratings have been imported yet."
+        next_step = (
+            "Paste the ratings table from kenpom.com below or enter a KenPom Official API key to turn it on."
+        )
+
+    return {
+        "active": active_for_season,
+        "season_label": season_label,
+        "season_end_year": end_year,
+        "season_floor": season_floor,
+        "latest_asof_date": latest_asof_date,
+        "team_count": team_count,
+        "health_status": health_status,
+        "health_notes": health_notes,
+        "db_error": db_error,
+        "configured_methods": {
+            "official_api_key": has_api_key,
+            "credentials": has_creds,
+            "cookie": has_cookie,
+        },
+        "human_summary": human_summary,
+        "next_step": next_step,
+    }
+
+
+def run_kenpom_sync(
+    api_key: str | None = None,
+    asof_date: str | None = None,
+    include_extras: bool = False,
+) -> dict:
+    """Sync KenPom ratings via Official API (preferred) or web session credentials."""
+    from src.scripts.update_data_health import upsert as upsert_health
+
+    ensure_tables()
+    asof = (asof_date or _asof_date_et())[:10]
+    key = (api_key or os.getenv("KENPOM_API_KEY") or "").strip()
+
+    if key:
+        teams = fetch_kenpom_official_api(key)
+        if len(teams) < 10:
+            raise RuntimeError(
+                f"KenPom Official API returned only {len(teams)} teams for this season; nothing was overwritten."
+            )
+        n_team = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
+        try:
+            upsert_health(
+                "kenpom",
+                status="ok" if n_team > 0 else "stale",
+                row_count=n_team,
+                notes=f"Synced {n_team} teams via Official API ({asof})",
+            )
+        except Exception as e:
+            print(f"[kenpom] data_health upsert failed: {e}")
+        return {
+            "status": "ok",
+            "method": "official_api",
+            "asof_date": asof,
+            "rows": n_team,
+            "message": f"Synced {n_team} KenPom teams for {asof} via Official API.",
+        }
+
+    cookie = (os.getenv("KENPOM_COOKIE") or "").strip()
+    email = (os.getenv("KENPOM_EMAIL") or "").strip()
+    password = (os.getenv("KENPOM_PASSWORD") or "").strip()
+    if not cookie and not (email and password):
+        return {
+            "status": "needs_setup",
+            "method": None,
+            "asof_date": asof,
+            "rows": 0,
+            "message": (
+                "No KenPom API key, login email, or cookie is configured on this server. "
+                "Paste your KenPom table or enter a KenPom Official API key to sync immediately."
+            ),
+        }
+
+    sess = _session()
+    time.sleep(0.5)
+    teams = scrape_team_ratings(sess)
+    if not teams:
+        msg = (
+            "KenPom returned 0 teams (login failed or Cloudflare blocked the server request). "
+            "Use a KenPom Official API key or paste the ratings table from kenpom.com."
+        )
+        try:
+            upsert_health("kenpom", status="stale", row_count=0, notes=msg[:240])
+        except Exception:
+            pass
+        return {"status": "warning", "method": "web_session", "asof_date": asof, "rows": 0, "message": msg}
+
+    n_team = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
+    n_hca = n_refs = n_players = n_players_norm = n_team_agg = 0
+
+    if include_extras:
+        try:
+            time.sleep(0.8)
+            hca = scrape_home_court(sess)
+            n_hca = upsert_daily("kenpom_home_court_daily", asof, hca, ["team_name"])
+        except Exception as e:
+            print(f"[kenpom] hca skipped: {e}")
+        try:
+            time.sleep(0.8)
+            refs = scrape_ref_ratings(sess)
+            n_refs = upsert_daily("kenpom_ref_ratings_daily", asof, refs, ["ref_name"])
+        except Exception as e:
+            print(f"[kenpom] refs skipped: {e}")
+        try:
+            time.sleep(0.8)
+            players = scrape_player_stats(sess)
+            n_players = upsert_daily("kenpom_player_stats_daily", asof, players, ["player_name", "team_name"])
+            norm = normalize_player_rows(players)
+            n_players_norm = upsert_daily("kenpom_player_stats_norm_daily", asof, norm, ["player_name", "team_name"])
+            aggs = compute_team_player_agg(norm)
+            n_team_agg = upsert_daily("kenpom_team_player_agg_daily", asof, aggs, ["team_name"])
+        except Exception as e:
+            print(f"[kenpom] players skipped: {e}")
+
+    try:
+        total = int(n_team or 0) + int(n_hca or 0) + int(n_refs or 0) + int(n_players or 0)
+        upsert_health(
+            "kenpom",
+            status="ok" if n_team > 0 else "stale",
+            row_count=total,
+            notes=f"Synced {n_team} teams ({asof})",
+        )
+    except Exception as e:
+        print(f"[kenpom] data_health upsert failed: {e}")
+
+    return {
+        "status": "ok",
+        "method": "web_session",
+        "asof_date": asof,
+        "rows": n_team,
+        "message": f"Synced {n_team} KenPom teams for {asof}.",
+    }
+
+
 def ingest_kenpom_csv(csv_text: str, asof_date: str | None = None) -> dict:
     """Parse and upsert KenPom ratings from CSV text into DB and update data_health."""
     from src.scripts.update_data_health import upsert as upsert_health
@@ -1008,7 +1313,7 @@ def ingest_kenpom_csv(csv_text: str, asof_date: str | None = None) -> dict:
         "kenpom",
         "ok",
         row_count=n_saved,
-        notes=f"kenpom CSV upload asof={asof} rows={n_saved}",
+        notes=f"Imported {n_saved} teams from pasted/uploaded table ({asof})",
     )
     return {"status": "ok", "asof_date": asof, "rows": n_saved}
 
@@ -1029,73 +1334,10 @@ def main():
         print(f"csv_upload: asof={res['asof_date']} rows={res['rows']}")
         return
 
-    ensure_tables()
-    asof = (args.date or _asof_date_et())[:10]
-
-    api_key = (os.getenv("KENPOM_API_KEY") or "").strip()
-    if api_key:
-        teams = fetch_kenpom_official_api(api_key)
-        n_team = upsert_daily('kenpom_team_ratings_daily', asof, teams, ['team_name'])
-        print(f"official_api teams: fetched={len(teams)} upserted={n_team}")
-        try:
-            from src.scripts.update_data_health import upsert
-            status = 'ok' if (n_team and n_team > 0) else 'stale'
-            upsert('kenpom', status=status, row_count=n_team, notes=f"official_api team={n_team}")
-        except Exception as e:
-            print(f"[kenpom] data_health upsert failed: {e}")
-        return
-
-    cookie = (os.getenv("KENPOM_COOKIE") or "").strip()
-    email = (os.getenv("KENPOM_EMAIL") or "").strip()
-    password = (os.getenv("KENPOM_PASSWORD") or "").strip()
-    if not cookie and not (email and password):
+    res = run_kenpom_sync(asof_date=args.date, include_extras=True)
+    if res.get("status") == "needs_setup":
         raise RuntimeError("Set KENPOM_API_KEY, --csv <path>, or KENPOM_EMAIL/KENPOM_PASSWORD/KENPOM_COOKIE")
-
-    sess = _session()
-
-    # Be polite.
-    time.sleep(1.0)
-
-    teams = scrape_team_ratings(sess)
-    n_team = upsert_daily('kenpom_team_ratings_daily', asof, teams, ['team_name'])
-    print(f"teams: scraped={len(teams)} upserted={n_team}")
-
-    time.sleep(1.0)
-    hca = scrape_home_court(sess)
-    n_hca = upsert_daily('kenpom_home_court_daily', asof, hca, ['team_name'])
-    print(f"home_court: scraped={len(hca)} upserted={n_hca}")
-
-    time.sleep(1.0)
-    refs = scrape_ref_ratings(sess)
-    n_refs = upsert_daily('kenpom_ref_ratings_daily', asof, refs, ['ref_name'])
-    print(f"refs: scraped={len(refs)} upserted={n_refs}")
-
-    # Player stats can be large. Run daily, but keep it best-effort.
-    time.sleep(1.0)
-    players = scrape_player_stats(sess)
-    n_players = upsert_daily('kenpom_player_stats_daily', asof, players, ['player_name','team_name'])
-    print(f"players: scraped={len(players)} upserted={n_players}")
-
-    # Normalize player rows -> typed columns, then compute team aggregates.
-    n_players_norm = 0
-    n_team_agg = 0
-    try:
-        norm = normalize_player_rows(players)
-        n_players_norm = upsert_daily('kenpom_player_stats_norm_daily', asof, norm, ['player_name','team_name'])
-        aggs = compute_team_player_agg(norm)
-        n_team_agg = upsert_daily('kenpom_team_player_agg_daily', asof, aggs, ['team_name'])
-        print(f"players_norm: upserted={n_players_norm} team_player_agg: upserted={n_team_agg}")
-    except Exception as e:
-        print(f"[kenpom] normalize/agg failed: {e}")
-
-    # Update data_health row
-    try:
-        from src.scripts.update_data_health import upsert
-        total = int(n_team or 0) + int(n_hca or 0) + int(n_refs or 0) + int(n_players or 0) + int(n_players_norm or 0) + int(n_team_agg or 0)
-        status = 'ok' if (n_team and n_team > 0) else 'stale'
-        upsert('kenpom', status=status, row_count=total, notes=f"team={n_team} hca={n_hca} refs={n_refs} players={n_players} players_norm={n_players_norm} team_agg={n_team_agg}")
-    except Exception as e:
-        print(f"[kenpom] data_health upsert failed: {e}")
+    print(f"sync [{res.get('method')}]: status={res.get('status')} rows={res.get('rows')} msg={res.get('message')}")
 
 
 if __name__ == '__main__':

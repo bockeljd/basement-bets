@@ -218,11 +218,11 @@ function PlayerStatsTable({ players = [] }) {
                 <thead>
                     <tr className="border-b border-slate-800 text-slate-500 uppercase tracking-wider">
                         <th className="text-left py-2 px-3 font-bold">Player</th>
-                        <th className="text-center py-2 px-2 font-bold">PPG</th>
-                        <th className="text-center py-2 px-2 font-bold">APG</th>
-                        <th className="text-center py-2 px-2 font-bold">RPG</th>
-                        <th className="text-center py-2 px-2 font-bold">ORtg</th>
-                        <th className="text-center py-2 px-2 font-bold">Usg%</th>
+                        <th className="text-center py-2 px-2 font-bold">Pts</th>
+                        <th className="text-center py-2 px-2 font-bold">Ast</th>
+                        <th className="text-center py-2 px-2 font-bold">Reb</th>
+                        <th className="text-center py-2 px-2 font-bold">Off Rtg</th>
+                        <th className="text-center py-2 px-2 font-bold">Usage%</th>
                         <th className="text-center py-2 px-2 font-bold">eFG%</th>
                         <th className="text-center py-2 px-2 font-bold">Min%</th>
                     </tr>
@@ -547,7 +547,7 @@ const MarchMadness = () => {
             {(search ? filteredTeams : teams).map(t => (
                 <option key={t.team_name} value={t.team_name}
                     disabled={side === 'B' && t.team_name === selectedTeam.team_name}>
-                    {t.seed ? `[#${t.seed}] ` : `[KP #${t.rank}] `} {t.team_name}
+                    {t.seed ? `[#${t.seed}] ` : `[Rank #${t.rank}] `} {t.team_name}
                 </option>
             ))}
         </select>
@@ -559,7 +559,7 @@ const MarchMadness = () => {
             <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md flex-wrap gap-3">
                 <div className="flex items-center gap-3 flex-wrap">
                     <div className="hidden md:flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
-                        <Cpu size={14} className="text-orange-500" /> Profiler v2.3
+                        <Cpu size={14} className="text-orange-500" /> Tournament Hub
                     </div>
                     {/* Main tab toggle */}
                     <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
@@ -626,7 +626,7 @@ const MarchMadness = () => {
                                     {selectedTeam.seed ? (
                                         <><Layout size={12} className="text-orange-500" /> Seed #{selectedTeam.seed}</>
                                     ) : (
-                                        <>KP #{selectedTeam.rank}</>
+                                        <>KenPom #{selectedTeam.rank}</>
                                     )}
                                 </div>
                                 {selectedTeam.region && (
@@ -721,10 +721,10 @@ const MarchMadness = () => {
                         {/* Efficiency metrics */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {[
-                                { icon: <TrendingUp size={16} />, label: 'AdjEM', val: selectedTeam.adj_em, fmt: `${selectedTeam.adj_em > 0 ? '+' : ''}${selectedTeam.adj_em}`, color: 'text-white' },
-                                { icon: <Crosshair size={16} />, label: 'Adj Offense', val: selectedTeam.adj_o, fmt: selectedTeam.adj_o, color: getColorEff(selectedTeam.adj_o) },
-                                { icon: <Shield size={16} />, label: 'Adj Defense', val: selectedTeam.adj_d, fmt: selectedTeam.adj_d, color: getColorEff(selectedTeam.adj_d, true) },
-                                { icon: <Activity size={16} />, label: 'Tempo', val: selectedTeam.adj_t, fmt: selectedTeam.adj_t, color: 'text-white' },
+                                { icon: <TrendingUp size={16} />, label: 'Net Rating', val: selectedTeam.adj_em, fmt: `${selectedTeam.adj_em > 0 ? '+' : ''}${selectedTeam.adj_em}`, color: 'text-white' },
+                                { icon: <Crosshair size={16} />, label: 'Offense Rating', val: selectedTeam.adj_o, fmt: selectedTeam.adj_o, color: getColorEff(selectedTeam.adj_o) },
+                                { icon: <Shield size={16} />, label: 'Defense Rating', val: selectedTeam.adj_d, fmt: selectedTeam.adj_d, color: getColorEff(selectedTeam.adj_d, true) },
+                                { icon: <Activity size={16} />, label: 'Game Pace', val: selectedTeam.adj_t, fmt: selectedTeam.adj_t, color: 'text-white' },
                             ].map(({ icon, label, fmt, color }) => (
                                 <div key={label} className="bg-slate-900 rounded-2xl p-5 border border-slate-800 shadow-lg">
                                     <div className="flex items-center gap-2 mb-2 text-slate-400">{icon}<span className="text-xs font-bold uppercase tracking-wider">{label}</span></div>
@@ -737,12 +737,12 @@ const MarchMadness = () => {
                         {deepA?.torvik && Object.keys(deepA.torvik).length > 0 && (
                             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                                 <h3 className="text-sm font-bold text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                    <Zap size={14} className="text-blue-400" /> Torvik Deep Metrics
+                                    <Zap size={14} className="text-blue-400" /> BartTorvik Team Profile
                                 </h3>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     {[
-                                        { label: 'Adj Off', val: deepA.torvik.adj_off, color: getColorEff(deepA.torvik.adj_off) },
-                                        { label: 'Adj Def', val: deepA.torvik.adj_def, color: getColorEff(deepA.torvik.adj_def, true) },
+                                        { label: 'Offense Rating', val: deepA.torvik.adj_off, color: getColorEff(deepA.torvik.adj_off) },
+                                        { label: 'Defense Rating', val: deepA.torvik.adj_def, color: getColorEff(deepA.torvik.adj_def, true) },
                                         { label: 'Luck', val: deepA.torvik.luck, fmt: (v) => v != null ? `${parseFloat(v) >= 0 ? '+' : ''}${parseFloat(v).toFixed(3)}` : '—', color: (v) => parseFloat(v) > 0 ? 'text-red-400' : 'text-emerald-400' },
                                         { label: 'Continuity', val: deepA.torvik.continuity, fmt: (v) => v != null ? `${parseFloat(v).toFixed(0)}%` : '—', color: (v) => parseFloat(v) >= 75 ? 'text-emerald-400' : parseFloat(v) < 60 ? 'text-red-400' : 'text-slate-300' },
                                     ].map(({ label, val, fmt, color }) => (
@@ -761,7 +761,7 @@ const MarchMadness = () => {
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
                             <div className="bg-slate-800/50 p-4 border-b border-slate-800">
                                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                                    <Users className="text-blue-400" /> Player Stats (KenPom — by mins played)
+                                    <Users className="text-blue-400" /> Top Players (by minutes played)
                                 </h2>
                             </div>
                             {loadingDeepA ? (
@@ -782,7 +782,7 @@ const MarchMadness = () => {
                         <div className="bg-gradient-to-r from-purple-950/50 to-slate-900 border border-purple-500/20 rounded-2xl p-6">
                             <div className="flex flex-col md:flex-row items-center gap-6">
                                 <div className="flex-1">
-                                    <div className="text-xs font-bold uppercase tracking-widest text-purple-400 mb-1 flex items-center gap-1"><Target size={12} /> Quantitative Edge (AdjEM)</div>
+                                    <div className="text-xs font-bold uppercase tracking-widest text-purple-400 mb-1 flex items-center gap-1"><Target size={12} /> Projected Win Chance (Team Rating Edge)</div>
                                     <div className="flex items-center gap-4 mt-2">
                                         <span className="text-2xl font-black text-blue-400">{selectedTeam.team_name} {edgeScore}%</span>
                                         <span className="text-slate-500">vs</span>
@@ -815,7 +815,7 @@ const MarchMadness = () => {
                                 <div className={`text-xs font-bold text-${color}-400 uppercase tracking-widest mb-1`}>{team.conference}</div>
                                 <h2 className="text-2xl font-black text-white mb-1">{team.team_name}</h2>
                                 <div className="text-xs text-slate-400 mb-4">
-                                    {team.net_record || team.record} • KP #{team.rank}
+                                    {team.net_record || team.record} • Rank #{team.rank}
                                     {(deep?.net?.net_rank || team.net_rank) && ` • NET #${deep?.net?.net_rank || team.net_rank}`}
                                 </div>
                                 {/* Upset risk + dark horse inline */}
@@ -839,9 +839,9 @@ const MarchMadness = () => {
                                 )}
                                 <div className="grid grid-cols-3 gap-2 text-center mb-4">
                                     {[
-                                        { label: 'OFF', val: team.adj_o, color: getColorEff(team.adj_o) },
-                                        { label: 'DEF', val: team.adj_d, color: getColorEff(team.adj_d, true) },
-                                        { label: 'TEMPO', val: team.adj_t, color: 'text-white' },
+                                        { label: 'Offense', val: team.adj_o, color: getColorEff(team.adj_o) },
+                                        { label: 'Defense', val: team.adj_d, color: getColorEff(team.adj_d, true) },
+                                        { label: 'Pace', val: team.adj_t, color: 'text-white' },
                                     ].map(({ label, val, color: c }) => (
                                         <div key={label} className="bg-slate-950 p-2 rounded-lg border border-slate-800">
                                             <div className="text-[10px] text-slate-500 font-bold mb-1">{label}</div>
@@ -880,7 +880,7 @@ const MarchMadness = () => {
                             <div>Metric</div>
                             <div className="text-left text-rose-400">{selectedTeamB?.team_name}</div>
                         </div>
-                        <StatBar label="AdjEM" valA={selectedTeam.adj_em} valB={selectedTeamB?.adj_em} />
+                        <StatBar label="Net Rating" valA={selectedTeam.adj_em} valB={selectedTeamB?.adj_em} />
                         <StatBar label="Offense" valA={selectedTeam.adj_o} valB={selectedTeamB?.adj_o} />
                         <StatBar label="Defense" valA={selectedTeam.adj_d} valB={selectedTeamB?.adj_d} lowerIsBetter />
                         <StatBar label="Tempo" valA={selectedTeam.adj_t} valB={selectedTeamB?.adj_t} />
@@ -982,15 +982,15 @@ const MarchMadness = () => {
                                         <tr className="border-b border-slate-800 text-slate-500 uppercase tracking-wider text-xs">
                                             <th className="text-left py-3 px-4">#</th>
                                             <th className="text-left py-3 px-4 font-bold">Team</th>
-                                            <th className="text-center py-3 px-3">KP</th>
+                                            <th className="text-center py-3 px-3">Rank</th>
                                             <th className="text-center py-3 px-3">NET</th>
-                                            <th className="text-center py-3 px-3">AdjEM</th>
-                                            <th className="text-center py-3 px-3">Barthag</th>
+                                            <th className="text-center py-3 px-3">Net Rtg</th>
+                                            <th className="text-center py-3 px-3">Power %</th>
                                             <th className="text-center py-3 px-3">Luck</th>
-                                            <th className="text-center py-3 px-3">Cont.</th>
-                                            <th className="text-center py-3 px-3">Q1</th>
+                                            <th className="text-center py-3 px-3">Returning</th>
+                                            <th className="text-center py-3 px-3">Quad 1</th>
                                             <th className="text-center py-3 px-3">Upset Risk</th>
-                                            <th className="text-center py-3 px-3 font-black text-yellow-400">🐴 Score</th>
+                                            <th className="text-center py-3 px-3 font-black text-yellow-400">🐴 Dark Horse</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/50">
@@ -1380,7 +1380,7 @@ const ExpectedUpsetsWidget = ({ expectedUpsets }) => {
     return (
         <BracketTile
             title="Expected upsets"
-            subtitle="R64"
+            subtitle="First Round"
             accent="text-orange-300"
             icon={<Zap size={12} />}
         >
@@ -1406,7 +1406,7 @@ const UpsetCandidates = ({ items = [] }) => {
     return (
         <BracketTile
             title="Upset candidates"
-            subtitle="R64 ≥ 35%"
+            subtitle="First Round ≥ 35%"
             accent="text-slate-300"
             icon={<AlertTriangle size={12} />}
         >
@@ -1431,7 +1431,7 @@ const DarkHorseWatchlist = ({ items = [] }) => {
     return (
         <BracketTile
             title="Dark horses"
-            subtitle="Title equity"
+            subtitle="Championship Odds"
             accent="text-yellow-400"
             icon={<Star size={12} />}
         >
@@ -1604,8 +1604,8 @@ const BracketView = ({ data, loading, onMatchupClick, insights = {}, mode = 'the
                     <div className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 text-amber-200">
                         <div className="flex items-center gap-2">
                             <AlertTriangle size={16} className="shrink-0 text-amber-500" />
-                            <div className="text-xs font-bold uppercase tracking-wide">Degraded data</div>
-                            <div className="text-[11px] text-amber-200/80">Some games are using seed-based priors due to missing team mappings/metrics.</div>
+                            <div className="text-xs font-bold uppercase tracking-wide">Limited team data</div>
+                            <div className="text-[11px] text-amber-200/80">Some matchups use tournament seed estimates because team ratings are missing.</div>
                         </div>
                         <div className="text-[10px] font-mono bg-amber-500/20 px-2 py-1 rounded shrink-0">
                             {issueCount} issues

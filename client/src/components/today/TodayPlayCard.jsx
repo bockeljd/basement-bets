@@ -85,10 +85,10 @@ const TodayPlayCard = ({
 
         <div className="flex flex-col items-end gap-1 shrink-0">
           <span className={`px-2.5 py-0.5 rounded-full border text-[11px] font-bold tracking-wide ${conf.badgeCls}`}>
-            {conf.tier} CONF{conf.score !== null ? ` · ${conf.score}` : ''}
+            {conf.tier} CONFIDENCE{conf.score !== null ? ` · ${conf.score}` : ''}
           </span>
           <span className="text-xs font-mono font-bold text-emerald-300">
-            {rec?.ev !== null && rec?.ev !== undefined ? `+${(Number(rec.ev) * 100).toFixed(1)}% EV` : '—'}
+            {rec?.ev !== null && rec?.ev !== undefined ? `+${(Number(rec.ev) * 100).toFixed(1)}% Edge` : '—'}
           </span>
         </div>
       </div>
@@ -96,21 +96,21 @@ const TodayPlayCard = ({
       {/* Container-query responsive metric strip */}
       <div className="today-play-metrics">
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Price / Book</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Odds / Book</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-white">
             {fmtOdds(rec?.price)} <span className="text-xs font-sans font-normal text-slate-400">{rec?.book || 'Consensus'}</span>
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Fair vs Book</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Model vs Book</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-sky-300">
             {fairDisplay} <span className="text-slate-500 font-normal">vs</span> <span className="text-slate-200">{marketDisplay}</span>
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Win % / Edge</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Win Chance (Edge)</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-emerald-300">
             {fmtPct(winProb, 1)}
             {rec?.edge_points != null ? (
@@ -120,7 +120,7 @@ const TodayPlayCard = ({
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Quarter-Kelly</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Suggested Stake</div>
           <div className="mt-0.5 text-sm font-semibold text-indigo-200 truncate">{kellyUnits}</div>
         </div>
       </div>

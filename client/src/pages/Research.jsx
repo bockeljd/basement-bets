@@ -461,7 +461,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             Today&apos;s Slate &amp; Model Edges
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Market-first projections blending BartTorvik, Haslametrics &amp; KenPom with live injury and sharp money signals.
+            Blends live sportsbook odds with team strength ratings, injuries, and sharp money movement.
           </p>
         </div>
 
@@ -553,7 +553,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
           { label: `${leagueFilter} Games`, value: slateSummary.totalGames, accent: 'text-white' },
           { label: 'Actionable Plays', value: slateSummary.actionableCount, accent: 'text-emerald-300' },
           { label: 'High Confidence', value: slateSummary.highConfCount, accent: 'text-indigo-300' },
-          { label: 'Sharp / RLM Signals', value: slateSummary.sharpCount, accent: 'text-amber-300' },
+          { label: 'Sharp Money Signals', value: slateSummary.sharpCount, accent: 'text-amber-300' },
         ].map((kpi) => (
           <div
             key={kpi.label}

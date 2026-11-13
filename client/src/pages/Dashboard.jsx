@@ -43,13 +43,13 @@ export default function Dashboard({ financials, periodStats }) {
       <div className="flex items-center gap-3">
         <div>
           <h1 className="text-2xl font-black text-white">Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-1">Balances and high-level performance KPIs.</p>
+          <p className="text-slate-400 text-sm mt-1">Account balances and overall betting performance.</p>
         </div>
         <button
           onClick={loadPerf}
           className="ml-auto px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-bold flex items-center gap-2"
         >
-          <RefreshCw size={16} className={loadingPerf ? 'animate-spin' : ''} /> Refresh KPIs
+          <RefreshCw size={16} className={loadingPerf ? 'animate-spin' : ''} /> Refresh Stats
         </button>
       </div>
 
@@ -84,21 +84,21 @@ export default function Dashboard({ financials, periodStats }) {
         </div>
 
         {(!modelPerf || !modelPerf.windows) ? (
-          <div className="mt-3 text-slate-500 text-sm">{loadingPerf ? 'Loading KPIs…' : 'No model KPI data yet.'}</div>
+          <div className="mt-3 text-slate-500 text-sm">{loadingPerf ? 'Loading model stats…' : 'No model performance data yet.'}</div>
         ) : (
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {(() => {
               const w7 = modelPerf.windows?.['7d'];
               const w30 = modelPerf.windows?.['30d'];
               const kpis = [
-                { label: '7d Win Rate', value: `${(w7?.win_rate ?? 0).toFixed(1)}%` },
-                { label: '7d Return (ROI)', value: `${(w7?.roi_pct ?? 0).toFixed(1)}%` },
-                { label: '30d Win Rate', value: `${(w30?.win_rate ?? 0).toFixed(1)}%` },
-                { label: '30d Return (ROI)', value: `${(w30?.roi_pct ?? 0).toFixed(1)}%` },
-                { label: '30d Expected Edge', value: `${(((w30?.avg_ev_per_unit ?? 0) * 100)).toFixed(1)}%` },
-                { label: '30d Beat Close (pts)', value: (w30?.avg_clv_points ?? null) === null ? '—' : `${Number(w30.avg_clv_points).toFixed(2)}` },
-                { label: '30d Beat Close %', value: (w30?.pos_clv_rate ?? null) === null ? '—' : `${Number(w30.pos_clv_rate).toFixed(1)}%` },
-                { label: '30d Settled Picks', value: `${w30?.decided ?? 0}` },
+                { label: '7-Day Win Rate', value: `${(w7?.win_rate ?? 0).toFixed(1)}%` },
+                { label: '7-Day Return', value: `${(w7?.roi_pct ?? 0).toFixed(1)}%` },
+                { label: '30-Day Win Rate', value: `${(w30?.win_rate ?? 0).toFixed(1)}%` },
+                { label: '30-Day Return', value: `${(w30?.roi_pct ?? 0).toFixed(1)}%` },
+                { label: '30-Day Avg Edge', value: `${(((w30?.avg_ev_per_unit ?? 0) * 100)).toFixed(1)}%` },
+                { label: '30-Day Beat Close (pts)', value: (w30?.avg_clv_points ?? null) === null ? '—' : `${Number(w30.avg_clv_points).toFixed(2)}` },
+                { label: '30-Day Beat Close %', value: (w30?.pos_clv_rate ?? null) === null ? '—' : `${Number(w30.pos_clv_rate).toFixed(1)}%` },
+                { label: '30-Day Settled Picks', value: `${w30?.decided ?? 0}` },
               ];
               return kpis;
             })().map((k, i) => (

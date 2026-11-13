@@ -841,7 +841,7 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                                 </div>
                                 <div className="grid grid-cols-2 gap-3 text-sm">
                                     <div>
-                                        <div className="text-slate-400 text-xs">Net P/L</div>
+                                        <div className="text-slate-400 text-xs">Net Profit</div>
                                         <div className={`font-black text-lg ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCurrency(profit)}</div>
                                     </div>
                                     <div>
@@ -904,7 +904,7 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                         <option value="wager">$ Wager</option>
                     </select>
 
-                    <div className="ml-2 text-xs text-slate-500">Min N</div>
+                    <div className="ml-2 text-xs text-slate-500">Min Bets</div>
                     <input
                         type="number"
                         min={1}
@@ -964,7 +964,7 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                                                     <div className="grid grid-cols-2 gap-x-4 text-[10px]">
                                                         <span className="text-slate-400">Bets:</span> <span className="text-white text-right">{d.bets}</span>
                                                         <span className="text-slate-400">Record:</span> <span className="text-white text-right">{d.wins}-{d.losses}{d.push ? `-${d.push}` : ''}</span>
-                                                        <span className="text-slate-400">Net P/L:</span> <span className={d.profit >= 0 ? 'text-green-400 text-right' : 'text-red-400 text-right'}>{formatCurrency(d.profit)}</span>
+                                                        <span className="text-slate-400">Net Profit:</span> <span className={d.profit >= 0 ? 'text-green-400 text-right' : 'text-red-400 text-right'}>{formatCurrency(d.profit)}</span>
                                                         <span className="text-slate-400">Wager:</span> <span className="text-white text-right">{formatCurrency(d.wager)}</span>
                                                         <span className="text-slate-400">ROI:</span> <span className="text-white text-right">{d.roi}%</span>
                                                         <span className="text-slate-400">Win%:</span> <span className="text-white text-right">{d.actual_win_rate}%</span>
@@ -1062,7 +1062,7 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
 
                     {/* Biggest changes */}
                     <div className="bg-slate-800/20 border border-slate-800 rounded-xl p-4 mb-4">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-2">Biggest changes (ROI Δ, min N)</div>
+                        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-2">Biggest 30-Day Swings (min bets)</div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                             {(() => {
                                 const rows = (segmentAgg.driving || [])
@@ -1134,7 +1134,7 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                     </div>
 
                     <div className="mt-2 text-[10px] text-slate-600">
-                        ROI Δ compares last 30d ROI to prior 30d ROI for the same (sport, bet type) segment.
+                        Compares the last 30 days' return to the prior 30 days for each sport and bet type.
                     </div>
                 </div>
             </div>
@@ -1262,8 +1262,8 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                             <tr className="text-gray-400 border-b border-slate-800 text-[10px] uppercase tracking-wider">
                                 <th className="pb-3 pl-2">Period</th>
                                 <th className="pb-3 text-right">Record</th>
-                                <th className="pb-3 text-right">Implied WR</th>
-                                <th className="pb-3 text-right">Actual WR</th>
+                                <th className="pb-3 text-right">Expected Win %</th>
+                                <th className="pb-3 text-right">Actual Win %</th>
                                 <th className="pb-3 text-right pr-2">Edge</th>
                             </tr>
                         </thead>
@@ -1387,15 +1387,15 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                                             <span className="text-slate-500 ml-2">({wins}W - {total - wins}L)</span>
                                         </div>
                                         <div className="bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">
-                                            <span className="text-slate-400">Actual WR: </span>
+                                            <span className="text-slate-400">Actual Win %: </span>
                                             <span className="text-white font-bold">{avgActual.toFixed(1)}%</span>
                                         </div>
                                         <div className="bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">
-                                            <span className="text-slate-400">Implied WR: </span>
+                                            <span className="text-slate-400">Expected Win %: </span>
                                             <span className="text-white font-bold">{avgImplied.toFixed(1)}%</span>
                                         </div>
                                         <div className="bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">
-                                            <span className="text-slate-400">Total P/L: </span>
+                                            <span className="text-slate-400">Total Profit: </span>
                                             <span className={profit >= 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
                                                 {formatCurrency(profit)}
                                             </span>
@@ -1431,7 +1431,7 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                                 stroke="#94a3b8"
                                 fontSize={10}
                                 domain={[0, 100]}
-                                label={{ value: 'Your Performance (Actual WR)', angle: -90, position: 'left', fill: '#64748b', fontSize: 10 }}
+                                label={{ value: 'Actual Win Rate (%)', angle: -90, position: 'left', fill: '#64748b', fontSize: 10 }}
                             />
                             <ZAxis type="number" dataKey="bets" range={[50, 400]} name="Volume" />
                             <Tooltip
@@ -1448,8 +1448,8 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                                                     <span className="text-slate-400">Bets:</span> <span className="text-white text-right">{data.bets}</span>
                                                     <span className="text-slate-400">Profit:</span> <span className={data.profit >= 0 ? 'text-green-400 text-right' : 'text-red-400 text-right'}>{formatCurrency(data.profit)}</span>
                                                     <span className="text-slate-400">ROI:</span> <span className="text-white text-right">{data.roi}%</span>
-                                                    <span className="text-slate-400">Actual WR:</span> <span className="text-white text-right">{data.actual_win_rate}%</span>
-                                                    <span className="text-slate-400">Implied WR:</span> <span className="text-white text-right">{data.implied_win_rate}%</span>
+                                                    <span className="text-slate-400">Actual Win %:</span> <span className="text-white text-right">{data.actual_win_rate}%</span>
+                                                    <span className="text-slate-400">Expected Win %:</span> <span className="text-white text-right">{data.implied_win_rate}%</span>
                                                     <span className="text-slate-400">Edge:</span> <span className={data.edge >= 0 ? 'text-green-400 text-right' : 'text-red-400 text-right'}>{data.edge > 0 ? '+' : ''}{data.edge}%</span>
                                                 </div>
                                             </div>
@@ -1499,13 +1499,13 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                                     className="pb-3 text-right cursor-pointer hover:text-white transition-colors"
                                     onClick={() => handleSort('roi')}
                                 >
-                                    ROI {sortConfig.key === 'roi' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                                    Return (%) {sortConfig.key === 'roi' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                                 </th>
                                 <th
                                     className="pb-3 text-right pr-2 cursor-pointer hover:text-white transition-colors"
                                     onClick={() => handleSort('edge')}
                                 >
-                                    Edge vs Market {sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                                    Win % Edge {sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                                 </th>
                             </tr>
                         </thead>
@@ -1542,8 +1542,8 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                     </table>
                 </div>
                 <div className="mt-4 p-3 bg-blue-900/10 border border-blue-900/20 rounded-lg text-[11px] text-blue-300 leading-relaxed">
-                    <strong>How to read this:</strong> We compare your actual win percentage for each (Sport + Bet Type) combination against the market's implied expectations.
-                    Segments with high <strong>positive edge</strong> are where you consistently find value. Focus your bankroll on these green zones.
+                    <strong>How to read this:</strong> We compare your actual win percentage for each Sport and Bet Type against the sportsbook's expected win rate from the odds.
+                    Rows with a <strong>positive edge</strong> are where your bets are outperforming expectations.
                 </div>
             </div>
 

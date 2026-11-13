@@ -139,7 +139,7 @@ export default function PerformanceReportNCAAM() {
           <div className="mt-4 bg-slate-800/40 border border-slate-700 rounded-xl p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">2-leg ML parlay performance (recommended)</div>
+                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">2-Team Moneyline Parlay Results (Recommended)</div>
                 <div className="text-xs text-slate-500 mt-1">Tracked separately from straight bets.</div>
               </div>
               <div className="text-xs text-slate-500">Source: recommended_parlays</div>

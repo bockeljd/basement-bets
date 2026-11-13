@@ -67,6 +67,15 @@ export const safeReasonText = (rawReason) => {
   ) {
     return 'Analysis temporarily unavailable — open Details to retry';
   }
+  if (text.startsWith('Sanity block')) {
+    return 'Held for safety — model and sportsbook odds need a closer match';
+  }
+  if (text.startsWith('Steam move')) {
+    return 'Passed — the betting line already moved against this side';
+  }
+  if (text === 'No Edge Detected') {
+    return 'Line matches fair value — pass';
+  }
   return text;
 };
 
@@ -89,11 +98,11 @@ export const lookupTopPickForGame = (game, rowTopPicks = {}, rowTopPicksByKey = 
 
 export const normalizeMovementTag = (tag) => {
   const t = String(tag || '').toLowerCase();
-  if (t === 'rlm_confirmed') return { label: 'RLM Confirmed', tone: 'emerald' };
-  if (t === 'sharp_backing') return { label: 'Sharp Money', tone: 'emerald' };
-  if (t === 'injury_line_adjusted') return { label: 'Injury Adj', tone: 'amber' };
-  if (t === 'contra_sharp_money') return { label: 'Contra Sharp', tone: 'rose' };
-  if (t === 'steam_warning') return { label: 'Steam Watch', tone: 'amber' };
+  if (t === 'rlm_confirmed') return { label: 'Sharp Money (Line Move)', tone: 'emerald' };
+  if (t === 'sharp_backing') return { label: 'Big Money Backing', tone: 'emerald' };
+  if (t === 'injury_line_adjusted') return { label: 'Injury Adjustment', tone: 'amber' };
+  if (t === 'contra_sharp_money') return { label: 'Against Big Money', tone: 'rose' };
+  if (t === 'steam_warning') return { label: 'Line Moving Fast', tone: 'amber' };
   return { label: String(tag || '').replace(/_/g, ' '), tone: 'slate' };
 };
 
@@ -199,15 +208,15 @@ export const buildWhyPickReasons = (rec, game) => {
     });
   }
 
-  // Splits & RLM
+  // Splits & Line Movement
   const tags = Array.isArray(rec.movement_tags) ? rec.movement_tags : [];
   if (tags.includes('rlm_confirmed') || tags.includes('sharp_backing')) {
     reasons.push({
-      label: tags.includes('rlm_confirmed') ? 'Sharp Splits + RLM' : 'Sharp Ticket Split',
+      label: tags.includes('rlm_confirmed') ? 'Sharp Money Line Move' : 'Big Money Backing',
       tone: 'emerald',
       text: tags.includes('rlm_confirmed')
-        ? 'Public tickets skew elsewhere while sharp money moved the market line in agreement with our pick.'
-        : 'Higher handle % than ticket count indicates respected money on this side.',
+        ? 'Public bettors lean the other way, while respected money pushed the line in favor of this pick.'
+        : 'More total money than ticket count is backing this side.',
     });
   }
 

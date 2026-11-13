@@ -236,17 +236,17 @@ const TodayFullBoardTable = ({
                     <td data-label="Market" className="py-3 px-2 font-mono text-slate-300 whitespace-nowrap">
                       <div className="flex flex-col gap-0.5 text-[11px]">
                         <span>
-                          Spd:{' '}
+                          Spread:{' '}
                           <strong className="text-slate-100">
                             {homeSpread !== null && homeSpread !== undefined ? fmtSigned(homeSpread, 1) : '—'}
                           </strong>{' '}
-                          <span className="text-slate-500">·</span> O/U{' '}
+                          <span className="text-slate-500">·</span> Total{' '}
                           <strong className="text-slate-100">
                             {totalLine !== null && totalLine !== undefined ? Number(totalLine).toFixed(1) : '—'}
                           </strong>
                         </span>
                         <span className="text-slate-400">
-                          ML: {fmtOdds(mlAway)} / {fmtOdds(mlHome)}
+                          Moneyline: {fmtOdds(mlAway)} / {fmtOdds(mlHome)}
                         </span>
                       </div>
                     </td>

@@ -579,7 +579,7 @@ const ModelPerformanceAnalytics = ({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h3 id="edge-cal-heading" className="text-base font-bold text-slate-100">
-                Win Rate & ROI by Projected Edge
+                Win Rate & Return by Projected Edge
               </h3>
               <p className="text-xs text-slate-400">
                 Tests if bigger model edges actually win more often than the 52.4% break-even line (-110 odds).
@@ -764,7 +764,7 @@ const ModelPerformanceAnalytics = ({
       {/* Staking & CLV Summary Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Flat 1u P/L</h3>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Flat 1-Unit Profit</h3>
           <div className={`text-xl font-mono font-bold ${analytics.stakingComparison.flatUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {formatUnits(analytics.stakingComparison.flatUnits)}
           </div>
@@ -772,17 +772,17 @@ const ModelPerformanceAnalytics = ({
         </article>
 
         <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Quarter-Kelly Simulated</h3>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Confidence-Adjusted Sizing</h3>
           <div className={`text-xl font-mono font-bold ${analytics.stakingComparison.kellyUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {formatUnits(analytics.stakingComparison.kellyUnits)}
           </div>
           <p className="text-[11px] text-slate-400">
-            Edge-weighted sizing ({analytics.stakingComparison.kellyTaggedCount} Kelly-sized plays)
+            Scales bet size by confidence &amp; edge ({analytics.stakingComparison.kellyTaggedCount} sized plays)
           </p>
         </article>
 
         <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Closing Line Value (CLV)</h3>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Beating the Closing Line (CLV)</h3>
           <div
             className={`text-xl font-mono font-bold ${
               analytics.stakingComparison.avgClv === null
@@ -813,7 +813,7 @@ const ModelPerformanceAnalytics = ({
               Performance by Bet Type
             </h3>
             <p className="text-xs text-slate-400">
-              Compares return on investment (ROI %) across Spreads, Totals (Over/Under), Moneylines, and Parlays.
+              Compares return on bets (%) across Spreads, Totals (Over/Under), Moneylines, and Parlays.
             </p>
           </div>
 

@@ -104,7 +104,7 @@ function GameCard({ game }) {
             <div className="text-xs font-black text-slate-200">{spreadLabel || '—'}</div>
           </div>
           <div className="bg-slate-800/30 rounded-lg p-2">
-            <div className="text-[9px] uppercase tracking-widest text-slate-500 mb-1">O/U</div>
+            <div className="text-[9px] uppercase tracking-widest text-slate-500 mb-1">Total Runs (O/U)</div>
             <div className="text-xs font-black text-slate-200">{fmt(game.total)}</div>
           </div>
           <div className="bg-slate-800/30 rounded-lg p-2">
@@ -460,7 +460,7 @@ export default function MLB() {
           accent={recordStats.netUnits > 0 ? 'text-emerald-400' : recordStats.netUnits < 0 ? 'text-red-400' : 'text-slate-400'}
         />
         <StatTile
-          label="Return (ROI)"
+          label="Return on Stakes"
           value={recordStats.roi !== null ? `${recordStats.roi > 0 ? '+' : ''}${recordStats.roi.toFixed(1)}%` : '—'}
           sub="average return per bet"
           accent={recordStats.roi > 0 ? 'text-emerald-400' : recordStats.roi < 0 ? 'text-red-400' : 'text-slate-400'}

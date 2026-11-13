@@ -95,16 +95,16 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
                               <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Primary</div>
                               <div className="mt-1 text-xl font-black text-white">{fmt(Number((primary?.ledger_in_play ?? primary?.in_play) || 0))}</div>
                               <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-                                <div>Dep <span className="font-mono text-slate-200">{fmt(Number(primary?.deposited || 0))}</span></div>
-                                <div>Wdr <span className="font-mono text-slate-200">{fmt(Number(primary?.withdrawn || 0))}</span></div>
+                                <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(primary?.deposited || 0))}</span></div>
+                                <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(primary?.withdrawn || 0))}</span></div>
                               </div>
                             </div>
                             <div className="border border-slate-800 rounded-lg p-4 bg-slate-950/20">
                               <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Secondary</div>
                               <div className="mt-1 text-xl font-black text-white">{fmt(Number((secondary?.ledger_in_play ?? secondary?.in_play) || 0))}</div>
                               <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-                                <div>Dep <span className="font-mono text-slate-200">{fmt(Number(secondary?.deposited || 0))}</span></div>
-                                <div>Wdr <span className="font-mono text-slate-200">{fmt(Number(secondary?.withdrawn || 0))}</span></div>
+                                <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(secondary?.deposited || 0))}</span></div>
+                                <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(secondary?.withdrawn || 0))}</span></div>
                               </div>
                             </div>
                           </div>

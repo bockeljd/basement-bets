@@ -1335,6 +1335,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             } if hasla_available else None,
             "kenpom": {
                 "fair_spread_home": round(-float(kp_margin), 1),
+                "fair_total": round(float(mu_kenpom_total), 1) if mu_kenpom_total is not None else None,
                 "available": True,
             } if kp_available else None,
             "torvik": {
@@ -1361,6 +1362,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         debug_info = {
             "mu_spread_final": mu_spread_final,
+            "mu_total_final": mu_total_final,
             "sigma_spread": sigma_spread,
             "tempo_factor": tempo_factor,
             "luck_adj": luck_adjustment,
@@ -2558,6 +2560,22 @@ class NCAAMMarketFirstModelV2(BaseModel):
         def _total_over_prob(mu_total: float, sigma: float, total_line: float) -> float:
             return 1.0 - self._normal_cdf(float(total_line), float(mu_total), float(sigma))
 
+        def _format_sanity_block(reasons: List[str], score: int) -> str:
+            labels = []
+            for item in (reasons or []):
+                text = str(item or "")
+                if text.startswith("prob_gap="):
+                    labels.append("model and sportsbook odds differ too much")
+                elif text.startswith("odds_outlier_gap="):
+                    labels.append("one sportsbook price looks out of line")
+                elif text.startswith("steam_block=") or text.startswith("steam_against="):
+                    labels.append("line already moved against this pick")
+                elif text.startswith("steam_reason="):
+                    labels.append(text.split("=", 1)[1])
+            if not labels:
+                labels.append("risk guardrail triggered")
+            return "Held for safety: " + "; ".join(dict.fromkeys(labels))
+
         def _sanity_adjust(market: str, side: str, win_prob: float, ev: float, mc: Optional[Dict[str, Any]]):
             """Soft guardrails + market-movement uncertainty.
 
@@ -2803,7 +2821,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         hard_block = str(os.getenv('SANITY_HARD_BLOCK', '1')).strip() not in ('0', 'false', 'False', '')
                         block_score = int(float(os.getenv('SANITY_BLOCK_SCORE', '2')))
                         if hard_block and score >= block_score:
-                            snap['_no_bet_reason_spread'] = "Sanity block (suspect data): " + ", ".join(reasons or [f"score={score}"])
+                            snap['_no_bet_reason_spread'] = _format_sanity_block(reasons, score)
                         else:
                             # Soft-adjust: inflate uncertainty + degrade EV
                             ev_raw = float(best.get('ev') or 0.0)
@@ -2938,7 +2956,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         hard_block = str(os.getenv('SANITY_HARD_BLOCK', '1')).strip() not in ('0', 'false', 'False', '')
                         block_score = int(float(os.getenv('SANITY_BLOCK_SCORE', '2')))
                         if hard_block and score >= block_score:
-                            snap['_no_bet_reason_total'] = "Sanity block (suspect data): " + ", ".join(reasons or [f"score={score}"])
+                            snap['_no_bet_reason_total'] = _format_sanity_block(reasons, score)
                         else:
                             ev_raw = float(best.get('ev') or 0.0)
                             ev_adj = ev_raw - float(ev_penalty or 0.0)
@@ -3048,7 +3066,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 fair_spread_torvik = -margin
                 if spread_mkt is not None:
                     delta = fair_spread_torvik - float(spread_mkt)
-                    key_factors.append(f"Torvik margin {margin:+.1f} → fair spread {fair_spread_torvik:+.1f} (Δ vs market {delta:+.1f})")
+                    key_factors.append(f"Torvik projected margin {margin:+.1f} → fair spread {fair_spread_torvik:+.1f} (diff vs market {delta:+.1f})")
             except Exception:
                 pass
             if torvik.get('projected_score'):
@@ -3064,9 +3082,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 fair_spread_kp = -kp_margin
                 if spread_mkt is not None:
                     delta = fair_spread_kp - float(spread_mkt)
-                    key_factors.append(f"KenPom expected margin {kp_margin:+.1f} → fair spread {fair_spread_kp:+.1f} (Δ vs market {delta:+.1f})")
+                    key_factors.append(f"KenPom projected margin {kp_margin:+.1f} → fair spread {fair_spread_kp:+.1f} (diff vs market {delta:+.1f})")
             if kenpom.get('total_adj') is not None and total_mkt is not None:
-                key_factors.append(f"KenPom total adj {float(kenpom.get('total_adj')):+.1f} (market {float(total_mkt):.1f})")
+                key_factors.append(f"KenPom pace adjustment {float(kenpom.get('total_adj')):+.1f} pts vs market {float(total_mkt):.1f}")
         except Exception:
             pass
 
@@ -3091,7 +3109,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             side_split = (splits.get(rmkt) or {}).get(rside) if rmkt in splits else None
             if isinstance(side_split, dict) and side_split.get('bet_pct') is not None and side_split.get('handle_pct') is not None:
                 key_factors.append(
-                    f"Public split ({rside}): {int(round(side_split['bet_pct']))}% of bets / {int(round(side_split['handle_pct']))}% of money"
+                    f"Public betting ({rside}): {int(round(side_split['bet_pct']))}% of tickets / {int(round(side_split['handle_pct']))}% of money"
                 )
 
         inj_list = signals.get('injuries') or []
@@ -3254,7 +3272,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             # For bettor, higher is better (more points). So worse if (cur_line - open_line) < -threshold.
             delta = (cur_line - open_line)
             if delta < -abs(max_move_spread):
-                return f"Steam move {delta:+.1f}pts (open {open_line:+.1f} → cur {cur_line:+.1f})"
+                return f"Line moved against pick ({open_line:+.1f} → {cur_line:+.1f})"
 
         if m == 'TOTAL':
             open_total = _safe_float(mc.get('open_total'))
@@ -3266,9 +3284,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
             # Over: higher total is worse. Under: lower total is worse.
             delta = (cur_total - open_total)
             if s == 'over' and delta > abs(max_move_total):
-                return f"Steam move +{delta:.1f} (open {open_total:.1f} → cur {cur_total:.1f})"
+                return f"Total moved against pick ({open_total:.1f} → {cur_total:.1f})"
             if s == 'under' and delta < -abs(max_move_total):
-                return f"Steam move {delta:.1f} (open {open_total:.1f} → cur {cur_total:.1f})"
+                return f"Total moved against pick ({open_total:.1f} → {cur_total:.1f})"
 
         return None
 

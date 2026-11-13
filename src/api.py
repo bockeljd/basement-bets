@@ -237,6 +237,45 @@ async def upload_kenpom_csv(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to ingest KenPom CSV: {e}")
 
+
+@app.get("/api/admin/kenpom/status")
+async def get_kenpom_admin_status(user: dict = Depends(get_current_user)):
+    """Return plain-English KenPom setup status & server credential availability (no secrets exposed)."""
+    from src.scripts.ingest_kenpom import get_kenpom_status
+
+    try:
+        return get_kenpom_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not check KenPom status: {e}")
+
+
+@app.post("/api/admin/kenpom/sync")
+async def sync_kenpom_admin(request: Request, user: dict = Depends(get_current_user)):
+    """Trigger an immediate KenPom sync using Official API key (optional body override) or server config."""
+    from src.scripts.ingest_kenpom import run_kenpom_sync
+
+    api_key = None
+    asof_date = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            api_key = (body.get("api_key") or "").strip() or None
+            asof_date = (body.get("asof_date") or "").strip() or None
+    except Exception:
+        pass
+
+    try:
+        res = run_kenpom_sync(api_key=api_key, asof_date=asof_date, include_extras=False)
+        if int(res.get("rows") or 0) > 0:
+            _top_picks_cache.clear()
+        return res
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except RuntimeError as re_err:
+        raise HTTPException(status_code=502, detail=str(re_err))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"KenPom sync failed: {e}")
+
 @app.get("/api/health")
 def health_check():
     from src.database import get_db_connection, _exec
@@ -2016,6 +2055,30 @@ async def reconcile_settlements(league: Optional[str] = None, limit: int = 500, 
          print(f"[API] Settlement Failed: {e}")
          raise HTTPException(status_code=500, detail=str(e))
 
+def _format_data_health_notes(source: str, notes: Optional[str], row_count: Optional[int]) -> str:
+    """Turn raw telemetry or JSON strings in data_health.notes into plain English for the UI."""
+    import json as _json
+    raw = str(notes or "").strip()
+    src = str(source or "").lower()
+    if src == "kenpom" and raw.startswith("{"):
+        try:
+            parsed = _json.loads(raw)
+            asof = str(parsed.get("asof_date") or "")[:10]
+            team_n = parsed.get("team")
+            if asof:
+                from datetime import date as _date
+                from src.utils.ncaam_season import season_start_date_for_game
+                floor = str(season_start_date_for_game(_date.today()))
+                season_note = " (prior season — needs 2026-27 update)" if asof < floor else ""
+                count_note = f" — {team_n} teams loaded" if team_n else ""
+                return f"Last updated {asof}{season_note}{count_note}"
+        except Exception:
+            pass
+    if not raw:
+        return f"{row_count} records tracked" if row_count is not None else "No recent check details"
+    return raw
+
+
 @app.get("/api/data-health")
 async def get_data_health():
     """Return latest data pipeline health status."""
@@ -2023,7 +2086,12 @@ async def get_data_health():
         from src.database import get_db_connection, _exec
         with get_db_connection() as conn:
             rows = _exec(conn, "SELECT source, last_success_at, last_row_count, status, notes, updated_at FROM data_health ORDER BY source ASC").fetchall()
-            return {"status": "success", "items": [dict(r) for r in rows]}
+            items = []
+            for r in rows:
+                d = dict(r)
+                d["human_notes"] = _format_data_health_notes(d.get("source"), d.get("notes"), d.get("last_row_count"))
+                items.append(d)
+            return {"status": "success", "items": items}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2262,49 +2330,38 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
 
 @app.api_route("/api/jobs/ingest_kenpom", methods=["GET", "POST"])
 async def trigger_kenpom_ingestion(request: Request, authorized: bool = Depends(verify_cron_secret)):
-    """
-    Cron Job: KenPom Ingestion.
-
-    Scrapes kenpom.com using the KENPOM_COOKIE env var for authentication.
-    Without a valid cookie the public homepage is returned (may be empty for
-    users behind the paywall) — the job will store whatever it gets.
-    """
-    import os
+    """Cron Job: KenPom Ingestion via Official API (KENPOM_API_KEY) or web session credentials."""
     job_key = "ingest_kenpom"
     from src.services.job_service import JobContext, JobLockedException
-    from src.services.kenpom_scraper import KenPomScraper
+    from src.scripts.ingest_kenpom import run_kenpom_sync
 
     try:
         with JobContext(job_key) as ctx:
             last_run = ctx.state.get("last_run_date")
             print(f"[Job] KenPom Ingest. Last Run: {last_run}")
 
-            scraper = KenPomScraper()
+            res = run_kenpom_sync(include_extras=True)
+            rows = int(res.get("rows") or 0)
+            if rows <= 0:
+                return {
+                    "status": "warning",
+                    "message": res.get("message") or "No teams synced",
+                    "teams_count": 0,
+                    "method": res.get("method"),
+                }
 
-            # Inject auth cookie if available so the session gets past the login wall
-            kenpom_cookie = os.environ.get("KENPOM_COOKIE", "").strip()
-            if kenpom_cookie:
-                scraper.session.headers.update({"Cookie": kenpom_cookie})
-                print("[Job] KENPOM_COOKIE injected into scraper session")
-            else:
-                print("[Job] KENPOM_COOKIE not set — attempting unauthenticated scrape")
-
-            teams = scraper.scrape_homepage_rankings()
-
-            if not teams:
-                return {"status": "warning", "message": "No teams scraped — KenPom may require login or cookie is expired"}
-
-            # Persist to DB
-            scraper.save_to_database(teams)
-
-            ctx.state["last_run_date"] = datetime.now().strftime("%Y-%m-%d")
-            ctx.state["teams_count"] = len(teams)
+            ctx.state["last_run_date"] = res.get("asof_date") or datetime.now().strftime("%Y-%m-%d")
+            ctx.state["teams_count"] = rows
+            ctx.state["method"] = res.get("method")
+            _top_picks_cache.clear()
 
             return {
                 "status": "success",
-                "message": f"Ingested {len(teams)} KenPom teams",
-                "teams_count": len(teams),
-                "authenticated": bool(kenpom_cookie),
+                "message": res.get("message") or f"Ingested {rows} KenPom teams",
+                "teams_count": rows,
+                "method": res.get("method"),
+                "asof_date": res.get("asof_date"),
+                "authenticated": True,
             }
 
     except JobLockedException:
@@ -2880,9 +2937,15 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         def _clean_no_bet_reason(raw):
             txt = str(raw or '').strip()
             if not txt:
-                return 'No bet'
+                return 'No clear betting edge'
             if ('Object of type' in txt and 'serializable' in txt) or ('Traceback' in txt) or len(txt) > 140:
                 return 'Analysis unavailable — click Details to retry'
+            if txt.startswith('Sanity block'):
+                return 'Held for safety — model & book odds need closer match'
+            if txt.startswith('Steam move'):
+                return 'Passed — line already moved against this side'
+            if txt == 'No Edge Detected':
+                return 'Line matches fair value — pass'
             return txt
 
         cached = [r for r in cached if (dict(r).get('reason') or '') != 'Data Unavailable']
@@ -3071,14 +3134,10 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                     }
                 else:
                     stats['computed_no_pick'] += 1
-                    reason = None
+                    raw_reason = None
                     if isinstance(res, dict):
-                        reason = res.get('block_reason') or res.get('headline') or res.get('recommendation') or res.get('error')
-                    r_txt = str(reason or 'No bet').strip()
-                    if ('Object of type' in r_txt and 'serializable' in r_txt) or ('Traceback' in r_txt) or len(r_txt) > 140:
-                        reason = 'Analysis unavailable — click Details to retry'
-                    else:
-                        reason = r_txt or 'No bet'
+                        raw_reason = res.get('block_reason') or res.get('headline') or res.get('recommendation') or res.get('error')
+                    reason = _clean_no_bet_reason(raw_reason)
 
                     # Preserve no-bet reasons per event so UI can show "No Bet" states.
                     picks[eid] = {
@@ -3350,15 +3409,28 @@ async def get_matchup_profiles(request: Request, date: str | None = None):
                     '_mapped_away': a_map
                 })
 
-            # Bulk fetch KenPom ratings
+            # Bulk fetch KenPom ratings (prefer current-season daily snapshot, fallback to kenpom_ratings)
             kenpom_map = {}
             if teams:
+                from datetime import date as _date
+                from src.utils.ncaam_season import season_start_date_for_game
+                season_floor = str(season_start_date_for_game(_date.today()))
                 krow = _exec(conn, """
-                    SELECT team_name, rank, conference, record,
+                    SELECT team_name, rank, conf AS conference, record,
                            adj_em, adj_o, adj_d, adj_t, updated_at
-                    FROM kenpom_ratings
-                    WHERE team_name = ANY(%s)
-                """, (list(teams),)).fetchall()
+                    FROM kenpom_team_ratings_daily
+                    WHERE asof_date = (
+                        SELECT MAX(asof_date) FROM kenpom_team_ratings_daily WHERE asof_date >= %s
+                    )
+                      AND team_name = ANY(%s)
+                """, (season_floor, list(teams),)).fetchall()
+                if not krow:
+                    krow = _exec(conn, """
+                        SELECT team_name, rank, conference, record,
+                               adj_em, adj_o, adj_d, adj_t, updated_at
+                        FROM kenpom_ratings
+                        WHERE team_name = ANY(%s)
+                    """, (list(teams),)).fetchall()
                 for r in krow:
                     kenpom_map[r['team_name']] = dict(r)
 
@@ -3446,14 +3518,28 @@ async def get_tournament_teams(request: Request, limit: int = 80, generate: bool
 
     try:
         with get_db_connection() as conn:
-            # Fetch Top teams
+            from datetime import date as _date
+            from src.utils.ncaam_season import season_start_date_for_game
+            season_floor = str(season_start_date_for_game(_date.today()))
+            # Fetch Top teams (prefer current-season daily snapshot, fallback to kenpom_ratings)
             krows = _exec(conn, """
-                SELECT team_name, rank, conference, record,
+                SELECT team_name, rank, conf AS conference, record,
                        adj_em, adj_o, adj_d, adj_t, updated_at
-                FROM kenpom_ratings
-                ORDER BY rank ASC
+                FROM kenpom_team_ratings_daily
+                WHERE asof_date = (
+                    SELECT MAX(asof_date) FROM kenpom_team_ratings_daily WHERE asof_date >= %s
+                )
+                ORDER BY rank ASC NULLS LAST
                 LIMIT %s
-            """, (limit,)).fetchall()
+            """, (season_floor, limit,)).fetchall()
+            if not krows:
+                krows = _exec(conn, """
+                    SELECT team_name, rank, conference, record,
+                           adj_em, adj_o, adj_d, adj_t, updated_at
+                    FROM kenpom_ratings
+                    ORDER BY rank ASC
+                    LIMIT %s
+                """, (limit,)).fetchall()
             
             teams = [dict(r) for r in krows]
             team_names = [t['team_name'] for t in teams]
@@ -3584,12 +3670,25 @@ async def get_team_deep_profile(request: Request, team: str):
 
     try:
         with get_db_connection() as conn:
-            # 1. KenPom team rating
-            kp_name = matcher.find_source_name(team, 'kenpom_ratings', 'team_name') or team
+            from datetime import date as _date
+            from src.utils.ncaam_season import season_start_date_for_game
+            season_floor = str(season_start_date_for_game(_date.today()))
+            # 1. KenPom team rating (prefer current-season daily snapshot, fallback to kenpom_ratings)
+            kp_row = None
+            kp_daily_name = matcher.find_source_name(team, 'kenpom_team_ratings_daily', 'team_name') or team
             kp_row = _exec(conn, """
-                SELECT team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t
-                FROM kenpom_ratings WHERE team_name = %s LIMIT 1
-            """, (kp_name,)).fetchone()
+                SELECT team_name, rank, conf AS conference, record, adj_em, adj_o, adj_d, adj_t
+                FROM kenpom_team_ratings_daily
+                WHERE asof_date >= %s AND team_name = %s
+                ORDER BY asof_date DESC
+                LIMIT 1
+            """, (season_floor, kp_daily_name,)).fetchone()
+            if not kp_row:
+                kp_name = matcher.find_source_name(team, 'kenpom_ratings', 'team_name') or team
+                kp_row = _exec(conn, """
+                    SELECT team_name, rank, conference, record, adj_em, adj_o, adj_d, adj_t
+                    FROM kenpom_ratings WHERE team_name = %s LIMIT 1
+                """, (kp_name,)).fetchone()
             kenpom = dict(kp_row) if kp_row else {}
 
             # 2. NET rankings
