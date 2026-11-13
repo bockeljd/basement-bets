@@ -6152,7 +6152,8 @@ def get_game_correlation(event_id: str):
         SELECT adj_tempo, adj_off, adj_def
         FROM bt_team_metrics_daily
         WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
-          AND LOWER(e.home_team) LIKE '%' || LOWER(team_text) || '%'
+          AND LENGTH(TRIM(team_text)) > 0
+          AND STRPOS(LOWER(e.home_team), LOWER(team_text)) > 0
         ORDER BY LENGTH(team_text) DESC
         LIMIT 1
     ) mh ON TRUE
@@ -6160,7 +6161,8 @@ def get_game_correlation(event_id: str):
         SELECT adj_tempo, adj_off, adj_def
         FROM bt_team_metrics_daily
         WHERE date = (SELECT MAX(date) FROM bt_team_metrics_daily)
-          AND LOWER(e.away_team) LIKE '%' || LOWER(team_text) || '%'
+          AND LENGTH(TRIM(team_text)) > 0
+          AND STRPOS(LOWER(e.away_team), LOWER(team_text)) > 0
         ORDER BY LENGTH(team_text) DESC
         LIMIT 1
     ) ma ON TRUE

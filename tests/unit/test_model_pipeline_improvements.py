@@ -214,3 +214,44 @@ def test_upsert_pick_sanitizes_raw_datetime_serialization_errors():
     params = mock_exec.call_args[0][2]
     assert "JSON serializable" not in (params["reason"] or "")
     assert "unavailable" in (params["reason"] or "").lower()
+
+
+def test_correlations_game_endpoint_sql_has_no_unescaped_percent_and_returns_200(monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.api import app
+    from src.config import settings
+
+    row_data = {
+        "id": "action:ncaam:297763",
+        "start_time": datetime(2026, 11, 13, 23, 0, tzinfo=timezone.utc),
+        "close_spread": Decimal("-6.5"),
+        "home_pace": Decimal("71.2"),
+        "home_net_eff": Decimal("22.4"),
+        "away_pace": Decimal("68.8"),
+        "away_net_eff": Decimal("9.6"),
+    }
+    mock_conn = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_conn
+    captured_sql = []
+
+    def _fake_exec(conn, sql, params=None):
+        captured_sql.append(sql)
+        cur = MagicMock()
+        cur.fetchone.return_value = row_data
+        return cur
+
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+    with patch("src.database.get_db_connection", return_value=mock_ctx), \
+         patch("src.database._exec", side_effect=_fake_exec):
+        client = TestClient(app)
+        resp = client.get(
+            "/api/ncaam/correlations/game?event_id=action:ncaam:297763",
+            headers={"X-BASEMENT-KEY": "test-secret"},
+        )
+
+    assert resp.status_code == 200
+    assert captured_sql and "'%'" not in captured_sql[0]
+    body = resp.json()
+    assert body["archetype"]["key"]
+
