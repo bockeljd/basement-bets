@@ -1575,8 +1575,11 @@ def fetch_model_history(limit=100, league=None, user_id=None, recommended_only: 
         params.append(user_id)
 
     if league:
-        conditions.append("e.league = %s")
-        params.append(league)
+        from src.utils.model_performance import sport_query_aliases
+        aliases = sport_query_aliases(league)
+        placeholders = ", ".join(["%s"] * len(aliases))
+        conditions.append(f"UPPER(COALESCE(e.league, '')) IN ({placeholders})")
+        params.extend(aliases)
 
     if recommended_only:
         # Server-side definition of "recommended" to keep History tab clean.
@@ -1693,8 +1696,11 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
     
     conditions = []
     if league:
-        conditions.append("rs.league = %s")
-        params.append(league)
+        from src.utils.model_performance import sport_query_aliases
+        aliases = sport_query_aliases(league)
+        placeholders = ", ".join(["%s"] * len(aliases))
+        conditions.append(f"UPPER(COALESCE(rs.league, '')) IN ({placeholders})")
+        params.extend(aliases)
     
     if lookback_days and int(lookback_days) > 0:
         conditions.append("rs.date_et >= (NOW() AT TIME ZONE 'America/New_York' - (%s || ' days')::interval)::date::text")

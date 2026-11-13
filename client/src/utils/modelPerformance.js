@@ -238,11 +238,55 @@ export const getNumericEdge = (row) => {
   return n;
 };
 
+const SPORT_ALIAS_MAP = {
+  BASKETBALL_NCAAB: 'NCAAM',
+  NCAAB: 'NCAAM',
+  NCAAM: 'NCAAM',
+  CBB: 'NCAAM',
+  BASEBALL_MLB: 'MLB',
+  MLB: 'MLB',
+  AMERICANFOOTBALL_NFL: 'NFL',
+  NFL: 'NFL',
+  AMERICANFOOTBALL_NCAAF: 'NCAAF',
+  NCAAF: 'NCAAF',
+  CFB: 'NCAAF',
+  SOCCER_EPL: 'EPL',
+  EPL: 'EPL',
+  'ENG.1': 'EPL',
+};
+
+export const normalizeSport = (rowOrSport) => {
+  const isObj = rowOrSport && typeof rowOrSport === 'object';
+  const rawSport = isObj
+    ? (rowOrSport?.sport || rowOrSport?.league || '')
+    : (rowOrSport || '');
+  const upper = String(rawSport).trim().toUpperCase();
+  if (SPORT_ALIAS_MAP[upper]) return SPORT_ALIAS_MAP[upper];
+  if (upper && upper !== 'NONE' && upper !== 'NULL' && upper !== 'UNKNOWN') {
+    return upper;
+  }
+
+  const eid = isObj ? String(rowOrSport?.event_id || '').trim().toLowerCase() : '';
+  for (const slug of ['mlb', 'nfl', 'ncaaf', 'epl']) {
+    if (eid.startsWith(`${slug}:`) || eid.startsWith(`action:${slug}:`)) {
+      return slug.toUpperCase();
+    }
+  }
+  return 'NCAAM';
+};
+
+export const computeRowProfitUnits = (row) => {
+  if (!row) return 0;
+  return roiPerUnit(getRawOutcome(row), getEffectivePrice(row));
+};
+
 export const computeRecordStats = (rows) => {
   const list = Array.isArray(rows) ? rows : [];
   let wins = 0;
   let losses = 0;
   let pushes = 0;
+  let voids = 0;
+  let pending = 0;
   let roiSum = 0;
 
   for (const h of list) {
@@ -251,20 +295,27 @@ export const computeRecordStats = (rows) => {
     if (norm === 'WON') wins += 1;
     else if (norm === 'LOST') losses += 1;
     else if (norm === 'PUSH') pushes += 1;
+    else if (norm === 'VOID') voids += 1;
+    else pending += 1;
     roiSum += roiPerUnit(out, getEffectivePrice(h));
   }
 
   const decided = wins + losses;
+  const settled = decided + pushes;
   const winRate = decided > 0 ? (wins / decided) * 100 : 0;
-  const roiPct = list.length > 0 ? (roiSum / list.length) * 100 : 0;
+  const roiPct = settled > 0 ? (roiSum / settled) * 100 : 0;
 
   return {
     total: list.length,
+    settled,
     wins,
     losses,
     pushes,
+    voids,
+    pending,
     decided,
     winRate,
+    profitUnits: roiSum,
     roiPct,
   };
 };
@@ -291,4 +342,63 @@ export const selectTopPicksPerDay = (rows, topN = 6) => {
     out.push(...sorted.slice(0, topN));
   }
   return out;
+};
+
+export const computeRankBreakdown = (rows, maxRank = 6) => {
+  const list = Array.isArray(rows) ? rows : [];
+  const groups = {};
+  for (const h of list) {
+    const day = getPerformanceDay(h) || 'unknown';
+    if (!groups[day]) groups[day] = [];
+    groups[day].push(h);
+  }
+
+  const buckets = Array.from({ length: maxRank }, (_, idx) => ({
+    rank: idx + 1,
+    label: `#${idx + 1}`,
+    total: 0,
+    wins: 0,
+    losses: 0,
+    pushes: 0,
+    roiSum: 0,
+  }));
+
+  for (const day of Object.keys(groups)) {
+    const sorted = groups[day].slice().sort((a, b) => {
+      const evA = getNumericEdge(a) ?? -999;
+      const evB = getNumericEdge(b) ?? -999;
+      if (evB !== evA) return evB - evA;
+      const rkA = Number(a?.rank) || 999;
+      const rkB = Number(b?.rank) || 999;
+      return rkA - rkB;
+    });
+    sorted.slice(0, maxRank).forEach((row, idx) => {
+      const bucket = buckets[idx];
+      const out = getRawOutcome(row);
+      const norm = normalizeOutcome(out);
+      bucket.total += 1;
+      if (norm === 'WON') bucket.wins += 1;
+      else if (norm === 'LOST') bucket.losses += 1;
+      else if (norm === 'PUSH') bucket.pushes += 1;
+      bucket.roiSum += roiPerUnit(out, getEffectivePrice(row));
+    });
+  }
+
+  return buckets.map((b) => {
+    const decided = b.wins + b.losses;
+    const settled = decided + b.pushes;
+    return {
+      rank: b.rank,
+      label: b.label,
+      total: b.total,
+      settled,
+      wins: b.wins,
+      losses: b.losses,
+      pushes: b.pushes,
+      decided,
+      winRate: decided > 0 ? (b.wins / decided) * 100 : 0,
+      profitUnits: b.roiSum,
+      roiPct: settled > 0 ? (b.roiSum / settled) * 100 : 0,
+    };
+  });
 };

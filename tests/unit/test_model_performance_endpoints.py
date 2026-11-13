@@ -11,6 +11,8 @@ from src.utils.model_performance import (
     normalize_confidence_pct,
     normalize_history_row,
     normalize_market_type,
+    normalize_sport,
+    sport_query_aliases,
 )
 
 
@@ -352,3 +354,98 @@ def test_yesterday_slate_falls_back_to_model_predictions(monkeypatch):
     assert data["straight"][0]["matchup"] == "Villanova @ UConn"
     assert data["straight"][0]["bet_line"] == 144.5
     assert data["record"]["straight"] == {"won": 0, "lost": 0, "push": 1, "decided": 1}
+
+
+def test_sport_normalization_and_research_history_sport_filter(monkeypatch):
+    import src.database as db
+
+    assert normalize_sport("basketball_ncaab") == "NCAAM"
+    assert normalize_sport("ncaab") == "NCAAM"
+    assert normalize_sport("baseball_mlb") == "MLB"
+    assert normalize_sport(None, event_id="action:mlb:999") == "MLB"
+    assert normalize_sport(None, event_id="espn:ncaam:123") == "NCAAM"
+    assert sport_query_aliases("basketball_ncaab") == ("NCAAM", "NCAAB", "BASKETBALL_NCAAB", "CBB")
+    assert sport_query_aliases("MLB") == ("MLB", "BASEBALL_MLB")
+
+    captured_leagues = []
+
+    sample_rows = [
+        normalize_history_row(
+            {
+                "id": "ncaam_1",
+                "event_id": "evt_cbb_1",
+                "sport": "basketball_ncaab",
+                "market_type": "SPREAD",
+                "away_team": "Duke",
+                "home_team": "UNC",
+                "selection": "Duke",
+                "bet_line": -3.5,
+                "bet_price": -110,
+                "outcome": "WON",
+                "ev_per_unit": 0.06,
+                "start_time": "2026-11-11T23:00:00Z",
+            }
+        ),
+        normalize_history_row(
+            {
+                "id": "mlb_1",
+                "event_id": "mlb:evt_1",
+                "sport": "baseball_mlb",
+                "market_type": "MONEYLINE",
+                "away_team": "Yankees",
+                "home_team": "Red Sox",
+                "selection": "Yankees",
+                "bet_price": -125,
+                "outcome": "LOST",
+                "ev_per_unit": 0.05,
+                "start_time": "2026-08-15T23:00:00Z",
+            }
+        ),
+    ]
+
+    def fake_canonical(**kwargs):
+        captured_leagues.append(("canonical", kwargs.get("league")))
+        league = kwargs.get("league")
+        if not league:
+            return list(sample_rows)
+        return [r for r in sample_rows if r["sport"] == league]
+
+    def fake_model_history(**kwargs):
+        captured_leagues.append(("fallback", kwargs.get("league")))
+        return []
+
+    monkeypatch.setattr(db, "fetch_recommended_history_canonical", fake_canonical)
+    monkeypatch.setattr(db, "fetch_model_history", fake_model_history)
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+
+    client = TestClient(app)
+    mlb_resp = client.get(
+        "/api/research/history?sport=MLB",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert mlb_resp.status_code == 200
+    mlb_body = mlb_resp.json()
+    assert len(mlb_body) == 1
+    assert mlb_body[0]["sport"] == "MLB"
+    assert mlb_body[0]["id"] == "mlb_1"
+    assert ("canonical", "MLB") in captured_leagues
+
+    ncaam_resp = client.get(
+        "/api/research/history?sport=basketball_ncaab",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert ncaam_resp.status_code == 200
+    ncaam_body = ncaam_resp.json()
+    assert len(ncaam_body) == 1
+    assert ncaam_body[0]["sport"] == "NCAAM"
+    assert ncaam_body[0]["id"] == "ncaam_1"
+    assert ("canonical", "NCAAM") in captured_leagues
+
+    all_resp = client.get(
+        "/api/research/history?sport=ALL",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert all_resp.status_code == 200
+    assert len(all_resp.json()) == 2
+    assert ("canonical", None) in captured_leagues
+

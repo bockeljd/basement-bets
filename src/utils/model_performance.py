@@ -71,6 +71,42 @@ def conf_bucket(c0) -> str:
     return 'Low'
 
 
+_SPORT_ALIASES = {
+    "NCAAM": ("NCAAM", "NCAAB", "BASKETBALL_NCAAB", "CBB"),
+    "MLB": ("MLB", "BASEBALL_MLB"),
+    "NFL": ("NFL", "AMERICANFOOTBALL_NFL"),
+    "NCAAF": ("NCAAF", "AMERICANFOOTBALL_NCAAF", "CFB"),
+    "EPL": ("EPL", "SOCCER_EPL", "ENG.1"),
+}
+_ALIAS_TO_SPORT = {
+    alias: canonical
+    for canonical, aliases in _SPORT_ALIASES.items()
+    for alias in aliases
+}
+
+
+def normalize_sport(sport, *, event_id=None) -> str:
+    """Normalize sport/league aliases to canonical uppercase display codes."""
+    raw = str(sport or "").strip().upper()
+    if raw in _ALIAS_TO_SPORT:
+        return _ALIAS_TO_SPORT[raw]
+    if raw and raw not in ("NONE", "NULL", "UNKNOWN"):
+        return raw
+
+    eid = str(event_id or "").strip().lower()
+    for canonical in _SPORT_ALIASES:
+        slug = canonical.lower()
+        if eid.startswith((f"{slug}:", f"action:{slug}:")):
+            return canonical
+    return "NCAAM"
+
+
+def sport_query_aliases(sport: str) -> tuple[str, ...]:
+    """Return uppercase league aliases matching a canonical sport filter in SQL queries."""
+    canonical = normalize_sport(sport)
+    return _SPORT_ALIASES.get(canonical, (canonical,))
+
+
 def normalize_market_type(market_type, *, is_parlay: bool = False, bet_type=None) -> str:
     """Normalize legacy and vendor market labels into canonical UI categories."""
     if is_parlay or "PARLAY" in str(bet_type or "").upper():
@@ -142,7 +178,10 @@ def normalize_history_row(row: dict) -> dict:
         bet_type=out.get("bet_type"),
     )
     out["outcome"] = norm_outcome(out.get("graded_result") or out.get("outcome") or out.get("result"))
-    out["sport"] = _first_present(out.get("sport"), out.get("league")) or "NCAAM"
+    out["sport"] = normalize_sport(
+        _first_present(out.get("sport"), out.get("league")),
+        event_id=out.get("event_id"),
+    )
 
     matchup = format_matchup(out)
     if matchup:

@@ -1669,12 +1669,13 @@ async def grade_research_history(
 
 
 @app.get("/api/research/history")
-async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = Depends(get_current_user)):
+async def get_history(limit: int = 2000, lookback_days: int = 400, sport: Optional[str] = None, user: dict = Depends(get_current_user)):
     """Model prediction history (recommended picks by default).
 
     Parameters:
       - limit: max rows
       - lookback_days: how far back to scan when recommended_only=True (default widened for year-to-date)
+      - sport: optional sport/league filter (e.g. NCAAM, MLB, NFL)
 
     Notes:
       We fall back to unscoped history to support legacy single-user rows.
@@ -1694,10 +1695,14 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = 
 
     # Combined History: Canonical Slate-backed + User Fallback
     from src.database import fetch_recommended_history_canonical, fetch_model_history
-    from src.utils.model_performance import dedupe_and_merge_history
+    from src.utils.model_performance import dedupe_and_merge_history, normalize_sport
 
-    canonical_rows = fetch_recommended_history_canonical(limit=limit, lookback_days=lookback_days, user_id=user_id)
-    user_rows = fetch_model_history(user_id=user_id, recommended_only=True, limit=limit, lookback_days=lookback_days)
+    sport_filter = None
+    if sport is not None and str(sport).strip() and str(sport).strip().upper() != "ALL":
+        sport_filter = normalize_sport(sport)
+
+    canonical_rows = fetch_recommended_history_canonical(limit=limit, league=sport_filter, lookback_days=lookback_days, user_id=user_id)
+    user_rows = fetch_model_history(user_id=user_id, league=sport_filter, recommended_only=True, limit=limit, lookback_days=lookback_days)
     for r in user_rows:
         r['source_type'] = 'fallback_prediction'
 
@@ -1705,10 +1710,13 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, user: dict = 
 
     # Global Fallback
     if not rows:
-        global_rows = fetch_model_history(user_id=None, recommended_only=True, limit=limit, lookback_days=lookback_days)
+        global_rows = fetch_model_history(user_id=None, league=sport_filter, recommended_only=True, limit=limit, lookback_days=lookback_days)
         for r in global_rows:
             r['source_type'] = 'legacy_fallback'
         rows = dedupe_and_merge_history([], global_rows)
+
+    if sport_filter:
+        rows = [r for r in rows if normalize_sport(r.get('sport'), event_id=r.get('event_id')) == sport_filter]
 
     # Sort combined results by strongest date marker descending
     def sort_key(x):

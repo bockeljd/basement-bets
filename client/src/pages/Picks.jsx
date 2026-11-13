@@ -1,26 +1,84 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import api from '../api/axios';
-import { RefreshCw, BarChart3, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine, ComposedChart, Line, Cell, LabelList } from 'recharts';
+import {
+  RefreshCw,
+  ArrowUpDown,
+  ChevronUp,
+  ChevronDown,
+  HelpCircle,
+  Search,
+  Filter,
+  RotateCcw,
+} from 'lucide-react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ReferenceLine,
+  Cell,
+} from 'recharts';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
 import {
+  normalizeOutcome,
+  isGradedOutcome,
+  toEtDay,
+  getPerformanceDay,
+  getNumericConfidence,
+  getConfidenceBucket,
+  getRawOutcome,
+  normalizeMarketType,
+  formatMarketLabel,
   formatMatchup,
   formatPickLabel,
   formatLineAndOdds,
-  formatMarketLabel,
-  getRawOutcome,
   getNumericEdge,
   selectTopPicksPerDay,
   computeRecordStats,
+  normalizeSport,
+  computeRowProfitUnits,
+  computeRankBreakdown,
 } from '../utils/modelPerformance';
 
-import {
-  normalizeOutcome, isGradedOutcome, isWinOutcome, isLossOutcome,
-  toEtDay, getPerformanceDay, roiPerUnit, getNumericConfidence, getConfidenceBucket
-} from '../utils/modelPerformance';
-import { getCurrentEtYear } from '../utils/ncaamSeason';
+const TOOLTIP_STYLE = {
+  backgroundColor: '#020617',
+  borderColor: '#334155',
+  borderRadius: '0.75rem',
+  color: '#f8fafc',
+  fontSize: '12px',
+  padding: '8px 12px',
+};
 
-const CURRENT_ET_YEAR = getCurrentEtYear();
+const formatUnits = (u) => {
+  const val = Number(u || 0);
+  if (Math.abs(val) < 0.005) return '0.00u';
+  return `${val > 0 ? '+' : ''}${val.toFixed(2)}u`;
+};
+
+const formatSignedPct = (p, digits = 1) => {
+  const val = Number(p || 0);
+  if (Math.abs(val) < 0.05) return '0.0%';
+  return `${val > 0 ? '+' : ''}${val.toFixed(digits)}%`;
+};
+
+const formatOutcomeBadge = (rawOutcome) => {
+  const norm = normalizeOutcome(rawOutcome);
+  if (norm === 'WON') return { key: 'WON', label: 'Won', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' };
+  if (norm === 'LOST') return { key: 'LOST', label: 'Lost', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30' };
+  if (norm === 'PUSH') return { key: 'PUSH', label: 'Push', cls: 'bg-slate-600/25 text-slate-300 border-slate-500/40' };
+  if (norm === 'VOID') return { key: 'VOID', label: 'Void', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+  return { key: 'PENDING', label: 'Pending', cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' };
+};
+
+const etDaysAgoIso = (days) => {
+  const todayEt = toEtDay(new Date()) || new Date().toISOString().slice(0, 10);
+  const dt = new Date(`${todayEt}T12:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() - days);
+  return dt.toISOString().slice(0, 10);
+};
 
 export default function Picks() {
   const [history, setHistory] = useState([]);
@@ -29,113 +87,64 @@ export default function Picks() {
   const [isGrading, setIsGrading] = useState(false);
   const [gradeMessage, setGradeMessage] = useState(null);
   const [yesterdayReco, setYesterdayReco] = useState(null);
-  const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
+
+  // Filters & interactive UI state
+  const [selectedSport, setSelectedSport] = useState('ALL');
+  const [windowFilter, setWindowFilter] = useState('ALL');
+  const [marketFilter, setMarketFilter] = useState('ALL');
   const [historyScope, setHistoryScope] = useState('all');
+  const [outcomeFilter, setOutcomeFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
   const [historyRowLimit, setHistoryRowLimit] = useState(100);
-
-  const recommendedHistory = useMemo(() => {
-    const base = Array.isArray(history) ? history : [];
-    const usable = base.filter((h) => {
-      if (!h) return false;
-      const mt = String(h.market_type || '').toUpperCase();
-      if (mt === 'AUTO') return false;
-      const pk = formatPickLabel(h);
-      const ev = getNumericEdge(h);
-      return Boolean((h.id || h.prediction_id || h.event_id) && (pk !== '—' || (ev !== null && ev >= 0.02)));
-    });
-    return usable.length > 0 ? usable : base;
-  }, [history]);
-
-  const top6History = useMemo(() => selectTopPicksPerDay(recommendedHistory, 6), [recommendedHistory]);
-
-  const scopedHistory = useMemo(
-    () => (historyScope === 'top6' ? top6History : recommendedHistory),
-    [historyScope, top6History, recommendedHistory]
-  );
-
-  const scopedStats = useMemo(() => {
-    const finished = scopedHistory.filter((h) => {
-      const out = String(getRawOutcome(h) || '').toUpperCase();
-      return out === 'WON' || out === 'WIN' || out === 'LOST' || out === 'LOSS' || out === 'PUSH';
-    });
-    return computeRecordStats(finished);
-  }, [scopedHistory]);
-
-
-  const pastPendingCount = useMemo(() => {
-    const todayEt = toEtDay(new Date());
-    return (recommendedHistory || []).filter((h) => {
-      const day = getPerformanceDay(h);
-      if (!day || day >= todayEt) return false;
-      const norm = normalizeOutcome(h.graded_result || h.outcome || h.result);
-      return !isGradedOutcome(norm) && norm !== 'VOID';
-    }).length;
-  }, [recommendedHistory]);
-
-  const gradeNow = async () => {
-    try {
-      setIsGrading(true);
-      setGradeMessage(null);
-      setErr(null);
-      const res = await api.post('/api/research/grade', {
-        backfill_pending: true,
-        max_grade_rows: 5000,
-      });
-      const data = res?.data || {};
-      const gradedCount = Number(data.graded_predictions ?? data.predictions_graded ?? 0);
-      const checkedGames = Number(data.ingested_games ?? data.games_checked ?? 0);
-      setGradeMessage(`Checked ${checkedGames.toLocaleString()} final game scores and updated ${gradedCount.toLocaleString()} pending pick(s).`);
-      await load(); // Refresh data after grading
-    } catch (e) {
-      setErr(e?.response?.data?.detail || e?.message || 'Could not update past pick results right now.');
-    } finally {
-      setIsGrading(false);
-    }
-  };
+  const [showExplainer, setShowExplainer] = useState(false);
+  const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
   const load = async () => {
     setLoading(true);
     setErr(null);
     try {
-      // Primary source: recommended model history (all leagues)
-      // Pull enough lookback to include full YTD performance.
       const res = await api.get('/api/research/history', { params: { limit: 20000, lookback_days: 400 } });
       let rows = res.data || [];
 
-      // Also load the exact slate that was recommended yesterday (so "graded" matches "recommended").
       try {
         const ys = await api.get('/api/ncaam/recommended-slate/yesterday');
         setYesterdayReco(ys.data || null);
       } catch (e) {
-        // ignore; fallback to history-derived view
         setYesterdayReco(null);
       }
+
       if (!(Array.isArray(rows) && rows.length > 0)) {
-        // Fallback (UI-only): NCAAM history endpoint
         const n = await api.get('/api/ncaam/history', { params: { limit: 2000 } }).catch(() => ({ data: [] }));
         rows = n.data || [];
       }
 
-      // Ensure yesterday is always settled: if any yesterday-slate picks are pending, trigger grading once.
+      // Ensure yesterday's pending picks are auto-graded once per day if scores are available
       try {
-        const yesterdayEt = toEtDay(new Date(Date.now() - 86400000));
-        const pendingYesterday = (rows || []).filter((h) => getPerformanceDay(h) === yesterdayEt && !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
-        const k = `grade_yesterday_attempt_${yesterdayEt}`;
+        const yesterdayEtStr = toEtDay(new Date(Date.now() - 86400000));
+        const pendingYesterday = (rows || []).filter(
+          (h) => getPerformanceDay(h) === yesterdayEtStr && !isGradedOutcome(getRawOutcome(h)) && normalizeOutcome(getRawOutcome(h)) !== 'VOID'
+        ).length;
+        const k = `grade_yesterday_attempt_${yesterdayEtStr}`;
         if (pendingYesterday > 0 && !localStorage.getItem(k)) {
           localStorage.setItem(k, '1');
           await api.post('/api/research/grade');
           const res2 = await api.get('/api/research/history', { params: { limit: 20000, lookback_days: 400 } });
           rows = res2.data || rows;
         }
-      } catch (e) { }
+      } catch (e) {
+        // non-blocking
+      }
 
       setHistory(rows);
     } catch (e) {
-      // Match other pages: if auth fails, prompt for Basement password.
       if (e?.response?.status === 403) {
         const pass = prompt('Authentication failed. Please enter the Basement Password:');
         if (pass) {
-          try { localStorage.setItem('basement_password', pass); } catch (err) { }
+          try {
+            localStorage.setItem('basement_password', pass);
+          } catch (storageErr) {
+            // ignore storage errors
+          }
           window.location.reload();
           return;
         }
@@ -150,1005 +159,1027 @@ export default function Picks() {
     load();
   }, []);
 
+  const gradeNow = async () => {
+    try {
+      setIsGrading(true);
+      setGradeMessage(null);
+      setErr(null);
+      const res = await api.post('/api/research/grade', {
+        backfill_pending: true,
+        max_grade_rows: 5000,
+      });
+      const data = res?.data || {};
+      const gradedCount = Number(data.graded_predictions ?? data.predictions_graded ?? 0);
+      const checkedGames = Number(data.ingested_games ?? data.games_checked ?? 0);
+      setGradeMessage(
+        `Checked ${checkedGames.toLocaleString()} final game scores and updated ${gradedCount.toLocaleString()} pending pick(s).`
+      );
+      await load();
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e?.message || 'Could not update past pick results right now.');
+    } finally {
+      setIsGrading(false);
+    }
+  };
+
+  // Canonical recommended rows (keeps all actionable bets across every sport)
+  const recommendedHistory = useMemo(() => {
+    const base = Array.isArray(history) ? history : [];
+    const usable = base.filter((h) => {
+      if (!h) return false;
+      const mt = String(h.market_type || '').toUpperCase();
+      if (mt === 'AUTO') return false;
+      const pk = formatPickLabel(h);
+      const ev = getNumericEdge(h);
+      return Boolean((h.id || h.prediction_id || h.event_id) && (pk !== '—' || (ev !== null && ev >= 0.02)));
+    });
+    return usable.length > 0 ? usable : base;
+  }, [history]);
+
+  // Dynamic sport options with counts
+  const availableSports = useMemo(() => {
+    const counts = {};
+    for (const h of recommendedHistory) {
+      const sp = normalizeSport(h);
+      counts[sp] = (counts[sp] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .map(([sport, count]) => ({ sport, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [recommendedHistory]);
+
+  // Dynamic bet type options within active sport
+  const availableMarkets = useMemo(() => {
+    const set = new Set();
+    for (const h of recommendedHistory) {
+      if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) continue;
+      set.add(normalizeMarketType(h));
+    }
+    return Array.from(set).sort();
+  }, [recommendedHistory, selectedSport]);
+
+  useEffect(() => {
+    if (marketFilter !== 'ALL' && availableMarkets.length > 0 && !availableMarkets.includes(marketFilter)) {
+      setMarketFilter('ALL');
+    }
+  }, [availableMarkets, marketFilter]);
+
+  // Filter by Window & Bet Type (kept cross-sport so "By Sport" comparison stays live)
+  const windowMarketHistory = useMemo(() => {
+    const cutoff =
+      windowFilter === '90'
+        ? etDaysAgoIso(90)
+        : windowFilter === '30'
+          ? etDaysAgoIso(30)
+          : windowFilter === '7'
+            ? etDaysAgoIso(7)
+            : null;
+
+    return recommendedHistory.filter((h) => {
+      if (cutoff) {
+        const day = getPerformanceDay(h);
+        if (!day || day < cutoff) return false;
+      }
+      if (marketFilter !== 'ALL' && normalizeMarketType(h) !== marketFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [recommendedHistory, windowFilter, marketFilter]);
+
+  // Filter by selected Sport
+  const sportWindowMarketHistory = useMemo(() => {
+    if (selectedSport === 'ALL') return windowMarketHistory;
+    return windowMarketHistory.filter((h) => normalizeSport(h) === selectedSport);
+  }, [windowMarketHistory, selectedSport]);
+
+  // Apply Scope (All Recommended Picks vs Top 6 Daily Best)
+  const scopedHistory = useMemo(() => {
+    if (historyScope === 'top6') {
+      return selectTopPicksPerDay(sportWindowMarketHistory, 6);
+    }
+    return sportWindowMarketHistory;
+  }, [historyScope, sportWindowMarketHistory]);
+
+  // Precompute rank map (#1-#6 per day in active sport) for table badges & Rank chart
+  const rankByRowKey = useMemo(() => {
+    const byDay = {};
+    for (const h of sportWindowMarketHistory) {
+      const day = getPerformanceDay(h) || 'unknown';
+      if (!byDay[day]) byDay[day] = [];
+      byDay[day].push(h);
+    }
+    const map = new WeakMap();
+    for (const day of Object.keys(byDay)) {
+      const sorted = byDay[day].slice().sort((a, b) => {
+        const evA = getNumericEdge(a) ?? -999;
+        const evB = getNumericEdge(b) ?? -999;
+        if (evB !== evA) return evB - evA;
+        const rkA = Number(a?.rank) || 999;
+        const rkB = Number(b?.rank) || 999;
+        return rkA - rkB;
+      });
+      sorted.forEach((row, idx) => {
+        map.set(row, idx + 1);
+      });
+    }
+    return map;
+  }, [sportWindowMarketHistory]);
+
+  const rankBreakdown = useMemo(
+    () => computeRankBreakdown(sportWindowMarketHistory, 6),
+    [sportWindowMarketHistory]
+  );
+
+  // Overall KPI stats (settled + pending + void + profit)
+  const scopedStats = useMemo(() => computeRecordStats(scopedHistory), [scopedHistory]);
+
+  const clvStats = useMemo(() => {
+    let sum = 0;
+    let count = 0;
+    for (const h of scopedHistory) {
+      const v = parseFloat(h?.clv_points);
+      if (Number.isFinite(v)) {
+        sum += v;
+        count += 1;
+      }
+    }
+    return { count, avg: count > 0 ? sum / count : null };
+  }, [scopedHistory]);
+
+  const pastPendingCount = useMemo(() => {
+    const todayEt = toEtDay(new Date());
+    return (recommendedHistory || []).filter((h) => {
+      const day = getPerformanceDay(h);
+      if (!day || day >= todayEt) return false;
+      const norm = normalizeOutcome(getRawOutcome(h));
+      return !isGradedOutcome(norm) && norm !== 'VOID';
+    }).length;
+  }, [recommendedHistory]);
+
+  // Yesterday / Latest Graded Slate Recap (preserving canonical slate markers)
   const yesterdayEt = useMemo(() => {
     const d = new Date();
-    // Convert to ET day string by forcing timezone formatting after subtracting 1 day
     d.setDate(d.getDate() - 1);
     return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   }, []);
 
-  const graded = useMemo(() => {
-    return (history || []).filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
-  }, [history]);
-
-  const yesterdaySlate = useMemo(() => {
-    return (history || []).filter((h) => getPerformanceDay(h) === yesterdayEt);
-  }, [history, yesterdayEt]);
-
-  const classify = (h) => {
-    const mt = String(h?.market_type || h?.market || h?.bet_type || '').toUpperCase();
-    const isParlay = Boolean(h?.is_parlay) || String(h?.bet_type || '').toLowerCase().includes('parlay');
-    if (isParlay) return 'PARLAY';
-    if (mt.includes('SPREAD')) return 'SPREAD';
-    if (mt.includes('TOTAL')) return 'TOTAL';
-    if (mt.includes('MONEYLINE') || mt === 'ML') return 'MONEYLINE';
-    return mt || 'OTHER';
-  };
-
-  const getEv = (h) => {
-    const ev = Number(h?.ev_per_unit ?? h?.ev);
-    return Number.isFinite(ev) ? ev : 0;
-  };
-
-  const recoYesterdayStraight = useMemo(() => {
-    return (yesterdaySlate || [])
-      .filter(h => {
-        const c = classify(h);
-        return c === 'SPREAD' || c === 'TOTAL';
-      })
-      .sort((a, b) => (a.rank || 999) - (b.rank || 999));
-  }, [yesterdaySlate]);
-
-  const recoYesterdayMlParlay = useMemo(() => {
-    return (yesterdaySlate || [])
-      .filter(h => {
-        const c = classify(h);
-        return c === 'MONEYLINE' || c === 'PARLAY';
-      })
-      .sort((a, b) => (a.rank || 999) - (b.rank || 999));
-  }, [yesterdaySlate]);
-
-  const recoYesterdayAll = useMemo(() => {
-    return (yesterdaySlate || [])
-      .slice()
-      .sort((a, b) => (a.rank || 999) - (b.rank || 999));
-  }, [yesterdaySlate]);
-
-  const gradedYesterdayStraight = useMemo(() => {
-    return recoYesterdayStraight.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
-  }, [recoYesterdayStraight]);
-
-  const gradedYesterdayMlParlay = useMemo(() => {
-    return recoYesterdayMlParlay.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
-  }, [recoYesterdayMlParlay]);
-
-  const gradedYesterday = useMemo(() => {
-    return recoYesterdayAll.filter((h) => isGradedOutcome(h.graded_result || h.outcome || h.result));
-  }, [recoYesterdayAll]);
-
-  const pendingYesterday = useMemo(() => {
-    return recoYesterdayAll.filter((h) => !isGradedOutcome(h.graded_result || h.outcome || h.result)).length;
-  }, [recoYesterdayAll]);
-
-  const recordFor = (rows) => {
-    const w = (rows || []).filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
-    const l = (rows || []).filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
-    const p = (rows || []).filter((h) => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
-    const decided = w + l;
-    const winRate = decided > 0 ? (w / decided) * 100 : 0;
-    return { w, l, p, decided, winRate };
-  };
-
-  const yRecord = useMemo(() => recordFor(gradedYesterday), [gradedYesterday]);
-  const yRecordStraight = useMemo(() => recordFor(gradedYesterdayStraight), [gradedYesterdayStraight]);
-  const yRecordMlParlay = useMemo(() => recordFor(gradedYesterdayMlParlay), [gradedYesterdayMlParlay]);
-
-  // Preferred: use the exact recommended slate for yesterday when available.
-  const recoStraight = useMemo(() => (yesterdayReco?.straight || []), [yesterdayReco]);
-  const recoMlParlay = useMemo(() => (yesterdayReco?.ml_parlay || []), [yesterdayReco]);
+  const recoStraight = useMemo(() => yesterdayReco?.straight || [], [yesterdayReco]);
+  const recoMlParlay = useMemo(() => yesterdayReco?.ml_parlay || [], [yesterdayReco]);
   const hasReco = useMemo(() => Boolean(yesterdayReco?.slate?.id), [yesterdayReco]);
 
-  const recordForReco = (rows) => {
-    const decided = (rows || []).filter((h) => isGradedOutcome(h.outcome));
-    const w = decided.filter((h) => isWinOutcome(h.outcome)).length;
-    const l = decided.filter((h) => isLossOutcome(h.outcome)).length;
-    const p = decided.filter((h) => normalizeOutcome(h.outcome) === 'PUSH').length;
-    const wl = w + l;
-    const winRate = wl > 0 ? (w / wl) * 100.0 : 0.0;
-    return { w, l, p, decided: decided.length, winRate };
-  };
+  const recentSlateDisplay = useMemo(() => {
+    const ncaamYesterdayActive =
+      (selectedSport === 'ALL' || selectedSport === 'NCAAM') &&
+      hasReco &&
+      recoStraight.length + recoMlParlay.length > 0;
 
-  const yRecoRecordStraight = useMemo(() => recordForReco(recoStraight), [recoStraight]);
-  const yRecoRecordMlParlay = useMemo(() => recordForReco(recoMlParlay), [recoMlParlay]);
-
-  const top6RankPerformance = useMemo(() => {
-    // Compute win% by rank for the daily Top 6 recommended picks (ranked by EV/u).
-    // Filter to current ET calendar year YTD.
-    const currentEtYearPrefix = `${CURRENT_ET_YEAR}-`;
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    const isW = (r) => r === 'WON' || r === 'WIN';
-    const isL = (r) => r === 'LOST' || r === 'LOSS';
-
-    const ev = (h) => {
-      let n = Number(h?.ev_per_unit ?? h?.ev);
-      if (!Number.isFinite(n)) {
-        n = Number(h?.edge ?? h?.edge_points);
-      }
-      if (!Number.isFinite(n)) return null;
-
-      let safety = 0;
-      while (Math.abs(n) > 0.5 && safety < 3) {
-        n /= 100;
-        safety++;
-      }
-      return n;
-    };
-
-    const ymd = (h) => getPerformanceDay(h);
-
-    // group graded picks by day
-    const byDay = {};
-    (graded || []).forEach((h) => {
-      const day = ymd(h);
-      if (!day) return;
-      if (!String(day).startsWith(currentEtYearPrefix)) return;
-      const res = h.graded_result || h.outcome || h.result;
-      if (!isGradedOutcome(res)) return;
-      const e = ev(h);
-      if (!Number.isFinite(e)) return;
-      byDay[day] = byDay[day] || [];
-      byDay[day].push(h);
-    });
-
-    const agg = {
-      1: { w: 0, l: 0 },
-      2: { w: 0, l: 0 },
-      3: { w: 0, l: 0 },
-      4: { w: 0, l: 0 },
-      5: { w: 0, l: 0 },
-      6: { w: 0, l: 0 },
-    };
-
-    // Yesterday: determine W/L/P by rank (locked in from database).
-    const yByRank = { 1: null, 2: null, 3: null, 4: null, 5: null, 6: null };
-    try {
-      const yRows = (yesterdaySlate || [])
-        .filter(h => h.rank >= 1 && h.rank <= 6);
-      yRows.forEach((h) => {
-        const rank = h.rank;
-        const res = h.graded_result || h.outcome || h.result;
-        if (isWinOutcome(res)) yByRank[rank] = 'W';
-        else if (isLossOutcome(res)) yByRank[rank] = 'L';
-        else if (normalizeOutcome(res) === 'PUSH') yByRank[rank] = 'P';
-        else yByRank[rank] = null;
-      });
-    } catch (e) { }
-
-    Object.keys(byDay).forEach((day) => {
-      const rows = (byDay[day] || []);
-      // Only include items with explicit static ranks 1-6 for the rank analytics chart
-      const rankedItems = rows.filter(h => h.rank >= 1 && h.rank <= 6);
-      rankedItems.forEach((h) => {
-        const rank = h.rank;
-        const res = h.graded_result || h.outcome || h.result;
-        agg[rank] = agg[rank] || { w: 0, l: 0 };
-        if (isWinOutcome(res)) agg[rank].w += 1;
-        else if (isLossOutcome(res)) agg[rank].l += 1;
-      });
-    });
-
-    const out = [1, 2, 3, 4, 5, 6].map((rank) => {
-      const w = agg[rank].w;
-      const l = agg[rank].l;
-      const decided = w + l;
-      const winRate = decided ? (w / decided) * 100 : null;
+    if (ncaamYesterdayActive) {
+      const combined = [...recoStraight, ...recoMlParlay];
+      const normalized = combined.map((p) => ({
+        id: p.prediction_id || p.event_id,
+        matchup: p.matchup || formatMatchup(p),
+        sport: 'NCAAM',
+        market: formatMarketLabel(p.market_type),
+        pick: p.selection || p.side || formatPickLabel(p),
+        lineOdds: formatLineAndOdds({ bet_line: p.bet_line ?? p.line, bet_price: p.bet_price ?? p.price ?? p.odds }),
+        outcome: p.outcome,
+        score: p.score || null,
+        evPct: p.ev_per_unit != null ? Number(p.ev_per_unit) * 100 : null,
+      }));
       return {
-        rank: `#${rank}`,
-        winRate: winRate === null ? null : Number(winRate.toFixed(1)),
-        n: decided,
-        _fill: (winRate !== null && winRate >= 50) ? '#34d399' : '#60a5fa',
-        yesterday: yByRank[rank] || '—',
-        _yFill: (yByRank[rank] === 'W') ? '#34d399' : (yByRank[rank] === 'L') ? '#fb7185' : (yByRank[rank] === 'P') ? '#e2e8f0' : '#64748b',
+        title: `Yesterday's Top Recommended Slate (${yesterdayReco?.date_et || yesterdayEt})`,
+        subtitle: `${recoStraight.length} straight • ${recoMlParlay.length} ML/parlay picks`,
+        rows: normalized,
       };
-    });
-
-    const vals = out.map((x) => x.winRate).filter((x) => Number.isFinite(x));
-    const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-
-    return { rows: out, avg: avg === null ? null : Number(avg.toFixed(1)) };
-  }, [graded, yesterdaySlate]);
-
-  const top6DailyWinRate30 = useMemo(() => {
-    // For each ET day (last 30 days), compute win% of that day's Top 6 recommended picks (ranked by EV/u).
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    const ev = (h) => {
-      let n = Number(h?.ev_per_unit ?? h?.ev);
-      if (!Number.isFinite(n)) {
-        n = Number(h?.edge ?? h?.edge_points);
-      }
-      if (!Number.isFinite(n)) return null;
-
-      let safety = 0;
-      // Recursively divide by 100 if obviously a percentage (e.g. 5.0 or 500)
-      while (Math.abs(n) > 0.5 && safety < 3) {
-        n /= 100;
-        safety++;
-      }
-      return n;
-    };
-    const isW = (r) => r === 'WON' || r === 'WIN';
-    const isL = (r) => r === 'LOST' || r === 'LOSS';
-
-    const now = new Date();
-    const days = [];
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const ymd = d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-      days.push(ymd);
     }
 
-    const byDay = {};
-    (graded || []).forEach((h) => {
-      const day = getPerformanceDay(h);
-      if (!day) return;
-      if (!days.includes(day)) return;
-      const e = ev(h);
-      if (!Number.isFinite(e)) return;
-      byDay[day] = byDay[day] || [];
-      byDay[day].push(h);
-    });
+    // Fallback to latest active day for the chosen sport/filters
+    const dayRowsMap = {};
+    for (const h of sportWindowMarketHistory) {
+      const d = getPerformanceDay(h);
+      if (!d) continue;
+      if (!dayRowsMap[d]) dayRowsMap[d] = [];
+      dayRowsMap[d].push(h);
+    }
+    const sortedDays = Object.keys(dayRowsMap).sort((a, b) => b.localeCompare(a));
+    const latestDay = sortedDays.find((d) => dayRowsMap[d].some((r) => isGradedOutcome(getRawOutcome(r)))) || sortedDays[0];
+    const picks = (latestDay ? dayRowsMap[latestDay] : []).slice().sort((a, b) => (getNumericEdge(b) ?? -1) - (getNumericEdge(a) ?? -1));
+    const isActuallyYesterday = latestDay === yesterdayEt;
 
-    const rows = days.map((day) => {
-      const picks = (byDay[day] || []).slice().sort((a, b) => (ev(b) ?? -999) - (ev(a) ?? -999)).slice(0, 6);
-      let w = 0;
-      let l = 0;
-      picks.forEach((h) => {
-        const res = h.graded_result || h.outcome || h.result;
-        if (isWinOutcome(res)) w += 1;
-        else if (isLossOutcome(res)) l += 1;
-      });
-      const decided = w + l;
-      const winRate = decided ? (w / decided) * 100 : null;
-      return {
-        day,
-        winRate: winRate === null ? null : Number(winRate.toFixed(1)),
-        n: decided,
-        _fill: (winRate !== null && winRate >= 50) ? '#34d399' : '#fb7185',
-      };
-    }).filter((x) => x.winRate !== null);
-
-    const vals = rows.map((x) => x.winRate).filter((x) => Number.isFinite(x));
-    const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-    return { rows, avg: avg === null ? null : Number(avg.toFixed(1)) };
-  }, [graded, yesterdaySlate]);
-
-  const dailyPerformance = useMemo(() => {
-    // Only perform charts on TOP 6 picks per day to avoid "noise"
-    const unit = (h) => {
-      const res = h.graded_result || h.outcome || h.result;
-      if (isWinOutcome(res)) return 1;
-      if (isLossOutcome(res)) return -1;
-      return 0;
+    return {
+      title: latestDay
+        ? isActuallyYesterday
+          ? `Yesterday's Graded Picks (${latestDay})`
+          : `Most Recent Graded Day (${latestDay})`
+        : 'Recent Slate Recap',
+      subtitle:
+        picks.length > 0
+          ? `${selectedSport === 'ALL' ? 'All sports' : selectedSport} • Top ${Math.min(picks.length, 6)} picks by projected edge`
+          : `No recent picks recorded for ${selectedSport === 'ALL' ? 'selected filters' : selectedSport}.`,
+      rows: picks.slice(0, 6).map((h, i) => ({
+        id: h.id || h.prediction_id || `${h.event_id}-${i}`,
+        matchup: formatMatchup(h),
+        sport: normalizeSport(h),
+        market: formatMarketLabel(h),
+        pick: formatPickLabel(h),
+        lineOdds: formatLineAndOdds(h),
+        outcome: getRawOutcome(h),
+        score: h.score || null,
+        evPct: getNumericEdge(h) != null ? getNumericEdge(h) * 100 : null,
+      })),
     };
-
-    const byDay = {};
-
-    // Group all graded picks by day first
-    const gByDay = {};
-    graded.forEach(h => {
-      const day = toEtDay(h.analyzed_at) || '—';
-      if (!gByDay[day]) gByDay[day] = [];
-      gByDay[day].push(h);
-    });
-    // Track performance for all recommended bets per day
-    Object.keys(gByDay).forEach(day => {
-      const topPicks = gByDay[day]
-        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0));
-
-      byDay[day] = byDay[day] || { day, units: 0, wins: 0, losses: 0, pushes: 0, picks: 0 };
-      topPicks.forEach(h => {
-        const res = h.graded_result || h.outcome || h.result;
-        byDay[day].picks += 1;
-        byDay[day].units += unit(h);
-        if (isWinOutcome(res)) byDay[day].wins += 1;
-        else if (isLossOutcome(res)) byDay[day].losses += 1;
-        else if (normalizeOutcome(res) === 'PUSH') byDay[day].pushes += 1;
-      });
-    });
-
-    return Object.values(byDay)
-      .filter((x) => x.day && x.day !== '—')
-      .sort((a, b) => String(a.day).localeCompare(String(b.day)))
-      .slice(-30);
-  }, [graded]);
-
-  const confidenceBreakdown = useMemo(() => {
-    const normRes = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-    const isW = (r) => r === 'WON' || r === 'WIN';
-    const isL = (r) => r === 'LOST' || r === 'LOSS';
-
-    const bucket = (h) => {
-      const c = Number(h?.confidence_0_100 ?? h?.confidence ?? 0);
-      if (c >= 80) return 'High';
-      if (c >= 50) return 'Medium';
-      return 'Low';
-    };
-
-    const base = { High: [], Medium: [], Low: [] };
-    graded.forEach((h) => {
-      base[bucket(h)].push(h);
-    });
-
-    const calc = (rows) => {
-      const w = rows.filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
-      const l = rows.filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
-      const p = rows.filter((h) => normalizeOutcome(h.graded_result || h.outcome || h.result) === 'PUSH').length;
-      const decided = w + l;
-      const winRate = decided > 0 ? (w / decided) * 100 : null;
-      const totalRoi = rows.length > 0 ? rows.reduce((sum, h) => sum + roiPerUnit(h.graded_result || h.outcome || h.result, h.bet_price), 0) : 0;
-      const roi = rows.length > 0 ? (totalRoi / rows.length) * 100 : null;
-      return { w, l, p, decided, winRate, roi, n: rows.length };
-    };
-
-    const out = ['High', 'Medium', 'Low'].map((k) => {
-      const s = calc(base[k]);
-      return {
-        bucket: k,
-        picks: s.n,
-        wins: s.w,
-        losses: s.l,
-        pushes: s.p,
-        winRate: s.winRate === null ? null : Number(s.winRate.toFixed(1)),
-        roi: s.roi === null ? null : Number(s.roi.toFixed(1)),
-      };
-    }).filter((x) => x.picks > 0);
-
-    return out;
-  }, [graded, yesterdaySlate]);
-
-  const edgeBandChart = useMemo(() => {
-    const bands = [
-      { lo: 0.0, hi: 0.05, label: '0–5%' },
-      { lo: 0.05, hi: 0.1, label: '5-10%' },
-      { lo: 0.1, hi: 0.15, label: '10-15%' },
-      { lo: 0.15, hi: 0.2, label: '15-20%' },
-      { lo: 0.2, hi: 0.25, label: '20-25%' },
-      { lo: 0.25, hi: 0.3, label: '25-30%' },
-      { lo: 0.3, hi: null, label: '30%+' },
-    ];
-
-    const res = (h) => String(h.graded_result || h.outcome || h.result || '').toUpperCase();
-
-    // Group all graded picks by day and take Top 6 for chart consistency
-    const gByDay = {};
-    graded.forEach(h => {
-      const day = toEtDay(h.analyzed_at) || '—';
-      if (!gByDay[day]) gByDay[day] = [];
-      gByDay[day].push(h);
-    });
-
-    const topPicksAll = [];
-    Object.values(gByDay).forEach(dayList => {
-      const top6 = dayList
-        .sort((a, b) => Number(b.ev_per_unit || b.ev || 0) - Number(a.ev_per_unit || a.ev || 0));
-      topPicksAll.push(...top6);
-    });
-
-    const getEv = (h) => {
-      let n = Number(h?.ev_per_unit ?? h?.ev);
-      if (!Number.isFinite(n)) {
-        n = Number(h?.edge ?? h?.edge_points);
-      }
-      if (!Number.isFinite(n)) return null;
-
-      let safety = 0;
-      while (Math.abs(n) > 0.5 && safety < 3) {
-        n /= 100;
-        safety++;
-      }
-      return n;
-    };
-
-    return bands.map((b) => {
-      const rows = topPicksAll.filter((h) => {
-        const e = getEv(h);
-        if (e === null) return false;
-        if (b.hi == null) return e >= b.lo;
-        return e >= b.lo && e < b.hi;
-      });
-      const w = rows.filter((h) => isWinOutcome(h.graded_result || h.outcome || h.result)).length;
-      const l = rows.filter((h) => isLossOutcome(h.graded_result || h.outcome || h.result)).length;
-      const wr = (w + l) > 0 ? (w / (w + l)) * 100 : 0;
-      return { label: b.label, winRate: Number(wr.toFixed(1)), n: rows.length };
-    });
-  }, [graded]);
+  }, [selectedSport, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportWindowMarketHistory]);
 
   const handleSort = (key) => {
-    let direction = 'desc';
-    if (sortConfig.key === key && sortConfig.direction === 'desc') {
-      direction = 'asc';
-    }
-    setSortConfig({ key, direction });
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc',
+    }));
   };
 
-  const isRecommendedHistoryItem = (h) => {
-    try {
-      const mt = String(h?.market_type || h?.market || '').toUpperCase();
-      const sel = String(h?.selection || '').trim();
-      const pick = String(h?.pick || '').toUpperCase();
-      const ev = Number(h?.ev_per_unit ?? h?.ev ?? 0);
-      if (!mt || mt === 'AUTO') return false;
-      if (!sel || sel === '—') return false;
-      if (!pick || pick === 'NONE') return false;
-      if (!Number.isFinite(ev) || ev < 0.02) return false;
+  // Outcome + Search + Sort for Bottom Pick History Table
+  const filteredAndSortedTableRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+
+    const filtered = scopedHistory.filter((h) => {
+      const norm = normalizeOutcome(getRawOutcome(h));
+      if (outcomeFilter === 'SETTLED') {
+        if (norm !== 'WON' && norm !== 'LOST' && norm !== 'PUSH') return false;
+      } else if (outcomeFilter === 'WON' && norm !== 'WON') {
+        return false;
+      } else if (outcomeFilter === 'LOST' && norm !== 'LOST') {
+        return false;
+      } else if (outcomeFilter === 'PUSH' && norm !== 'PUSH') {
+        return false;
+      } else if (outcomeFilter === 'VOID' && norm !== 'VOID') {
+        return false;
+      } else if (outcomeFilter === 'PENDING' && norm !== null) {
+        return false;
+      }
+
+      if (q) {
+        const hay = [
+          formatMatchup(h),
+          formatPickLabel(h),
+          normalizeSport(h),
+          formatMarketLabel(h),
+          getPerformanceDay(h),
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
-    } catch (e) {
-      return false;
-    }
-  };
-
-  const isTodayET = (ts) => {
-    if (!ts) return false;
-    try {
-      const d = new Date(ts);
-      const day = d.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
-      const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' });
-      return day === today;
-    } catch (e) {
-      return false;
-    }
-  };
-
-  const getSortedHistory = () => {
-    return [...scopedHistory].sort((a, b) => {
-      let key = sortConfig.key;
-      // Fix 'edge' sort: sort numerically by ev_per_unit
-      if (key === 'edge') {
-        const aVal = parseFloat(a.ev_per_unit ?? a.ev ?? a.edge ?? 0);
-        const bVal = parseFloat(b.ev_per_unit ?? b.ev ?? b.edge ?? 0);
-        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
-      }
-      if (key === 'matchup') {
-        const am = formatMatchup(a);
-        const bm = formatMatchup(b);
-        return sortConfig.direction === 'asc' ? am.localeCompare(bm) : bm.localeCompare(am);
-      }
-      if (key === 'bet_on') {
-        const ap = formatPickLabel(a);
-        const bp = formatPickLabel(b);
-        return sortConfig.direction === 'asc' ? ap.localeCompare(bp) : bp.localeCompare(ap);
-      }
-      if (key === 'created_at') {
-        const ad = getPerformanceDay(a) || String(a.start_time || a.analyzed_at || a.created_at || '');
-        const bd = getPerformanceDay(b) || String(b.start_time || b.analyzed_at || b.created_at || '');
-        return sortConfig.direction === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
-      }
-      
-      let aVal = a[key] || '';
-      let bVal = b[key] || '';
-      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
     });
+
+    const { key, direction } = sortConfig;
+    return filtered.slice().sort((a, b) => {
+      let valA;
+      let valB;
+
+      if (key === 'created_at') {
+        valA = getPerformanceDay(a) || String(a.analyzed_at || a.start_time || '');
+        valB = getPerformanceDay(b) || String(b.analyzed_at || b.start_time || '');
+      } else if (key === 'sport') {
+        valA = normalizeSport(a);
+        valB = normalizeSport(b);
+      } else if (key === 'matchup') {
+        valA = formatMatchup(a);
+        valB = formatMatchup(b);
+      } else if (key === 'pick') {
+        valA = formatPickLabel(a);
+        valB = formatPickLabel(b);
+      } else if (key === 'edge') {
+        const getVal = (item) => {
+          const e = getNumericEdge(item);
+          if (e !== null) return e;
+          const raw = item?.ev_per_unit ?? item?.ev ?? item?.edge;
+          return raw !== undefined && raw !== null ? parseFloat(raw) : -999;
+        };
+        valA = getVal(a);
+        valB = getVal(b);
+      } else if (key === 'result') {
+        const order = { WON: 4, PUSH: 3, VOID: 2, PENDING: 1, LOST: 0 };
+        valA = order[normalizeOutcome(getRawOutcome(a)) || 'PENDING'] ?? 1;
+        valB = order[normalizeOutcome(getRawOutcome(b)) || 'PENDING'] ?? 1;
+      } else if (key === 'pl') {
+        valA = computeRowProfitUnits(a);
+        valB = computeRowProfitUnits(b);
+      }
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      const numA = Number(valA ?? 0);
+      const numB = Number(valB ?? 0);
+      return direction === 'asc' ? numA - numB : numB - numA;
+    });
+  }, [scopedHistory, outcomeFilter, searchQuery, sortConfig]);
+
+  const visibleTableRows = useMemo(() => {
+    if (historyRowLimit === 'ALL') return filteredAndSortedTableRows;
+    return filteredAndSortedTableRows.slice(0, Number(historyRowLimit) || 100);
+  }, [filteredAndSortedTableRows, historyRowLimit]);
+
+  const hasNonDefaultFilters =
+    selectedSport !== 'ALL' ||
+    windowFilter !== 'ALL' ||
+    marketFilter !== 'ALL' ||
+    historyScope !== 'all' ||
+    outcomeFilter !== 'ALL' ||
+    searchQuery.trim() !== '';
+
+  const resetAllFilters = () => {
+    setSelectedSport('ALL');
+    setWindowFilter('ALL');
+    setMarketFilter('ALL');
+    setHistoryScope('all');
+    setOutcomeFilter('ALL');
+    setSearchQuery('');
   };
 
-  const getRecommendedHistory = () => {
-    const sorted = getSortedHistory()
-      .filter(h => {
-        // Exclude games that haven't started yet (Strict Date check)
-        const st = h?.start_time;
-        if (!st) return false;
+  const windowLabel =
+    windowFilter === 'ALL' ? 'All Time' : `Last ${windowFilter} Days`;
+  const sportLabel = selectedSport === 'ALL' ? 'All Sports' : selectedSport;
+  const filterSummaryText = `${sportLabel} • ${windowLabel}${marketFilter !== 'ALL' ? ` • ${formatMarketLabel(marketFilter)}` : ''}`;
 
-        try {
-          const now = new Date();
-          const gameStart = new Date(st);
-
-          const todayStr = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-          const gameDayStr = gameStart.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-          // Exclude if game is tomorrow or later
-          if (gameDayStr > todayStr) return false;
-
-          // If it's today, allow it if it's within 10 mins of starting
-          // This keeps the history feed responsive to currently playing/about to start games.
-          return gameStart <= new Date(now.getTime() + 10 * 60000);
-        } catch (e) {
-          return false;
-        }
-      });
-    return sorted;
+  const renderSortIcon = (colKey) => {
+    if (sortConfig.key !== colKey) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45" aria-hidden="true" />;
+    return sortConfig.direction === 'asc' ? (
+      <ChevronUp className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+    ) : (
+      <ChevronDown className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+    );
   };
 
-  const SortIcon = ({ column }) => {
-    if (sortConfig.key !== column) return <ArrowUpDown size={12} className="ml-1 opacity-20" />;
-    return sortConfig.direction === 'asc' ? <ChevronUp size={12} className="ml-1 text-blue-400" /> : <ChevronDown size={12} className="ml-1 text-blue-400" />;
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white">Model Performance</h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Track how our recommended picks have performed overall, by confidence level, and day by day.
-          </p>
-        </div>
+  const renderSortableHeader = (colKey, label, align = 'left') => {
+    const isActive = sortConfig.key === colKey;
+    const ariaSort = isActive ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined;
+    return (
+      <th scope="col" aria-sort={ariaSort} className={`py-3 px-3 font-semibold text-xs uppercase tracking-wider text-slate-400 ${align === 'right' ? 'text-right' : 'text-left'}`}>
         <button
           type="button"
-          onClick={gradeNow}
-          disabled={isGrading || loading}
-          className="inline-flex items-center gap-2 self-start px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-700 bg-slate-900/70 text-slate-200 hover:text-white hover:border-slate-500 disabled:opacity-50 transition-colors"
+          onClick={() => handleSort(colKey)}
+          className={`inline-flex items-center gap-1.5 hover:text-slate-100 transition-colors cursor-pointer ${
+            align === 'right' ? 'ml-auto justify-end' : ''
+          }`}
         >
-          <RefreshCw size={14} className={isGrading || loading ? 'animate-spin' : ''} />
-          {isGrading ? 'Checking Scores…' : 'Update Results'}
+          <span>{label}</span>
+          {renderSortIcon(colKey)}
         </button>
-      </div>
+      </th>
+    );
+  };
 
-      {gradeMessage && (
-        <div role="status" className="p-3 rounded-lg bg-emerald-900/20 border border-emerald-800/40 text-emerald-200 text-xs sm:text-sm">
-          {gradeMessage}
+  const breakEvenDelta = scopedStats.decided > 0 ? scopedStats.winRate - 52.38 : null;
+
+  return (
+    <div className="space-y-6 pb-12">
+      {/* Page Header */}
+      <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1>Model Performance</h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Track pick accuracy, unit profit, and ROI across sports. Winning over <strong className="text-slate-200 font-semibold">52.4%</strong> at standard -110 odds is profitable.
+          </p>
         </div>
-      )}
 
-      {pastPendingCount > 0 && !isGrading && (
-        <div className="p-3 rounded-xl bg-amber-900/20 border border-amber-700/40 text-amber-200 text-xs flex flex-wrap items-center justify-between gap-2">
-          <span>
-            {pastPendingCount.toLocaleString()} past pick(s) from earlier dates are still waiting to be graded against final scores.
-          </span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            aria-expanded={showExplainer}
+            aria-controls="grading-explainer-panel"
+            onClick={() => setShowExplainer((prev) => !prev)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-sm font-medium transition-colors cursor-pointer"
+          >
+            <HelpCircle className="w-4 h-4 text-indigo-400" aria-hidden="true" />
+            <span>How Grading Works</span>
+          </button>
+
           <button
             type="button"
             onClick={gradeNow}
-            className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 font-semibold transition"
+            disabled={isGrading || loading}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-indigo-500/40 bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-50 text-indigo-200 text-sm font-semibold transition-colors cursor-pointer"
           >
-            Grade Past Picks
+            <RefreshCw className={`w-4 h-4 ${isGrading ? 'animate-spin' : ''}`} aria-hidden="true" />
+            <span>{isGrading ? 'Grading...' : 'Grade Pending'}</span>
+            {pastPendingCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-500/25 text-amber-200 text-xs font-mono">
+                {pastPendingCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-200 text-sm font-medium transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+            <span>Refresh</span>
           </button>
         </div>
+      </header>
+
+      {/* Collapsible Plain-Language Grading Explainer */}
+      {showExplainer && (
+        <section
+          id="grading-explainer-panel"
+          aria-labelledby="grading-explainer-heading"
+          className="ui-card p-5 sm:p-6 border-indigo-500/30 bg-slate-900/70 space-y-4"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="grading-explainer-heading" className="text-base font-bold text-slate-100">
+              How Pick Tracking & Grading Works
+            </h2>
+            <button
+              type="button"
+              onClick={() => setShowExplainer(false)}
+              className="text-xs font-medium text-slate-400 hover:text-slate-200 cursor-pointer"
+            >
+              Hide guide
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-300 leading-relaxed">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
+              <div className="font-bold text-indigo-300">1. Which Picks Are Graded?</div>
+              <p className="text-xs text-slate-300">
+                Only picks passing positive expected-value gates (<strong className="text-slate-100">+2.0% EV or higher</strong>; Moneylines <strong className="text-slate-100">+5.0% EV &amp; 45%+ win chance</strong>) are saved and graded. <strong className="text-slate-100">No Bet</strong> games are skipped, while <strong className="text-slate-100">all confidence levels</strong> (High, Medium, Low) on recommended picks are graded.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
+              <div className="font-bold text-emerald-300">2. What Each Outcome Means</div>
+              <p className="text-xs text-slate-300">
+                <strong className="text-emerald-300">Won / Lost</strong> set Win % and 1-unit profit using the bet&apos;s posted odds. <strong className="text-slate-100">Push</strong> ties the line (<code className="text-slate-200">0.00u</code>, excluded from Win %). <strong className="text-amber-300">Void</strong> marks postponed/canceled games (<code className="text-slate-200">0.00u</code>, excluded from ROI).
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
+              <div className="font-bold text-sky-300">3. All Picks vs Top 6 Daily Best</div>
+              <p className="text-xs text-slate-300">
+                Use <strong className="text-slate-100">All Recommended</strong> to audit total model volume, or switch to <strong className="text-slate-100">Top 6 Daily Best</strong> to track only the 6 highest-edge plays per day. Filter by Sport above to isolate NCAAM vs MLB.
+              </p>
+            </div>
+          </div>
+        </section>
       )}
 
-      {err && <div className="p-3 rounded-lg bg-red-900/20 border border-red-800 text-red-200 text-sm">{err}</div>}
-
-      {!loading && !err && (!history || history.length === 0) && (
-        <div className="p-4 rounded-lg bg-slate-900/40 border border-slate-800 text-slate-400 text-sm">
-          No model-performance history returned yet. If it still shows empty, it usually means the backend isn’t returning any stored recommended picks for your user.
+      {/* Alerts */}
+      {gradeMessage && (
+        <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+          {gradeMessage}
+        </div>
+      )}
+      {err && (
+        <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {err}
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Yesterday graded results — Straight bets (Spreads/Totals) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-2">
-            <BarChart3 size={18} className="text-emerald-300" />
-            <div className="text-sm font-bold text-slate-100">Yesterday’s Picks — Spreads & Over/Unders</div>
-            <div className="ml-auto flex items-center gap-2">
-              <div className="text-xs text-slate-500">{yesterdayEt}</div>
-              {pendingYesterday > 0 && (
-                <button
-                  onClick={async () => { await gradeNow(); await load(); }}
-                  disabled={isGrading}
-                  className={`px-2 py-1 rounded-lg text-xs font-bold border transition ${isGrading ? 'text-slate-500 border-slate-800 bg-slate-900/40' : 'text-amber-200 border-amber-900/40 bg-amber-900/20 hover:bg-amber-900/30'}`}
-                  title="Run grading now"
-                >
-                  {isGrading ? 'Updating…' : 'Update Results'}
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-6 text-sm">
-            {hasReco && (
-              <div>
-                <div className="text-slate-400 text-xs">Source</div>
-                <div className="text-white font-black">{String(yesterdayReco?.slate?.source || '—').toUpperCase()}</div>
-              </div>
-            )}
-            <div>
-              <div className="text-slate-400 text-xs">Record</div>
-              <div className="text-white font-black">{(hasReco ? yRecoRecordStraight.w : yRecordStraight.w)}-{(hasReco ? yRecoRecordStraight.l : yRecordStraight.l)}-{(hasReco ? yRecoRecordStraight.p : yRecordStraight.p)}</div>
-            </div>
-            <div>
-              <div className="text-slate-400 text-xs">Win rate</div>
-              <div className="text-white font-black">{(hasReco ? yRecoRecordStraight.decided : yRecordStraight.decided) ? `${(hasReco ? yRecoRecordStraight.winRate : yRecordStraight.winRate).toFixed(1)}%` : '—'}</div>
-            </div>
-            <div>
-              <div className="text-slate-400 text-xs">Graded picks</div>
-              <div className="text-white font-black">{hasReco ? recoStraight.length : gradedYesterdayStraight.length}</div>
-            </div>
+      {/* Unified Filter Toolbar */}
+      <search aria-label="Filter model performance" className="ui-card p-4 sm:p-5 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+          {/* Sport Dropdown */}
+          <div className="space-y-1.5">
+            <label htmlFor="perf-sport-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Sport
+            </label>
+            <select
+              id="perf-sport-select"
+              value={selectedSport}
+              onChange={(e) => setSelectedSport(e.target.value)}
+              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            >
+              <option value="ALL">All Sports ({recommendedHistory.length.toLocaleString()})</option>
+              {availableSports.map((s) => (
+                <option key={s.sport} value={s.sport}>
+                  {s.sport} ({s.count.toLocaleString()})
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Breakdown by confidence (yesterday only) */}
-          {(() => {
-            const dataRows = (hasReco ? recoStraight : gradedYesterdayStraight) || [];
-            if (dataRows.length === 0) return null;
-            
-            const by = { High: { w: 0, l: 0, p: 0 }, Medium: { w: 0, l: 0, p: 0 }, Low: { w: 0, l: 0, p: 0 } };
-            dataRows.forEach((h) => {
-              const b = getConfidenceBucket(h);
-              const r = normalizeOutcome(h.graded_result || h.outcome || h.result);
-              if (r === 'WON') by[b].w += 1;
-              else if (r === 'LOST') by[b].l += 1;
-              else if (r === 'PUSH') by[b].p += 1;
-            });
-            const tiles = ['High', 'Medium', 'Low'].map((k) => ({ k, ...by[k] }));
-            return (
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                {tiles.map((t) => (
-                  <div key={t.k} className="bg-slate-950/20 border border-slate-800 rounded-xl p-4">
-                    <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">{t.k} confidence</div>
-                    <div className="mt-1 text-slate-100 font-black text-xl">{t.w}-{t.l}{t.p ? `-${t.p}` : ''}</div>
+          {/* Bet Type Dropdown */}
+          <div className="space-y-1.5">
+            <label htmlFor="perf-market-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Bet Type
+            </label>
+            <select
+              id="perf-market-select"
+              value={marketFilter}
+              onChange={(e) => setMarketFilter(e.target.value)}
+              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            >
+              <option value="ALL">All Bet Types</option>
+              {availableMarkets.map((m) => (
+                <option key={m} value={m}>
+                  {formatMarketLabel(m)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Time Window Radio Group */}
+          <fieldset className="space-y-1.5">
+            <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Time Window
+            </legend>
+            <div className="grid grid-cols-4 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+              {[
+                { val: 'ALL', label: 'All' },
+                { val: '90', label: '90d' },
+                { val: '30', label: '30d' },
+                { val: '7', label: '7d' },
+              ].map((opt) => {
+                const active = windowFilter === opt.val;
+                return (
+                  <label
+                    key={opt.val}
+                    className={`flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                      active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="perf-window"
+                      value={opt.val}
+                      checked={active}
+                      onChange={() => setWindowFilter(opt.val)}
+                      className="sr-only"
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          {/* Pick Scope Radio Group */}
+          <fieldset className="space-y-1.5">
+            <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Pick Scope
+            </legend>
+            <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+              {[
+                { val: 'all', label: 'All Picks' },
+                { val: 'top6', label: 'Top 6 / Day' },
+              ].map((opt) => {
+                const active = historyScope === opt.val;
+                return (
+                  <label
+                    key={opt.val}
+                    className={`flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                      active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="perf-scope"
+                      value={opt.val}
+                      checked={active}
+                      onChange={() => setHistoryScope(opt.val)}
+                      className="sr-only"
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs text-slate-400">
+          <div className="flex items-center gap-2">
+            <Filter className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+            <span>
+              Viewing <strong className="text-slate-200">{filterSummaryText}</strong> •{' '}
+              <span className="font-mono text-slate-200">{scopedStats.settled.toLocaleString()}</span> settled out of{' '}
+              <span className="font-mono text-slate-200">{scopedStats.total.toLocaleString()}</span> picks
+            </span>
+          </div>
+          {hasNonDefaultFilters && (
+            <button
+              type="button"
+              onClick={resetAllFilters}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-300 hover:text-indigo-200 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Reset filters</span>
+            </button>
+          )}
+        </div>
+      </search>
+
+      {/* Top KPI Summary Cards */}
+      <section aria-labelledby="kpi-summary-heading" className="space-y-3">
+        <h2 id="kpi-summary-heading" className="sr-only">
+          Key Performance Summary
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <article className="ui-card p-5 space-y-1.5">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Settled Record</div>
+            <div className="text-2xl font-extrabold font-mono text-slate-100">
+              {scopedStats.wins}-{scopedStats.losses}-{scopedStats.pushes}
+            </div>
+            <div className="text-xs text-slate-400">
+              {scopedStats.settled.toLocaleString()} settled
+              {scopedStats.voids > 0 ? ` • ${scopedStats.voids} void` : ''}
+              {scopedStats.pending > 0 ? ` • ${scopedStats.pending} pending` : ''}
+            </div>
+          </article>
+
+          <article className="ui-card p-5 space-y-1.5">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Win Rate</div>
+            <div
+              className={`text-2xl font-extrabold font-mono ${
+                scopedStats.decided === 0
+                  ? 'text-slate-300'
+                  : scopedStats.winRate >= 52.38
+                    ? 'text-emerald-400'
+                    : 'text-rose-400'
+              }`}
+            >
+              {scopedStats.decided > 0 ? `${scopedStats.winRate.toFixed(1)}%` : '—'}
+            </div>
+            <div className="text-xs text-slate-400">
+              {breakEvenDelta === null
+                ? 'Break-even at -110 odds is 52.4%'
+                : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% break-even`}
+            </div>
+          </article>
+
+          <article className="ui-card p-5 space-y-1.5">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Profit &amp; ROI</div>
+            <div
+              className={`text-2xl font-extrabold font-mono ${
+                scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              }`}
+            >
+              {formatUnits(scopedStats.profitUnits)}
+            </div>
+            <div className="text-xs text-slate-400">
+              {scopedStats.settled > 0
+                ? `${formatSignedPct(scopedStats.roiPct)} ROI across 1u flat stakes`
+                : 'Awaiting settled bets'}
+            </div>
+          </article>
+
+          <article className="ui-card p-5 space-y-1.5">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Closing Line Edge (CLV)</div>
+            <div
+              className={`text-2xl font-extrabold font-mono ${
+                clvStats.avg === null
+                  ? 'text-slate-300'
+                  : clvStats.avg >= 0
+                    ? 'text-emerald-400'
+                    : 'text-amber-300'
+              }`}
+            >
+              {clvStats.avg === null ? 'N/A' : `${clvStats.avg >= 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
+            </div>
+            <div className="text-xs text-slate-400">
+              {clvStats.count > 0
+                ? `Tracked on ${clvStats.count.toLocaleString()} picks w/ closing line`
+                : 'No closing-line deltas logged in selection'}
+            </div>
+          </article>
+        </div>
+      </section>
+
+      {/* Main Recharts Visualizations & Breakdowns */}
+      <h2 className="sr-only">Model Performance Charts and Breakdowns</h2>
+      <ModelPerformanceAnalytics
+        history={scopedHistory}
+        allHistory={windowMarketHistory}
+        selectedSport={selectedSport}
+        onSelectSport={setSelectedSport}
+        scopeLabel={historyScope === 'top6' ? 'Top 6 daily picks' : 'all recommended picks'}
+        filterSummary={filterSummaryText}
+      />
+
+      {/* Top 6 Rank Breakdown + Yesterday / Latest Slate Recap */}
+      <section aria-label="Daily Rank Performance and Recent Slate Recap" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Daily Rank #1 - #6 */}
+        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="rank-breakdown-heading">
+          <div>
+            <h2 id="rank-breakdown-heading" className="text-base font-bold text-slate-100">
+              Daily Best Picks by Rank (#1 to #6)
+            </h2>
+            <p className="text-xs text-slate-400">
+              Ranks each day&apos;s picks by highest projected EV (#1 = strongest play of the day) for {sportLabel}.
+            </p>
+          </div>
+
+          {rankBreakdown.every((r) => r.settled === 0) ? (
+            <div className="h-[220px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
+              No ranked settled picks match this filter.
+            </div>
+          ) : (
+            <>
+              <div className="h-[210px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={rankBreakdown.map((r) => ({ ...r, winRateRounded: Number(r.winRate.toFixed(1)) }))}
+                    margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey="label" stroke="#cbd5e1" fontSize={12} tickLine={false} />
+                    <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
+                    <ReferenceLine
+                      y={52.4}
+                      stroke="#f59e0b"
+                      strokeDasharray="4 4"
+                      label={{ value: '52.4% Break-Even', fill: '#f59e0b', fontSize: 10, position: 'insideTopRight' }}
+                    />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(val) => [`${val}%`, 'Win Rate']}
+                      labelFormatter={(_, payload) => {
+                        const p = payload?.[0]?.payload;
+                        return p ? `Rank ${p.label} • ${p.wins}-${p.losses}${p.pushes > 0 ? `-${p.pushes}` : ''} • ${formatUnits(p.profitUnits)} (${formatSignedPct(p.roiPct)})` : '';
+                      }}
+                    />
+                    <Bar dataKey="winRateRounded" radius={[5, 5, 0, 0]} maxBarSize={38}>
+                      {rankBreakdown.map((r) => (
+                        <Cell
+                          key={r.rank}
+                          fill={r.settled === 0 ? '#334155' : r.winRate >= 52.4 ? '#10b981' : '#f43f5e'}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {rankBreakdown.map((r) => (
+                  <div key={r.rank} className="rounded-xl border border-slate-800 bg-slate-950/60 p-2 text-center">
+                    <div className="text-[11px] font-bold text-indigo-300">{r.label}</div>
+                    <div className={`text-xs font-mono font-bold mt-0.5 ${r.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                      {r.decided > 0 ? `${r.winRate.toFixed(0)}%` : '—'}
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-400">
+                      {r.wins}-{r.losses}
+                    </div>
+                    <div className={`text-[10px] font-mono ${r.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {r.settled > 0 ? formatSignedPct(r.roiPct) : '—'}
+                    </div>
                   </div>
                 ))}
               </div>
-            );
-          })()}
-          {(() => {
-            const total = hasReco ? (recoStraight || []).length : (recoYesterdayStraight || []).length;
-            const decided = hasReco ? (recoStraight || []).filter(h => isGradedOutcome(h.outcome)).length : gradedYesterdayStraight.length;
-            const pending = total - decided;
+            </>
+          )}
+        </article>
 
-            if (total === 0) {
-              return <div className="mt-3 text-xs text-slate-400">No picks were recommended yesterday.</div>;
-            }
-            if (decided === 0 && pending > 0) {
-              return <div className="mt-3 text-xs text-slate-400">Yesterday has {pending} pick(s) still waiting on final scores. Click “Update Results”.</div>;
-            }
-            if (decided === 0) {
-              return <div className="mt-3 text-xs text-slate-400">Yesterday’s picks have not been graded yet.</div>;
-            }
-            if (pending > 0) {
-              return <div className="mt-3 text-xs text-slate-400">Still waiting on final scores: {pending}</div>;
-            }
-            return null;
-          })()}
+        {/* Yesterday / Most Recent Active Slate Recap */}
+        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="recent-slate-heading">
+          <div>
+            <h2 id="recent-slate-heading" className="text-base font-bold text-slate-100">
+              {recentSlateDisplay.title}
+            </h2>
+            <p className="text-xs text-slate-400">{recentSlateDisplay.subtitle}</p>
+          </div>
 
-          {/* Quick list (yesterday slate) — spreads & totals only */}
-          {(hasReco ? (recoStraight.length > 0) : (gradedYesterdayStraight.length > 0)) && (
-            <div className="mt-4 space-y-2">
-              {(() => {
-                const getEv = (h) => {
-                  const ev = Number(h?.ev_per_unit ?? h?.ev);
-                  return Number.isFinite(ev) ? ev : 0;
-                };
-                const base = (hasReco ? (recoStraight || []) : (recoYesterdayStraight || []));
-                const rows = base.slice().sort((a, b) => getEv(b) - getEv(a));
-                return rows.map((h, idx) => {
-                  const out = String(h.graded_result || h.outcome || h.result || 'PENDING').toUpperCase();
-                  const cls = out === 'WON' || out === 'WIN' ? 'text-green-300' : out === 'LOST' || out === 'LOSS' ? 'text-red-300' : out === 'PUSH' ? 'text-slate-300' : 'text-slate-500';
-                  return (
-                    <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950/20">
-                      <div className="min-w-0">
-                        <div className="text-xs font-black text-slate-100 whitespace-normal break-words leading-snug">
-                          <span className="text-slate-400 mr-2">#{h.rank || idx + 1}</span>
-                          {h.sport || '—'} • {(h.away_team && h.home_team) ? `${h.away_team} @ ${h.home_team}` : (h.matchup || '—')}
-                        </div>
-                        <div className="text-xs text-slate-300 whitespace-normal break-words leading-snug">{formatMarketLabel(h)} • {formatPickLabel(h)} ({formatLineAndOdds(h)})</div>
+          {recentSlateDisplay.rows.length === 0 ? (
+            <div className="h-[220px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
+              No recent graded picks to show for this sport yet.
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+              {recentSlateDisplay.rows.map((item) => {
+                const badge = formatOutcomeBadge(item.outcome);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/90 bg-slate-950/60 px-3.5 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
+                          {item.sport}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-100 truncate">{item.matchup}</span>
                       </div>
-                      <div className={`text-xs font-mono font-black ${isWinOutcome(h.graded_result || h.outcome || h.result) ? 'text-green-300' : isLossOutcome(h.graded_result || h.outcome || h.result) ? 'text-red-300' : 'text-slate-500'}`}>
-                        {normalizeOutcome(h.graded_result || h.outcome || h.result) || 'PENDING'}
+                      <div className="text-xs text-slate-300 mt-0.5 truncate">
+                        <span className="font-semibold text-indigo-300">{item.pick}</span>{' '}
+                        <span className="text-slate-400">{item.lineOdds}</span>{' '}
+                        <span className="text-slate-500">• {item.market}</span>
                       </div>
                     </div>
-                  );
-                });
-              })()}
-              {/* No longer capping to 6; show all */}
 
+                    <div className="text-right shrink-0 space-y-0.5">
+                      <span className={`inline-block px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                      {(item.score || item.evPct != null) && (
+                        <div className="text-[11px] font-mono text-slate-400">
+                          {item.score ? item.score : `${item.evPct >= 0 ? '+' : ''}${item.evPct.toFixed(1)}% EV`}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-        </div>
+        </article>
+      </section>
 
-
-        {/* Top 6 recommended: win% by rank */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <div>
-              <div className="text-sm font-bold text-slate-100">How Our Top 6 Daily Picks Perform ({CURRENT_ET_YEAR} Season)</div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Rank #1 is the highest-edge pick each day. Bars show win rate on finished picks.
-              </p>
-            </div>
-            <div className="text-xs text-slate-300 font-semibold whitespace-nowrap tabular-nums">
-              Avg: {top6RankPerformance?.avg !== null && top6RankPerformance?.avg !== undefined ? `${top6RankPerformance.avg.toFixed(1)}%` : '—'}
-            </div>
-          </div>
-          <div className="h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={top6RankPerformance.rows} layout="vertical" margin={{ top: 8, right: 44, left: 10, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} interval={0} tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                <YAxis
-                  type="category"
-                  dataKey="rank"
-                  interval={0}
-                  width={58}
-                  tick={(props) => {
-                    const { x, y, payload } = props;
-                    // payload.value is already "#1", "#2" etc.
-                    const label = String(payload?.value || '');
-                    const row = (top6RankPerformance.rows || []).find((r) => String(r.rank) === label);
-                    const v = String(row?.yesterday || '—');
-                    const fill = row?._yFill || '#64748b';
-                    const cx = (x || 0);
-                    const cy = (y || 0);
-                    return (
-                      <g>
-                        <text x={cx} y={cy + 4} textAnchor="end" fontSize={11} fontWeight={900} fill="#e2e8f0" transform={`translate(-36,0)`}>{label}</text>
-                        <rect x={cx - 30} y={cy - 8} rx={6} ry={6} width={22} height={16} fill={fill} opacity={0.20} />
-                        <text x={cx - 19} y={cy + 3.5} textAnchor="middle" fontSize={11} fontWeight={900} fill={fill}>{v}</text>
-                      </g>
-                    );
-                  }}
-                />
-                <Tooltip
-                  contentStyle={{ background: '#0b1220', border: '1px solid #334155', borderRadius: 8 }}
-                  labelStyle={{ color: '#e2e8f0' }}
-                  formatter={(v, name) => (name === 'Win%' ? [`${Number(v).toFixed(1)}%`, 'Win%'] : [v, name])}
-                />
-                <ReferenceLine x={50} stroke="#94a3b8" strokeDasharray="4 4" />
-                <Bar dataKey="winRate" name="Win%" radius={[6, 6, 6, 6]}>
-                  {(top6RankPerformance.rows || []).map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry._fill || '#60a5fa'} />
-                  ))}
-                  <LabelList dataKey="winRate" position="right" formatter={(v) => (v === null || v === undefined ? '' : `${v}%`)} fill="#94a3b8" fontSize={11} />
-                  <LabelList dataKey="n" position="insideRight" formatter={(v) => (v ? `${v} picks` : '')} fill="#0b1220" fontSize={10} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      {/* Existing analytics (kept) */}
-      <div className="ui-card p-4 sm:p-5 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h2 className="text-base font-bold text-white">Filter Performance View</h2>
-          <p className="text-xs text-slate-400">
-            Choose whether the charts, breakdowns, and pick history below show every recommended bet or just the Top 6 daily best bets.
-          </p>
-        </div>
-        <div className="inline-flex rounded-xl bg-slate-950/60 p-1 border border-slate-700/50 self-start" role="group" aria-label="Pick scope filter">
-          <button
-            type="button"
-            onClick={() => { setHistoryScope('all'); setHistoryRowLimit(100); }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-              historyScope === 'all'
-                ? 'bg-sky-500 text-slate-950'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            All Picks ({recommendedHistory.length.toLocaleString()})
-          </button>
-          <button
-            type="button"
-            onClick={() => { setHistoryScope('top6'); setHistoryRowLimit(100); }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-              historyScope === 'top6'
-                ? 'bg-sky-500 text-slate-950'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            Top 6 Daily Best ({top6History.length.toLocaleString()})
-          </button>
-        </div>
-      </div>
-
-      <ModelPerformanceAnalytics
-        history={scopedHistory}
-        scopeLabel={historyScope === 'top6' ? 'Top 6 daily best bets' : 'all recommended picks'}
-      />
-
-      {/* Full Pick History Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden mt-8">
-        <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      {/* Bottom Pick History & Grading Explorer Table */}
+      <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="pick-history-heading">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
-            <h3 id="history-table-title" className="text-white font-bold text-lg">Past Picks History</h3>
-            <p className="text-xs text-slate-400 mt-0.5 tabular-nums">
-              {scopedStats.total.toLocaleString()} finished ({scopedStats.wins}-{scopedStats.losses}-{scopedStats.pushes}, {scopedStats.winRate.toFixed(1)}% win rate) • {scopedHistory.length.toLocaleString()} total in view
+            <h2 id="pick-history-heading" className="text-lg font-bold text-slate-100">
+              Pick History &amp; Grading Log
+            </h2>
+            <p className="text-xs text-slate-400">
+              Showing {visibleTableRows.length.toLocaleString()} of {filteredAndSortedTableRows.length.toLocaleString()} matching picks ({filterSummaryText}).
             </p>
           </div>
-          <div className="text-xs text-slate-400 font-medium">Click column headers to sort</div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Search Box */}
+            <search aria-label="Search pick history" className="relative">
+              <label htmlFor="pick-search-input" className="sr-only">
+                Search matchup or pick
+              </label>
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
+              <input
+                id="pick-search-input"
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search team or pick..."
+                className="min-h-[38px] w-56 rounded-xl border border-slate-700 bg-slate-950 pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </search>
+
+            {/* Row Limit */}
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="row-limit-select" className="text-xs text-slate-400">
+                Show
+              </label>
+              <select
+                id="row-limit-select"
+                value={historyRowLimit}
+                onChange={(e) => setHistoryRowLimit(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                className="min-h-[38px] rounded-xl border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              >
+                <option value={50}>50 rows</option>
+                <option value={100}>100 rows</option>
+                <option value={250}>250 rows</option>
+                <option value={500}>500 rows</option>
+                <option value="ALL">All ({filteredAndSortedTableRows.length})</option>
+              </select>
+            </div>
+          </div>
         </div>
 
-        <div className="overflow-x-auto" role="region" aria-labelledby="history-table-title" tabIndex={0}>
-          <table className="w-full text-left border-collapse">
-            <caption className="sr-only">Past recommended picks history with matchup, pick, odds, edge, result, and final score</caption>
-            <thead>
-              <tr className="text-slate-300 border-b border-slate-700 bg-slate-800/50 text-xs font-semibold">
-                <th scope="col" aria-sort={sortConfig.key === 'created_at' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
-                  <button type="button" onClick={() => handleSort('created_at')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
-                    Date <SortIcon column="created_at" />
-                  </button>
-                </th>
-                <th scope="col" className="py-2.5 px-2.5">Rank</th>
-                <th scope="col" aria-sort={sortConfig.key === 'sport' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-2.5">
-                  <button type="button" onClick={() => handleSort('sport')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
-                    Sport <SortIcon column="sport" />
-                  </button>
-                </th>
-                <th scope="col" aria-sort={sortConfig.key === 'matchup' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
-                  <button type="button" onClick={() => handleSort('matchup')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
-                    Matchup <SortIcon column="matchup" />
-                  </button>
-                </th>
-                <th scope="col" aria-sort={sortConfig.key === 'bet_on' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
-                  <button type="button" onClick={() => handleSort('bet_on')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
-                    Pick & Type <SortIcon column="bet_on" />
-                  </button>
-                </th>
-                <th scope="col" className="py-2.5 px-3 whitespace-nowrap">Odds & Line</th>
-                <th scope="col" aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
-                  <button type="button" onClick={() => handleSort('edge')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
-                    Edge <SortIcon column="edge" />
-                  </button>
-                </th>
-                <th scope="col" aria-sort={sortConfig.key === 'result' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
-                  <button type="button" onClick={() => handleSort('result')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
-                    Result <SortIcon column="result" />
-                  </button>
-                </th>
-                <th scope="col" className="py-2.5 px-3 whitespace-nowrap">Score</th>
+        {/* Outcome Filter Pills */}
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter picks by outcome">
+          {[
+            { key: 'ALL', label: 'All' },
+            { key: 'SETTLED', label: 'Settled Only' },
+            { key: 'WON', label: 'Won' },
+            { key: 'LOST', label: 'Lost' },
+            { key: 'PUSH', label: 'Push' },
+            { key: 'VOID', label: 'Void' },
+            { key: 'PENDING', label: 'Pending' },
+          ].map((pill) => {
+            const active = outcomeFilter === pill.key;
+            return (
+              <button
+                key={pill.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setOutcomeFilter(pill.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                  active
+                    ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200'
+                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                }`}
+              >
+                {pill.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sortable Responsive Table */}
+        <div className="table-wrapper overflow-x-auto rounded-xl border border-slate-800/80" tabIndex={0}>
+          <table className="w-full text-left border-collapse text-sm">
+            <thead className="bg-slate-950/80 border-b border-slate-800">
+              <tr>
+                {renderSortableHeader('created_at', 'Date (ET)')}
+                {renderSortableHeader('sport', 'Sport')}
+                {renderSortableHeader('matchup', 'Matchup')}
+                {renderSortableHeader('pick', 'Pick & Odds')}
+                {renderSortableHeader('edge', 'Edge & Tier', 'right')}
+                {renderSortableHeader('result', 'Grade & Score')}
+                {renderSortableHeader('pl', 'Profit (1u)', 'right')}
               </tr>
             </thead>
-            <tbody>
-              {(() => {
-                const histRaw = getRecommendedHistory();
-                const etDayForRecap = (ts) => toEtDay(ts);
-                const keyFor = (x) => {
-                  return String(x?.id || '')
-                    || `${x?.event_id || 'evt'}|${x?.market_type || x?.market || ''}|${x?.selection || ''}|${x?.bet_price || ''}|${x?.analyzed_at || x?.created_at || ''}`;
-                };
+            <tbody className="divide-y divide-slate-800/70">
+              {loading && visibleTableRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-sm text-slate-400">
+                    Loading model performance history...
+                  </td>
+                </tr>
+              ) : visibleTableRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-sm text-slate-400">
+                    No picks match your current filters.
+                  </td>
+                </tr>
+              ) : (
+                visibleTableRows.map((h, idx) => {
+                  const day = getPerformanceDay(h) || '—';
+                  const sp = normalizeSport(h);
+                  const matchup = formatMatchup(h);
+                  const pickLabel = formatPickLabel(h);
+                  const lineOdds = formatLineAndOdds(h);
+                  const market = formatMarketLabel(h);
+                  const evDec = getNumericEdge(h);
+                  const evPct = evDec != null ? evDec * 100 : null;
+                  const confTier = getConfidenceBucket(h);
+                  const confScore = Math.round(getNumericConfidence(h));
+                  const badge = formatOutcomeBadge(getRawOutcome(h));
+                  const profitUnits = computeRowProfitUnits(h);
+                  const rankNum = rankByRowKey.get(h);
 
-                const rankByKey = {};
-                const groups = {};
-                histRaw.forEach((h) => {
-                  const d = etDayForRecap(h?.start_time || h?.analyzed_at || h?.created_at);
-                  if (!d) return;
-                  groups[d] = groups[d] || [];
-                  groups[d].push(h);
-                });
-                Object.keys(groups).forEach((d) => {
-                  const arr = groups[d];
-                  arr.sort((a, b) => {
-                    const ae = Number(a?.ev_per_unit ?? a?.ev ?? 0);
-                    const be = Number(b?.ev_per_unit ?? b?.ev ?? 0);
-                    return be - ae;
-                  });
-                  arr.forEach((h, i) => {
-                    rankByKey[keyFor(h)] = i + 1;
-                  });
-                });
-
-                // Respect active scope (All Picks vs Top 6 Daily Best); render up to historyRowLimit rows
-                const histAll = histRaw;
-                const visibleRows = histAll.slice(0, historyRowLimit);
-
-                return visibleRows.map((item) => {
-                  let recs = [];
-                  try {
-                    if (item.outputs_json) {
-                      const out = JSON.parse(item.outputs_json);
-                      if (out.recommendations) recs = out.recommendations;
-                    }
-                    if (recs.length === 0 && item.recommendation_json) {
-                      recs = JSON.parse(item.recommendation_json);
-                    }
-                    if (recs.length === 0 && item.pick) {
-                      recs = [{ side: item.pick, line: item.bet_line, edge: item.ev_per_unit || item.edge }];
-                    }
-                  } catch (e) { }
-
-                  const recRank = rankByKey[keyFor(item)] || null;
-                  const mainRec = recs[0] || {};
-                  const resultStatus = item.graded_result || item.outcome;
-                  const normOut = normalizeOutcome(resultStatus);
-                  const isWon = isWinOutcome(resultStatus);
-                  const isLost = isLossOutcome(resultStatus);
-                  const isPush = normOut === 'PUSH';
-                  const isVoid = normOut === 'VOID';
-
-                  const formatDateMDY = (rowOrTs) => {
-                    const etDay = getPerformanceDay(rowOrTs);
-                    if (etDay && /^\d{4}-\d{2}-\d{2}$/.test(etDay)) {
-                      const [yy, mm, dd] = etDay.split('-');
-                      return `${Number(mm)}/${Number(dd)}/${yy.slice(2)}`;
-                    }
-                    if (!rowOrTs) return '—';
-                    try {
-                      const d = new Date(rowOrTs);
-                      return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric', day: 'numeric', year: '2-digit' });
-                    } catch (e) { return String(rowOrTs); }
-                  };
+                  const tierCls =
+                    confTier === 'High'
+                      ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
+                      : confTier === 'Medium'
+                        ? 'text-amber-300 bg-amber-500/10 border-amber-500/30'
+                        : 'text-slate-300 bg-slate-800/80 border-slate-700';
 
                   return (
-                    <tr key={keyFor(item)} className="border-b border-slate-700/40 hover:bg-slate-800/20 transition-colors text-xs sm:text-[13px]">
-                      <td className="py-2 px-3 text-slate-400 font-mono tabular-nums whitespace-nowrap">
-                        {formatDateMDY(item)}
+                    <tr key={h.id || h.prediction_id || `${h.event_id}-${idx}`} className="hover:bg-slate-900/55 transition-colors">
+                      <td className="py-3 px-3 font-mono text-xs text-slate-300 whitespace-nowrap">{day}</td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 text-xs font-bold">
+                          {sp}
+                        </span>
                       </td>
-                      <td className="py-2 px-2.5 whitespace-nowrap">
-                        {recRank ? (
-                          <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${recRank <= 6 ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/30' : 'bg-slate-700/30 text-slate-400'
-                            }`}>
-                            {recRank}
-                          </span>
-                        ) : '—'}
+                      <td className="py-3 px-3 font-medium text-slate-100 max-w-[240px]">
+                        <div className="truncate" title={matchup}>
+                          {matchup}
+                        </div>
                       </td>
-                      <td className="py-2 px-2.5 text-slate-300 font-bold uppercase text-[11px] whitespace-nowrap">
-                        {item.sport || item.league || '—'}
-                      </td>
-                      <td className="py-2 px-3 text-slate-200 font-semibold min-w-[170px] max-w-[240px]">
-                        {formatMatchup(item)}
-                      </td>
-                      <td className="py-2 px-3 min-w-[150px] max-w-[220px]">
-                        <span className="text-white font-semibold">{formatPickLabel(item)}</span>
-                        <span className="ml-1.5 text-[11px] font-medium text-slate-400">({formatMarketLabel(item)})</span>
-                      </td>
-                      <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                        <span className="font-mono tabular-nums">{formatLineAndOdds(item)}</span>
-                      </td>
-                      <td className="py-2 px-3 whitespace-nowrap">
-                        {(() => {
-                          let ev = Number(item?.ev_per_unit ?? item?.ev);
-                          if (!Number.isFinite(ev)) {
-                            ev = Number(item?.edge ?? item?.edge_points);
-                          }
-                          if (!Number.isFinite(ev)) return <span className="text-slate-500">—</span>;
-
-                          // Aggressive normalization: handle 0.05, 5.0, 500, 2177, etc.
-                          // We want a decimal like 0.05 for the text color threshold and then *100 for display.
-                          let normEv = ev;
-                          let safety = 0;
-                          // Use 0.5 (50%) as the threshold for 'this must be a whole number percent'
-                          while (Math.abs(normEv) > 0.5 && safety < 3) {
-                            normEv /= 100;
-                            safety++;
-                          }
-
-                          return (
-                            <span className={`font-black ${normEv > 0.05 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                              +{(normEv * 100).toFixed(1)}%
+                      <td className="py-3 px-3 max-w-[260px]">
+                        <div className="flex items-center gap-1.5">
+                          {rankNum && rankNum <= 6 && (
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-mono font-bold shrink-0">
+                              #{rankNum}
                             </span>
-                          );
-                        })()}
+                          )}
+                          <span className="font-semibold text-indigo-300 truncate" title={`${pickLabel} ${lineOdds}`}>
+                            {pickLabel}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {lineOdds} • {market}
+                        </div>
                       </td>
-                      <td className="py-2 px-4 whitespace-nowrap">
-                        {isWon ? (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-semibold ring-1 ring-emerald-500/20">Won</span>
-                        ) : isLost ? (
-                          <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-xs font-semibold ring-1 ring-red-500/20">Lost</span>
-                        ) : isPush ? (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-500/15 text-slate-300 text-xs font-semibold ring-1 ring-slate-500/20">Push</span>
-                        ) : isVoid ? (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-700/40 text-slate-300 text-xs font-medium ring-1 ring-slate-600/30">Void</span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-800/60 text-slate-400 text-xs font-medium">Pending</span>
-                        )}
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        <div className="font-mono text-xs font-semibold text-slate-200">
+                          {evPct != null ? `${evPct >= 0 ? '+' : ''}${evPct.toFixed(1)}% EV` : '—'}
+                        </div>
+                        <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded border text-[10px] font-semibold ${tierCls}`}>
+                          {confTier}{confScore > 0 ? ` (${confScore})` : ''}
+                        </span>
                       </td>
-                      <td className="py-2 px-4 text-slate-300 font-mono tabular-nums text-xs whitespace-nowrap">
-                        {item.score || '—'}
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${badge.cls}`}>
+                            {badge.label}
+                          </span>
+                          {h.score && <span className="font-mono text-xs text-slate-400">{h.score}</span>}
+                        </div>
+                      </td>
+                      <td
+                        className={`py-3 px-3 text-right font-mono text-xs font-bold whitespace-nowrap ${
+                          badge.key === 'WON'
+                            ? 'text-emerald-400'
+                            : badge.key === 'LOST'
+                              ? 'text-rose-400'
+                              : 'text-slate-400'
+                        }`}
+                      >
+                        {badge.key === 'PENDING' ? '—' : formatUnits(profitUnits)}
                       </td>
                     </tr>
                   );
-                });
-              })()}
+                })
+              )}
             </tbody>
           </table>
         </div>
-        {scopedHistory.length > historyRowLimit && (
-          <div className="px-5 py-3 border-t border-slate-800 bg-slate-900/40 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-            <span>
-              Showing {Math.min(historyRowLimit, scopedHistory.length).toLocaleString()} of {scopedHistory.length.toLocaleString()} picks
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setHistoryRowLimit((n) => n + 150)}
-                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/70 text-slate-200 hover:text-white font-semibold"
-              >
-                Show 150 More
-              </button>
-              <button
-                type="button"
-                onClick={() => setHistoryRowLimit(scopedHistory.length)}
-                className="px-3 py-1.5 rounded-lg border border-slate-700/70 text-slate-300 hover:text-white font-medium"
-              >
-                Show All ({scopedHistory.length.toLocaleString()})
-              </button>
-            </div>
-          </div>
-        )}
-        {scopedHistory.length === 0 && (
-          <div className="py-12 text-center text-slate-400">No historical recommended picks found for this filter yet.</div>
-        )}
-      </div>
+      </article>
     </div>
   );
 }
-
