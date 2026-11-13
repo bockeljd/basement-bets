@@ -186,6 +186,10 @@ export const formatPickLabel = (row) => {
     if (!s) continue;
     const upper = s.toUpperCase();
     if (upper === 'NONE' || upper === 'NULL' || s === '-' || s === '—') continue;
+    if (upper === 'HOME' && row?.home_team) return String(row.home_team).trim();
+    if (upper === 'AWAY' && row?.away_team) return String(row.away_team).trim();
+    if (upper === 'OVER') return 'Over';
+    if (upper === 'UNDER') return 'Under';
     return s;
   }
   return '—';

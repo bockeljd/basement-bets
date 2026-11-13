@@ -897,43 +897,43 @@ export default function Picks() {
         </div>
 
         <div className="overflow-x-auto" role="region" aria-labelledby="history-table-title" tabIndex={0}>
-          <table className="w-full text-left border-collapse min-w-[760px]">
+          <table className="w-full text-left border-collapse">
             <caption className="sr-only">Past recommended picks history with matchup, pick, odds, edge, result, and final score</caption>
             <thead>
               <tr className="text-slate-300 border-b border-slate-700 bg-slate-800/50 text-xs font-semibold">
-                <th scope="col" aria-sort={sortConfig.key === 'created_at' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                <th scope="col" aria-sort={sortConfig.key === 'created_at' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
                   <button type="button" onClick={() => handleSort('created_at')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
                     Date <SortIcon column="created_at" />
                   </button>
                 </th>
-                <th scope="col" className="py-2.5 px-4">Rank</th>
-                <th scope="col" aria-sort={sortConfig.key === 'sport' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                <th scope="col" className="py-2.5 px-2.5">Rank</th>
+                <th scope="col" aria-sort={sortConfig.key === 'sport' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-2.5">
                   <button type="button" onClick={() => handleSort('sport')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
                     Sport <SortIcon column="sport" />
                   </button>
                 </th>
-                <th scope="col" aria-sort={sortConfig.key === 'matchup' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                <th scope="col" aria-sort={sortConfig.key === 'matchup' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
                   <button type="button" onClick={() => handleSort('matchup')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
                     Matchup <SortIcon column="matchup" />
                   </button>
                 </th>
-                <th scope="col" aria-sort={sortConfig.key === 'bet_on' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                <th scope="col" aria-sort={sortConfig.key === 'bet_on' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
                   <button type="button" onClick={() => handleSort('bet_on')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
                     Pick & Type <SortIcon column="bet_on" />
                   </button>
                 </th>
-                <th scope="col" className="py-2.5 px-4">Odds & Line</th>
-                <th scope="col" aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                <th scope="col" className="py-2.5 px-3 whitespace-nowrap">Odds & Line</th>
+                <th scope="col" aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
                   <button type="button" onClick={() => handleSort('edge')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
                     Edge <SortIcon column="edge" />
                   </button>
                 </th>
-                <th scope="col" aria-sort={sortConfig.key === 'result' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-4">
+                <th scope="col" aria-sort={sortConfig.key === 'result' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : undefined} className="py-2 px-3">
                   <button type="button" onClick={() => handleSort('result')} className="flex items-center hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 rounded py-1">
                     Result <SortIcon column="result" />
                   </button>
                 </th>
-                <th scope="col" className="py-2.5 px-4">Final Score</th>
+                <th scope="col" className="py-2.5 px-3 whitespace-nowrap">Score</th>
               </tr>
             </thead>
             <tbody>
@@ -1005,11 +1005,11 @@ export default function Picks() {
                   };
 
                   return (
-                    <tr key={keyFor(item)} className="border-b border-slate-700/40 hover:bg-slate-800/20 transition-colors text-[13px]">
-                      <td className="py-2 px-4 text-slate-400 font-mono tabular-nums whitespace-nowrap">
+                    <tr key={keyFor(item)} className="border-b border-slate-700/40 hover:bg-slate-800/20 transition-colors text-xs sm:text-[13px]">
+                      <td className="py-2 px-3 text-slate-400 font-mono tabular-nums whitespace-nowrap">
                         {formatDateMDY(item)}
                       </td>
-                      <td className="py-2 px-4 whitespace-nowrap">
+                      <td className="py-2 px-2.5 whitespace-nowrap">
                         {recRank ? (
                           <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${recRank <= 6 ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/30' : 'bg-slate-700/30 text-slate-400'
                             }`}>
@@ -1017,20 +1017,20 @@ export default function Picks() {
                           </span>
                         ) : '—'}
                       </td>
-                      <td className="py-2 px-4 text-slate-300 font-bold uppercase text-[11px] whitespace-nowrap">
+                      <td className="py-2 px-2.5 text-slate-300 font-bold uppercase text-[11px] whitespace-nowrap">
                         {item.sport || item.league || '—'}
                       </td>
-                      <td className="py-2 px-4 text-slate-200 font-semibold whitespace-nowrap">
+                      <td className="py-2 px-3 text-slate-200 font-semibold min-w-[170px] max-w-[240px]">
                         {formatMatchup(item)}
                       </td>
-                      <td className="py-2 px-4 whitespace-nowrap">
+                      <td className="py-2 px-3 min-w-[150px] max-w-[220px]">
                         <span className="text-white font-semibold">{formatPickLabel(item)}</span>
                         <span className="ml-1.5 text-[11px] font-medium text-slate-400">({formatMarketLabel(item)})</span>
                       </td>
-                      <td className="py-2 px-4 text-slate-400 whitespace-nowrap">
+                      <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
                         <span className="font-mono tabular-nums">{formatLineAndOdds(item)}</span>
                       </td>
-                      <td className="py-2 px-4 whitespace-nowrap">
+                      <td className="py-2 px-3 whitespace-nowrap">
                         {(() => {
                           let ev = Number(item?.ev_per_unit ?? item?.ev);
                           if (!Number.isFinite(ev)) {

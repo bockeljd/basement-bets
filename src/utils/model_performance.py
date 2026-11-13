@@ -160,8 +160,14 @@ def normalize_history_row(row: dict) -> dict:
     bet_on = _meaningful_pick_text(out.get("bet_on"))
     best_pick = sel or bet_on or pick
     if best_pick:
-        if not sel:
-            out["selection"] = best_pick
+        low = best_pick.lower()
+        if low == "home" and out.get("home_team"):
+            best_pick = str(out["home_team"]).strip()
+        elif low == "away" and out.get("away_team"):
+            best_pick = str(out["away_team"]).strip()
+        elif low in ("over", "under"):
+            best_pick = low.capitalize()
+        out["selection"] = best_pick if (not sel or sel.lower() in ("home", "away", "over", "under")) else sel
         if not pick:
             out["pick"] = best_pick
         if not bet_on:

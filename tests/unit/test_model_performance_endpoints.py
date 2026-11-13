@@ -50,6 +50,18 @@ def test_normalization_and_dedupe_helpers():
     assert row["confidence_0_100"] == 78.0
     assert row["outcome"] == "WON"
 
+    legacy_home = normalize_history_row(
+        {
+            "event_id": "evt_home",
+            "market_type": "SPREAD",
+            "away_team": "Yale Bulldogs",
+            "home_team": "Harvard Crimson",
+            "selection": "home",
+            "pick": "home",
+        }
+    )
+    assert legacy_home["selection"] == "Harvard Crimson"
+
     canonical = [
         {
             "id": "p_1",
