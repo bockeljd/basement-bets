@@ -270,6 +270,24 @@ export const normalizeSport = (rowOrSport) => {
   return 'NCAAM';
 };
 
+export const getRowSeason = (row) => {
+  const direct = String(row?.season || '').trim();
+  if (direct) return direct;
+
+  const day = getPerformanceDay(row);
+  if (!day || day.length < 7) return null;
+  const year = Number(day.slice(0, 4));
+  const month = Number(day.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+
+  const sport = normalizeSport(row);
+  if (sport === 'NCAAM') {
+    const endYear = month >= 7 ? year + 1 : year;
+    return `${endYear - 1}-${String(endYear).slice(-2)}`;
+  }
+  return String(year);
+};
+
 export const computeRowProfitUnits = (row) => {
   if (!row) return 0;
   return roiPerUnit(getRawOutcome(row), getEffectivePrice(row));

@@ -18,12 +18,15 @@ import sys
 import json
 import argparse
 from dataclasses import dataclass
-from typing import Any, List, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 # repo root on path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.database import get_db_connection, _exec
+from src.utils.model_calibration import is_valid_winprob_calibration
+from src.utils.ncaam_season import current_ncaam_season_short, season_start_date_for_game
 
 
 def norm_result(x: Any) -> str | None:
@@ -159,27 +162,49 @@ def fit_calibration_artifact(obs: List[Obs], days: int = 30, min_points: int = 1
     }
 
 
-def _fetch_obs_for_window(days: int, league: str = "NCAAM") -> List[Obs]:
+def _fetch_obs_for_window(
+    days: int,
+    league: str = "NCAAM",
+    *,
+    season_start: Optional[str] = None,
+    min_price: int = -250,
+    max_price: int = 185,
+) -> List[Obs]:
     """Fetch decided model predictions with valid win_prob for the target league/window."""
-    q = """
-    SELECT m.win_prob, m.outcome
+    lg = str(league or "NCAAM").upper().strip()
+    season_clause = ""
+    params: Dict[str, Any] = {"days": f"{int(days)} days", "league": lg}
+    if season_start:
+        season_clause = "AND COALESCE(e.start_time, m.analyzed_at) >= :season_start"
+        params["season_start"] = f"{str(season_start)[:10]}T00:00:00+00:00"
+
+    q = f"""
+    SELECT m.win_prob, m.outcome, COALESCE(m.bet_price, m.price) AS price
     FROM model_predictions m
     JOIN events e ON m.event_id = e.id
     WHERE m.analyzed_at >= NOW() - INTERVAL :days
       AND UPPER(COALESCE(e.league, 'NCAAM')) = :league
+      {season_clause}
       AND m.win_prob IS NOT NULL
       AND m.outcome IS NOT NULL
       AND UPPER(COALESCE(m.pick, '')) NOT IN ('', 'NONE', 'NO BET', 'PASS')
     """
     obs: List[Obs] = []
     with get_db_connection() as conn:
-        rows = _exec(conn, q, {"days": f"{int(days)} days", "league": str(league).upper()}).fetchall()
+        rows = _exec(conn, q, params).fetchall()
 
     for r in rows:
         rr = dict(r) if not isinstance(r, dict) else r
         res = norm_result(rr.get("outcome"))
         if res not in ("W", "L"):
             continue
+        if lg == "NCAAM" and rr.get("price") is not None:
+            try:
+                pr_int = int(rr.get("price"))
+                if pr_int < min_price or pr_int > max_price:
+                    continue
+            except Exception:
+                pass
         try:
             p = float(rr.get("win_prob"))
         except Exception:
@@ -193,12 +218,21 @@ def _fetch_obs_for_window(days: int, league: str = "NCAAM") -> List[Obs]:
 def main(
     days: int = 30,
     out_path: str | None = None,
-    min_obs: int = 50,
+    min_obs: int = 75,
     allow_insufficient: bool = True,
     league: str = "NCAAM",
     auto_widen: bool = True,
+    cross_season: bool = False,
 ):
     lg = str(league or "NCAAM").upper().strip()
+    season_start: Optional[str] = None
+    season_label: Optional[str] = None
+    if lg == "NCAAM" and not cross_season:
+        season_start = season_start_date_for_game()
+        season_label = current_ncaam_season_short()
+    elif lg == "MLB":
+        season_label = str(datetime.now(timezone.utc).year)
+
     windows = [int(days)]
     if auto_widen:
         for w in (90, 180, 365, 730):
@@ -208,7 +242,7 @@ def main(
     obs: List[Obs] = []
     used_days = int(days)
     for w in windows:
-        candidate = _fetch_obs_for_window(days=w, league=lg)
+        candidate = _fetch_obs_for_window(days=w, league=lg, season_start=season_start)
         if len(candidate) > len(obs):
             obs = candidate
             used_days = w
@@ -224,6 +258,17 @@ def main(
 
     artifact = fit_calibration_artifact(obs, days=used_days, min_points=12)
     artifact["league"] = lg
+    if season_label:
+        artifact["season"] = season_label
+    if season_start:
+        artifact["season_start"] = season_start
+
+    if not is_valid_winprob_calibration(artifact, min_obs=int(min_obs), min_max_pcal=0.52):
+        msg = f"[calibration:{lg}] Refusing to publish degenerate PAVA curve (max p_cal < 0.52 across {len(obs)} obs)."
+        if allow_insufficient:
+            print(msg)
+            return
+        raise SystemExit(msg)
 
     fname = f"winprob_calibration_{lg.lower()}.json"
     param_key = f"winprob_calibration_{lg.lower()}"
@@ -251,15 +296,16 @@ def main(
     except Exception as e:
         print(f"[calibration:{lg}] DB model_params_store update skipped: {e}")
 
-    print(f"league={lg} window={used_days}d n_obs={artifact['n_obs']} points={len(artifact['points'])}")
+    print(f"league={lg} season={season_label} window={used_days}d n_obs={artifact['n_obs']} points={len(artifact['points'])}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=30)
-    ap.add_argument("--min-obs", type=int, default=50)
+    ap.add_argument("--min-obs", type=int, default=75)
     ap.add_argument("--league", type=str, default="NCAAM")
     ap.add_argument("--no-auto-widen", action="store_true", help="Disable fallback window expansion")
+    ap.add_argument("--cross-season", action="store_true", help="Allow pulling observations across prior seasons")
     ap.add_argument("--strict", action="store_true", help="Exit non-zero if fewer than --min-obs samples")
     ap.add_argument("--out", type=str, default=None)
     args = ap.parse_args()
@@ -271,4 +317,5 @@ if __name__ == "__main__":
         allow_insufficient=not args.strict,
         league=args.league,
         auto_widen=not args.no_auto_widen,
+        cross_season=args.cross_season,
     )

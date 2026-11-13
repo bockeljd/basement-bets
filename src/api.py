@@ -1669,13 +1669,20 @@ async def grade_research_history(
 
 
 @app.get("/api/research/history")
-async def get_history(limit: int = 2000, lookback_days: int = 400, sport: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def get_history(
+    limit: int = 2000,
+    lookback_days: int = 400,
+    sport: Optional[str] = None,
+    season: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
     """Model prediction history (recommended picks by default).
 
     Parameters:
       - limit: max rows
       - lookback_days: how far back to scan when recommended_only=True (default widened for year-to-date)
       - sport: optional sport/league filter (e.g. NCAAM, MLB, NFL)
+      - season: optional season filter (e.g. 2026-27, 2025-26, 2026)
 
     Notes:
       We fall back to unscoped history to support legacy single-user rows.
@@ -1695,11 +1702,15 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, sport: Option
 
     # Combined History: Canonical Slate-backed + User Fallback
     from src.database import fetch_recommended_history_canonical, fetch_model_history
-    from src.utils.model_performance import dedupe_and_merge_history, normalize_sport
+    from src.utils.model_performance import dedupe_and_merge_history, get_row_season, normalize_sport
 
     sport_filter = None
     if sport is not None and str(sport).strip() and str(sport).strip().upper() != "ALL":
         sport_filter = normalize_sport(sport)
+
+    season_filter = None
+    if season is not None and str(season).strip() and str(season).strip().upper() != "ALL":
+        season_filter = str(season).strip()
 
     canonical_rows = fetch_recommended_history_canonical(limit=limit, league=sport_filter, lookback_days=lookback_days, user_id=user_id)
     user_rows = fetch_model_history(user_id=user_id, league=sport_filter, recommended_only=True, limit=limit, lookback_days=lookback_days)
@@ -1717,6 +1728,9 @@ async def get_history(limit: int = 2000, lookback_days: int = 400, sport: Option
 
     if sport_filter:
         rows = [r for r in rows if normalize_sport(r.get('sport'), event_id=r.get('event_id')) == sport_filter]
+
+    if season_filter:
+        rows = [r for r in rows if get_row_season(r) == season_filter]
 
     # Sort combined results by strongest date marker descending
     def sort_key(x):
@@ -3845,7 +3859,7 @@ async def ncaam_top6_rank_performance(days: int = 365):
 def _yesterday_items_from_daily_top_picks(conn, yday: str):
     """Fallback yesterday slate builder from daily_top_picks + events + game_results."""
     from src.database import _exec
-    from src.utils.model_performance import normalize_history_row
+    from src.utils.model_performance import normalize_history_row, normalize_market_type
 
     picks_rows = _exec(conn, """
         SELECT d.event_id, d.computed_at, d.rec_json,
@@ -3863,7 +3877,17 @@ def _yesterday_items_from_daily_top_picks(conn, yday: str):
                    bet_line, bet_price, price, selection, market_type, pick
             FROM model_predictions mp
             WHERE mp.event_id = d.event_id
-            ORDER BY mp.analyzed_at DESC
+            ORDER BY
+                CASE
+                    WHEN UPPER(COALESCE(mp.market_type, '')) = UPPER(COALESCE(d.rec_json->>'bet_type', d.rec_json->>'market_type', ''))
+                      AND (COALESCE(d.rec_json->>'selection', d.rec_json->>'side', '') = ''
+                           OR UPPER(COALESCE(mp.selection, '')) = UPPER(COALESCE(d.rec_json->>'selection', d.rec_json->>'side', '')))
+                    THEN 0
+                    WHEN UPPER(COALESCE(mp.market_type, '')) = UPPER(COALESCE(d.rec_json->>'bet_type', d.rec_json->>'market_type', ''))
+                    THEN 1
+                    ELSE 2
+                END ASC,
+                mp.analyzed_at DESC
             LIMIT 1
         ) m ON TRUE
         WHERE d.league = 'NCAAM'
@@ -3891,30 +3915,45 @@ def _yesterday_items_from_daily_top_picks(conn, yday: str):
         aw = r.get('away_score')
         hs = r.get('home_score')
         score = f"{aw}-{hs}" if aw is not None and hs is not None else None
-        ev_val = rec.get('ev_per_unit') if rec.get('ev_per_unit') is not None else r.get('pred_ev')
+
+        rec_mkt = normalize_market_type(rec.get('bet_type') or rec.get('market_type'))
+        pred_mkt = normalize_market_type(r.get('pred_market'))
+        mkt_matches = (rec_mkt in ('', 'OTHER')) or (pred_mkt == rec_mkt)
+
+        ev_val = rec.get('ev_per_unit')
+        if ev_val is None:
+            ev_val = rec.get('ev')
+        if ev_val is None and mkt_matches:
+            ev_val = r.get('pred_ev')
         try:
             ev_num = float(ev_val) if ev_val is not None else 0.0
         except Exception:
             ev_num = 0.0
-        conf_val = rec.get('confidence') if rec.get('confidence') is not None else r.get('pred_conf')
-        price_val = rec.get('odds') if rec.get('odds') is not None else (rec.get('price') if rec.get('price') is not None else r.get('pred_price'))
-        line_val = rec.get('line') if rec.get('line') is not None else r.get('pred_line')
+
+        conf_val = rec.get('confidence') if rec.get('confidence') is not None else (r.get('pred_conf') if mkt_matches else None)
+        price_val = rec.get('odds') if rec.get('odds') is not None else (
+            rec.get('price') if rec.get('price') is not None else (r.get('pred_price') if mkt_matches else None)
+        )
+        line_val = rec.get('line') if rec.get('line') is not None else (
+            rec.get('bet_line') if rec.get('bet_line') is not None else (r.get('pred_line') if mkt_matches else None)
+        )
+        row_outcome = r.get('outcome') if mkt_matches else 'PENDING'
 
         items.append(normalize_history_row({
             'rank': 0,
-            'prediction_id': r.get('prediction_id'),
-            'linked_prediction_id': r.get('prediction_id'),
+            'prediction_id': r.get('prediction_id') if mkt_matches else None,
+            'linked_prediction_id': r.get('prediction_id') if mkt_matches else None,
             'event_id': r.get('event_id'),
             'sport': r.get('sport') or 'NCAAM',
             'market_type': rec.get('bet_type') or rec.get('market_type') or r.get('pred_market'),
-            'selection': rec.get('side') or rec.get('selection') or r.get('pred_selection') or r.get('pred_pick'),
+            'selection': rec.get('selection') or rec.get('side') or (r.get('pred_selection') if mkt_matches else None) or (r.get('pred_pick') if mkt_matches else None),
             'bet_line': line_val,
             'price': price_val,
             'bet_price': price_val,
             'ev_per_unit': ev_num,
             'confidence_0_100': conf_val,
-            'clv_points': r.get('clv_points'),
-            'outcome': r.get('outcome') or 'PENDING',
+            'clv_points': r.get('clv_points') if mkt_matches else None,
+            'outcome': row_outcome or 'PENDING',
             'away_team': r.get('away_team'),
             'home_team': r.get('home_team'),
             'start_time': r.get('start_time'),
@@ -4044,9 +4083,12 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
                 FROM model_predictions m
                 WHERE r.event_id IS NOT NULL
                   AND m.event_id=r.event_id
+                  AND (NULLIF(TRIM(r.market_type), '') IS NULL OR UPPER(COALESCE(m.market_type, ''))=UPPER(TRIM(r.market_type)))
                   AND (r.selection IS NULL OR m.selection=r.selection)
                   AND (r.bet_price IS NULL OR COALESCE(m.bet_price, m.price)=r.bet_price)
-                ORDER BY m.analyzed_at DESC
+                ORDER BY
+                  CASE WHEN UPPER(COALESCE(m.outcome, '')) IN ('WON','LOST','PUSH','WIN','LOSS') THEN 0 ELSE 1 END ASC,
+                  m.analyzed_at DESC
                 LIMIT 1
               ) m2 ON TRUE
               JOIN events e ON e.id=COALESCE(m1.event_id, m2.event_id, r.event_id)

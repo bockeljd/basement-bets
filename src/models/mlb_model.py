@@ -74,13 +74,19 @@ class MLBModel(BaseModel):
 
     # Edge thresholds (minimum edge to recommend a bet)
     MIN_EDGE_SPREAD = 0.3     # 0.3 runs on run line
-    MIN_EDGE_TOTAL = 0.55     # 0.55 runs on total (curbs marginal -110 O/U noise)
+    MIN_EDGE_TOTAL = 0.65     # 0.65 runs on total (curbs marginal -110 O/U noise)
     MIN_EDGE_ML_PROB = 0.06   # 6% probability edge on moneyline
     MIN_EDGE_NRFI_PROB = 0.06 # 6% probability edge on NRFI
 
-    # EV threshold (minimum expected value per unit to recommend)
+    # EV thresholds (minimum expected value per unit to recommend)
     MIN_EV_PER_UNIT = 0.05
+    MIN_EV_TOTAL = 0.06       # Require +6.0% EV on Over/Under totals (historically noisy)
     MAX_ML_PRICE = -165       # Don't recommend ML picks shorter than -165
+
+    # Late-season (Aug-Sep) roster expansion / fatigue conservatism
+    LATE_SEASON_START_MONTH = 8
+    LATE_SEASON_TOTAL_EDGE_BUMP = 0.15
+    LATE_SEASON_EV_BUMP = 0.015
 
     # Caps on how far model can deviate from market
     CAP_MARGIN = 1.5   # Max ±1.5 runs from market spread
@@ -336,6 +342,7 @@ class MLBModel(BaseModel):
             }
 
         # ── Generate Recommendations ──────────────────────────
+        is_late_season = bool(isinstance(game_time, datetime) and game_time.month >= self.LATE_SEASON_START_MONTH)
 
         recommendations = self._generate_recommendations(
             mu_market_spread=mu_market_spread,
@@ -362,6 +369,7 @@ class MLBModel(BaseModel):
             has_total=has_total,
             home_data_conf=home_data_conf,
             away_data_conf=away_data_conf,
+            is_late_season=is_late_season,
         )
 
         # ── Bell Curves ────────────────────────────────────────
@@ -479,6 +487,7 @@ class MLBModel(BaseModel):
         self._winprob_calibration = load_winprob_calibration(
             "winprob_calibration_mlb",
             "winprob_calibration_mlb.json",
+            min_max_pcal=0.52,
         )
         return self._winprob_calibration
 
@@ -515,6 +524,11 @@ class MLBModel(BaseModel):
         home_team = kwargs["home_team"]
         away_team = kwargs["away_team"]
         market_snapshot = kwargs["market_snapshot"]
+        is_late_season = bool(kwargs.get("is_late_season"))
+        late_ev_bump = float(self.LATE_SEASON_EV_BUMP) if is_late_season else 0.0
+        min_ev_standard = float(self.MIN_EV_PER_UNIT) + late_ev_bump
+        min_edge_total = float(self.MIN_EDGE_TOTAL) + (float(self.LATE_SEASON_TOTAL_EDGE_BUMP) if is_late_season else 0.0)
+        min_ev_total = float(self.MIN_EV_TOTAL) + late_ev_bump
 
         # 1. Spread (Run Line)
         if kwargs.get("has_spread"):
@@ -541,7 +555,7 @@ class MLBModel(BaseModel):
                 prob_cal = self._calibrate_win_prob(prob)
                 ev = self._calculate_ev(prob_cal, price or -110)
 
-                if ev >= self.MIN_EV_PER_UNIT:
+                if ev >= min_ev_standard:
                     conf_label, conf_score = self._classify_confidence(prob_cal, ev)
                     recs.append({
                         "market_type": "SPREAD",
@@ -567,7 +581,7 @@ class MLBModel(BaseModel):
             if ml_edge > self.MIN_EDGE_ML_PROB and ml_price and data_conf >= 0.5 and (isinstance(ml_price, int) and ml_price >= self.MAX_ML_PRICE):
                 prob_cal = self._calibrate_win_prob(raw_prob)
                 ev = self._calculate_ev(prob_cal, ml_price)
-                if ev >= self.MIN_EV_PER_UNIT:
+                if ev >= min_ev_standard:
                     conf_label, conf_score = self._classify_confidence(prob_cal, ev)
                     recs.append({
                         "market_type": "MONEYLINE",
@@ -589,7 +603,7 @@ class MLBModel(BaseModel):
             mu_final_total = kwargs["mu_final_total"]
             mu_market_total = kwargs["mu_market_total"]
 
-            if total_edge >= self.MIN_EDGE_TOTAL:
+            if total_edge >= min_edge_total:
                 if mu_final_total > mu_market_total:
                     pick = "OVER"
                     prob = kwargs["prob_over"]
@@ -601,7 +615,7 @@ class MLBModel(BaseModel):
                 prob_cal = self._calibrate_win_prob(prob)
                 ev = self._calculate_ev(prob_cal, price or -110)
 
-                if ev >= self.MIN_EV_PER_UNIT:
+                if ev >= min_ev_total:
                     conf_label, conf_score = self._classify_confidence(prob_cal, ev)
                     recs.append({
                         "market_type": "TOTAL",

@@ -41,7 +41,9 @@ import {
   normalizeSport,
   computeRowProfitUnits,
   computeRankBreakdown,
+  getRowSeason,
 } from '../utils/modelPerformance';
+import { getCurrentNcaamSeasonShort, formatSeasonLabel } from '../utils/ncaamSeason';
 
 const TOOLTIP_STYLE = {
   backgroundColor: '#020617',
@@ -88,8 +90,11 @@ export default function Picks() {
   const [gradeMessage, setGradeMessage] = useState(null);
   const [yesterdayReco, setYesterdayReco] = useState(null);
 
-  // Filters & interactive UI state
-  const [selectedSport, setSelectedSport] = useState('ALL');
+  const defaultNcaamSeason = useMemo(() => getCurrentNcaamSeasonShort(), []);
+
+  // Filters & interactive UI state (default to current NCAAM 2026-2027 season)
+  const [selectedSport, setSelectedSport] = useState('NCAAM');
+  const [selectedSeason, setSelectedSeason] = useState(() => getCurrentNcaamSeasonShort());
   const [windowFilter, setWindowFilter] = useState('ALL');
   const [marketFilter, setMarketFilter] = useState('ALL');
   const [historyScope, setHistoryScope] = useState('all');
@@ -203,20 +208,64 @@ export default function Picks() {
       const sp = normalizeSport(h);
       counts[sp] = (counts[sp] || 0) + 1;
     }
+    if (selectedSport !== 'ALL' && counts[selectedSport] === undefined) {
+      counts[selectedSport] = 0;
+    }
     return Object.entries(counts)
       .map(([sport, count]) => ({ sport, count }))
       .sort((a, b) => b.count - a.count);
-  }, [recommendedHistory]);
+  }, [recommendedHistory, selectedSport]);
 
-  // Dynamic bet type options within active sport
+  // Dynamic season options scoped to the selected sport (descending, newest first)
+  const availableSeasons = useMemo(() => {
+    const counts = {};
+    for (const h of recommendedHistory) {
+      if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) continue;
+      const se = getRowSeason(h);
+      if (!se) continue;
+      counts[se] = (counts[se] || 0) + 1;
+    }
+    if (selectedSport === 'NCAAM' && counts[defaultNcaamSeason] === undefined) {
+      counts[defaultNcaamSeason] = 0;
+    }
+    return Object.entries(counts)
+      .map(([season, count]) => ({ season, count }))
+      .sort((a, b) => b.season.localeCompare(a.season));
+  }, [recommendedHistory, selectedSport, defaultNcaamSeason]);
+
+  const handleSportChange = (nextSport) => {
+    setSelectedSport(nextSport);
+    if (nextSport === 'ALL') {
+      setSelectedSeason('ALL');
+      return;
+    }
+    if (selectedSeason === 'ALL') return;
+    const sportSeasons = Array.from(
+      new Set(
+        recommendedHistory
+          .filter((h) => normalizeSport(h) === nextSport)
+          .map((h) => getRowSeason(h))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => b.localeCompare(a));
+    if (nextSport === 'NCAAM' && !sportSeasons.includes(defaultNcaamSeason)) {
+      sportSeasons.unshift(defaultNcaamSeason);
+    }
+    if (sportSeasons.length > 0 && !sportSeasons.includes(selectedSeason)) {
+      setSelectedSeason(sportSeasons[0]);
+    }
+  };
+
+  // Dynamic bet type options within active sport & season
   const availableMarkets = useMemo(() => {
     const set = new Set();
     for (const h of recommendedHistory) {
       if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) continue;
+      if (selectedSeason !== 'ALL' && getRowSeason(h) !== selectedSeason) continue;
       set.add(normalizeMarketType(h));
     }
     return Array.from(set).sort();
-  }, [recommendedHistory, selectedSport]);
+  }, [recommendedHistory, selectedSport, selectedSeason]);
 
   useEffect(() => {
     if (marketFilter !== 'ALL' && availableMarkets.length > 0 && !availableMarkets.includes(marketFilter)) {
@@ -247,11 +296,14 @@ export default function Picks() {
     });
   }, [recommendedHistory, windowFilter, marketFilter]);
 
-  // Filter by selected Sport
+  // Filter by selected Sport + Season
   const sportWindowMarketHistory = useMemo(() => {
-    if (selectedSport === 'ALL') return windowMarketHistory;
-    return windowMarketHistory.filter((h) => normalizeSport(h) === selectedSport);
-  }, [windowMarketHistory, selectedSport]);
+    return windowMarketHistory.filter((h) => {
+      if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) return false;
+      if (selectedSeason !== 'ALL' && getRowSeason(h) !== selectedSeason) return false;
+      return true;
+    });
+  }, [windowMarketHistory, selectedSport, selectedSeason]);
 
   // Apply Scope (All Recommended Picks vs Top 6 Daily Best)
   const scopedHistory = useMemo(() => {
@@ -331,6 +383,7 @@ export default function Picks() {
   const recentSlateDisplay = useMemo(() => {
     const ncaamYesterdayActive =
       (selectedSport === 'ALL' || selectedSport === 'NCAAM') &&
+      (selectedSeason === 'ALL' || selectedSeason === defaultNcaamSeason) &&
       hasReco &&
       recoStraight.length + recoMlParlay.length > 0;
 
@@ -389,7 +442,7 @@ export default function Picks() {
         evPct: getNumericEdge(h) != null ? getNumericEdge(h) * 100 : null,
       })),
     };
-  }, [selectedSport, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportWindowMarketHistory]);
+  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportWindowMarketHistory]);
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
@@ -483,7 +536,8 @@ export default function Picks() {
   }, [filteredAndSortedTableRows, historyRowLimit]);
 
   const hasNonDefaultFilters =
-    selectedSport !== 'ALL' ||
+    selectedSport !== 'NCAAM' ||
+    selectedSeason !== defaultNcaamSeason ||
     windowFilter !== 'ALL' ||
     marketFilter !== 'ALL' ||
     historyScope !== 'all' ||
@@ -491,7 +545,8 @@ export default function Picks() {
     searchQuery.trim() !== '';
 
   const resetAllFilters = () => {
-    setSelectedSport('ALL');
+    setSelectedSport('NCAAM');
+    setSelectedSeason(defaultNcaamSeason);
     setWindowFilter('ALL');
     setMarketFilter('ALL');
     setHistoryScope('all');
@@ -502,7 +557,8 @@ export default function Picks() {
   const windowLabel =
     windowFilter === 'ALL' ? 'All Time' : `Last ${windowFilter} Days`;
   const sportLabel = selectedSport === 'ALL' ? 'All Sports' : selectedSport;
-  const filterSummaryText = `${sportLabel} • ${windowLabel}${marketFilter !== 'ALL' ? ` • ${formatMarketLabel(marketFilter)}` : ''}`;
+  const seasonLabel = formatSeasonLabel(selectedSeason);
+  const filterSummaryText = `${sportLabel} • ${seasonLabel} • ${windowLabel}${marketFilter !== 'ALL' ? ` • ${formatMarketLabel(marketFilter)}` : ''}`;
 
   const renderSortIcon = (colKey) => {
     if (sortConfig.key !== colKey) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45" aria-hidden="true" />;
@@ -640,7 +696,7 @@ export default function Picks() {
 
       {/* Unified Filter Toolbar */}
       <search aria-label="Filter model performance" className="ui-card p-4 sm:p-5 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
           {/* Sport Dropdown */}
           <div className="space-y-1.5">
             <label htmlFor="perf-sport-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -648,14 +704,36 @@ export default function Picks() {
             </label>
             <select
               id="perf-sport-select"
+              name="sport"
               value={selectedSport}
-              onChange={(e) => setSelectedSport(e.target.value)}
-              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              onChange={(e) => handleSportChange(e.target.value)}
+              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
             >
               <option value="ALL">All Sports ({recommendedHistory.length.toLocaleString()})</option>
               {availableSports.map((s) => (
                 <option key={s.sport} value={s.sport}>
                   {s.sport} ({s.count.toLocaleString()})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Season Dropdown */}
+          <div className="space-y-1.5">
+            <label htmlFor="perf-season-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Season
+            </label>
+            <select
+              id="perf-season-select"
+              name="season"
+              value={selectedSeason}
+              onChange={(e) => setSelectedSeason(e.target.value)}
+              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
+            >
+              <option value="ALL">All Seasons</option>
+              {availableSeasons.map((s) => (
+                <option key={s.season} value={s.season}>
+                  {formatSeasonLabel(s.season)} ({s.count.toLocaleString()})
                 </option>
               ))}
             </select>
@@ -668,9 +746,10 @@ export default function Picks() {
             </label>
             <select
               id="perf-market-select"
+              name="market"
               value={marketFilter}
               onChange={(e) => setMarketFilter(e.target.value)}
-              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
             >
               <option value="ALL">All Bet Types</option>
               {availableMarkets.map((m) => (
@@ -854,7 +933,7 @@ export default function Picks() {
         history={scopedHistory}
         allHistory={windowMarketHistory}
         selectedSport={selectedSport}
-        onSelectSport={setSelectedSport}
+        onSelectSport={handleSportChange}
         scopeLabel={historyScope === 'top6' ? 'Top 6 daily picks' : 'all recommended picks'}
         filterSummary={filterSummaryText}
       />

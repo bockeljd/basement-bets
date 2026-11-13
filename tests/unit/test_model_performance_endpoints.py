@@ -449,3 +449,121 @@ def test_sport_normalization_and_research_history_sport_filter(monkeypatch):
     assert len(all_resp.json()) == 2
     assert ("canonical", None) in captured_leagues
 
+
+def test_season_derivation_and_history_season_filter(monkeypatch):
+    import src.database as db
+    from src.utils.model_performance import get_row_season
+
+    assert get_row_season({"sport": "NCAAM", "day_et": "2026-11-12"}) == "2026-27"
+    assert get_row_season({"sport": "NCAAM", "day_et": "2026-03-20"}) == "2025-26"
+    assert get_row_season({"sport": "MLB", "day_et": "2026-07-04"}) == "2026"
+
+    sample_rows = [
+        normalize_history_row({
+            "id": "n_27",
+            "event_id": "action:ncaam:27",
+            "sport": "NCAAM",
+            "market_type": "SPREAD",
+            "selection": "Duke",
+            "bet_line": -4.5,
+            "bet_price": -110,
+            "outcome": "WON",
+            "day_et": "2026-11-12",
+            "start_time": "2026-11-13T00:00:00Z",
+        }),
+        normalize_history_row({
+            "id": "n_26",
+            "event_id": "action:ncaam:26",
+            "sport": "NCAAM",
+            "market_type": "SPREAD",
+            "selection": "Kansas",
+            "bet_line": -2.5,
+            "bet_price": -110,
+            "outcome": "LOST",
+            "day_et": "2026-03-15",
+            "start_time": "2026-03-15T18:00:00Z",
+        }),
+        normalize_history_row({
+            "id": "m_26",
+            "event_id": "action:mlb:26",
+            "sport": "MLB",
+            "market_type": "TOTAL",
+            "selection": "OVER 8.5",
+            "bet_price": -110,
+            "outcome": "WON",
+            "day_et": "2026-08-15",
+            "start_time": "2026-08-15T23:00:00Z",
+        }),
+    ]
+    assert sample_rows[2]["bet_line"] == 8.5
+
+    monkeypatch.setattr(db, "fetch_recommended_history_canonical", lambda **kwargs: list(sample_rows))
+    monkeypatch.setattr(db, "fetch_model_history", lambda **kwargs: [])
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+
+    client = TestClient(app)
+    r27 = client.get("/api/research/history?sport=NCAAM&season=2026-27", headers={"X-BASEMENT-KEY": "test-secret"})
+    assert r27.status_code == 200
+    assert [r["id"] for r in r27.json()] == ["n_27"]
+
+    r26 = client.get("/api/research/history?sport=NCAAM&season=2025-26", headers={"X-BASEMENT-KEY": "test-secret"})
+    assert r26.status_code == 200
+    assert [r["id"] for r in r26.json()] == ["n_26"]
+
+
+def test_yesterday_total_line_inference_and_non_matching_ml_isolation():
+    from src.api import _yesterday_items_from_daily_top_picks
+
+    # Simulate daily_top_picks OVER 142.5 row where mismatched LATERAL join matched a LOST Moneyline row
+    mismatched_rows = [
+        {
+            "event_id": "action:ncaam:297743",
+            "computed_at": datetime(2026, 11, 13, 3, 24, tzinfo=timezone.utc),
+            "rec_json": {
+                "bet_type": "TOTAL",
+                "side": "OVER",
+                "selection": "OVER 142.5",
+                "odds": -105,
+                "ev": 0.042,
+                "confidence": 64,
+            },
+            "away_team": "Loyola Marymount Lions",
+            "home_team": "South Alabama Jaguars",
+            "start_time": datetime(2026, 11, 13, 1, 0, tzinfo=timezone.utc),
+            "sport": "NCAAM",
+            "away_score": 72,
+            "home_score": 79,
+            "prediction_id": "wrong-ml-id",
+            "outcome": "LOST",
+            "pred_ev": 0.8298,
+            "pred_conf": 32,
+            "clv_points": None,
+            "pred_line": None,
+            "pred_price": 860,
+            "pred_selection": "Loyola Marymount Lions",
+            "pred_market": "MONEYLINE",
+            "pred_pick": "Loyola Marymount Lions",
+        }
+    ]
+
+    class _MockConn:
+        pass
+
+    import src.database as db
+    orig_exec = db._exec
+    try:
+        db._exec = lambda conn, sql, params=None: _FakeCursor(mismatched_rows)
+        slate, items = _yesterday_items_from_daily_top_picks(_MockConn(), "2026-11-12")
+    finally:
+        db._exec = orig_exec
+
+    assert slate is not None
+    assert len(items) == 1
+    item = items[0]
+    assert item["market_type"] == "TOTAL"
+    assert item["bet_line"] == 142.5
+    assert item["ev_per_unit"] == 0.042
+    # Must re-grade OVER 142.5 cleanly from 72-79 (151 pts) as WON, not inherit LOST from MONEYLINE!
+    assert item["outcome"] == "WON"
+
+

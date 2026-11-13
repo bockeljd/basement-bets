@@ -181,4 +181,162 @@ def test_ncaam_and_mlb_calibration_blend_preserves_strong_edges():
     assert mlb._calibrate_win_prob(0.545) < 0.51
 
 
+def test_calibration_validator_rejects_degenerate_and_stale_curves(monkeypatch):
+    from src.utils.model_calibration import is_valid_winprob_calibration, load_winprob_calibration
+
+    stale_degenerate = {
+        "season": "2025-26",
+        "season_start": "2025-11-01",
+        "n_obs": 2747,
+        "points": [
+            {"p": 0.18, "p_cal": 0.10},
+            {"p": 0.63, "p_cal": 0.456},
+        ],
+    }
+    assert is_valid_winprob_calibration(stale_degenerate, min_obs=75, min_max_pcal=0.52) is False
+    assert (
+        is_valid_winprob_calibration(
+            {**stale_degenerate, "points": [{"p": 0.40, "p_cal": 0.42}, {"p": 0.60, "p_cal": 0.58}]},
+            min_obs=75,
+            min_max_pcal=0.52,
+            min_season_start="2026-11-01",
+        )
+        is False
+    )
+
+    monkeypatch.setattr("src.database.get_model_param", lambda k: stale_degenerate)
+    loaded = load_winprob_calibration(
+        "winprob_calibration_ncaam",
+        "winprob_calibration_ncaam.json",
+        min_obs=75,
+        min_max_pcal=0.52,
+        min_season_start="2026-11-01",
+    )
+    assert loaded.get("points") == []
+
+
+def test_ncaam_total_requires_higher_ev_than_spread():
+    m = NCAAMMarketFirstModelV2()
+    m._archetype_stats = {}
+    rec_spread = {"market": "SPREAD", "side": "HOME", "ev": 0.025, "edge_points": 1.6}
+    rec_total = {"market": "TOTAL", "side": "OVER", "ev": 0.025, "edge_points": 1.6}
+    rec_total_strong = {"market": "TOTAL", "side": "OVER", "ev": 0.042, "edge_points": 1.6}
+
+    # Stub archetype stats so CI check allows passing once min_ev & override thresholds are met
+    m._get_archetype_stats = lambda key: {"n": 80, "mean": 0.04, "sd": 0.10}
+    assert m._passes_publish_gates(rec_spread, market_line_home=-3.5, torvik_ok=True) is True
+    assert m._passes_publish_gates(rec_total, market_line_home=None, torvik_ok=True) is False
+    assert m._passes_publish_gates(rec_total_strong, market_line_home=None, torvik_ok=True) is True
+
+
+def test_mlb_totals_and_late_season_thresholds():
+    model = MLBModel()
+    model._winprob_calibration = {"n_obs": 0, "points": []}
+    snap = {
+        "spread_home": -1.5,
+        "spread_price_home": -110,
+        "spread_price_away": -110,
+        "total": 8.5,
+        "total_over_price": -110,
+        "total_under_price": -110,
+    }
+    base_kwargs = {
+        "mu_market_spread": -1.5,
+        "mu_final_spread": -2.0,
+        "mu_market_total": 8.5,
+        "mu_final_total": 9.10,
+        "prob_home_cover": 0.56,
+        "prob_away_cover": 0.44,
+        "prob_home_win": 0.55,
+        "prob_away_win": 0.45,
+        "prob_over": 0.559,
+        "prob_under": 0.441,
+        "spread_edge": 0.5,
+        "ml_edge_home": 0.01,
+        "ml_edge_away": 0.0,
+        "total_edge": 0.60,
+        "nrfi_result": {"p_nrfi": 0.50},
+        "home_team": "Yankees",
+        "away_team": "Red Sox",
+        "ml_home_price": -120,
+        "ml_away_price": 100,
+        "market_snapshot": snap,
+        "has_spread": True,
+        "has_total": True,
+        "home_data_conf": 0.9,
+        "away_data_conf": 0.9,
+    }
+
+    # 0.60 run total edge passes old 0.55 bar but is now rejected by 0.65 MIN_EDGE_TOTAL
+    early_recs = model._generate_recommendations(**base_kwargs, is_late_season=False)
+    early_markets = {r["market_type"] for r in early_recs}
+    assert "SPREAD" in early_markets
+    assert "TOTAL" not in early_markets
+
+    # 0.72 run edge & 0.565 prob (~7.8% EV) passes in June, but gets blocked by late-season Aug-Sep bump if EV is marginal
+    late_marginal = dict(base_kwargs, total_edge=0.70, prob_over=0.560, spread_edge=0.5, prob_home_cover=0.555)
+    recs_june = model._generate_recommendations(**late_marginal, is_late_season=False)
+    recs_sep = model._generate_recommendations(**late_marginal, is_late_season=True)
+    assert len(recs_june) > len(recs_sep)
+
+
+def test_ncaam_prevents_correlated_spread_and_ml_double_persistence(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    model = NCAAMMarketFirstModelV2()
+    model._winprob_calibration = {"n_obs": 0, "points": []}
+    model.torvik_service = MagicMock()
+    model.torvik_service.get_projection.return_value = {"margin": 6.5, "official_margin": 6.5, "total": 144.0, "lean": "Duke Blue Devils"}
+    model.torvik_service.get_matchup_team_stats.return_value = {"game_tempo": 68.0, "home": {"luck": 0.0, "continuity": 75.0}, "away": {"luck": 0.0, "continuity": 75.0}}
+    model.kenpom_client = MagicMock()
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 0.0, "total_adj": 0.0, "summary": ""}
+    model.kenpom_client.get_team_player_agg.return_value = None
+    model.kenpom_client.get_team_rating.return_value = None
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 200.0
+
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_passes_publish_gates", lambda *a, **kw: True)
+
+    persisted_docs = []
+    monkeypatch.setattr("src.models.ncaam_market_first_model_v2.insert_model_prediction", lambda doc: persisted_docs.append(doc))
+
+    future_tip = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+    event = {
+        "id": "evt_dedupe_ml",
+        "home_team": "Duke Blue Devils",
+        "away_team": "Army Black Knights",
+        "start_time": future_tip,
+    }
+    snap = {
+        "spread_home": -3.5,
+        "spread_price_home": -110,
+        "spread_price_away": -110,
+        "total": 144.0,
+        "total_over_price": -110,
+        "total_under_price": -110,
+        "moneyline_price_home": -135,
+        "moneyline_price_away": 115,
+    }
+    model.analyze("evt_dedupe_ml", event_context=event, market_snapshot=snap, persist=True)
+    # Home SPREAD (-3.5) is persisted; step 10b MUST suppress correlated Home MONEYLINE double exposure
+    persisted_markets = [d["market_type"] for d in persisted_docs]
+    assert "SPREAD" in persisted_markets
+    assert "MONEYLINE" not in persisted_markets
+
+    # When no SPREAD is persisted on that game/side, a qualifying standalone ML row IS persisted
+    persisted_docs.clear()
+    monkeypatch.setattr(model, "_passes_publish_gates", lambda rec, *a, **kw: str(rec.get("market") or "").upper() != "SPREAD")
+    model.analyze("evt_ml_only", event_context=event, market_snapshot=snap, persist=True)
+    assert "MONEYLINE" in [d["market_type"] for d in persisted_docs]
+
+
+
+
 

@@ -101,6 +101,69 @@ def normalize_sport(sport, *, event_id=None) -> str:
     return "NCAAM"
 
 
+    return out_sport
+
+
+def get_row_season(row: dict) -> str | None:
+    """Derive canonical season label ('2026-27' for NCAAM, '2026' for calendar sports like MLB)."""
+    if not isinstance(row, dict):
+        return None
+    existing = str(row.get("season") or "").strip()
+    if existing:
+        return existing
+
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    sport = normalize_sport(row.get("sport") or row.get("league"), event_id=row.get("event_id"))
+    day_str = str(row.get("day_et") or "").strip()[:10]
+    ref_year = None
+    ref_month = None
+
+    if len(day_str) == 10 and day_str[4] == "-" and day_str[7] == "-":
+        try:
+            ref_year = int(day_str[:4])
+            ref_month = int(day_str[5:7])
+        except Exception:
+            ref_year = None
+
+    if ref_year is None:
+        et_tz = ZoneInfo("America/New_York")
+        for key in ("start_time", "game_time", "analyzed_at", "created_at"):
+            val = row.get(key)
+            if not val:
+                continue
+            try:
+                if isinstance(val, datetime):
+                    dt = val
+                else:
+                    dt = datetime.fromisoformat(str(val).strip().replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                et_dt = dt.astimezone(et_tz)
+                ref_year = et_dt.year
+                ref_month = et_dt.month
+                break
+            except Exception:
+                s = str(val).strip()[:10]
+                if len(s) >= 7 and s[4] == "-":
+                    try:
+                        ref_year = int(s[:4])
+                        ref_month = int(s[5:7])
+                        break
+                    except Exception:
+                        continue
+
+    if ref_year is None or ref_month is None:
+        return None
+
+    if sport == "NCAAM":
+        end_year = ref_year + 1 if ref_month >= 7 else ref_year
+        return f"{end_year - 1}-{str(end_year)[-2:]}"
+
+    return str(ref_year)
+
+
 def sport_query_aliases(sport: str) -> tuple[str, ...]:
     """Return uppercase league aliases matching a canonical sport filter in SQL queries."""
     canonical = normalize_sport(sport)
@@ -221,7 +284,7 @@ def normalize_history_row(row: dict) -> dict:
     if out.get("ev_per_unit") is None and out.get("ev") is not None:
         out["ev_per_unit"] = out.get("ev")
 
-    if out["market_type"] in ("OTHER", "AUTO", "") and best_pick:
+    if (out["market_type"] in ("OTHER", "AUTO", "") or out.get("bet_line") is None) and best_pick:
         try:
             from src.services.grading_backfill import infer_market_type_and_line
 
@@ -231,12 +294,16 @@ def normalize_history_row(row: dict) -> dict:
                 selection=out.get("selection"),
                 bet_line=out.get("bet_line"),
             )
-            if inferred_mkt and inferred_mkt not in ("OTHER", "AUTO", ""):
+            if out["market_type"] in ("OTHER", "AUTO", "") and inferred_mkt and inferred_mkt not in ("OTHER", "AUTO", ""):
                 out["market_type"] = inferred_mkt
             if out.get("bet_line") is None and inferred_line is not None:
                 out["bet_line"] = inferred_line
         except Exception:
             pass
+
+    season_val = get_row_season(out)
+    if season_val:
+        out["season"] = season_val
 
     if out["outcome"] == "PENDING":
         from datetime import datetime, timedelta, timezone

@@ -1522,6 +1522,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         context_json_str = json.dumps(ctx, default=str)
 
         inserted_best_doc_id = None
+        persisted_spread_sides = set()
         if recs:
             def _normalize_spread_line(side, raw_line):
                 if raw_line is None:
@@ -1643,6 +1644,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     print(f"[MODEL] failed to persist rec {rec.get('market')} {rec.get('side')}: {e}")
                     continue
                 rec['prediction_id'] = doc.get('id')
+                if str(rec.get('market') or '').upper() == 'SPREAD' and rec.get('side'):
+                    persisted_spread_sides.add(str(rec.get('side')).strip().upper())
                 ui_ref = rec.get('_ui_rec')
                 if ui_ref is not None:
                     ui_ref['prediction_id'] = doc.get('id')
@@ -1849,6 +1852,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         if persist and should_persist:
             insert_model_prediction(res)
+            if str(res.get('market_type') or '').upper() == 'SPREAD':
+                rec_side = str((best_rec or {}).get('side') or '').strip().upper()
+                if rec_side:
+                    persisted_spread_sides.add(rec_side)
 
         # 10b. Persist ML prediction (separate row)
         # This does NOT change the existing spread/total recommendation selection.
@@ -1894,6 +1901,22 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     price=price,
                 )
                 should_persist_ml = should_persist_ml and team is not None and str(team).strip() != ''
+
+                # Prevent correlated same-game double exposure: if we already persisted a SPREAD
+                # bet on the exact same team/side (either as best_rec or secondary rec), skip
+                # persisting a standalone MONEYLINE row.
+                team_norm = str(team or '').strip().lower()
+                same_team_spread_persisted = side in persisted_spread_sides
+                if not same_team_spread_persisted and should_persist and str(res.get('market_type') or '').upper() == 'SPREAD':
+                    spread_pick_norm = str(res.get('pick') or res.get('selection') or '').strip().lower()
+                    rec_side_norm = str((best_rec or {}).get('side') or '').strip().upper()
+                    same_team_spread_persisted = bool(team_norm) and (
+                        spread_pick_norm == team_norm
+                        or spread_pick_norm.startswith(team_norm)
+                        or rec_side_norm == side
+                    )
+                if same_team_spread_persisted:
+                    should_persist_ml = False
 
                 # Apply same lock window
                 if should_persist_ml:
@@ -1952,6 +1975,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     # --- Publication gates (Research tab) ---
     # Straight bets only for now. (Correlation/parlays are handled elsewhere.)
     PUBLISH_MIN_EV = 0.02  # +2.0% per unit
+    PUBLISH_MIN_EV_TOTAL = 0.035  # +3.5% EV required on Over/Under totals (curbs O/U bleed)
     PUBLISH_MIN_EV_ML = 0.05  # +5.0% EV required on Moneyline picks
     MIN_ML_WIN_PROB = 0.45    # Exclude <45% longshots (historically ~31.8% win, -10.4% ROI)
     MAX_ML_UNDERDOG_PRICE = 185
@@ -2139,7 +2163,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         stats = self._get_archetype_stats(key)
 
         min_n = self.PUBLISH_MIN_N_TORVIK_OK if torvik_ok else self.PUBLISH_MIN_N_TORVIK_MISSING
-        min_ev = self.PUBLISH_MIN_EV if torvik_ok else (self.PUBLISH_MIN_EV + self.PUBLISH_MIN_EV_TORVIK_MISSING_BUMP)
+        base_ev = float(self.PUBLISH_MIN_EV_TOTAL) if market == 'TOTAL' else float(self.PUBLISH_MIN_EV)
+        min_ev = base_ev if torvik_ok else (base_ev + float(self.PUBLISH_MIN_EV_TORVIK_MISSING_BUMP))
 
         if ev < min_ev:
             return False
@@ -2161,9 +2186,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
         override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV', '0.035'))  # 3.5%
         override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS', '1.5'))
         
-        # Totals have wider variances; applying an identical EV constraint effectively bans them 
+        # Totals have wider variance & worse historical ROI; require >= +4.0% EV override.
         if market == 'TOTAL':
-            override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV_TOTAL', '0.03'))  # 3%
+            override_ev = float(os.getenv('PUBLISH_OVERRIDE_MIN_EV_TOTAL', '0.04'))
             override_edge = float(os.getenv('PUBLISH_OVERRIDE_MIN_EDGE_PTS_TOTAL', '1.5'))
 
         override_ok = (ev >= override_ev) and (edge_pts >= override_edge) and (n >= min_n)
@@ -2178,12 +2203,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
     _winprob_calibration: Optional[Dict[str, Any]] = None
 
     def _load_winprob_calibration(self) -> Dict[str, Any]:
-        """Load piecewise-linear win_prob calibration mapping (DB store first, JSON fallback)."""
+        """Load piecewise-linear win_prob calibration mapping for the current season (DB first, JSON fallback)."""
         if self._winprob_calibration is not None:
             return self._winprob_calibration
+        from src.utils.ncaam_season import season_start_date_for_game
+
         self._winprob_calibration = load_winprob_calibration(
             "winprob_calibration_ncaam",
             "winprob_calibration_ncaam.json",
+            min_obs=75,
+            min_max_pcal=0.52,
+            min_season_start=season_start_date_for_game(),
         )
         return self._winprob_calibration
 
