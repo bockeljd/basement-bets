@@ -42,7 +42,7 @@ def norm_result(x: Any) -> str | None:
 @dataclass
 class Obs:
     p: float
-    y: int
+    y: float
     w: float = 1.0
 
 
@@ -54,6 +54,29 @@ def pava(observations: List[Obs]) -> List[Tuple[float, float]]:
 
     # sort by p
     xs = sorted(observations, key=lambda o: o.p)
+
+    # Pool large datasets (>=100 obs) into equal-count quantile bins (~25+ obs/bin)
+    # so isolated extreme tail observations cannot collapse endpoints to 0.01/0.99.
+    if len(xs) >= 100:
+        num_bins = min(25, max(8, len(xs) // 25))
+        binned: List[Obs] = []
+        for b_idx in range(num_bins):
+            lo = (b_idx * len(xs)) // num_bins
+            hi = ((b_idx + 1) * len(xs)) // num_bins
+            chunk = xs[lo:hi]
+            if not chunk:
+                continue
+            tot_w = sum(o.w for o in chunk)
+            if tot_w <= 0:
+                continue
+            binned.append(
+                Obs(
+                    p=sum(o.w * o.p for o in chunk) / tot_w,
+                    y=sum(o.w * o.y for o in chunk) / tot_w,
+                    w=tot_w,
+                )
+            )
+        xs = binned
 
     # each block: sum_w, sum_wy, sum_wp
     blocks: List[dict] = []

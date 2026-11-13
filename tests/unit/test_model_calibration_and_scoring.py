@@ -141,3 +141,16 @@ def test_stale_empty_score_history_row_voids_after_14_days():
     })
     assert recent_ungraded["outcome"] == "PENDING"
 
+
+def test_pava_quantile_pooling_prevents_tail_collapse():
+    # Single lowest-p miss + 149 well-calibrated rows shouldn't collapse p_cal to 0.01
+    obs = [Obs(p=0.520, y=0)]
+    for i in range(1, 150):
+        p = 0.52 + (i / 150.0) * 0.30
+        obs.append(Obs(p=p, y=1 if (i % 2 == 0 or p > 0.65) else 0))
+
+    art = fit_calibration_artifact(obs, days=365, min_points=12)
+    assert art["points"][0]["p_cal"] >= 0.30
+    assert art["points"][-1]["p_cal"] <= 0.99
+
+
