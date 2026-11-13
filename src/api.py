@@ -2979,7 +2979,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             return {}
 
         cached = [r for r in cached if (dict(r).get('reason') or '') != 'Data Unavailable']
-        if cached and not refresh:
+        if cached:
             current_ver = getattr(NCAAMMarketFirstModelV2, 'VERSION', '')
             picks = {}
             actionable_cached = 0
@@ -3048,6 +3048,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                     'no_pick_samples': [],
                     'picks': picks,
                 }
+                _top_picks_cache[cache_key] = {"at": now, "data": data}
                 data = jsonable_encoder(data)
                 etag = _make_etag(data)
                 inm = request.headers.get('if-none-match')
