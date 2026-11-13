@@ -2188,7 +2188,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         return self._winprob_calibration
 
     def _calibrate_win_prob(self, p: float) -> float:
-        """Calibrate raw win probability using a monotonic piecewise-linear mapping."""
+        """Calibrate raw win probability using shrinkage-blended PAVA mapping."""
         try:
             p_val = float(p)
         except Exception:
@@ -2197,7 +2197,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return 0.0
         if p_val >= 1.0:
             return 1.0
-        return interpolate_pava_prob(p_val, self._load_winprob_calibration())
+        return interpolate_pava_prob(
+            p_val,
+            self._load_winprob_calibration(),
+            blend_weight=0.25,
+        )
 
     _model_conf_params: Optional[Dict[str, Any]] = None
 

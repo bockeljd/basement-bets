@@ -488,7 +488,7 @@ class MLBModel(BaseModel):
             prob,
             self._load_winprob_calibration(),
             min_obs=200,
-            blend_weight=0.5,
+            blend_weight=0.35,
         )
 
     def _classify_confidence(self, prob: float, ev: float) -> Tuple[str, int]:
