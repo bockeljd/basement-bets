@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Info, Upload, ClipboardPaste, X, CheckCircle2, AlertCircle, Bookmark, Copy, ExternalLink } from 'lucide-react';
+import { Info, Upload, ClipboardPaste, X, CheckCircle2, AlertCircle, Bookmark, Copy, ExternalLink, Clock } from 'lucide-react';
 import api from '../../api/axios';
 import { buildKenpomBookmarklet } from './todayHelpers';
 
@@ -120,10 +120,20 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
       }
       const rowsCount = res?.data?.rows ?? 'all';
       const asof = res?.data?.asof_date ? ` for ${res.data.asof_date}` : '';
+      const ds = res?.data?.datasets_synced || {};
+      const extras = [
+        ds.four_factors > 0 ? 'Four Factors' : null,
+        ds.height_experience > 0 ? 'Height/Exp' : null,
+        ds.home_court > 0 ? 'HCA' : null,
+        ds.player_stats > 0 ? 'Players' : null,
+        ds.ref_ratings > 0 ? 'Refs' : null,
+        ds.fanmatch_games > 0 ? 'FanMatch' : null,
+      ].filter(Boolean);
+      const extraMsg = extras.length ? ` + ${extras.join(', ')}` : '';
       setUploadState({
         uploading: false,
         status: 'success',
-        message: `Imported ${rowsCount} teams${asof}. Updating today's predictions...`,
+        message: `Imported ${rowsCount} teams${extraMsg}${asof}. Updating today's predictions...`,
       });
       setSelectedFile(null);
       setPastedText('');
@@ -143,6 +153,7 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
 
   const kpActive = kenpomStatus ? Boolean(kenpomStatus.active) : String(bySource.kenpom?.status || '').toLowerCase() === 'ok';
   const kpMethods = kenpomStatus?.configured_methods || {};
+  const kpDatasets = kenpomStatus?.datasets || {};
 
   return (
     <dialog
@@ -204,16 +215,41 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
             </div>
 
             {kenpomStatus && (
-              <div className="rounded-lg border border-slate-800 bg-slate-950/75 p-3 space-y-1.5">
+              <div className="rounded-lg border border-slate-800 bg-slate-950/75 p-3 space-y-2">
                 <p className="text-slate-200 font-medium">{kenpomStatus.human_summary}</p>
                 <p className="text-slate-400">{kenpomStatus.next_step}</p>
-                <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+                <div className="flex flex-wrap gap-1.5 pt-1 text-[10px]">
+                  {[
+                    ['ratings', 'Ratings + Luck/SOS'],
+                    ['four_factors', 'Four Factors'],
+                    ['height_experience', 'Height & Continuity'],
+                    ['home_court', 'Home Court (HCA)'],
+                    ['player_stats', 'Player Stats'],
+                    ['ref_ratings', 'Referees'],
+                    ['fanmatch_games', 'FanMatch'],
+                  ].map(([k, label]) => {
+                    const count = Number(kpDatasets[k] || 0);
+                    return (
+                      <span
+                        key={k}
+                        className={`px-2 py-0.5 rounded border ${
+                          count > 0
+                            ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200'
+                            : 'border-slate-800 bg-slate-900/90 text-slate-400'
+                        }`}
+                      >
+                        {label}: {count > 0 ? count : 'Off'}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap gap-2 pt-0.5 text-[11px]">
                   <span className={`px-2 py-0.5 rounded border ${kpMethods.credentials || kpMethods.cookie ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
                     Web Login / Cookie: {kpMethods.credentials || kpMethods.cookie ? 'Set' : 'Not set'}
                   </span>
                 </div>
-                <p className="text-[11px] text-amber-200/80 pt-1">
-                  Note on automation: GitHub Actions runs on shared cloud (Azure) IPs, which KenPom&apos;s Cloudflare firewall blocks with HTTP 403 even when email/password secrets are set. Click your Chrome bookmark while viewing kenpom.com, or paste/upload the table below.
+                <p className="text-[11px] text-amber-200/80 pt-0.5">
+                  Note on automation: GitHub Actions runs on shared cloud (Azure) IPs, which KenPom&apos;s Cloudflare firewall blocks with HTTP 403 even when email/password secrets are set. Use the 1-Click Bookmarklet (Way 2) or Daily Mac Auto-Sync (Way 3) so all 7 datasets sync from your own home IP.
                 </p>
               </div>
             )}
@@ -274,22 +310,22 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
               </div>
             </div>
 
-            {/* Way 2: 1-Click Chrome Bookmarklet (zero copy/paste) */}
+            {/* Way 2: 1-Click Multi-Page Chrome Bookmarklet (zero copy/paste) */}
             <div className="rounded-lg border border-indigo-500/30 bg-slate-950/60 p-3 space-y-2.5">
               <div className="font-semibold text-slate-100 flex items-center gap-1.5">
                 <Bookmark size={13} className="text-indigo-300" aria-hidden="true" />
-                <span>Way 2: Automated 1-Click Chrome Bookmarklet (No Copy/Paste)</span>
+                <span>Way 2: Automated 1-Click Chrome Bookmarklet (Syncs All 7 Pages)</span>
               </div>
               <p className="text-[11px] text-amber-200/90">
-                Note: A regular Chrome bookmark only saves a webpage address. To make a bookmark run the sync script automatically, drag the purple button below onto your Chrome Bookmarks Bar (<kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-200 font-mono text-[10px]">Cmd+Shift+B</kbd> to show it).
+                One click while viewing kenpom.com automatically pulls all 7 pages in the background (Ratings + Luck/SOS, Four Factors, Height/Experience/Continuity, Home Court, Player Stats, Referees, and FanMatch) using your active login.
               </p>
               <ol id="kenpom-bookmarklet-hint" className="list-decimal list-inside space-y-1 text-[11px] text-slate-300">
                 <li>
-                  <strong>Drag</strong> the button <strong>Send KenPom to Basement Bets</strong> below up to your Chrome Bookmarks Bar (don&apos;t just click it here).
+                  <strong>Drag</strong> the button <strong>Send KenPom to Basement Bets</strong> below up to your Chrome Bookmarks Bar (<kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-200 font-mono text-[10px]">Cmd+Shift+B</kbd> to show it).
                 </li>
                 <li>Open <strong>kenpom.com</strong> in Chrome and log in.</li>
                 <li>
-                  <strong>While looking at kenpom.com</strong>, click that bookmark in your bar &mdash; it pulls the table and opens right back here.
+                  <strong>While looking at any kenpom.com page</strong>, click that bookmark in your bar &mdash; wait ~2 seconds while it grabs all 7 datasets and opens right back here.
                 </li>
               </ol>
               <div className="flex flex-wrap items-center gap-2">
@@ -310,6 +346,39 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
                 >
                   <Copy size={13} aria-hidden="true" />
                   <span>Copy Script URL Manually</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Way 3: Hands-free Scheduled Mac Auto-Sync */}
+            <div className="rounded-lg border border-sky-500/30 bg-slate-950/60 p-3 space-y-2">
+              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                <Clock size={13} className="text-sky-300" aria-hidden="true" />
+                <span>Way 3: Hands-Free Daily Auto-Sync on Your Mac</span>
+              </div>
+              <p className="text-[11px] text-slate-300">
+                Runs on a daily schedule (6:30 AM &amp; 11:30 AM) from your Mac&apos;s residential IP so Cloudflare lets your KenPom login through automatically &mdash; no browser clicks needed. Run this once in Terminal inside the Basement Bets folder:
+              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2">
+                <code className="text-[11px] text-sky-200 font-mono">bash scripts/install_mac_kenpom_sync.sh</code>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText('bash scripts/install_mac_kenpom_sync.sh');
+                      setUploadState({
+                        uploading: false,
+                        status: 'success',
+                        message: 'Install command copied. Run it once in Terminal inside your Basement Bets folder.',
+                      });
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-semibold cursor-pointer"
+                >
+                  <Copy size={11} aria-hidden="true" />
+                  <span>Copy Command</span>
                 </button>
               </div>
             </div>

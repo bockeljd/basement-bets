@@ -264,6 +264,21 @@ def ensure_tables():
         );
         CREATE INDEX IF NOT EXISTS ix_kp_team_player_agg_team ON kenpom_team_player_agg_daily(asof_date, team_name);
 
+        CREATE TABLE IF NOT EXISTS kenpom_fanmatch_daily (
+          asof_date DATE NOT NULL,
+          home_team TEXT NOT NULL,
+          away_team TEXT NOT NULL,
+          pred_winner TEXT,
+          winner_score REAL,
+          loser_score REAL,
+          win_prob REAL,
+          thrill_score REAL,
+          raw JSONB,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (asof_date, home_team, away_team)
+        );
+        CREATE INDEX IF NOT EXISTS ix_kp_fanmatch_asof ON kenpom_fanmatch_daily(asof_date);
+
         -- Migration hardening (if table existed with nullable team_name)
         ALTER TABLE kenpom_player_stats_daily ALTER COLUMN team_name SET DEFAULT '';
         UPDATE kenpom_player_stats_daily SET team_name='' WHERE team_name IS NULL;
@@ -376,111 +391,510 @@ def scrape_team_ratings(sess: requests.Session) -> list[dict]:
         return []
 
 
-def scrape_home_court(sess: requests.Session) -> list[dict]:
-    # KenPom has a home-court ranking page; path may vary. Try a few known guesses.
-    candidates = [
-        "/hca.php",
-        "/home.php",
-        "/homeratings.php",
-    ]
-    html = None
-    for p in candidates:
-        try:
-            html = fetch_html(sess, p)
-            if html and "Home" in html and "Court" in html:
+def _extract_headers_and_rows_from_any(
+    text_or_html: str,
+    header_tokens: tuple[str, ...] = (),
+    min_cols: int = 2,
+) -> tuple[list[str], list[list[str]]]:
+    """Parse an HTML table or TSV/CSV paste into (headers, rows), skipping leading browser nav lines."""
+    import csv
+    import io
+    import re
+
+    raw_text = (
+        (text_or_html or "")
+        .lstrip("\ufeff")
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\xa0", " ")
+        .strip()
+    )
+    if not raw_text:
+        return [], []
+
+    lower_head = raw_text[:6000].lower()
+    if (
+        raw_text.startswith("<")
+        and any(tok in lower_head for tok in ("<table", "<!doctype", "<html", "<tr"))
+    ) or ("<table" in lower_head and "</tr>" in raw_text.lower()):
+        soup = BeautifulSoup(raw_text, "html.parser")
+        tables = soup.find_all("table")
+        if not tables:
+            return [], []
+        target = tables[0]
+        if header_tokens:
+            for tbl in tables:
+                snip = (tbl.get_text(" ", strip=True)[:1000] or "").lower()
+                if any(tok in snip for tok in header_tokens):
+                    target = tbl
+                    break
+        elif len(tables) > 1:
+            target = max(tables, key=lambda tbl: len(tbl.find_all("tr")))
+        return _table_headers_and_rows(target)
+
+    sample_lines = raw_text.splitlines()[:8]
+    sample = "\n".join(sample_lines)
+    if raw_text.count("\t") >= 5 or sample.count("\t") >= max(1, sample.count(",")):
+        rows_raw = [r for r in csv.reader(io.StringIO(raw_text), delimiter="\t") if r and any(c.strip() for c in r)]
+    elif sample.count(",") >= max(2, len(sample_lines)):
+        rows_raw = [r for r in csv.reader(io.StringIO(raw_text), delimiter=",") if r and any(c.strip() for c in r)]
+    else:
+        rows_raw = [re.split(r"\s{2,}", line.strip()) for line in raw_text.splitlines() if line.strip()]
+        if rows_raw and max(len(r) for r in rows_raw) < min_cols:
+            rows_raw = [r for r in csv.reader(io.StringIO(raw_text), delimiter=",") if r and any(c.strip() for c in r)]
+
+    if not rows_raw:
+        return [], []
+
+    header_idx = None
+    if header_tokens:
+        for idx, r in enumerate(rows_raw[:120]):
+            if len(r) < min_cols:
+                continue
+            joined = " ".join(c.strip().lower() for c in r)
+            if any(tok in joined for tok in header_tokens):
+                header_idx = idx
                 break
-        except Exception:
-            html = None
-    if not html:
+
+    if header_idx is None:
+        for idx, r in enumerate(rows_raw[:120]):
+            if len(r) >= min_cols and any(str(c).strip().lower() in ("team", "teamname", "player", "official", "ref", "game") for c in r):
+                header_idx = idx
+                break
+
+    if header_idx is not None:
+        return [c.strip() for c in rows_raw[header_idx]], rows_raw[header_idx + 1 :]
+    return [], rows_raw
+
+
+def _align_kp_row_with_headers(headers: list[str], row: list[str]) -> list[str]:
+    """Strip interleaved 1..400 rank cells from a pasted HTML table row when headers omit rank columns."""
+    if not headers or len(row) <= len(headers) + 1:
+        return row
+    if any("rank" in str(h).lower() or str(h).strip().lower() == "rk" for h in headers[2:]):
+        return row
+    out: list[str] = []
+    excess = len(row) - len(headers)
+    for idx, cell in enumerate(row):
+        if (
+            excess > 0
+            and idx >= 2
+            and _looks_like_kp_rank_cell(cell)
+            and out
+            and ("." in str(out[-1]) or "%" in str(out[-1]))
+        ):
+            excess -= 1
+            continue
+        out.append(cell)
+    return out
+
+
+def parse_kenpom_four_factors_text(text_or_html: str) -> list[dict]:
+    """Parse KenPom Team Stats / Four Factors (/stats.php) HTML or TSV/CSV."""
+    headers, rows = _extract_headers_and_rows_from_any(
+        text_or_html,
+        header_tokens=("efg", "ftrate", "to%", "or%"),
+        min_cols=6,
+    )
+    if not rows:
+        return []
+    norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
+
+    def _find_all_cols(cands: tuple[str, ...]) -> list[int]:
+        idxs: list[int] = []
+        for idx, nh in enumerate(norm_headers):
+            if nh.endswith("rank"):
+                continue
+            if nh in cands:
+                idxs.append(idx)
+        return idxs
+
+    idx_team = next((i for i, h in enumerate(norm_headers) if h in ("team", "teamname", "school")), None)
+    if idx_team is None:
+        if headers and any(h in ("rk", "rank") for h in norm_headers[:1]):
+            idx_team = 1
+        elif headers:
+            idx_team = 0
+        else:
+            return []
+
+    def _col(name_cands: tuple[str, ...]) -> int | None:
+        for c in name_cands:
+            for i, nh in enumerate(norm_headers):
+                if not nh.endswith("rank") and nh == c:
+                    return i
+        return None
+
+    efg_cols = _find_all_cols(("efg", "efgpct"))
+    to_cols = _find_all_cols(("to", "tov", "topct", "tovpct"))
+    or_cols = _find_all_cols(("or", "orb", "orpct", "orbpct"))
+    ftr_cols = _find_all_cols(("ftrate", "ftr", "ft"))
+
+    idx_off_efg = _col(("offefg", "oefg")) or (efg_cols[0] if len(efg_cols) >= 1 else None)
+    idx_def_efg = _col(("defefg", "defg")) or (efg_cols[1] if len(efg_cols) >= 2 else None)
+    idx_off_to = _col(("offto", "offtov", "oto")) or (to_cols[0] if len(to_cols) >= 1 else None)
+    idx_def_to = _col(("defto", "deftov", "dto")) or (to_cols[1] if len(to_cols) >= 2 else None)
+    idx_off_or = _col(("offor", "offorb", "oor")) or (or_cols[0] if len(or_cols) >= 1 else None)
+    idx_def_or = _col(("defor", "deforb", "dor")) or (or_cols[1] if len(or_cols) >= 2 else None)
+    idx_off_ftr = _col(("offftr", "offftrate", "oftr")) or (ftr_cols[0] if len(ftr_cols) >= 1 else None)
+    idx_def_ftr = _col(("defftr", "defftrate", "dftr")) or (ftr_cols[1] if len(ftr_cols) >= 2 else None)
+
+    if idx_off_efg is None and idx_def_efg is None:
         return []
 
-    soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table")
-    headers, rows = _table_headers_and_rows(table)
-    out = []
-    for cols in rows:
-        if len(cols) < 2:
+    def _pct(vals: list[str], idx: int | None) -> float | None:
+        if idx is None or idx >= len(vals):
+            return None
+        v = _to_float(vals[idx])
+        if v is None or v < 0.0 or v > 100.0:
+            return None
+        return round(v, 2)
+
+    out: list[dict] = []
+    for raw_row in rows:
+        row = _align_kp_row_with_headers(headers, raw_row)
+        if len(row) <= idx_team:
             continue
-        team = cols[0]
-        try:
-            hca = float(cols[1].replace("+", "").strip())
-        except Exception:
+        team = _clean_kp_team_name(row[idx_team])
+        if not team or team.lower() in ("team", "teamname", "rk", "rank"):
             continue
-        out.append({"team_name": team, "hca": hca, "raw": {"headers": headers, "cols": cols}})
+        rec = {
+            "team_name": team,
+            "off_efg": _pct(row, idx_off_efg),
+            "off_to": _pct(row, idx_off_to),
+            "off_or": _pct(row, idx_off_or),
+            "off_ftr": _pct(row, idx_off_ftr),
+            "def_efg": _pct(row, idx_def_efg),
+            "def_to": _pct(row, idx_def_to),
+            "def_or": _pct(row, idx_def_or),
+            "def_ftr": _pct(row, idx_def_ftr),
+        }
+        if rec["off_efg"] is None and rec["def_efg"] is None:
+            continue
+        out.append(rec)
     return out
+
+
+def parse_kenpom_height_text(text_or_html: str) -> list[dict]:
+    """Parse KenPom Height / Experience / Bench / Continuity (/height.php) HTML or TSV/CSV."""
+    import re
+
+    headers, rows = _extract_headers_and_rows_from_any(
+        text_or_html,
+        header_tokens=("avghgt", "effhgt", "continuity", "exp", "bench"),
+        min_cols=5,
+    )
+    if not rows:
+        return []
+    norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
+
+    def _col(cands: tuple[str, ...]) -> int | None:
+        for c in cands:
+            for i, nh in enumerate(norm_headers):
+                if nh.endswith("rank"):
+                    continue
+                if nh == c:
+                    return i
+        return None
+
+    idx_team = _col(("team", "teamname", "school"))
+    if idx_team is None:
+        return []
+    idx_hgt = _col(("avghgt", "hgt", "height"))
+    idx_eff_hgt = _col(("effhgt", "effectivehgt", "size"))
+    idx_exp = _col(("experience", "exp"))
+    idx_bench = _col(("bench", "benchmin", "benchpct"))
+    idx_cont = _col(("continuity", "cont"))
+    if all(i is None for i in (idx_exp, idx_cont, idx_hgt, idx_eff_hgt, idx_bench)):
+        return []
+
+    def _parse_hgt(vals: list[str], idx: int | None) -> float | None:
+        if idx is None or idx >= len(vals):
+            return None
+        s = str(vals[idx] or "").replace('"', "").strip()
+        m = re.match(r"^(\d)-(\d+(?:\.\d+)?)$", s)
+        if m:
+            return round(int(m.group(1)) * 12.0 + float(m.group(2)), 2)
+        v = _to_float(s)
+        if v is None or v < -15.0 or v > 90.0:
+            return None
+        return round(v, 2)
+
+    out: list[dict] = []
+    for raw_row in rows:
+        row = _align_kp_row_with_headers(headers, raw_row)
+        if len(row) <= idx_team:
+            continue
+        team = _clean_kp_team_name(row[idx_team])
+        if not team or team.lower() in ("team", "teamname", "rk", "rank"):
+            continue
+        rec = {
+            "team_name": team,
+            "avg_hgt": _parse_hgt(row, idx_hgt),
+            "eff_hgt": _parse_hgt(row, idx_eff_hgt),
+            "experience": _to_float(row[idx_exp]) if (idx_exp is not None and idx_exp < len(row)) else None,
+            "bench_pct": _to_float(row[idx_bench]) if (idx_bench is not None and idx_bench < len(row)) else None,
+            "continuity": _to_float(row[idx_cont]) if (idx_cont is not None and idx_cont < len(row)) else None,
+        }
+        if all(rec[k] is None for k in ("avg_hgt", "eff_hgt", "experience", "bench_pct", "continuity")):
+            continue
+        out.append(rec)
+    return out
+
+
+def parse_kenpom_hca_text(text_or_html: str) -> list[dict]:
+    """Parse KenPom Home Court Advantage (/hca.php) HTML or TSV/CSV."""
+    headers, rows = _extract_headers_and_rows_from_any(
+        text_or_html,
+        header_tokens=("hca", "home court", "home"),
+        min_cols=2,
+    )
+    if not rows:
+        return []
+    norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
+
+    idx_team = next((i for i, h in enumerate(norm_headers) if h in ("team", "teamname", "school")), None)
+    idx_hca = next((i for i, h in enumerate(norm_headers) if h in ("hca", "homecourt", "homecourtadvantage", "pts", "adv")), None)
+    if idx_team is None:
+        if norm_headers and norm_headers[0] in ("rk", "rank"):
+            idx_team = 1
+        else:
+            idx_team = 0
+
+    out: list[dict] = []
+    for raw_row in rows:
+        row = _align_kp_row_with_headers(headers, raw_row)
+        if len(row) <= idx_team + 1:
+            continue
+        team = _clean_kp_team_name(row[idx_team])
+        if not team or team.lower() in ("team", "teamname", "rk", "rank"):
+            continue
+        hca_val = None
+        if idx_hca is not None and idx_hca < len(row):
+            hca_val = _parse_kp_float(row[idx_hca])
+        else:
+            for c_idx in range(idx_team + 1, len(row)):
+                if "." in str(row[c_idx]) or str(row[c_idx]).strip().startswith(("+", "-")):
+                    cand = _parse_kp_float(row[c_idx])
+                    if cand is not None and -3.0 <= cand <= 9.0:
+                        hca_val = cand
+                        break
+        if hca_val is None or hca_val < -3.0 or hca_val > 9.0:
+            continue
+        out.append({"team_name": team, "hca": round(hca_val, 2), "raw": {"headers": headers, "cols": row}})
+    return out
+
+
+def parse_kenpom_player_stats_text(text_or_html: str) -> list[dict]:
+    """Parse KenPom Player Stats (/playerstats.php) HTML or TSV/CSV."""
+    headers, rows = _extract_headers_and_rows_from_any(
+        text_or_html,
+        header_tokens=("player", "ortg", "usage", "%min", "%poss", "min%"),
+        min_cols=4,
+    )
+    if not headers or not rows:
+        return []
+    norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
+    player_i = next((i for i, h in enumerate(norm_headers) if h in ("player", "name")), 0)
+    team_i = next((i for i, h in enumerate(norm_headers) if h in ("team", "school", "teamname")), 1 if player_i != 1 else 2)
+
+    out: list[dict] = []
+    for raw_row in rows:
+        row = _align_kp_row_with_headers(headers, raw_row)
+        if len(row) <= max(player_i, team_i):
+            continue
+        player = str(row[player_i] or "").strip()
+        team = _clean_kp_team_name(row[team_i])
+        if not player or not team or player.lower() in ("player", "name", "rk", "rank"):
+            continue
+        out.append({
+            "player_name": player,
+            "team_name": team,
+            "metrics": {"headers": headers, "cols": row},
+            "raw": {"headers": headers, "cols": row},
+        })
+    return out
+
+
+def parse_kenpom_refs_text(text_or_html: str) -> list[dict]:
+    """Parse KenPom Referee Ratings (/officials.php or /refs.php) HTML or TSV/CSV."""
+    headers, rows = _extract_headers_and_rows_from_any(
+        text_or_html,
+        header_tokens=("official", "referee", "ref", "pf", "foul", "rtg"),
+        min_cols=2,
+    )
+    if not rows:
+        return []
+    norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
+    idx_name = next((i for i, h in enumerate(norm_headers) if h in ("official", "referee", "ref", "name")), None)
+    if idx_name is None:
+        idx_name = 1 if (norm_headers and norm_headers[0] in ("rk", "rank")) else 0
+
+    out: list[dict] = []
+    for raw_row in rows:
+        row = _align_kp_row_with_headers(headers, raw_row)
+        if len(row) <= idx_name:
+            continue
+        name = str(row[idx_name] or "").strip()
+        if not name or name.isdigit() or name.lower() in ("official", "ref", "referee", "rk", "rank"):
+            continue
+        out.append({
+            "ref_name": name,
+            "metrics": {"headers": headers, "cols": row},
+            "raw": {"headers": headers, "cols": row},
+        })
+    return out
+
+
+def parse_kenpom_fanmatch_text(text_or_html: str) -> list[dict]:
+    """Parse KenPom FanMatch daily game predictions (/fanmatch.php) HTML or TSV/CSV."""
+    import re
+
+    headers, rows = _extract_headers_and_rows_from_any(
+        text_or_html,
+        header_tokens=("prediction", "thrill", "game"),
+        min_cols=2,
+    )
+    if not rows:
+        return []
+    norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
+    idx_game = next((i for i, h in enumerate(norm_headers) if h in ("game", "matchup")), None)
+    idx_pred = next((i for i, h in enumerate(norm_headers) if h in ("prediction", "pred", "projected", "line")), None)
+    idx_thrill = next((i for i, h in enumerate(norm_headers) if "thrill" in h), None)
+
+    def _clean_fm_team(s: str) -> str:
+        t = re.sub(r"^\s*\d{1,3}\s+", "", str(s or "").strip())
+        return _clean_kp_team_name(t)
+
+    out: list[dict] = []
+    for row in rows:
+        if not row:
+            continue
+        game_txt = row[idx_game] if (idx_game is not None and idx_game < len(row)) else ""
+        if not game_txt:
+            game_txt = next((c for c in row if (" at " in c or " vs " in c or " vs. " in c)), "")
+        if not game_txt:
+            continue
+
+        if " at " in game_txt:
+            parts = game_txt.split(" at ", 1)
+        elif " vs. " in game_txt:
+            parts = game_txt.split(" vs. ", 1)
+        elif " vs " in game_txt:
+            parts = game_txt.split(" vs ", 1)
+        else:
+            continue
+        away_team = _clean_fm_team(parts[0])
+        home_team = _clean_fm_team(parts[1])
+        if not away_team or not home_team or away_team.lower() == "game":
+            continue
+
+        pred_txt = row[idx_pred] if (idx_pred is not None and idx_pred < len(row)) else ""
+        if not pred_txt:
+            pred_txt = next((c for c in row if re.search(r"\d{2,3}\s*[-–]\s*\d{2,3}", c)), "")
+
+        pred_winner = None
+        winner_score = None
+        loser_score = None
+        win_prob = None
+        if pred_txt:
+            m = re.match(r"^\s*(.+?)\s+(\d{2,3})\s*[-–]\s*(\d{2,3})(?:\s*\((\d+(?:\.\d+)?)%?\))?", pred_txt)
+            if m:
+                pred_winner = _clean_fm_team(m.group(1))
+                winner_score = float(m.group(2))
+                loser_score = float(m.group(3))
+                win_prob = float(m.group(4)) if m.group(4) else None
+
+        thrill = _to_float(row[idx_thrill]) if (idx_thrill is not None and idx_thrill < len(row)) else None
+        out.append({
+            "home_team": home_team,
+            "away_team": away_team,
+            "pred_winner": pred_winner,
+            "winner_score": winner_score,
+            "loser_score": loser_score,
+            "win_prob": win_prob,
+            "thrill_score": thrill,
+            "raw": {"headers": headers, "cols": row},
+        })
+    return out
+
+
+def scrape_home_court(sess: requests.Session) -> list[dict]:
+    for p in ("/hca.php", "/home.php", "/homeratings.php"):
+        try:
+            html = fetch_html(sess, p)
+            if html and ("HCA" in html or ("Home" in html and "Court" in html)):
+                parsed = parse_kenpom_hca_text(html)
+                if parsed:
+                    return parsed
+        except Exception:
+            pass
+    return []
 
 
 def scrape_ref_ratings(sess: requests.Session) -> list[dict]:
-    # Ref data is less standardized; try common paths.
-    candidates = [
-        "/refs.php",
-        "/ref.php",
-        "/refstats.php",
-    ]
-    html = None
-    for p in candidates:
+    for p in ("/officials.php", "/refs.php", "/ref.php", "/refstats.php"):
         try:
             html = fetch_html(sess, p)
-            if html and ("Ref" in html or "Officials" in html):
-                break
+            if html and ("Official" in html or "Ref" in html):
+                parsed = parse_kenpom_refs_text(html)
+                if parsed:
+                    return parsed
         except Exception:
-            html = None
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table")
-    headers, rows = _table_headers_and_rows(table)
-
-    out = []
-    # Store as JSONB per ref to avoid brittle column parsing.
-    for cols in rows:
-        if not cols:
-            continue
-        name = cols[0]
-        if not name or name.lower() in ("ref", "official"):
-            continue
-        out.append({"ref_name": name, "metrics": {"headers": headers, "cols": cols[1:]}, "raw": {"headers": headers, "cols": cols}})
-    return out
+            pass
+    return []
 
 
 def scrape_player_stats(sess: requests.Session) -> list[dict]:
-    # Player stats page path can vary; use a best-effort.
-    candidates = [
-        "/playerstats.php",
-        "/player.php",
-    ]
-    html = None
-    for p in candidates:
+    for p in ("/playerstats.php?s=ORtg", "/playerstats.php", "/player.php"):
         try:
             html = fetch_html(sess, p)
             if html and ("Player" in html or "ORtg" in html or "Usage" in html):
-                break
+                parsed = parse_kenpom_player_stats_text(html)
+                if parsed:
+                    return parsed
         except Exception:
-            html = None
-    if not html:
-        return []
+            pass
+    return []
 
-    soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table")
-    headers, rows = _table_headers_and_rows(table)
-    
-    # Robust column mapping
-    h_idx = {h.lower(): i for i, h in enumerate(headers)}
-    player_i = h_idx.get('player', 0)
-    team_i = h_idx.get('team', 1)
 
-    out = []
-    for cols in rows:
-        if len(cols) <= max(player_i, team_i):
-            continue
-        player = cols[player_i]
-        team = cols[team_i]
-        if not player or player.lower() in ("player", "name", "rk"):
-            continue
-        # For the metrics, we pass the full cols and the headers
-        out.append({"player_name": player, "team_name": team, "metrics": {"headers": headers, "cols": cols}, "raw": {"headers": headers, "cols": cols}})
-    return out
+def scrape_four_factors(sess: requests.Session) -> list[dict]:
+    for p in ("/stats.php",):
+        try:
+            html = fetch_html(sess, p)
+            if html and ("eFG" in html or "FTRate" in html):
+                parsed = parse_kenpom_four_factors_text(html)
+                if parsed:
+                    return parsed
+        except Exception:
+            pass
+    return []
+
+
+def scrape_height(sess: requests.Session) -> list[dict]:
+    for p in ("/height.php",):
+        try:
+            html = fetch_html(sess, p)
+            if html and ("Continuity" in html or "Experience" in html or "Hgt" in html):
+                parsed = parse_kenpom_height_text(html)
+                if parsed:
+                    return parsed
+        except Exception:
+            pass
+    return []
+
+
+def scrape_fanmatch(sess: requests.Session) -> list[dict]:
+    for p in ("/fanmatch.php",):
+        try:
+            html = fetch_html(sess, p)
+            if html and ("Prediction" in html or "Thrill" in html):
+                parsed = parse_kenpom_fanmatch_text(html)
+                if parsed:
+                    return parsed
+        except Exception:
+            pass
+    return []
 
 
 def _to_float(x):
@@ -525,18 +939,18 @@ def normalize_player_rows(player_rows: list[dict]) -> list[dict]:
         cols = m.get('cols') or []
         mapping = _pair_headers(headers, cols)
 
-        # Common KenPom headers (vary): Min%, Min, ORtg, Usage, eFG%, TS%, Ast%, OR%, DR%, TO%, FT Rate, 3PA Rate
+        # Common KenPom headers (vary): Min%, Min, ORtg, Usage/%Poss, eFG%, TS%, Ast%/ARate, OR%, DR%, TO%, FT Rate, 3PA Rate
         min_pct = _to_float(_find(mapping, ['min%','min %','%min','minutes%','minutes %']))
         minutes = _to_float(_find(mapping, ['min', 'minutes']))
-        usage = _to_float(_find(mapping, ['usage']))
-        ortg = _to_float(_find(mapping, ['ortg','off rtg','offensive rating']))
+        usage = _to_float(_find(mapping, ['usage', '%poss', 'poss%']))
+        ortg = _to_float(_find(mapping, ['ortg','o-rat','off rtg','offensive rating']))
         efg = _to_float(_find(mapping, ['efg']))
         ts = _to_float(_find(mapping, ['ts%','ts %','true shooting']))
-        ast_rate = _to_float(_find(mapping, ['ast%','assist%','assist %']))
+        ast_rate = _to_float(_find(mapping, ['ast%','assist%','assist %','arate']))
         orb_rate = _to_float(_find(mapping, ['or%','off reb','off reb%','orb%']))
         drb_rate = _to_float(_find(mapping, ['dr%','def reb','def reb%','drb%']))
         tov_rate = _to_float(_find(mapping, ['to%','tov%','turnover%','turnover %']))
-        ft_rate = _to_float(_find(mapping, ['ft rate','ftr']))
+        ft_rate = _to_float(_find(mapping, ['ft rate','ftr','ftrate']))
         three_par = _to_float(_find(mapping, ['3pa rate','3par','3pa/fg','3pa / fg']))
 
         out.append({
@@ -664,7 +1078,7 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                   adj_t=EXCLUDED.adj_t,
                   conf=EXCLUDED.conf,
                   record=EXCLUDED.record,
-                  raw=EXCLUDED.raw,
+                  raw=COALESCE(kenpom_team_ratings_daily.raw, '{}'::jsonb) || EXCLUDED.raw,
                   updated_at=NOW();
                 """, {**payload, "raw": json.dumps(payload.get("raw") or {}, default=str)})
 
@@ -807,8 +1221,77 @@ def upsert_daily(table: str, asof_date: str, rows: list[dict], key_fields: list[
                 """, {**payload, "raw": json.dumps(payload.get('raw') or {}, default=str)})
                 n += 1
 
+            elif table == 'kenpom_fanmatch_daily':
+                _exec(conn, """
+                INSERT INTO kenpom_fanmatch_daily(
+                  asof_date, home_team, away_team,
+                  pred_winner, winner_score, loser_score, win_prob, thrill_score,
+                  raw, updated_at
+                )
+                VALUES (
+                  %(asof_date)s, %(home_team)s, %(away_team)s,
+                  %(pred_winner)s, %(winner_score)s, %(loser_score)s, %(win_prob)s, %(thrill_score)s,
+                  %(raw)s::jsonb, NOW()
+                )
+                ON CONFLICT (asof_date, home_team, away_team) DO UPDATE SET
+                  pred_winner=EXCLUDED.pred_winner,
+                  winner_score=EXCLUDED.winner_score,
+                  loser_score=EXCLUDED.loser_score,
+                  win_prob=EXCLUDED.win_prob,
+                  thrill_score=EXCLUDED.thrill_score,
+                  raw=EXCLUDED.raw,
+                  updated_at=NOW();
+                """, {**payload, "raw": json.dumps(payload.get("raw") or {}, default=str)})
+                n += 1
+
         conn.commit()
         return n
+
+
+def merge_team_supplement_daily(asof_date: str, rows: list[dict]) -> int:
+    """Merge extra team-level metrics (Four Factors, Height/Exp/Continuity) into kenpom_team_ratings_daily.raw."""
+    if not rows:
+        return 0
+    n = 0
+    with get_db_connection() as conn:
+        for r in rows:
+            team = (r.get("team_name") or "").strip()
+            if not team:
+                continue
+            patch = {k: v for k, v in r.items() if k != "team_name" and v is not None}
+            if not patch:
+                continue
+            patch_json = json.dumps(patch, default=str)
+            cur = _exec(
+                conn,
+                """
+                UPDATE kenpom_team_ratings_daily
+                SET raw = COALESCE(raw, '{}'::jsonb) || %(patch)s::jsonb,
+                    updated_at = NOW()
+                WHERE asof_date = %(asof_date)s AND LOWER(team_name) = LOWER(%(team_name)s)
+                """,
+                {"asof_date": asof_date, "team_name": team, "patch": patch_json},
+            )
+            if int(getattr(cur, "rowcount", 0) or 0) == 0:
+                cur = _exec(
+                    conn,
+                    """
+                    UPDATE kenpom_team_ratings_daily
+                    SET raw = COALESCE(raw, '{}'::jsonb) || %(patch)s::jsonb,
+                        updated_at = NOW()
+                    WHERE (asof_date, team_name) = (
+                      SELECT asof_date, team_name
+                      FROM kenpom_team_ratings_daily
+                      WHERE LOWER(team_name) = LOWER(%(team_name)s)
+                      ORDER BY asof_date DESC
+                      LIMIT 1
+                    )
+                    """,
+                    {"team_name": team, "patch": patch_json},
+                )
+            n += int(getattr(cur, "rowcount", 0) or 0)
+        conn.commit()
+    return n
 
 
 def _clean_kp_team_name(raw_name: str) -> str:
@@ -1191,6 +1674,15 @@ def get_kenpom_status() -> dict:
     health_status = "missing"
     health_notes = None
     db_error = None
+    datasets = {
+        "ratings": 0,
+        "four_factors": 0,
+        "height_experience": 0,
+        "home_court": 0,
+        "player_stats": 0,
+        "ref_ratings": 0,
+        "fanmatch_games": 0,
+    }
 
     try:
         with get_db_connection() as conn:
@@ -1217,6 +1709,48 @@ def get_kenpom_status() -> dict:
                 dh_d = dict(dh)
                 health_status = str(dh_d.get("status") or "missing").lower()
                 health_notes = dh_d.get("notes")
+
+            if latest_asof_date and latest_asof_date >= season_floor and team_count > 0:
+                datasets["ratings"] = team_count
+                try:
+                    r_extra = _exec(
+                        conn,
+                        """
+                        SELECT
+                          COUNT(*) FILTER (WHERE raw ? 'off_efg') AS ff_n,
+                          COUNT(*) FILTER (WHERE raw ? 'experience' OR raw ? 'continuity') AS hgt_n
+                        FROM kenpom_team_ratings_daily
+                        WHERE asof_date = %s
+                        """,
+                        (latest_asof_date,),
+                    ).fetchone()
+                    if r_extra:
+                        re_d = dict(r_extra)
+                        if re_d.get("ff_n") is not None:
+                            datasets["four_factors"] = int(re_d.get("ff_n") or 0)
+                        if re_d.get("hgt_n") is not None:
+                            datasets["height_experience"] = int(re_d.get("hgt_n") or 0)
+                except Exception:
+                    pass
+
+                for tbl_key, tbl_name in (
+                    ("home_court", "kenpom_home_court_daily"),
+                    ("player_stats", "kenpom_player_stats_daily"),
+                    ("ref_ratings", "kenpom_ref_ratings_daily"),
+                    ("fanmatch_games", "kenpom_fanmatch_daily"),
+                ):
+                    try:
+                        rc = _exec(
+                            conn,
+                            f"SELECT COUNT(*) AS c FROM {tbl_name} WHERE asof_date >= %s",
+                            (season_floor,),
+                        ).fetchone()
+                        if rc:
+                            rc_d = dict(rc)
+                            if rc_d.get("c") is not None:
+                                datasets[tbl_key] = int(rc_d.get("c") or 0)
+                    except Exception:
+                        pass
     except Exception as e:
         db_error = str(e)
 
@@ -1234,14 +1768,14 @@ def get_kenpom_status() -> dict:
             f"are from {latest_asof_date} (prior season)."
         )
         next_step = (
-            "Open kenpom.com while logged in and click your Sync KenPom to Basement Bets Chrome bookmark, "
-            "or paste/upload the ratings table below."
+            "Open kenpom.com while logged in and click Send KenPom to Basement Bets on your Chrome Bookmarks Bar, "
+            "or run the daily Mac auto-sync script."
         )
     else:
         human_summary = f"KenPom is turned off because no {season_label} team ratings have been imported yet."
         next_step = (
-            "Open kenpom.com while logged in and click your Sync KenPom to Basement Bets Chrome bookmark, "
-            "or paste/upload the ratings table below."
+            "Open kenpom.com while logged in and click Send KenPom to Basement Bets on your Chrome Bookmarks Bar, "
+            "or run the daily Mac auto-sync script."
         )
 
     return {
@@ -1254,6 +1788,7 @@ def get_kenpom_status() -> dict:
         "health_status": health_status,
         "health_notes": health_notes,
         "db_error": db_error,
+        "datasets": datasets,
         "configured_methods": {
             "official_api_key": has_api_key,
             "credentials": has_creds,
@@ -1262,6 +1797,23 @@ def get_kenpom_status() -> dict:
         "human_summary": human_summary,
         "next_step": next_step,
     }
+
+
+def _merge_team_supplement_into_rows(teams: list[dict], supp_rows: list[dict]) -> int:
+    """Attach supplementary team metrics directly into ratings rows' raw dicts in memory."""
+    by_lc = {(t.get("team_name") or "").strip().lower(): t for t in teams if t.get("team_name")}
+    merged = 0
+    for sr in supp_rows or []:
+        tname = (sr.get("team_name") or "").strip().lower()
+        target = by_lc.get(tname)
+        if not target:
+            continue
+        raw = target.setdefault("raw", {})
+        for k, v in sr.items():
+            if k != "team_name" and v is not None:
+                raw[k] = v
+        merged += 1
+    return merged
 
 
 def run_kenpom_sync(
@@ -1310,8 +1862,8 @@ def run_kenpom_sync(
             "asof_date": asof,
             "rows": 0,
             "message": (
-                "No KenPom API key, login email, or cookie is configured on this server. "
-                "Paste your KenPom table or enter a KenPom Official API key to sync immediately."
+                "No KenPom login email or cookie is configured on this server. "
+                "Use the Chrome bookmarklet on kenpom.com or run the daily Mac auto-sync script."
             ),
         }
 
@@ -1321,7 +1873,7 @@ def run_kenpom_sync(
     if not teams:
         msg = (
             "KenPom returned 0 teams (login failed or Cloudflare blocked the server request). "
-            "Use a KenPom Official API key or paste the ratings table from kenpom.com."
+            "Use the Chrome bookmarklet on kenpom.com or run the daily Mac auto-sync script."
         )
         try:
             upsert_health("kenpom", status="stale", row_count=0, notes=msg[:240])
@@ -1329,24 +1881,39 @@ def run_kenpom_sync(
             pass
         return {"status": "warning", "method": "web_session", "asof_date": asof, "rows": 0, "message": msg}
 
-    n_team = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
-    n_hca = n_refs = n_players = n_players_norm = n_team_agg = 0
+    n_ff = n_hgt = n_hca = n_refs = n_players = n_players_norm = n_team_agg = n_fm = 0
 
     if include_extras:
         try:
-            time.sleep(0.8)
+            time.sleep(0.6)
+            ff = scrape_four_factors(sess)
+            n_ff = _merge_team_supplement_into_rows(teams, ff)
+        except Exception as e:
+            print(f"[kenpom] four_factors skipped: {e}")
+        try:
+            time.sleep(0.6)
+            hgt = scrape_height(sess)
+            n_hgt = _merge_team_supplement_into_rows(teams, hgt)
+        except Exception as e:
+            print(f"[kenpom] height/exp skipped: {e}")
+
+    n_team = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
+
+    if include_extras:
+        try:
+            time.sleep(0.6)
             hca = scrape_home_court(sess)
             n_hca = upsert_daily("kenpom_home_court_daily", asof, hca, ["team_name"])
         except Exception as e:
             print(f"[kenpom] hca skipped: {e}")
         try:
-            time.sleep(0.8)
+            time.sleep(0.6)
             refs = scrape_ref_ratings(sess)
             n_refs = upsert_daily("kenpom_ref_ratings_daily", asof, refs, ["ref_name"])
         except Exception as e:
             print(f"[kenpom] refs skipped: {e}")
         try:
-            time.sleep(0.8)
+            time.sleep(0.6)
             players = scrape_player_stats(sess)
             n_players = upsert_daily("kenpom_player_stats_daily", asof, players, ["player_name", "team_name"])
             norm = normalize_player_rows(players)
@@ -1355,14 +1922,20 @@ def run_kenpom_sync(
             n_team_agg = upsert_daily("kenpom_team_player_agg_daily", asof, aggs, ["team_name"])
         except Exception as e:
             print(f"[kenpom] players skipped: {e}")
+        try:
+            time.sleep(0.6)
+            fm = scrape_fanmatch(sess)
+            n_fm = upsert_daily("kenpom_fanmatch_daily", asof, fm, ["home_team", "away_team"])
+        except Exception as e:
+            print(f"[kenpom] fanmatch skipped: {e}")
 
     try:
-        total = int(n_team or 0) + int(n_hca or 0) + int(n_refs or 0) + int(n_players or 0)
+        total = int(n_team or 0) + int(n_hca or 0) + int(n_refs or 0) + int(n_players or 0) + int(n_fm or 0)
         upsert_health(
             "kenpom",
             status="ok" if n_team > 0 else "stale",
             row_count=total,
-            notes=f"Synced {n_team} teams ({asof})",
+            notes=f"Synced {n_team} teams, {n_ff} FF, {n_hgt} exp/hgt, {n_hca} HCA, {n_players} players, {n_refs} refs, {n_fm} FanMatch ({asof})",
         )
     except Exception as e:
         print(f"[kenpom] data_health upsert failed: {e}")
@@ -1372,28 +1945,191 @@ def run_kenpom_sync(
         "method": "web_session",
         "asof_date": asof,
         "rows": n_team,
-        "message": f"Synced {n_team} KenPom teams for {asof}.",
+        "datasets_synced": {
+            "ratings": n_team,
+            "four_factors": n_ff,
+            "height_experience": n_hgt,
+            "home_court": n_hca,
+            "player_stats": n_players,
+            "ref_ratings": n_refs,
+            "fanmatch_games": n_fm,
+        },
+        "message": f"Synced {n_team} KenPom teams + extra datasets for {asof}.",
+    }
+
+
+def ingest_kenpom_bundle(bundle: dict, asof_date: str | None = None) -> dict:
+    """Ingest a multi-dataset KenPom JSON bundle emitted by the Chrome bookmarklet or Mac auto-sync."""
+    from src.scripts.update_data_health import upsert as upsert_health
+
+    ensure_tables()
+    asof = (asof_date or _asof_date_et())[:10]
+    counts = {
+        "ratings": 0,
+        "four_factors": 0,
+        "height_experience": 0,
+        "home_court": 0,
+        "player_stats": 0,
+        "ref_ratings": 0,
+        "fanmatch_games": 0,
+    }
+    warnings: list[str] = []
+
+    teams: list[dict] = []
+    if bundle.get("ratings"):
+        teams = parse_kenpom_csv_text(str(bundle["ratings"]))
+
+    ff_rows: list[dict] = []
+    if bundle.get("stats"):
+        try:
+            ff_rows = parse_kenpom_four_factors_text(str(bundle["stats"]))
+            if teams and ff_rows:
+                counts["four_factors"] = _merge_team_supplement_into_rows(teams, ff_rows)
+        except Exception as e:
+            warnings.append(f"stats: {e}")
+
+    hgt_rows: list[dict] = []
+    if bundle.get("height"):
+        try:
+            hgt_rows = parse_kenpom_height_text(str(bundle["height"]))
+            if teams and hgt_rows:
+                counts["height_experience"] = _merge_team_supplement_into_rows(teams, hgt_rows)
+        except Exception as e:
+            warnings.append(f"height: {e}")
+
+    if teams:
+        if len(teams) < 10 and not any((bundle.get("stats"), bundle.get("height"), bundle.get("hca"), bundle.get("playerstats"), bundle.get("refs"), bundle.get("fanmatch"))):
+            raise ValueError(f"Parsed only {len(teams)} valid teams; expected a full KenPom table (>=10 rows).")
+        if len(teams) >= 10:
+            counts["ratings"] = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
+    else:
+        if ff_rows:
+            try:
+                counts["four_factors"] = merge_team_supplement_daily(asof, ff_rows)
+            except Exception as e:
+                warnings.append(f"stats_merge: {e}")
+        if hgt_rows:
+            try:
+                counts["height_experience"] = merge_team_supplement_daily(asof, hgt_rows)
+            except Exception as e:
+                warnings.append(f"height_merge: {e}")
+
+    if bundle.get("hca"):
+        try:
+            hca_rows = parse_kenpom_hca_text(str(bundle["hca"]))
+            if hca_rows:
+                counts["home_court"] = upsert_daily("kenpom_home_court_daily", asof, hca_rows, ["team_name"])
+        except Exception as e:
+            warnings.append(f"hca: {e}")
+
+    if bundle.get("playerstats"):
+        try:
+            player_rows = parse_kenpom_player_stats_text(str(bundle["playerstats"]))
+            if player_rows:
+                counts["player_stats"] = upsert_daily(
+                    "kenpom_player_stats_daily", asof, player_rows, ["player_name", "team_name"]
+                )
+                norm = normalize_player_rows(player_rows)
+                upsert_daily("kenpom_player_stats_norm_daily", asof, norm, ["player_name", "team_name"])
+                aggs = compute_team_player_agg(norm)
+                upsert_daily("kenpom_team_player_agg_daily", asof, aggs, ["team_name"])
+        except Exception as e:
+            warnings.append(f"playerstats: {e}")
+
+    if bundle.get("refs"):
+        try:
+            ref_rows = parse_kenpom_refs_text(str(bundle["refs"]))
+            if ref_rows:
+                counts["ref_ratings"] = upsert_daily("kenpom_ref_ratings_daily", asof, ref_rows, ["ref_name"])
+        except Exception as e:
+            warnings.append(f"refs: {e}")
+
+    if bundle.get("fanmatch"):
+        try:
+            fm_rows = parse_kenpom_fanmatch_text(str(bundle["fanmatch"]))
+            if fm_rows:
+                counts["fanmatch_games"] = upsert_daily(
+                    "kenpom_fanmatch_daily", asof, fm_rows, ["home_team", "away_team"]
+                )
+        except Exception as e:
+            warnings.append(f"fanmatch: {e}")
+
+    total_synced = sum(counts.values())
+    if total_synced == 0:
+        raise ValueError("Could not parse any valid KenPom rows from the uploaded bundle.")
+
+    notes = (
+        f"Imported bundle ({asof}): ratings={counts['ratings']}, four_factors={counts['four_factors']}, "
+        f"height_exp={counts['height_experience']}, hca={counts['home_court']}, "
+        f"players={counts['player_stats']}, refs={counts['ref_ratings']}, fanmatch={counts['fanmatch_games']}"
+    )
+    upsert_health(
+        "kenpom",
+        "ok",
+        row_count=counts["ratings"] or total_synced,
+        notes=notes[:240],
+    )
+    return {
+        "status": "ok",
+        "asof_date": asof,
+        "rows": counts["ratings"] or total_synced,
+        "datasets_synced": counts,
+        "warnings": warnings,
     }
 
 
 def ingest_kenpom_csv(csv_text: str, asof_date: str | None = None) -> dict:
-    """Parse and upsert KenPom ratings from CSV text into DB and update data_health."""
+    """Parse and upsert KenPom ratings (or multi-dataset JSON bundle) into DB and update data_health."""
     from src.scripts.update_data_health import upsert as upsert_health
 
-    teams = parse_kenpom_csv_text(csv_text)
-    if len(teams) < 10:
-        raise ValueError(f"Parsed only {len(teams)} valid teams from CSV; expected a full KenPom table (>=10 rows).")
+    raw_stripped = (csv_text or "").lstrip("\ufeff").strip()
+    if raw_stripped.startswith("{"):
+        try:
+            bundle = json.loads(raw_stripped)
+        except Exception as e:
+            raise ValueError(f"Invalid KenPom JSON bundle: {e}") from e
+        if isinstance(bundle, dict) and (
+            bundle.get("_kp_bundle")
+            or any(k in bundle for k in ("ratings", "stats", "height", "hca", "playerstats", "refs", "fanmatch"))
+        ):
+            return ingest_kenpom_bundle(bundle, asof_date=asof_date)
+        raise ValueError("JSON payload is missing KenPom dataset keys.")
 
-    ensure_tables()
-    asof = (asof_date or _asof_date_et())[:10]
-    n_saved = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
-    upsert_health(
-        "kenpom",
-        "ok",
-        row_count=n_saved,
-        notes=f"Imported {n_saved} teams from pasted/uploaded table ({asof})",
-    )
-    return {"status": "ok", "asof_date": asof, "rows": n_saved}
+    try:
+        teams = parse_kenpom_csv_text(csv_text)
+    except ValueError:
+        teams = []
+
+    if len(teams) >= 10:
+        ensure_tables()
+        asof = (asof_date or _asof_date_et())[:10]
+        n_saved = upsert_daily("kenpom_team_ratings_daily", asof, teams, ["team_name"])
+        upsert_health(
+            "kenpom",
+            "ok",
+            row_count=n_saved,
+            notes=f"Imported {n_saved} teams from pasted/uploaded table ({asof})",
+        )
+        return {"status": "ok", "asof_date": asof, "rows": n_saved, "datasets_synced": {"ratings": n_saved}}
+
+    # Also allow standalone single-page supplemental KenPom pastes (HCA, Four Factors, Height/Exp, Players, Refs, FanMatch)
+    supp_checks = [
+        ("stats", parse_kenpom_four_factors_text, 10),
+        ("height", parse_kenpom_height_text, 10),
+        ("hca", parse_kenpom_hca_text, 10),
+        ("playerstats", parse_kenpom_player_stats_text, 10),
+        ("refs", parse_kenpom_refs_text, 10),
+        ("fanmatch", parse_kenpom_fanmatch_text, 1),
+    ]
+    for key, parser_fn, min_rows in supp_checks:
+        try:
+            parsed = parser_fn(csv_text)
+            if len(parsed) >= min_rows:
+                return ingest_kenpom_bundle({key: csv_text}, asof_date=asof_date)
+        except Exception:
+            continue
+
+    raise ValueError(f"Parsed only {len(teams)} valid teams from CSV; expected a full KenPom table (>=10 rows).")
 
 
 def main():

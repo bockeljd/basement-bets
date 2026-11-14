@@ -270,65 +270,129 @@ export const buildWhyPickReasons = (rec, game) => {
 };
 
 /**
- * Build a portable javascript: bookmarklet that extracts #ratings-table (with colspan headers)
- * from the user's own logged-in kenpom.com browser tab and opens Basement Bets with #kp_import=...
+ * Build a 1-click Chrome bookmarklet (`javascript:...`) that runs on kenpom.com,
+ * fetches all 7 KenPom pages in parallel using the browser's active session cookies,
+ * bundles them into a JSON payload, and passes them back to Basement Bets via #kp_import=.
  */
 export const buildKenpomBookmarklet = (appOrigin) => {
   const cleanOrigin = String(appOrigin || '').replace(/\/+$/, '');
   const destPrefix = JSON.stringify(`${cleanOrigin}/#kp_import=`);
   const body = `(function(){
-    var t=document.querySelector('#ratings-table');
-    if(!t){
-      var ts=document.querySelectorAll('table');
-      for(var k=0;k<ts.length;k++){
-        var txt=(ts[k].innerText||'').slice(0,800);
-        if(/NetRtg|AdjEM|ORtg|AdjOE/i.test(txt)){t=ts[k];break;}
-      }
-    }
-    if(!t){
-      if(confirm('You are not on kenpom.com yet.\\n\\nClick OK to open kenpom.com in a new tab. Once logged in with the rankings table on screen, click this bookmark again to sync back to Basement Bets.')){
+    if(location.hostname.indexOf('kenpom.com')===-1){
+      if(confirm('You are not on kenpom.com yet.\\n\\nClick OK to open kenpom.com in a new tab. Once logged in, click this bookmark again to sync all 7 KenPom datasets back to Basement Bets.')){
         window.open('https://kenpom.com/','_blank');
       }
       return;
     }
-    var hTr=[].slice.call(t.querySelectorAll('thead tr')).pop();
-    var hdrs=[];
-    if(hTr){
-      [].slice.call(hTr.children).forEach(function(c){
-        var lb=(c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();
-        var sp=parseInt(c.getAttribute('colspan')||'1',10)||1;
-        hdrs.push(lb);
-        for(var j=1;j<sp;j++){hdrs.push(lb?lb+' Rank':'');}
+    var old=document.getElementById('bb-kp-sync');
+    if(old&&old.parentNode){old.parentNode.removeChild(old);}
+    var pill=document.createElement('div');
+    pill.id='bb-kp-sync';
+    pill.style.cssText='position:fixed;top:16px;right:16px;z-index:2147483647;background:#0f172a;color:#6ee7b7;border:1px solid #10b981;padding:12px 16px;border-radius:10px;font:600 13px/1.4 system-ui,sans-serif;box-shadow:0 10px 25px rgba(0,0,0,0.45);';
+    pill.textContent='Basement Bets: Syncing all 7 KenPom pages (Ratings, Four Factors, Height/Exp, HCA, Players, Refs, FanMatch)...';
+    if(document.body){document.body.appendChild(pill);}
+    function grabTsv(doc,maxRows){
+      if(!doc){return '';}
+      var t=doc.querySelector('#ratings-table');
+      if(!t){
+        var ts=doc.querySelectorAll('table');
+        var bestLen=0;
+        for(var k=0;k<ts.length;k++){
+          var txt=(ts[k].innerText||ts[k].textContent||'').slice(0,800);
+          var nTr=ts[k].querySelectorAll('tr').length;
+          if(/NetRtg|AdjEM|ORtg|AdjOE|eFG%|Continuity|HCA|Official|Ref|Prediction|Player/i.test(txt)&&nTr>bestLen){
+            t=ts[k];bestLen=nTr;
+          }
+        }
+        if(!t&&ts.length){t=ts[0];}
+      }
+      if(!t){return '';}
+      var hTrs=t.querySelectorAll('thead tr');
+      var hTr=hTrs.length?hTrs[hTrs.length-1]:null;
+      var hdrs=[];
+      if(hTr){
+        [].slice.call(hTr.children).forEach(function(c){
+          var lb=(c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();
+          var sp=parseInt(c.getAttribute('colspan')||'1',10)||1;
+          hdrs.push(lb);
+          for(var j=1;j<sp;j++){hdrs.push(lb?lb+' Rank':'');}
+        });
+      }
+      var lines=[];
+      if(hdrs.length>=2){lines.push(hdrs.join('\\t'));}
+      var tb=t.querySelector('tbody')||t;
+      var trs=tb.querySelectorAll('tr');
+      var limit=maxRows?Math.min(trs.length,maxRows):trs.length;
+      for(var r=0;r<limit;r++){
+        if(trs[r].closest&&trs[r].closest('thead')){continue;}
+        var cls=[].slice.call(trs[r].querySelectorAll('td,th')).map(function(c){
+          return (c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();
+        });
+        if(cls.length>=2){lines.push(cls.join('\\t'));}
+      }
+      return lines.join('\\n');
+    }
+    function fetchPage(url,maxRows){
+      return fetch(url,{credentials:'include'}).then(function(resp){
+        if(!resp.ok){return '';}
+        return resp.text();
+      }).then(function(html){
+        if(!html){return '';}
+        var doc=new DOMParser().parseFromString(html,'text/html');
+        return grabTsv(doc,maxRows);
+      }).catch(function(){return '';});
+    }
+    var ratingsP=document.querySelector('#ratings-table')?Promise.resolve(grabTsv(document)):fetchPage('/');
+    Promise.all([
+      ratingsP,
+      fetchPage('/stats.php'),
+      fetchPage('/height.php'),
+      fetchPage('/hca.php'),
+      fetchPage('/playerstats.php?s=ORtg',1200),
+      fetchPage('/officials.php'),
+      fetchPage('/fanmatch.php')
+    ]).then(function(res){
+      if(pill.parentNode){pill.parentNode.removeChild(pill);}
+      if(!res[0]||res[0].split('\\n').length<10){
+        alert('Could not find the full KenPom ratings table. Make sure you are logged in to kenpom.com, then click this bookmark again.');
+        return;
+      }
+      var payload=JSON.stringify({
+        _kp_bundle:1,
+        ratings:res[0],
+        stats:res[1],
+        height:res[2],
+        hca:res[3],
+        playerstats:res[4],
+        refs:res[5],
+        fanmatch:res[6]
       });
-    }
-    var lines=[];
-    if(hdrs.length>=6){lines.push(hdrs.join('\\t'));}
-    var tb=t.querySelector('tbody')||t;
-    var trs=tb.querySelectorAll('tr');
-    for(var r=0;r<trs.length;r++){
-      if(trs[r].closest&&trs[r].closest('thead')){continue;}
-      var cls=[].slice.call(trs[r].querySelectorAll('td,th')).map(function(c){
-        return (c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();
-      });
-      if(cls.length>=6){lines.push(cls.join('\\t'));}
-    }
-    var tsv=lines.join('\\n');
-    if(lines.length<10){
-      alert('Found fewer than 10 rows. Make sure the full ratings table on kenpom.com is loaded.');
-      return;
-    }
-    var bytes=new TextEncoder().encode(tsv);
-    var bin='';
-    for(var i=0;i<bytes.length;i+=8192){
-      bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
-    }
-    var b64=btoa(bin);
-    var dest=${destPrefix}+encodeURIComponent(b64);
-    try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(tsv).catch(function(){});}}catch(e){}
-    var w=window.open(dest,'_blank');
-    if(!w){
-      window.location.href=dest;
-    }
+      if(payload.length>900000&&res[4]){
+        payload=JSON.stringify({
+          _kp_bundle:1,
+          ratings:res[0],
+          stats:res[1],
+          height:res[2],
+          hca:res[3],
+          playerstats:res[4].split('\\n').slice(0,601).join('\\n'),
+          refs:res[5],
+          fanmatch:res[6]
+        });
+      }
+      try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(payload).catch(function(){});}}catch(e){}
+      var bytes=new TextEncoder().encode(payload);
+      var bin='';
+      for(var i=0;i<bytes.length;i+=8192){
+        bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+      }
+      var b64=btoa(bin);
+      var dest=${destPrefix}+encodeURIComponent(b64);
+      var w=window.open(dest,'_blank');
+      if(!w){window.location.href=dest;}
+    }).catch(function(err){
+      if(pill.parentNode){pill.parentNode.removeChild(pill);}
+      alert('KenPom sync error: '+(err&&err.message?err.message:err));
+    });
   })();`;
   return `javascript:${body.replace(/\n\s*/g, '')}`;
 };

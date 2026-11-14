@@ -1055,4 +1055,280 @@ def test_parse_kenpom_full_page_cmd_a_copy():
     assert rows[1]["team_name"] == "Houston"
 
 
+def test_parse_kenpom_all_supplemental_datasets_and_bundle_ingest(monkeypatch):
+    import json
+    import src.scripts.ingest_kenpom as ik
+    import src.scripts.update_data_health as udh
+
+    ratings_rows = [
+        "Rk\tTeam\tConf\tW-L\tNetRtg\tORtg\t\tDRtg\t\tAdjT\t\tLuck\t\tNetRtg\t\tORtg\t\tDRtg\t\tNetRtg",
+        *[
+            f"{i}\tTeam{i}\tACC\t3-0\t{25.0 - i}\t118.0\t{i}\t95.0\t{i}\t68.5\t{i}\t+.010\t50\t+4.0\t30\t108.0\t40\t104.0\t35\t+3.0\t45"
+            for i in range(1, 13)
+        ],
+    ]
+    ratings_tsv = "\n".join(ratings_rows)
+
+    stats_html = """
+    <html><body><table><thead>
+      <tr><th>Team</th><th>Conf</th><th>AdjT</th><th>AdjO</th><th>eFG%</th><th>TO%</th><th>OR%</th><th>FTRate</th><th>AdjD</th><th>eFG%</th><th>TO%</th><th>OR%</th><th>FTRate</th></tr>
+    </thead><tbody>
+      <tr><td>Team1</td><td>ACC</td><td>68.5</td><td>40</td><td>118.0</td><td>5</td><td>57.2</td><td>8</td><td>14.5</td><td>22</td><td>34.8</td><td>15</td><td>36.0</td><td>28</td><td>95.0</td><td>6</td><td>45.1</td><td>9</td><td>21.2</td><td>18</td><td>24.0</td><td>14</td><td>26.5</td><td>19</td></tr>
+      <tr><td>Team2</td><td>ACC</td><td>66.0</td><td>180</td><td>111.0</td><td>45</td><td>50.1</td><td>120</td><td>18.9</td><td>195</td><td>27.5</td><td>210</td><td>29.0</td><td>190</td><td>101.0</td><td>80</td><td>51.2</td><td>190</td><td>16.4</td><td>240</td><td>31.0</td><td>230</td><td>34.0</td><td>200</td></tr>
+    </tbody></table></body></html>
+    """
+    ff_rows = ik.parse_kenpom_four_factors_text(stats_html)
+    assert len(ff_rows) == 2
+    assert ff_rows[0]["team_name"] == "Team1"
+    assert ff_rows[0]["off_efg"] == pytest.approx(57.2)
+    assert ff_rows[0]["off_to"] == pytest.approx(14.5)
+    assert ff_rows[0]["def_efg"] == pytest.approx(45.1)
+    assert ff_rows[0]["def_ftr"] == pytest.approx(26.5)
+    assert ff_rows[1]["team_name"] == "Team2"
+    assert ik._clean_kp_team_name("Gonzaga 1*") == "Gonzaga"
+
+    height_tsv = "\n".join(
+        [
+            "Team\tConf\tAvgHgt\tEffHgt\tExp\tBench\tContinuity",
+            "Team1\tACC\t77.8\t+1.6\t2.25\t34.5\t62.0",
+            "Team2\tACC\t75.4\t-0.9\t1.05\t28.1\t31.5",
+        ]
+    )
+    hgt_rows = ik.parse_kenpom_height_text(height_tsv)
+    assert len(hgt_rows) == 2
+    assert hgt_rows[0]["eff_hgt"] == pytest.approx(1.6)
+    assert hgt_rows[0]["experience"] == pytest.approx(2.25)
+    assert hgt_rows[0]["continuity"] == pytest.approx(62.0)
+
+    hca_tsv = "\n".join(
+        [
+            "Rk\tTeam\tConf\tHCA",
+            "1\tTeam1\tACC\t+4.4",
+            "2\tTeam2\tACC\t+3.1",
+        ]
+    )
+    hca_rows = ik.parse_kenpom_hca_text(hca_tsv)
+    assert len(hca_rows) == 2
+    assert hca_rows[0]["team_name"] == "Team1"
+    assert hca_rows[0]["hca"] == pytest.approx(4.4)
+
+    players_tsv = "\n".join(
+        [
+            "Rk\tPlayer\tTeam\tConf\tMin%\tORtg\t%Poss\teFG%\tTS%\tOR%\tDR%\tARate\tTO%\tFTRate",
+            "1\tCooper Star\tTeam1\tACC\t78.4\t126.5\t26.2\t60.1\t64.0\t8.5\t17.2\t22.0\t12.5\t42.0",
+        ]
+    )
+    p_rows = ik.parse_kenpom_player_stats_text(players_tsv)
+    assert len(p_rows) == 1
+    assert p_rows[0]["player_name"] == "Cooper Star"
+    assert p_rows[0]["team_name"] == "Team1"
+    norm_p = ik.normalize_player_rows(p_rows)
+    assert norm_p[0]["usage"] == pytest.approx(26.2)
+    assert norm_p[0]["ortg"] == pytest.approx(126.5)
+
+    refs_tsv = "\n".join(
+        [
+            "Rk\tOfficial\tRtg\tGames\tPF/40\tHome%",
+            "1\tRoger Ayers\t98.5\t12\t38.2\t64.1",
+        ]
+    )
+    ref_rows = ik.parse_kenpom_refs_text(refs_tsv)
+    assert len(ref_rows) == 1
+    assert ref_rows[0]["ref_name"] == "Roger Ayers"
+
+    fanmatch_tsv = "\n".join(
+        [
+            "Time (ET)\tGame\tLocation\tThrill\tPrediction",
+            "7:00 PM\t12 Team2 at 4 Team1\tDurham, NC\t74.2\tTeam1 79-72 (76%)",
+        ]
+    )
+    fm_rows = ik.parse_kenpom_fanmatch_text(fanmatch_tsv)
+    assert len(fm_rows) == 1
+    assert fm_rows[0]["home_team"] == "Team1"
+    assert fm_rows[0]["away_team"] == "Team2"
+    assert fm_rows[0]["pred_winner"] == "Team1"
+    assert fm_rows[0]["winner_score"] == pytest.approx(79.0)
+    assert fm_rows[0]["loser_score"] == pytest.approx(72.0)
+    assert fm_rows[0]["win_prob"] == pytest.approx(76.0)
+    assert fm_rows[0]["thrill_score"] == pytest.approx(74.2)
+
+    recorded_tables = {}
+    monkeypatch.setattr(ik, "ensure_tables", lambda: None)
+
+    def _fake_upsert(table, asof, rows, keys):
+        recorded_tables[table] = rows
+        return len(rows)
+
+    monkeypatch.setattr(ik, "upsert_daily", _fake_upsert)
+    monkeypatch.setattr(udh, "upsert", lambda *a, **kw: None)
+
+    bundle_json = json.dumps(
+        {
+            "_kp_bundle": 1,
+            "ratings": ratings_tsv,
+            "stats": stats_html,
+            "height": height_tsv,
+            "hca": hca_tsv,
+            "playerstats": players_tsv,
+            "refs": refs_tsv,
+            "fanmatch": fanmatch_tsv,
+        }
+    )
+    res = ik.ingest_kenpom_csv(bundle_json, asof_date="2026-11-13")
+    assert res["status"] == "ok"
+    assert res["rows"] == 12
+    assert res["datasets_synced"] == {
+        "ratings": 12,
+        "four_factors": 2,
+        "height_experience": 2,
+        "home_court": 2,
+        "player_stats": 1,
+        "ref_ratings": 1,
+        "fanmatch_games": 1,
+    }
+    team1_saved = next(r for r in recorded_tables["kenpom_team_ratings_daily"] if r["team_name"] == "Team1")
+    assert team1_saved["raw"]["off_efg"] == pytest.approx(57.2)
+    assert team1_saved["raw"]["experience"] == pytest.approx(2.25)
+    assert team1_saved["raw"]["continuity"] == pytest.approx(62.0)
+    assert "kenpom_fanmatch_daily" in recorded_tables
+
+
+def test_kenpom_four_factors_and_experience_flow_into_model_v2(monkeypatch):
+    from datetime import date
+    from src.services.kenpom_client import KenPomClient
+
+    kp = KenPomClient.__new__(KenPomClient)
+    kp.get_team_rating = lambda name, conn=None: (
+        {
+            "team": "Team1",
+            "rank": 5,
+            "adj_em": 24.0,
+            "adj_o": 119.0,
+            "adj_d": 95.0,
+            "adj_t": 68.0,
+            "luck": 0.0,
+            "sos_adj_em": 4.0,
+            "ncsos_adj_em": 3.0,
+            "off_efg": 57.0,
+            "off_to": 14.0,
+            "off_or": 35.0,
+            "off_ftr": 36.0,
+            "def_efg": 45.0,
+            "def_to": 21.0,
+            "def_or": 24.0,
+            "def_ftr": 27.0,
+            "experience": 2.3,
+            "eff_hgt": 1.6,
+            "continuity": 64.0,
+        }
+        if name == "Team1"
+        else {
+            "team": "Team2",
+            "rank": 40,
+            "adj_em": 14.0,
+            "adj_o": 111.0,
+            "adj_d": 97.0,
+            "adj_t": 68.0,
+            "luck": 0.0,
+            "sos_adj_em": 1.0,
+            "ncsos_adj_em": 0.5,
+            "off_efg": 50.0,
+            "off_to": 19.0,
+            "off_or": 28.0,
+            "off_ftr": 29.0,
+            "def_efg": 51.0,
+            "def_to": 16.0,
+            "def_or": 31.0,
+            "def_ftr": 34.0,
+            "experience": 1.0,
+            "eff_hgt": -0.8,
+            "continuity": 32.0,
+        }
+    )
+    adj = kp.calculate_kenpom_adjustment("Team1", "Team2", neutral_site=False)
+    assert adj["four_factors_adj"] > 0.5
+    assert adj["exp_height_adj"] > 0.3
+    assert adj["home_continuity"] == pytest.approx(64.0)
+    assert adj["away_continuity"] == pytest.approx(32.0)
+
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.torvik_service.get_projection.return_value = {
+        "margin": 8.0,
+        "official_margin": 8.0,
+        "total": 146.0,
+        "projected_score": "69-77",
+        "lean": "Home",
+    }
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "record": "12-2"},
+        "away": {"luck": 0.0, "record": "10-4"},
+    }
+    model.kenpom_client = kp
+    kp.get_home_court = lambda name, conn=None: {"team": name, "hca": 4.2}
+    kp.get_team_player_agg = lambda name, conn=None: None
+    kp.get_player_stats_for_team = lambda name, limit=50, conn=None: []
+    model.haslametrics_client = None
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 150.0
+    model.news_service = MagicMock()
+    model.news_service.fetch_game_context.return_value = {}
+    model.injury_service = MagicMock()
+    model.injury_service.get_matchup_injuries.return_value = {
+        "has_injuries": False,
+        "injuries": [],
+        "sigma_mult": 1.0,
+        "spread_adj": 0.0,
+        "total_adj": 0.0,
+    }
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+
+    event_ctx = {
+        "id": "ev-kp-style-1",
+        "home_team": "Team1",
+        "away_team": "Team2",
+        "start_time": f"{date.today().isoformat()}T19:00:00+00:00",
+        "neutral_site": False,
+    }
+    snap = {"spread_home": -6.5, "total": 146.0}
+    res = model.analyze("ev-kp-style-1", market_snapshot=snap, event_context=event_ctx, persist=False)
+    sig_adj = res["signals"]["adjustments"]
+    assert sig_adj["kp_style_adj"] > 0.5
+    assert sig_adj["kp_hca"] == pytest.approx(0.5, abs=0.05)
+    assert res["context"]["kp_style_adj"] > 0.5
+
+
+def test_mac_kenpom_daily_sync_builds_7_dataset_bundle(monkeypatch):
+    import sys
+    from pathlib import Path
+    scripts_dir = str(Path(__file__).resolve().parents[2] / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import mac_kenpom_daily_sync as mk
+
+    sample_pages = {
+        "/": "<html><body><table id='ratings-table'><thead><tr><th>Rk</th><th>Team</th><th>Conf</th><th>W-L</th><th>NetRtg</th></tr></thead><tbody>"
+             + "".join(f"<tr><td>{i}</td><td>Team{i}</td><td>ACC</td><td>3-0</td><td>{20-i}</td></tr>" for i in range(1, 13))
+             + "</tbody></table></body></html>",
+        "/stats.php": "<html><body><table><thead><tr><th>Team</th><th>eFG%</th></tr></thead><tbody><tr><td>Team1</td><td>56.0</td></tr></tbody></table></body></html>",
+        "/height.php": "<html><body><table><thead><tr><th>Team</th><th>Continuity</th></tr></thead><tbody><tr><td>Team1</td><td>61.2</td></tr></tbody></table></body></html>",
+        "/hca.php": "<html><body><table><thead><tr><th>Team</th><th>HCA</th></tr></thead><tbody><tr><td>Team1</td><td>4.1</td></tr></tbody></table></body></html>",
+        "/playerstats.php?s=ORtg": "<html><body><table><thead><tr><th>Player</th><th>Team</th><th>ORtg</th></tr></thead><tbody><tr><td>Star Player</td><td>Team1</td><td>125.0</td></tr></tbody></table></body></html>",
+        "/officials.php": "<html><body><table><thead><tr><th>Official</th><th>PF/40</th></tr></thead><tbody><tr><td>Ref One</td><td>37.5</td></tr></tbody></table></body></html>",
+        "/fanmatch.php": "<html><body><table><thead><tr><th>Game</th><th>Prediction</th></tr></thead><tbody><tr><td>Team2 at Team1</td><td>Team1 78-70 (74%)</td></tr></tbody></table></body></html>",
+    }
+
+    monkeypatch.setattr(mk, "fetch_html", lambda sess, path: sample_pages[path])
+    bundle = mk.build_kenpom_bundle_from_session(object(), sleep_s=0.0)
+    assert bundle["_kp_bundle"] == 1
+    for key in ("ratings", "stats", "height", "hca", "playerstats", "refs", "fanmatch"):
+        assert key in bundle and len(bundle[key]) > 0
+
+
+
 

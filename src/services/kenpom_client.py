@@ -116,6 +116,19 @@ class KenPomClient:
                 'opp_o': raw_dict.get('opp_o'),
                 'opp_d': raw_dict.get('opp_d'),
                 'ncsos_adj_em': raw_dict.get('ncsos_adj_em'),
+                'off_efg': raw_dict.get('off_efg'),
+                'off_to': raw_dict.get('off_to'),
+                'off_or': raw_dict.get('off_or'),
+                'off_ftr': raw_dict.get('off_ftr'),
+                'def_efg': raw_dict.get('def_efg'),
+                'def_to': raw_dict.get('def_to'),
+                'def_or': raw_dict.get('def_or'),
+                'def_ftr': raw_dict.get('def_ftr'),
+                'avg_hgt': raw_dict.get('avg_hgt'),
+                'eff_hgt': raw_dict.get('eff_hgt'),
+                'experience': raw_dict.get('experience'),
+                'bench_pct': raw_dict.get('bench_pct'),
+                'continuity': raw_dict.get('continuity'),
             }
         
         self._rating_cache[matched_name] = res
@@ -292,6 +305,75 @@ class KenPomClient:
             out.append({"player_name": row["player_name"], "team_name": row["team_name"], "metrics": row["metrics"]})
         return out
 
+    def get_fanmatch_prediction(self, home_team: str, away_team: str, conn=None) -> Optional[Dict]:
+        """Best-effort lookup of KenPom FanMatch daily prediction for home_team vs away_team."""
+        try:
+            matcher = getattr(self, "matcher", None)
+            if matcher is None:
+                return None
+            h_match = matcher.find_source_name(home_team, "kenpom_fanmatch_daily", "home_team") or home_team
+            a_match = matcher.find_source_name(away_team, "kenpom_fanmatch_daily", "away_team") or away_team
+            season_start = season_start_date_for_game(None)
+
+            def _query(c):
+                row = _exec(
+                    c,
+                    """
+                    SELECT asof_date::text AS asof_date, home_team, away_team,
+                           pred_winner, winner_score, loser_score, win_prob, thrill_score
+                    FROM kenpom_fanmatch_daily
+                    WHERE asof_date >= %s
+                      AND (
+                        (LOWER(home_team) = LOWER(%s) AND LOWER(away_team) = LOWER(%s))
+                        OR (LOWER(home_team) = LOWER(%s) AND LOWER(away_team) = LOWER(%s))
+                      )
+                    ORDER BY asof_date DESC
+                    LIMIT 1
+                    """,
+                    (season_start, h_match, a_match, a_match, h_match),
+                ).fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                w_sc = d.get("winner_score")
+                l_sc = d.get("loser_score")
+                winner = str(d.get("pred_winner") or "").strip()
+                total = (float(w_sc) + float(l_sc)) if (w_sc is not None and l_sc is not None) else None
+                margin_abs = abs(float(w_sc) - float(l_sc)) if (w_sc is not None and l_sc is not None) else None
+                home_won = bool(
+                    winner
+                    and (
+                        winner.lower() == str(h_match).lower()
+                        or winner.lower() == str(home_team).lower()
+                    )
+                )
+                home_margin = None
+                if margin_abs is not None and winner:
+                    home_margin = margin_abs if home_won else -margin_abs
+                proj_score = None
+                if w_sc is not None and l_sc is not None:
+                    h_pts = int(round(w_sc if home_won else l_sc))
+                    a_pts = int(round(l_sc if home_won else w_sc))
+                    proj_score = f"{a_pts}-{h_pts}"
+                return {
+                    "asof_date": d.get("asof_date"),
+                    "pred_winner": d.get("pred_winner"),
+                    "winner_score": w_sc,
+                    "loser_score": l_sc,
+                    "win_prob": d.get("win_prob"),
+                    "thrill_score": d.get("thrill_score"),
+                    "fair_margin": home_margin,
+                    "fair_total": total,
+                    "projected_score": proj_score,
+                }
+
+            if conn is not None:
+                return _query(conn)
+            with get_db_connection() as c:
+                return _query(c)
+        except Exception:
+            return None
+
     def calculate_kenpom_adjustment(
         self,
         home_team: str,
@@ -375,6 +457,56 @@ class KenPomClient:
         raw_sos_adj = ((sos_diff or 0.0) * 0.05) + ((ncsos_diff or 0.0) * 0.03)
         sos_spread_adj = round(max(-1.0, min(1.0, raw_sos_adj)), 2) if (sos_diff is not None or ncsos_diff is not None) else 0.0
 
+        # Four Factors matchup edge (eFG%, TO%, OR%, FTRate)
+        h_off_efg = _opt_float(home_rating.get('off_efg'))
+        h_def_efg = _opt_float(home_rating.get('def_efg'))
+        a_off_efg = _opt_float(away_rating.get('off_efg'))
+        a_def_efg = _opt_float(away_rating.get('def_efg'))
+        four_factors_adj = 0.0
+        if None not in (h_off_efg, h_def_efg, a_off_efg, a_def_efg):
+            efg_diff = ((h_off_efg - a_def_efg) - (a_off_efg - h_def_efg)) * 0.5
+            h_off_to = _opt_float(home_rating.get('off_to'))
+            h_def_to = _opt_float(home_rating.get('def_to'))
+            a_off_to = _opt_float(away_rating.get('off_to'))
+            a_def_to = _opt_float(away_rating.get('def_to'))
+            to_diff = 0.0
+            if None not in (h_off_to, h_def_to, a_off_to, a_def_to):
+                to_diff = ((a_off_to + h_def_to) - (h_off_to + a_def_to)) * 0.5
+            h_off_or = _opt_float(home_rating.get('off_or'))
+            h_def_or = _opt_float(home_rating.get('def_or'))
+            a_off_or = _opt_float(away_rating.get('off_or'))
+            a_def_or = _opt_float(away_rating.get('def_or'))
+            or_diff = 0.0
+            if None not in (h_off_or, h_def_or, a_off_or, a_def_or):
+                or_diff = ((h_off_or + a_def_or) - (a_off_or + h_def_or)) * 0.5
+            h_off_ftr = _opt_float(home_rating.get('off_ftr'))
+            h_def_ftr = _opt_float(home_rating.get('def_ftr'))
+            a_off_ftr = _opt_float(away_rating.get('off_ftr'))
+            a_def_ftr = _opt_float(away_rating.get('def_ftr'))
+            ftr_diff = 0.0
+            if None not in (h_off_ftr, h_def_ftr, a_off_ftr, a_def_ftr):
+                ftr_diff = ((h_off_ftr + a_def_ftr) - (a_off_ftr + h_def_ftr)) * 0.5
+            raw_ff = (efg_diff * 0.12) + (to_diff * 0.08) + (or_diff * 0.06) + (ftr_diff * 0.04)
+            four_factors_adj = round(max(-1.2, min(1.2, raw_ff)), 2)
+
+        # Experience & Effective Height matchup edge
+        h_exp = _opt_float(home_rating.get('experience'))
+        a_exp = _opt_float(away_rating.get('experience'))
+        h_eff_hgt = _opt_float(home_rating.get('eff_hgt')) or _opt_float(home_rating.get('avg_hgt'))
+        a_eff_hgt = _opt_float(away_rating.get('eff_hgt')) or _opt_float(away_rating.get('avg_hgt'))
+        raw_eh = 0.0
+        if h_exp is not None and a_exp is not None:
+            raw_eh += (h_exp - a_exp) * 0.30
+        if h_eff_hgt is not None and a_eff_hgt is not None:
+            raw_eh += (h_eff_hgt - a_eff_hgt) * 0.10
+        exp_height_adj = round(max(-0.75, min(0.75, raw_eh)), 2) if (
+            (h_exp is not None and a_exp is not None) or (h_eff_hgt is not None and a_eff_hgt is not None)
+        ) else 0.0
+
+        h_cont = _opt_float(home_rating.get('continuity'))
+        a_cont = _opt_float(away_rating.get('continuity'))
+        fanmatch = self.get_fanmatch_prediction(home_team, away_team, conn=conn) if hasattr(self, "get_fanmatch_prediction") else None
+
         summary = f"KenPom: {home_rating['team']} (#{home_rating['rank']}) vs {away_rating['team']} (#{away_rating['rank']})"
 
         return {
@@ -390,6 +522,13 @@ class KenPomClient:
             'sos_diff': sos_diff,
             'ncsos_diff': ncsos_diff,
             'sos_spread_adj': sos_spread_adj,
+            'four_factors_adj': four_factors_adj,
+            'exp_height_adj': exp_height_adj,
+            'home_continuity': h_cont,
+            'away_continuity': a_cont,
+            'home_experience': h_exp,
+            'away_experience': a_exp,
+            'fanmatch': fanmatch,
             'home_luck': h_luck,
             'away_luck': a_luck,
             'home_sos': h_sos,

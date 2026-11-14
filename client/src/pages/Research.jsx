@@ -293,9 +293,19 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       }
       const rows = res?.data?.rows ?? 'all';
       const asof = res?.data?.asof_date ? ` (${res.data.asof_date})` : '';
+      const ds = res?.data?.datasets_synced || {};
+      const extras = [
+        ds.four_factors > 0 ? 'Four Factors' : null,
+        ds.height_experience > 0 ? 'Height/Exp' : null,
+        ds.home_court > 0 ? 'HCA' : null,
+        ds.player_stats > 0 ? 'Players' : null,
+        ds.ref_ratings > 0 ? 'Refs' : null,
+        ds.fanmatch_games > 0 ? 'FanMatch' : null,
+      ].filter(Boolean);
+      const extraMsg = extras.length ? ` + ${extras.join(', ')}` : '';
       setToast({
         tone: 'ok',
-        text: `KenPom updated (${rows} teams${asof}). Refreshing model picks...`,
+        text: `KenPom updated (${rows} teams${extraMsg}${asof}). Refreshing model picks...`,
       });
       await fetchSchedule();
       return true;
@@ -326,7 +336,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         return;
       }
       const text = (await navigator.clipboard.readText()) || '';
-      if (text.trim().length < 50 || !/(NetRtg|AdjEM|ORtg|AdjOE|\t)/i.test(text)) {
+      if (text.trim().length < 50 || !/(NetRtg|AdjEM|ORtg|AdjOE|_kp_bundle|\t)/i.test(text)) {
         setShowModelLogicDialog(true);
         setToast({
           tone: 'warn',

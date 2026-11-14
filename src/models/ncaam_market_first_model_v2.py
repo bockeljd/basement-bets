@@ -978,8 +978,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
             
         # --- Feature: Continuity / Transfer Portal Factor ---
         # Note: Torvik stores continuity either as 0..1 or 0..100 percentage; normalize to 0..1.
-        raw_h_cont = (torvik_team_stats.get('home') or {}).get('continuity', 0.7) or 0.7
-        raw_a_cont = (torvik_team_stats.get('away') or {}).get('continuity', 0.7) or 0.7
+        raw_h_cont = (torvik_team_stats.get('home') or {}).get('continuity')
+        raw_a_cont = (torvik_team_stats.get('away') or {}).get('continuity')
+        if raw_h_cont is None and isinstance(kenpom_adj, dict):
+            raw_h_cont = kenpom_adj.get('home_continuity')
+        if raw_a_cont is None and isinstance(kenpom_adj, dict):
+            raw_a_cont = kenpom_adj.get('away_continuity')
+        raw_h_cont = 0.7 if raw_h_cont is None else raw_h_cont
+        raw_a_cont = 0.7 if raw_a_cont is None else raw_a_cont
         home_continuity = float(raw_h_cont) / 100.0 if float(raw_h_cont) > 1.5 else float(raw_h_cont)
         away_continuity = float(raw_a_cont) / 100.0 if float(raw_a_cont) > 1.5 else float(raw_a_cont)
         
@@ -1363,8 +1369,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         else:
             sos_adj = hasla_sos_adj
 
-        # Positive sos_adj / mom_adj favors home team -> lower (more negative) home spread
-        mu_spread_final -= (sos_adj + mom_adj) * situational_scale
+        kp_ff_adj = _safe_float((kenpom_adj or {}).get('four_factors_adj')) or 0.0
+        kp_eh_adj = _safe_float((kenpom_adj or {}).get('exp_height_adj')) or 0.0
+        kp_style_adj = round(max(-1.2, min(1.2, kp_ff_adj + kp_eh_adj)), 2) if kp_available else 0.0
+
+        # Positive sos_adj / mom_adj / kp_style_adj favors home team -> lower (more negative) home spread
+        mu_spread_final -= (sos_adj + mom_adj + kp_style_adj) * situational_scale
 
         # Re-clamp automated spread adjustments (allow up to effective_cap + 1.0 when consensus agrees,
         # but tighter +0.4 buffer on 25+ pt blowouts)
@@ -1461,6 +1471,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "kenpom": {
                 "fair_spread_home": round(-float(kp_margin), 1),
                 "fair_total": round(float(mu_kenpom_total), 1) if mu_kenpom_total is not None else None,
+                "four_factors_adj": round(float(kp_ff_adj), 2),
+                "exp_height_adj": round(float(kp_eh_adj), 2),
+                "fanmatch_projected_score": (kenpom_adj.get("fanmatch") or {}).get("projected_score") if isinstance(kenpom_adj, dict) and isinstance(kenpom_adj.get("fanmatch"), dict) else None,
                 "available": True,
             } if kp_available else None,
             "torvik": {
@@ -1489,6 +1502,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "adjustments": {
                 "sos_adj": round(float(sos_adj), 2),
                 "mom_adj": round(float(mom_adj), 2),
+                "kp_style_adj": round(float(kp_style_adj), 2),
+                "kp_hca": round(float(kp_hca), 2),
                 "fatigue_adj": round(float(fatigue_adj), 2),
                 "spot_adj": round(float(spot_adj), 2),
                 "shooting_adj": round(float(shooting_adj), 2),
@@ -1558,6 +1573,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             'w_hasla': round(float(w_hasla), 3),
             'sos_adj': round(float(sos_adj), 2),
             'mom_adj': round(float(mom_adj), 2),
+            'kp_style_adj': round(float(kp_style_adj), 2),
+            'kp_hca': round(float(kp_hca), 2),
             'fatigue_adj': round(float(fatigue_adj), 2),
             'spot_adj': round(float(spot_adj), 2),
             'shooting_adj': round(float(shooting_adj), 2),
