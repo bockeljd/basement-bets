@@ -175,10 +175,10 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
             </div>
             <div>
               <h2 id="modelInfoDialogTitle" className="text-lg font-bold text-white">
-                How Picks Are Built &amp; KenPom Setup
+                How Basement Bets Works
               </h2>
               <p className="text-xs text-slate-400">
-                Plain-English guide to our projections, injury pricing, and turning KenPom on
+                Plain-English guide to picks, live trending, confidence scores, and KenPom syncing
               </p>
             </div>
           </div>
@@ -455,74 +455,115 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
 
           <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-2">
             <h3 className="font-bold uppercase tracking-wider text-indigo-300">
-              2. How Each Pick Is Built
+              2. How Each Bet Is Picked
             </h3>
             <p className="text-slate-300">
-              Our independent projection engine blends team efficiency ratings from{' '}
-              <strong>BartTorvik</strong>, <strong>KenPom</strong>, and <strong>Haslametrics</strong> alongside live
-              sportsbook odds. Instead of just echoing Vegas, whenever multiple independent systems agree the line is
-              off, Basement Bets boosts efficiency projection weight up to <strong>40%&ndash;60%</strong>.
+              Our model blends independent college basketball ratings from{' '}
+              <strong>BartTorvik</strong>, <strong>KenPom</strong>, and <strong>Haslametrics</strong> and compares them
+              directly against live sportsbook odds. Instead of just copying Vegas, when multiple rating systems agree
+              that a line is off, Basement Bets gives team ratings up to <strong>40%&ndash;60% weight</strong>.
             </p>
             <p className="text-slate-400">
-              KenPom contributes pace-adjusted efficiency margins, true scoring-efficiency fair totals,{' '}
-              <strong>Strength of Schedule (SOS / non-conference cupcake filters)</strong>, and{' '}
-              <strong>Luck regression</strong>; Haslametrics adds recent <strong>momentum</strong> and game-to-game{' '}
-              <strong>consistency</strong>. Plays are published when a side clears <strong>+2.0% EV</strong> (or{' '}
-              <strong>1.1+ pts / +2.5% EV</strong> high-conviction override) with clean safety checks.
+              We also adjust for <strong>schedule strength</strong>, <strong>luck regression</strong>,{' '}
+              <strong>recent form</strong>, <strong>rest/travel</strong>, and <strong>key player injuries</strong>. A
+              play is only posted when our edge clears <strong>+2.0% expected profit value</strong> and passes safety
+              checks against sharp line moves against us.
             </p>
           </section>
 
           <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-2.5">
             <h3 className="font-bold uppercase tracking-wider text-sky-300">
-              3. How Confidence Level Is Calculated (0&ndash;100 Score &amp; Tier)
+              3. How Confidence Is Scored (0&ndash;100)
             </h3>
             <p className="text-slate-300">
-              Confidence does <strong>not</strong> measure raw payout size &mdash; it measures how likely the bet still
-              wins after stressing our projection for real-game variance and model uncertainty:
+              Confidence does <strong>not</strong> chase big longshot payouts &mdash; it measures how reliably the bet
+              wins after accounting for real-game swings and uncertainty:
             </p>
             <div className="space-y-2 text-slate-300">
               <div className="rounded-lg border border-slate-800 bg-slate-900/75 p-2.5">
-                <span className="font-semibold text-white">Step 1 &mdash; Variance-Adjusted &amp; Calibrated Win Probability:</span>{' '}
-                We compute the probability of covering or clearing the total using our fair line (&mu;) and game-specific
-                standard deviation (&sigma;, widened for fast tempo, heavy roster turnover, 18+ point blowouts, injuries,
-                and line-movement uncertainty), subtract whole-number push odds, and apply PAVA probability calibration.
-                When projection-uncertainty bounds are enabled, we use a conservative{' '}
-                <strong>10th-percentile lower bound</strong> from 600 Monte Carlo trials instead of the midpoint.
+                <span className="font-semibold text-white">Step 1 &mdash; Stress-Tested Win Chance:</span>{' '}
+                We calculate how likely a team is to cover or clear the total based on how far our fair line sits from
+                the sportsbook line. Games with fast pace, heavy roster turnover, 18+ point blowout risk, injuries, or
+                conflicting line moves automatically widen our uncertainty buffer so risky bets get downgraded.
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-2.5">
                   <div className="font-bold text-emerald-300">HIGH (Score 80&ndash;95)</div>
                   <div className="text-[11px] text-slate-300 mt-0.5">
-                    Calibrated win chance <strong>&ge; 55.0%</strong> with positive expected value (+EV). Comfortably
-                    clears the 52.4% break-even bar at -110 odds (scales from 80 at 55% up to 95 at 65%+).
+                    <strong>55.0%+</strong> win chance with positive value (well above the 52.4% break-even bar at -110
+                    odds).
                   </div>
                 </div>
                 <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 p-2.5">
                   <div className="font-bold text-amber-300">MEDIUM (Score 55&ndash;78)</div>
                   <div className="text-[11px] text-slate-300 mt-0.5">
-                    Calibrated win chance between <strong>52.0% and 54.9%</strong> with positive +EV. Solid playable
-                    edge, scaled linearly from 55 to 78.
+                    <strong>52.0% to 54.9%</strong> win chance with positive value &mdash; solid playable edge with
+                    closer margins.
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-2.5">
                   <div className="font-bold text-slate-300">LOW (Score 15&ndash;49)</div>
                   <div className="text-[11px] text-slate-400 mt-0.5">
-                    Win chance <strong>&lt; 52.0%</strong> (or non-positive EV). Prevents risky longshots with big payout
-                    odds from being labeled High Confidence.
+                    Under <strong>52.0%</strong> win chance (or negative value) &mdash; held back from top plays.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-2.5">
+            <h3 className="font-bold uppercase tracking-wider text-rose-300">
+              4. How Live In-Game Trending Works (Winning vs. Losing)
+            </h3>
+            <p className="text-slate-300">
+              While a game is live, Basement Bets tracks the <strong>game clock</strong>, <strong>% played</strong>,
+              and <strong>live scoring speed (pts/min)</strong> to estimate whether a bet is genuinely on pace to win or
+              lose &mdash; instead of just reading the raw scoreboard:
+            </p>
+            <div className="space-y-2 text-slate-300">
+              <div className="rounded-lg border border-slate-800 bg-slate-900/75 p-2.5">
+                <span className="font-semibold text-white">Pace-Blended Final Projection:</span>{' '}
+                Early in a game (first few minutes), we blend current scoring speed lightly (<strong>15% weight</strong>)
+                with our pre-game projection so an early scoring run does not overreact. As the clock winds down toward
+                the finish, live pace takes over up to <strong>80% weight</strong> to project the final score and margin
+                (across NCAAM halves/OTs, NBA/NFL quarters, and soccer halves).
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-2.5">
+                  <div className="font-bold text-emerald-300">Trending to Win (Green)</div>
+                  <div className="text-[11px] text-slate-300 mt-0.5">
+                    Projected final score beats the bet line by <strong>1.5+ pts (Totals)</strong> or{' '}
+                    <strong>1.25+ pts (Spreads/ML)</strong> &mdash; or an Over already passed the target (99% Already
+                    Cashed).
+                  </div>
+                </div>
+                <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 p-2.5">
+                  <div className="font-bold text-amber-300">Tight / Toss-Up (Amber)</div>
+                  <div className="text-[11px] text-slate-300 mt-0.5">
+                    Projected finish lands within <strong>1.5 pts (Totals)</strong> or <strong>1.25 pts (Spreads)</strong>{' '}
+                    of the line &mdash; too close to call.
+                  </div>
+                </div>
+                <div className="rounded-lg border border-rose-500/30 bg-rose-950/20 p-2.5">
+                  <div className="font-bold text-rose-300">Trending to Lose (Red)</div>
+                  <div className="text-[11px] text-slate-300 mt-0.5">
+                    Projected finish misses the bet line by <strong>1.5+ pts (Totals)</strong> or{' '}
+                    <strong>1.25+ pts (Spreads)</strong> &mdash; or an Under already went over the limit (1% Over
+                    Limit).
                   </div>
                 </div>
               </div>
               <p className="text-[11px] text-slate-400">
-                Any adverse steam move, book-to-book outlier, 18+ pt blowout variance guard, or unpriced key injury
-                widens uncertainty (&sigma;), which compresses win probability toward 50% and automatically lowers the
-                confidence score.
+                <strong>Live Win %:</strong> Converts the projected cushion into a win chance based on time remaining
+                &mdash; small leads stay near 50%&ndash;65% at halftime and climb toward 90%+ late when the clock runs
+                down. Games without a recommended pick still track live pace vs. the sportsbook spread and total.
               </p>
             </div>
           </section>
 
           <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-3">
             <h3 className="font-bold uppercase tracking-wider text-emerald-300">
-              4. Data Sources Overview
+              5. Data Sources Overview
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {['torvik', 'kenpom', 'haslametrics', 'odds', 'action_splits'].map((src) => {

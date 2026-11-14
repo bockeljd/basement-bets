@@ -14,7 +14,7 @@ const FEED_LABEL_MAP = {
   kenpom: 'KenPom',
   haslametrics: 'Haslametrics',
   odds: 'Sportsbook Odds',
-  action_splits: 'Public Betting Splits',
+  action_splits: 'Public Betting Money',
   results: 'Game Results',
 };
 
@@ -142,35 +142,18 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
             }`}
           >
             <span className={`w-1.5 h-1.5 rounded-full ${feedsHealthy ? 'bg-emerald-400' : 'bg-amber-400'}`} aria-hidden="true" />
-            <span>Data Feeds: {activeFeedCount}/{FEED_DEFS.length} Active</span>
+            <span>Data Sources: {activeFeedCount}/{FEED_DEFS.length} Ready</span>
           </span>
 
-          <span className="text-slate-400 font-mono text-[11px] px-1.5">
-            Odds: <strong className="text-slate-200">{withOdds}/{leagueGames.length}</strong> games
+          <span className="text-slate-400 text-[11px] px-1">
+            Odds loaded on <strong className="font-mono text-slate-200">{withOdds}/{leagueGames.length}</strong> games
           </span>
 
-          <div className="hidden sm:flex items-center gap-1 flex-wrap">
-            {FEED_DEFS.map((feed) => {
-              const state = getFeedState(bySource[feed.key], feed.key);
-              const isSelected = detailsOpen && selectedSource === feed.key;
-              return (
-                <button
-                  key={feed.key}
-                  type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => handleTogglePill(feed.key)}
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] transition cursor-pointer ${
-                    isSelected
-                      ? 'bg-slate-800 border-indigo-400/50 text-white'
-                      : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
-                  }`}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${state.dotCls}`} aria-hidden="true" />
-                  <span>{feed.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          {leagueFilter === 'NCAAM' && !kenpomOk && (
+            <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] font-semibold">
+              KenPom Off
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -183,7 +166,7 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
             }}
             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-950/70 hover:bg-slate-800 text-[11px] font-semibold text-slate-300 hover:text-white cursor-pointer"
           >
-            <span>Feed Details</span>
+            <span>View Sources</span>
             {detailsOpen ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
           </button>
 
@@ -196,7 +179,7 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-semibold transition cursor-pointer"
               >
                 <ClipboardPaste size={11} aria-hidden="true" />
-                <span>Paste Sync KenPom</span>
+                <span>Paste KenPom</span>
               </button>
               <button
                 type="button"
@@ -208,7 +191,7 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
                 }`}
               >
                 <Upload size={11} aria-hidden="true" />
-                <span>{kenpomOk ? 'Refresh KenPom' : 'Enable KenPom'}</span>
+                <span>{kenpomOk ? 'Update KenPom' : 'Enable KenPom'}</span>
               </button>
             </>
           )}

@@ -53,9 +53,9 @@ const TodayPlayCard = ({
   const kellyRaw = Number(rec?.kelly ?? rec?.kelly_fraction);
   const kellyUnits =
     Number.isFinite(kellyRaw) && kellyRaw > 0
-      ? `${(kellyRaw * 100).toFixed(1)}% bankroll`
-      : '0.5u–1.0u';
-  const tags = Array.isArray(rec?.movement_tags) ? rec.movement_tags.slice(0, 3) : [];
+      ? `Stake ${(kellyRaw * 100).toFixed(1)}%`
+      : 'Standard bet';
+  const tags = Array.isArray(rec?.movement_tags) ? rec.movement_tags.slice(0, 2) : [];
   const reasons = buildWhyPickReasons(rec, game).filter(
     (r) => r.label !== 'Model vs Market' && r.label !== 'Independent Ratings'
   );
@@ -69,6 +69,14 @@ const TodayPlayCard = ({
   const visualData = buildVisualModelData(rec, game, analysisLike);
   const liveInfo = getLiveGameStatus(game, rec, context);
   const modelSignals = getModelSignalData(rec, context, null, game);
+  const cardSignals = modelSignals.pills.slice(0, 2);
+  const liveBadgeText = liveInfo.isLive && liveInfo.trendLabel
+    ? `${liveInfo.trendLabel}${liveInfo.liveWinProb != null ? ` (${Math.round(liveInfo.liveWinProb * 100)}%)` : ''}`
+    : liveInfo.coverText;
+  const liveProjLine =
+    liveInfo.liveProjAwayScore != null && liveInfo.liveProjHomeScore != null
+      ? `Proj. Finish: ${game?.away_team} ${liveInfo.liveProjAwayScore} – ${game?.home_team} ${liveInfo.liveProjHomeScore}`
+      : liveInfo.gameTrendText;
 
   const pickLabel = rec?.selection || rec?.pick || game?.home_team || 'Pick';
   const matchupLabel = `${game?.away_team || 'Away'} at ${game?.home_team || 'Home'}`;
@@ -159,7 +167,7 @@ const TodayPlayCard = ({
               )}
             </div>
 
-            {liveInfo.coverText && (
+            {liveBadgeText && (
               <span
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${
                   liveInfo.coverTone === 'win'
@@ -178,7 +186,7 @@ const TodayPlayCard = ({
                 ) : (
                   <Activity size={11} aria-hidden="true" />
                 )}
-                <span>{liveInfo.coverText}</span>
+                <span>{liveBadgeText}</span>
               </span>
             )}
           </div>
@@ -189,7 +197,7 @@ const TodayPlayCard = ({
                 <p className="text-[11px] text-slate-200 leading-snug">{liveInfo.trendDetail}</p>
               )}
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
-                <span>{liveInfo.gameTrendText}</span>
+                <span>{liveProjLine}</span>
                 {liveInfo.pointsPerMinute != null && (
                   <span className="font-mono text-slate-300">
                     {liveInfo.pointsPerMinute.toFixed(1)} pts/min
@@ -225,28 +233,28 @@ const TodayPlayCard = ({
       {/* Streamlined 3-column comparison strip (zero duplicated info) */}
       <div className="today-play-metrics">
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Book vs. Model</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sportsbook vs. Our Line</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-white truncate">
             {marketDisplay} <span className="text-slate-500">→</span>{' '}
             <span className="text-sky-300">{fairDisplay}</span>
           </div>
           <div className="text-[11px] text-slate-400 truncate">
-            {rec?.edge_points != null ? `${Math.abs(Number(rec.edge_points)).toFixed(1)} pt cushion` : 'Fair line'} · {rec?.book || 'Consensus'}
+            {rec?.edge_points != null ? `${Math.abs(Number(rec.edge_points)).toFixed(1)} pt edge` : 'Fair line'} · {rec?.book || 'Consensus'}
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Expected Value</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Win Chance &amp; Value</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-emerald-300 truncate">
-            {evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% EV` : '—'}
+            {winProb != null ? `${fmtPct(winProb, 1)} to win` : evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% value` : '—'}
           </div>
           <div className="text-[11px] text-indigo-200 truncate">
-            {winProb != null ? `${fmtPct(winProb, 1)} win` : 'Model edge'} · {kellyUnits}
+            {evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% profit edge` : 'Positive edge'} · {kellyUnits}
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Proj. Score</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Projected Score</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-sky-200 truncate">
             {projectedScore ? projectedScore.shortText : '—'}
           </div>
@@ -275,10 +283,10 @@ const TodayPlayCard = ({
         </div>
       )}
 
-      {/* Concise backend signal & movement tags */}
-      {(modelSignals.pills.length > 0 || tags.length > 0 || injImpact) && (
+      {/* Concise plain-English key tags */}
+      {(cardSignals.length > 0 || tags.length > 0 || injImpact) && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {modelSignals.pills.map((pill) => (
+          {cardSignals.map((pill) => (
             <span
               key={pill.id}
               className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${TONE_BADGES[pill.tone] || TONE_BADGES.slate}`}
@@ -301,7 +309,7 @@ const TodayPlayCard = ({
           {injImpact && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-500/35 bg-amber-500/10 text-amber-300 text-[11px] font-semibold">
               <AlertTriangle size={10} aria-hidden="true" />
-              Injury {fmtSigned(injImpact.spread_adj || 0, 1)}pt spread
+              Injury {fmtSigned(injImpact.spread_adj || 0, 1)} pts
             </span>
           )}
         </div>
@@ -316,11 +324,11 @@ const TodayPlayCard = ({
             onClick={onToggleExpand}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
           >
-            <span>{isExpanded ? 'Hide breakdown' : `More breakdown (${reasons.length - 1})`}</span>
+            <span>{isExpanded ? 'Hide reasons' : `More reasons (${reasons.length - 1})`}</span>
             {isExpanded ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
           </button>
         ) : (
-          <span className="text-[11px] text-slate-500">Click Details for matchup tables</span>
+          <span />
         )}
 
         <div className="flex items-center gap-2 ml-auto">

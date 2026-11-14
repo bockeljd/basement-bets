@@ -22,7 +22,7 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
           <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
             <Target size={12} className="text-sky-400" aria-hidden="true" />
-            <span>Model Projected Score</span>
+            <span>Projected Final Score</span>
           </div>
           <div className="text-xs font-bold text-white flex flex-wrap items-center gap-1.5">
             <span className="font-mono text-sky-200">{projectedScore.text}</span>
@@ -39,10 +39,10 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
           {!compact && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
               <span className="font-semibold text-slate-300">
-                {visualData.sideLabel} Scale
+                {visualData.sideLabel} Comparison
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-mono font-bold">
-                {visualData.cushionPts.toFixed(1)} pt cushion vs. books
+                {visualData.cushionPts.toFixed(1)} pt edge vs. sportsbook
               </span>
             </div>
           )}
@@ -72,7 +72,7 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
                 style={{ left: `${visualData.bookPct}%` }}
               >
                 <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-[10px] font-mono font-bold text-amber-200 whitespace-nowrap">
-                  Book {visualData.bookLabel}
+                  Sportsbook {visualData.bookLabel}
                 </span>
                 <span className="w-0.5 h-2 bg-amber-400" />
               </div>
@@ -84,7 +84,7 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
               >
                 <span className="w-0.5 h-2 bg-sky-400" />
                 <span className="px-1.5 py-0.5 rounded bg-sky-500/20 border border-sky-400/60 text-[10px] font-mono font-bold text-sky-200 whitespace-nowrap">
-                  Model {visualData.fairLabel}
+                  Our Line {visualData.fairLabel}
                 </span>
               </div>
             </div>
@@ -95,7 +95,7 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
             <div className="flex flex-wrap items-center gap-1.5 pt-2 text-[11px]">
               <span className="inline-flex items-center gap-1 text-slate-400 font-semibold mr-0.5">
                 <Layers size={11} aria-hidden="true" />
-                Inputs:
+                Sources:
               </span>
               {visualData.sources.map((src) => (
                 <span

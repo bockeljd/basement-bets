@@ -172,7 +172,7 @@ const TodayMatchupModal = ({
                     {game.away_team} {liveInfo.awayScore} – {game.home_team} {liveInfo.homeScore}
                   </span>
                 )}
-                {liveInfo.coverText && (
+                {(liveInfo.trendLabel || liveInfo.coverText) && (
                   <span
                     className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
                       liveInfo.coverTone === 'win'
@@ -184,7 +184,9 @@ const TodayMatchupModal = ({
                             : 'bg-slate-800 border-slate-700 text-slate-200'
                     }`}
                   >
-                    {liveInfo.coverText}
+                    {liveInfo.trendLabel
+                      ? `${liveInfo.trendLabel}${liveInfo.liveWinProb != null ? ` (${fmtPct(liveInfo.liveWinProb, 0)})` : ''}`
+                      : liveInfo.coverText}
                   </span>
                 )}
               </div>
@@ -224,7 +226,7 @@ const TodayMatchupModal = ({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                      {liveInfo.isFinal ? 'Final Score & Grade' : 'Live In-Game Bet Trend & Pace Tracker'}
+                      {liveInfo.isFinal ? 'Final Score & Result' : 'Live Score & Bet Trend'}
                     </span>
                     <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-slate-200">
                       {liveInfo.periodLabel} · {liveInfo.progressPct}% played
@@ -252,7 +254,7 @@ const TodayMatchupModal = ({
                       )}
                       <span>
                         {liveInfo.trendLabel}
-                        {liveInfo.liveWinProb != null ? ` (${fmtPct(liveInfo.liveWinProb, 0)} Win Prob)` : ''}
+                        {liveInfo.liveWinProb != null ? ` (${fmtPct(liveInfo.liveWinProb, 0)} Live Win Chance)` : ''}
                       </span>
                     </span>
                   )}
@@ -289,7 +291,7 @@ const TodayMatchupModal = ({
 
                   <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-2">
                     <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
-                      Pace vs. Bet Line
+                      Projected vs. Bet Line
                     </div>
                     <div
                       className={`mt-0.5 font-mono font-bold text-sm ${
@@ -336,18 +338,18 @@ const TodayMatchupModal = ({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">
-                          Recommended Play
+                          Recommended Bet
                         </span>
                         <h3 className="text-lg font-extrabold text-white mt-0.5">
                           {topRec.selection || topRec.pick}{' '}
                           <span className="font-mono text-emerald-300 text-base">({fmtOdds(topRec.price)})</span>
                         </h3>
                         <p className="text-xs text-slate-300 mt-0.5">
-                          {topRec.book || 'Consensus'} · Fair Line {topRec.fair_line ?? '—'} vs Market {topRec.market_line ?? '—'} ·{' '}
+                          {topRec.book || 'Consensus'} · Our Line {topRec.fair_line ?? '—'} vs Sportsbook {topRec.market_line ?? '—'} ·{' '}
                           <strong className="text-emerald-300">
-                            +{Number((topEv || 0) * 100).toFixed(1)}% expected value
+                            {fmtPct(topRec.calibrated_win_prob ?? topRec.win_prob, 1)} Win Chance
                           </strong>{' '}
-                          · Win Chance {fmtPct(topRec.calibrated_win_prob ?? topRec.win_prob, 1)}
+                          (+{Number((topEv || 0) * 100).toFixed(1)}% profit edge)
                         </p>
                       </div>
 
@@ -406,7 +408,7 @@ const TodayMatchupModal = ({
                     </h3>
                     <p className="text-xs text-slate-200">
                       {safeReasonText(analysisResult.block_reason || analysisResult.headline) ||
-                        'Current market lines and safety guardrails do not meet our +2.0% EV / 1.5-point edge publish threshold.'}
+                        'The sportsbook line is too close to our fair line right now, or safety checks flagged extra risk.'}
                     </p>
                   </section>
                 )}
@@ -421,7 +423,7 @@ const TodayMatchupModal = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-sky-400">
-                      Model Projections vs Market
+                      Our Line vs. Rating Sources
                     </h3>
                     <div className="space-y-1.5 text-xs">
                       {[
@@ -445,7 +447,7 @@ const TodayMatchupModal = ({
                           emptyNote: 'Off — needs 2026-27 KenPom data',
                         },
                         {
-                          label: 'Final Model Blend',
+                          label: 'Basement Bets Final',
                           spread: dbg.mu_spread_final ?? dbg.mu_spread_power ?? analysisResult.outputs?.mu_spread ?? topRec?.fair_line,
                           total: dbg.mu_total_final ?? dbg.mu_total_power ?? analysisResult.outputs?.mu_total,
                           score: null,
@@ -517,11 +519,11 @@ const TodayMatchupModal = ({
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
-                        Model Weighting &amp; Situational Adjustments
+                        What Moved Our Line
                       </h3>
                       {modelSignals.modelPct != null && (
                         <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-[11px] font-semibold text-indigo-200">
-                          {modelSignals.modelPct}% Independent Ratings / {modelSignals.marketPct}% Market Anchor
+                          {modelSignals.modelPct}% Team Ratings / {modelSignals.marketPct}% Sportsbook Anchor
                           {modelSignals.convCount >= 2 ? ` · ${modelSignals.convCount} Sources Agree` : ''}
                         </span>
                       )}
@@ -531,7 +533,7 @@ const TodayMatchupModal = ({
                       {modelSignals.modelPct != null && (
                         <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
                           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                            Source Blend Weights
+                            Rating Weights
                           </div>
                           <div className="mt-0.5 font-mono text-slate-200">
                             Torvik {Math.round(modelSignals.weights.torvik * 100)}%
@@ -548,7 +550,7 @@ const TodayMatchupModal = ({
                       {modelSignals.sosMomShift && (
                         <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
                           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                            SOS &amp; Recent Form
+                            Schedule &amp; Recent Form
                           </div>
                           <div className="mt-0.5 font-mono text-emerald-300">{modelSignals.sosMomShift.text}</div>
                         </div>
@@ -557,7 +559,7 @@ const TodayMatchupModal = ({
                       {modelSignals.restSpotShift && (
                         <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
                           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                            Rest &amp; Situational Spot
+                            Rest &amp; Travel Spot
                           </div>
                           <div className="mt-0.5 font-mono text-amber-300">{modelSignals.restSpotShift.text}</div>
                         </div>
@@ -566,7 +568,7 @@ const TodayMatchupModal = ({
                       {modelSignals.shootingShift && (
                         <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
                           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                            3PT Variance Regression
+                            3-Point Shooting Luck
                           </div>
                           <div className="mt-0.5 font-mono text-sky-300">{modelSignals.shootingShift.text}</div>
                         </div>
@@ -575,16 +577,16 @@ const TodayMatchupModal = ({
                       {modelSignals.blowoutSigmaAdd && (
                         <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
                           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                            Blowout Variance Guard
+                            Blowout Risk Warning
                           </div>
-                          <div className="mt-0.5 font-mono text-amber-300">+{modelSignals.blowoutSigmaAdd}σ spread widen</div>
+                          <div className="mt-0.5 text-amber-300">Higher score swing risk (+{modelSignals.blowoutSigmaAdd} pt range)</div>
                         </div>
                       )}
 
                       {(modelSignals.spreadMove || modelSignals.totalMove) && (
                         <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
                           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                            Open → Current Book Move
+                            Sportsbook Line Movement
                           </div>
                           <div className="mt-0.5 font-mono text-slate-200">
                             {modelSignals.spreadMove ? `Spread ${modelSignals.spreadMove.text}` : ''}

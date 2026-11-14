@@ -148,10 +148,10 @@ const TodayFullBoardTable = ({
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter games by pick status">
           {[
             { id: 'all', label: 'All Games' },
-            { id: 'picks', label: 'Actionable Picks' },
+            { id: 'picks', label: 'Best Bets' },
             { id: 'live', label: 'Live Now' },
-            { id: 'nobet', label: 'Pass / Leans' },
-            { id: 'final', label: 'Final Scores' },
+            { id: 'nobet', label: 'Passes & Leans' },
+            { id: 'final', label: 'Final' },
           ].map((opt) => {
             const active = statusFilter === opt.id;
             return (
@@ -191,18 +191,18 @@ const TodayFullBoardTable = ({
                 className="py-2.5 pl-3 pr-1.5 w-16"
                 aria-sort={sortConfig.key === 'time' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                <SortHeaderButton label="Tip (ET)" column="time" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeaderButton label="Time (ET)" column="time" sortConfig={sortConfig} onSort={handleSort} />
               </th>
               <th
                 scope="col"
                 className="py-2.5 px-2 max-w-[200px]"
                 aria-sort={sortConfig.key === 'team' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                <SortHeaderButton label="Matchup" column="team" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeaderButton label="Game" column="team" sortConfig={sortConfig} onSort={handleSort} />
               </th>
               <th scope="col" className="py-2.5 px-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Lines (Book vs Fair)
+                  Sportsbook vs. Our Line
                 </span>
               </th>
               <th
@@ -210,14 +210,14 @@ const TodayFullBoardTable = ({
                 className="py-2.5 px-2 max-w-[220px]"
                 aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                <SortHeaderButton label="Model Pick / Lean" column="edge" sortConfig={sortConfig} onSort={handleSort} />
+                <SortHeaderButton label="Pick / Lean" column="edge" sortConfig={sortConfig} onSort={handleSort} />
               </th>
               <th
                 scope="col"
                 className="py-2.5 px-2 text-right w-20"
                 aria-sort={sortConfig.key === 'conf' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
-                <SortHeaderButton label="EV / Conf" column="conf" sortConfig={sortConfig} onSort={handleSort} align="right" />
+                <SortHeaderButton label="Value / Conf." column="conf" sortConfig={sortConfig} onSort={handleSort} align="right" />
               </th>
               <th scope="col" className="py-2.5 pl-1.5 pr-3 text-right w-28">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Action</span>
@@ -314,7 +314,7 @@ const TodayFullBoardTable = ({
                     <td data-label="Lines" className="py-2.5 px-2 font-mono text-slate-300">
                       <div className="flex flex-col gap-0.5 text-[11px]">
                         <span>
-                          Book:{' '}
+                          Sportsbook:{' '}
                           <strong className="text-slate-100">
                             {homeSpread !== null && homeSpread !== undefined ? `Home ${fmtSigned(homeSpread, 1)}` : '—'}
                           </strong>{' '}
@@ -326,27 +326,15 @@ const TodayFullBoardTable = ({
                             <>
                               {' '}
                               <span className="text-slate-500">·</span>{' '}
-                              <span className="text-slate-400">ML {fmtOdds(mlAway)}/{fmtOdds(mlHome)}</span>
+                              <span className="text-slate-400">Moneyline {fmtOdds(mlAway)}/{fmtOdds(mlHome)}</span>
                             </>
                           )}
                         </span>
                         {hasFairLines && (
                           <span className="text-[11px] font-medium text-indigo-300">
-                            Model Fair: {ctx.fair_spread_home != null ? `Home ${fmtSigned(ctx.fair_spread_home, 1)}` : '—'} · Total{' '}
+                            Our Line: {ctx.fair_spread_home != null ? `Home ${fmtSigned(ctx.fair_spread_home, 1)}` : '—'} · Total{' '}
                             {ctx.fair_total != null ? `${Number(ctx.fair_total).toFixed(1)} pts` : '—'}
                           </span>
-                        )}
-                        {modelSig?.pills?.length > 0 && (
-                          <div className="flex flex-wrap gap-1 pt-0.5 font-sans">
-                            {modelSig.pills.slice(0, 2).map((p) => (
-                              <span
-                                key={p.id}
-                                className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-[10px] text-slate-300"
-                              >
-                                {p.label}
-                              </span>
-                            ))}
-                          </div>
                         )}
                       </div>
                     </td>
@@ -395,7 +383,7 @@ const TodayFullBoardTable = ({
                         <div className="flex flex-col gap-0.5 min-w-0">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="shrink-0 inline-flex w-fit px-2 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 text-[10px] font-bold uppercase">
-                              PASS
+                              Pass
                             </span>
                             {lean?.selection && (
                               <span className="text-[11px] font-mono text-slate-200 truncate">

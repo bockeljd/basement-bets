@@ -670,8 +670,8 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
   const tabs = useMemo(() => {
     const base = [
-      { id: 'top_plays', label: `Today's Top Plays (${actionablePlays.length})` },
-      { id: 'board', label: `Full Board (${slateSummary.totalGames})` },
+      { id: 'top_plays', label: `Best Bets (${actionablePlays.length})` },
+      { id: 'board', label: `All Games (${slateSummary.totalGames})` },
     ];
     if (leagueFilter === 'NCAAM') {
       base.push({ id: 'parlays', label: '2-Leg Parlays' });
@@ -767,10 +767,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         <div className="space-y-2">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              Today&apos;s Slate &amp; Best Bets
+              Today&apos;s Best Bets
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Independent team power ratings compared directly against live sportsbook odds.
+              Our team ratings compared against sportsbook lines, updated live.
             </p>
           </div>
 
@@ -781,7 +781,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             </span>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-semibold">
               <strong className="font-mono">{slateSummary.actionableCount}</strong>
-              <span>Actionable Plays</span>
+              <span>Best Bets</span>
             </span>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-400/30 text-indigo-200 font-semibold">
               <strong className="font-mono">{slateSummary.highConfCount}</strong>
@@ -794,7 +794,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                 <span>
                   Live Now
                   {slateSummary.liveTrendingWinCount > 0
-                    ? ` (${slateSummary.liveTrendingWinCount} Trending Win)`
+                    ? ` (${slateSummary.liveTrendingWinCount} Winning Pace)`
                     : ''}
                 </span>
               </span>
@@ -802,7 +802,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             {slateSummary.sharpCount > 0 && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-200 font-semibold">
                 <strong className="font-mono">{slateSummary.sharpCount}</strong>
-                <span>Sharp Signals</span>
+                <span>Big Money Alerts</span>
               </span>
             )}
           </div>
@@ -877,7 +877,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-400/50 text-xs font-semibold text-indigo-100 cursor-pointer disabled:opacity-50"
             >
               <Sparkles size={13} className={rescoringSlate ? 'animate-pulse' : ''} aria-hidden="true" />
-              <span>{rescoringSlate ? (rescoreProgress || 'Re-scoring...') : 'Re-Score Slate'}</span>
+              <span>{rescoringSlate ? (rescoreProgress || 'Updating...') : 'Recalculate Picks'}</span>
             </button>
           )}
 
@@ -958,13 +958,13 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       {activeSubTab === 'top_plays' && (
         <section role="tabpanel" aria-labelledby="today-tab-top_plays" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter top plays">
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter best bets">
               {[
-                { id: 'all', label: `All Plays (${pickFilterCounts.all})` },
-                { id: 'high_conf', label: `High Conf (${pickFilterCounts.high_conf})` },
+                { id: 'all', label: `All Bets (${pickFilterCounts.all})` },
+                { id: 'high_conf', label: `High Confidence (${pickFilterCounts.high_conf})` },
                 { id: 'spread', label: `Spreads (${pickFilterCounts.spread})` },
                 { id: 'total', label: `Totals (${pickFilterCounts.total})` },
-                { id: 'soon', label: `Tipping Soon (${pickFilterCounts.soon})` },
+                { id: 'soon', label: `Starting Soon (${pickFilterCounts.soon})` },
               ].map((pill) => {
                 const active = pickTypeFilter === pill.id;
                 return (
@@ -991,7 +991,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                 onClick={() => setPickViewMode((m) => (m === 'top6' ? 'all' : 'top6'))}
                 className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
               >
-                {pickViewMode === 'top6' ? `Show all ${actionablePlays.length} plays` : 'Show Top 6 only'}
+                {pickViewMode === 'top6' ? `Show all ${actionablePlays.length} bets` : 'Show Top 6 only'}
               </button>
             )}
           </div>
@@ -1006,13 +1006,13 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-3">
               <h3 className="text-base font-bold text-slate-200">
                 {actionablePlays.length === 0
-                  ? 'No Plays Passed Strict Publish Risk Gates'
-                  : 'No Qualifying Top Plays Match This Filter'}
+                  ? 'No Strong Bets Passed Safety Checks Yet'
+                  : 'No Bets Match This Filter'}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
                 {actionablePlays.length === 0
-                  ? 'Try Re-Scoring the slate after KenPom/odds updates, review Closest Model Leans below, or open the Full Board to see Model Fair spreads and totals for every game.'
-                  : 'Switch filters above or open the Full Board tab to inspect every game’s fair line, injuries, and public splits.'}
+                  ? 'Try clicking Recalculate Picks after updating KenPom or odds, check Closest Leans below, or browse All Games to see our line for every matchup.'
+                  : 'Try another filter above or open All Games to inspect every matchup.'}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                 {leagueFilter === 'NCAAM' && (
@@ -1023,7 +1023,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white cursor-pointer disabled:opacity-50"
                   >
                     <Sparkles size={13} aria-hidden="true" />
-                    <span>{rescoringSlate ? (rescoreProgress || 'Re-scoring...') : 'Re-Score Slate'}</span>
+                    <span>{rescoringSlate ? (rescoreProgress || 'Updating...') : 'Recalculate Picks'}</span>
                   </button>
                 )}
                 <button
@@ -1031,7 +1031,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                   onClick={() => setActiveSubTab('board')}
                   className="inline-flex px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white cursor-pointer"
                 >
-                  View Full Board ({slateSummary.totalGames} games)
+                  View All Games ({slateSummary.totalGames})
                 </button>
               </div>
             </div>
@@ -1059,10 +1059,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-bold text-indigo-200 tracking-tight">
-                    Closest Model Leans (Below Strict Publish Gate)
+                    Closest Leans (Just Below Our Cutoff)
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Top near-miss edges ranked by expected value — helpful when strict publish gates hold plays back.
+                    Small model edges that fell just short of an official bet — ranked strongest first.
                   </p>
                 </div>
                 <button
@@ -1070,7 +1070,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                   onClick={() => setActiveSubTab('board')}
                   className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
                 >
-                  Compare all Model Fair lines on Full Board
+                  Compare every game on All Games
                 </button>
               </div>
 
@@ -1101,7 +1101,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                             <span>{fmtTimeEt(game.start_time)} ET</span>
                           )}
                           <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-indigo-200 font-bold uppercase text-[10px]">
-                            {lean.bet_type || 'LEAN'} NEAR-MISS
+                            CLOSE LEAN
                           </span>
                         </div>
                         <div className="text-xs font-semibold text-slate-200 truncate">
@@ -1149,7 +1149,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                         <div className="text-[11px] font-mono text-slate-400 flex flex-wrap items-center gap-x-2">
                           <span>Sportsbook: {lean.market_line != null ? lean.market_line : '—'} ({fmtOdds(lean.price)})</span>
                           <span>·</span>
-                          <span className="text-indigo-300">Model Fair: {lean.fair_line != null ? lean.fair_line : '—'}</span>
+                          <span className="text-indigo-300">Our Line: {lean.fair_line != null ? lean.fair_line : '—'}</span>
                         </div>
                         {reasonTxt && (
                           <p className="text-[11px] text-slate-400 line-clamp-2">{reasonTxt}</p>
@@ -1180,11 +1180,11 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                                 book: lean.book || 'Consensus',
                               })
                             }
-                            aria-label={`Log Lean ${lean.selection}`}
+                            aria-label={`Add Bet ${lean.selection}`}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 cursor-pointer"
                           >
                             <PlusCircle size={12} aria-hidden="true" />
-                            <span>Log Lean</span>
+                            <span>Add Bet</span>
                           </button>
                         )}
                       </div>

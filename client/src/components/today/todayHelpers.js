@@ -98,9 +98,9 @@ export const lookupTopPickForGame = (game, rowTopPicks = {}, rowTopPicksByKey = 
 
 export const normalizeMovementTag = (tag) => {
   const t = String(tag || '').toLowerCase();
-  if (t === 'rlm_confirmed') return { label: 'Sharp Money (Line Move)', tone: 'emerald' };
+  if (t === 'rlm_confirmed') return { label: 'Pro Money Line Move', tone: 'emerald' };
   if (t === 'sharp_backing') return { label: 'Big Money Backing', tone: 'emerald' };
-  if (t === 'injury_line_adjusted') return { label: 'Injury Adjustment', tone: 'amber' };
+  if (t === 'injury_line_adjusted') return { label: 'Injury Priced In', tone: 'amber' };
   if (t === 'contra_sharp_money') return { label: 'Against Big Money', tone: 'rose' };
   if (t === 'steam_warning') return { label: 'Line Moving Fast', tone: 'amber' };
   return { label: String(tag || '').replace(/_/g, ' '), tone: 'slate' };
@@ -1400,13 +1400,13 @@ export const getModelSignalData = (rec, context, debugInfo, game) => {
     pills.push({
       id: 'consensus',
       tone: 'indigo',
-      label: `${convCount}/${Math.max(convCount, activeSourceCount)} Ratings Agree · ${modelPct}% Model Wt`,
+      label: `${convCount}/${Math.max(convCount, activeSourceCount)} Models Agree`,
     });
   } else if (modelPct != null && modelPct > 0) {
     pills.push({
       id: 'weight',
       tone: 'blue',
-      label: `${modelPct}% Model / ${marketPct}% Book Wt`,
+      label: `${modelPct}% Model Weight`,
     });
   }
 
@@ -1414,41 +1414,34 @@ export const getModelSignalData = (rec, context, debugInfo, game) => {
     pills.push({
       id: 'sos-mom',
       tone: 'emerald',
-      label: `SOS/Form: ${sosMomShift.text}`,
+      label: `Form/Sched: ${sosMomShift.text}`,
     });
   }
   if (restSpotShift && restSpotShift.pts >= 0.1) {
     pills.push({
       id: 'rest-spot',
       tone: 'amber',
-      label: `Rest/Spot: ${restSpotShift.text}`,
-    });
-  }
-  if (shootingShift && shootingShift.pts >= 0.1) {
-    pills.push({
-      id: 'shooting',
-      tone: 'slate',
-      label: `3PT Regress: ${shootingShift.text}`,
+      label: `Rest Edge: ${restSpotShift.text}`,
     });
   }
   if (blowoutSigmaAdd >= 0.1) {
     pills.push({
       id: 'blowout',
       tone: 'amber',
-      label: `Blowout Guard +${blowoutSigmaAdd.toFixed(1)}σ`,
+      label: 'High Blowout Risk',
     });
   }
   if (isTotalBet && totalMove) {
     pills.push({
       id: 'total-move',
       tone: 'blue',
-      label: `Line Move: ${totalMove.text}`,
+      label: `Line Moved: ${totalMove.text}`,
     });
   } else if (!isTotalBet && spreadMove) {
     pills.push({
       id: 'spread-move',
       tone: 'blue',
-      label: `Line Move: ${spreadMove.text}`,
+      label: `Line Moved: ${spreadMove.text}`,
     });
   }
 
