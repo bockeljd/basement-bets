@@ -1,5 +1,5 @@
 /* Today Tab Dashboard Styles
-   Follows modern CSS container queries, responsive tables, and native <dialog> containment rules. */
+   Follows modern CSS container queries, responsive tables, compliant tab underlines, and native <dialog> rules. */
 
 .today-play-card {
   container-type: inline-size;
@@ -7,23 +7,78 @@
 
 .today-play-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 0.5rem;
 }
 
-@container (min-width: 440px) {
+@container (min-width: 420px) {
   .today-play-metrics {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
+/* Single-row underline-indicated tabs:
+   Never wrap tabs, never alter dimensions on selection, draw underline with border on pseudo-element */
+.today-tablist {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid rgb(30 41 59);
+  scrollbar-width: none;
+}
+
+.today-tablist::-webkit-scrollbar {
+  display: none;
+}
+
+.today-tablist [role="tab"] {
+  position: relative;
+  flex: none;
+  padding: 0.625rem 0.95rem;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: rgb(148 163 184);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.today-tablist [role="tab"]:hover {
+  color: rgb(226 232 240);
+}
+
+.today-tablist [role="tab"][aria-selected="true"] {
+  color: rgb(255 255 255);
+}
+
+.today-tablist [role="tab"][aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  border-block-end: 3px solid rgb(129 140 248);
+}
+
 .today-board-container {
+  overflow: auto;
+  max-inline-size: 100%;
+  max-block-size: min(720px, 82vh);
   container-type: inline-size;
 }
 
 .today-board-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.today-board-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background: rgb(2 6 23 / 0.96);
+  backdrop-filter: blur(8px);
 }
 
 @container (max-width: 720px) {
@@ -46,6 +101,16 @@
     background: rgb(15 23 42 / 0.88);
   }
 
+  .today-board-table tbody th[scope="row"][data-primary="true"] {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+    padding: 0 0 0.45rem;
+    border-bottom: 1px solid rgb(30 41 59 / 0.9);
+    min-width: 0;
+  }
+
   .today-board-table td {
     display: flex;
     align-items: center;
@@ -66,18 +131,6 @@
     color: rgb(148 163 184);
     text-align: left;
     flex-shrink: 0;
-  }
-
-  .today-board-table td[data-primary="true"] {
-    flex-direction: column;
-    align-items: flex-start;
-    text-align: left;
-    padding-bottom: 0.45rem;
-    border-bottom: 1px solid rgb(30 41 59 / 0.9);
-  }
-
-  .today-board-table td[data-primary="true"]::before {
-    display: none;
   }
 }
 

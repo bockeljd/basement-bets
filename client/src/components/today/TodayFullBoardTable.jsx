@@ -97,7 +97,6 @@ const TodayFullBoardTable = ({
       if (sortConfig.key === 'conf') {
         return (a.confVal - b.confVal) * dir;
       }
-      // Default sort by actionable first, then EV descending
       if (a.isActionable !== b.isActionable) return a.isActionable ? -1 : 1;
       if (a.evVal !== b.evVal) return (a.evVal - b.evVal) * dir;
       return new Date(a.game.start_time || 0).getTime() - new Date(b.game.start_time || 0).getTime();
@@ -107,9 +106,9 @@ const TodayFullBoardTable = ({
   }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey, searchQuery, statusFilter, sortConfig]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Search & Status Filter Toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/75 p-3.5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/75 p-3">
         <div className="relative flex-1 max-w-md">
           <label htmlFor="board-team-search" className="sr-only">
             Filter board by team or pick
@@ -125,7 +124,7 @@ const TodayFullBoardTable = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search team or pick (e.g., Duke, Kansas, Over)..."
-            className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950/90 border border-slate-700/80 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-950/90 border border-slate-700/80 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
           />
         </div>
 
@@ -133,7 +132,7 @@ const TodayFullBoardTable = ({
           {[
             { id: 'all', label: 'All Games' },
             { id: 'picks', label: 'Actionable Picks' },
-            { id: 'nobet', label: 'No Bet' },
+            { id: 'nobet', label: 'Pass / Leans' },
             { id: 'final', label: 'Final Scores' },
           ].map((opt) => {
             const active = statusFilter === opt.id;
@@ -143,7 +142,7 @@ const TodayFullBoardTable = ({
                 type="button"
                 aria-pressed={active}
                 onClick={() => setStatusFilter(opt.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                className={`px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
                   active
                     ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-200'
                     : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
@@ -158,30 +157,51 @@ const TodayFullBoardTable = ({
 
       {/* Responsive Container-Query Table */}
       <div
-        className="today-board-container rounded-2xl border border-slate-800 bg-slate-900/65 p-2 sm:p-0 overflow-x-auto focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+        className="today-board-container rounded-2xl border border-slate-800 bg-slate-900/65 p-2 sm:p-0 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
         tabIndex={0}
         role="region"
-        aria-label="Full daily odds and model board"
+        aria-labelledby="today-board-caption"
       >
         <table className="today-board-table text-left text-xs">
+          <caption id="today-board-caption" className="sr-only">
+            Full daily odds, model fair lines, and picks
+          </caption>
           <thead>
-            <tr className="border-b border-slate-800 bg-slate-950/70">
-              <th scope="col" className="py-3 pl-4 pr-2 w-20" aria-sort={sortConfig.key === 'time' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+            <tr className="border-b border-slate-800">
+              <th
+                scope="col"
+                className="py-3 pl-4 pr-2 w-20"
+                aria-sort={sortConfig.key === 'time' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
                 <SortHeaderButton label="Tip (ET)" column="time" sortConfig={sortConfig} onSort={handleSort} />
               </th>
-              <th scope="col" className="py-3 px-2" aria-sort={sortConfig.key === 'team' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+              <th
+                scope="col"
+                className="py-3 px-2"
+                aria-sort={sortConfig.key === 'team' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
                 <SortHeaderButton label="Matchup" column="team" sortConfig={sortConfig} onSort={handleSort} />
               </th>
               <th scope="col" className="py-3 px-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Market Lines</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Lines (Book vs Fair)
+                </span>
               </th>
-              <th scope="col" className="py-3 px-2" aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                <SortHeaderButton label="Model Pick" column="edge" sortConfig={sortConfig} onSort={handleSort} />
+              <th
+                scope="col"
+                className="py-3 px-2"
+                aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                <SortHeaderButton label="Model Pick / Lean" column="edge" sortConfig={sortConfig} onSort={handleSort} />
               </th>
-              <th scope="col" className="py-3 px-2 text-right" aria-sort={sortConfig.key === 'conf' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+              <th
+                scope="col"
+                className="py-3 px-2 text-right"
+                aria-sort={sortConfig.key === 'conf' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
                 <SortHeaderButton label="EV / Conf" column="conf" sortConfig={sortConfig} onSort={handleSort} align="right" />
               </th>
-              <th scope="col" className="py-3 pl-2 pr-4 text-right w-36">
+              <th scope="col" className="py-3 pl-2 pr-4 text-right w-32">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Action</span>
               </th>
             </tr>
@@ -207,6 +227,7 @@ const TodayFullBoardTable = ({
                 const mlHome = game.ml_home_odds ?? game.moneyline_home;
                 const mlAway = game.ml_away_odds ?? game.moneyline_away;
                 const hasFairLines = ctx?.fair_spread_home != null || ctx?.fair_total != null;
+                const matchupLabel = `${game.away_team || 'Away'} at ${game.home_team || 'Home'}`;
 
                 return (
                   <tr
@@ -223,7 +244,7 @@ const TodayFullBoardTable = ({
                       )}
                     </td>
 
-                    <td data-primary="true" className="py-3 px-2 min-w-0">
+                    <th scope="row" data-primary="true" className="py-3 px-2 min-w-0 font-normal text-left">
                       <div className="flex flex-col gap-0.5 min-w-0">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-semibold text-slate-100 truncate">{game.away_team}</span>
@@ -239,33 +260,32 @@ const TodayFullBoardTable = ({
                           )}
                         </div>
                       </div>
-                    </td>
+                    </th>
 
-                    <td data-label="Market" className="py-3 px-2 font-mono text-slate-300 whitespace-nowrap">
+                    <td data-label="Lines" className="py-3 px-2 font-mono text-slate-300 whitespace-nowrap">
                       <div className="flex flex-col gap-0.5 text-[11px]">
                         <span>
-                          Spread:{' '}
+                          Book:{' '}
                           <strong className="text-slate-100">
                             {homeSpread !== null && homeSpread !== undefined ? fmtSigned(homeSpread, 1) : '—'}
                           </strong>{' '}
-                          <span className="text-slate-500">·</span> Total{' '}
+                          <span className="text-slate-500">·</span> O/U{' '}
                           <strong className="text-slate-100">
                             {totalLine !== null && totalLine !== undefined ? Number(totalLine).toFixed(1) : '—'}
-                          </strong>
-                        </span>
-                        <span className="text-slate-400">
-                          Moneyline: {fmtOdds(mlAway)} / {fmtOdds(mlHome)}
+                          </strong>{' '}
+                          <span className="text-slate-500">·</span>{' '}
+                          <span className="text-slate-400">ML {fmtOdds(mlAway)}/{fmtOdds(mlHome)}</span>
                         </span>
                         {hasFairLines && (
-                          <span className="text-[10px] text-indigo-300/90">
-                            Model Fair: {ctx.fair_spread_home != null ? fmtSigned(ctx.fair_spread_home, 1) : '—'} · O/U{' '}
+                          <span className="text-[11px] font-medium text-indigo-300">
+                            Fair: {ctx.fair_spread_home != null ? fmtSigned(ctx.fair_spread_home, 1) : '—'} · O/U{' '}
                             {ctx.fair_total != null ? Number(ctx.fair_total).toFixed(1) : '—'}
                           </span>
                         )}
                       </div>
                     </td>
 
-                    <td data-label="Model Pick" className="py-3 px-2 min-w-0 max-w-[240px]">
+                    <td data-label="Pick / Lean" className="py-3 px-2 min-w-0 max-w-[260px]">
                       {isActionable && rec ? (
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -284,17 +304,17 @@ const TodayFullBoardTable = ({
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="inline-flex w-fit px-2 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 text-[10px] font-bold uppercase">
-                              NO BET
+                              PASS
                             </span>
                             {lean?.selection && (
-                              <span className="text-[11px] font-mono text-slate-300 truncate">
+                              <span className="text-[11px] font-mono text-slate-200 truncate">
                                 Lean: {lean.selection}
                                 {lean.edge_points != null ? ` (${fmtSigned(lean.edge_points, 1)} pts)` : ''}
                               </span>
                             )}
                           </div>
                           {cleanReason && (
-                            <span className="text-[11px] text-slate-400 line-clamp-2">{cleanReason}</span>
+                            <span className="text-[11px] text-slate-400 line-clamp-1">{cleanReason}</span>
                           )}
                         </div>
                       )}
@@ -327,6 +347,7 @@ const TodayFullBoardTable = ({
                         <button
                           type="button"
                           onClick={() => onOpenDetails(game)}
+                          aria-label={`Details for ${matchupLabel}`}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 transition cursor-pointer"
                         >
                           <BarChart2 size={12} aria-hidden="true" />
@@ -346,8 +367,7 @@ const TodayFullBoardTable = ({
                                 book: rec.book || 'Consensus',
                               })
                             }
-                            aria-label={`Add bet ${rec.selection || rec.pick}`}
-                            title="Add bet to tracker"
+                            aria-label={`Add Bet ${rec.selection || rec.pick}`}
                             className="inline-flex items-center justify-center p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 transition cursor-pointer"
                           >
                             <PlusCircle size={14} aria-hidden="true" />

@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { CheckCircle2, AlertTriangle, XCircle, Upload, Clock } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, Upload, ChevronDown, ChevronUp } from 'lucide-react';
 
 const FEED_DEFS = [
   { key: 'torvik', label: 'BartTorvik' },
-  { key: 'kenpom', label: 'KenPom' },
   { key: 'haslametrics', label: 'Haslametrics' },
-  { key: 'odds', label: 'Sportsbook Odds' },
-  { key: 'action_splits', label: 'Public Betting Splits' },
+  { key: 'kenpom', label: 'KenPom' },
+  { key: 'odds', label: 'Odds' },
+  { key: 'action_splits', label: 'Splits' },
 ];
 
 const FEED_LABEL_MAP = {
@@ -54,41 +54,46 @@ const formatAge = (iso) => {
   }
 };
 
-const getPillMeta = (row, feedKey) => {
+const getFeedState = (row, feedKey) => {
   if (!row) {
     return {
-      tone: 'stale',
-      statusText: feedKey === 'kenpom' ? 'Off (Not Set Up)' : 'Not Loaded',
+      ok: false,
+      statusText: feedKey === 'kenpom' ? 'Off' : 'Missing',
+      dotCls: 'bg-slate-500',
+      textCls: 'text-slate-400',
       Icon: XCircle,
-      cls: 'bg-slate-900/80 border-slate-700/80 text-slate-400',
     };
   }
   const st = String(row.status || '').toLowerCase();
   if (st === 'ok') {
     return {
-      tone: 'ok',
+      ok: true,
       statusText: formatAge(row.updated_at),
+      dotCls: 'bg-emerald-400',
+      textCls: 'text-emerald-300',
       Icon: CheckCircle2,
-      cls: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
     };
   }
   if (st === 'alert' || st === 'stale') {
     return {
-      tone: 'alert',
-      statusText: feedKey === 'kenpom' ? 'Off (Needs 2026-27)' : st === 'alert' ? 'Watch' : 'Needs Update',
+      ok: false,
+      statusText: feedKey === 'kenpom' ? 'Needs Update' : st === 'alert' ? 'Watch' : 'Stale',
+      dotCls: 'bg-amber-400',
+      textCls: 'text-amber-300',
       Icon: AlertTriangle,
-      cls: 'bg-amber-500/10 border-amber-500/35 text-amber-300',
     };
   }
   return {
-    tone: 'error',
+    ok: false,
     statusText: 'Issue',
+    dotCls: 'bg-rose-400',
+    textCls: 'text-rose-300',
     Icon: XCircle,
-    cls: 'bg-rose-500/10 border-rose-500/35 text-rose-300',
   };
 };
 
 const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCAAM', onOpenKenpomUpload }) => {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null);
 
   const bySource = {};
@@ -96,7 +101,6 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
     if (item?.source) bySource[item.source] = item;
   });
 
-  // Compute live Today coverage directly from loaded board rows
   const leagueGames = (edges || []).filter((e) => !leagueFilter || e.sport === leagueFilter);
   const withOdds = leagueGames.filter(
     (e) =>
@@ -105,7 +109,10 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
       e.ml_home_odds !== null ||
       e.moneyline_home !== null
   ).length;
-  const boardItem = bySource[`board:${leagueFilter}`] || bySource['board:NCAAM'];
+
+  const activeFeedCount = FEED_DEFS.filter((f) => String(bySource[f.key]?.status || '').toLowerCase() === 'ok').length;
+  const feedsHealthy = activeFeedCount >= 4;
+
   const kenpomRow = bySource.kenpom;
   const kenpomOk = String(kenpomRow?.status || '').toLowerCase() === 'ok';
 
@@ -113,96 +120,153 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
   const activeNotes = selectedSource ? formatFeedNotes(selectedSource, activeDetail) : '';
   const activeCount = activeDetail?.last_row_count ?? activeDetail?.row_count;
 
+  const handleTogglePill = (key) => {
+    if (selectedSource === key && detailsOpen) {
+      setSelectedSource(null);
+      setDetailsOpen(false);
+    } else {
+      setSelectedSource(key);
+      setDetailsOpen(true);
+    }
+  };
+
   return (
-    <section
-      aria-label="Live data sources"
-      className="rounded-2xl border border-slate-800/90 bg-slate-900/75 px-3.5 py-2.5 space-y-2"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">
-            Data Sources
+    <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 px-3 py-2 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border font-semibold ${
+              feedsHealthy
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-amber-500/10 border-amber-500/35 text-amber-300'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${feedsHealthy ? 'bg-emerald-400' : 'bg-amber-400'}`} aria-hidden="true" />
+            <span>Data Feeds: {activeFeedCount}/{FEED_DEFS.length} Active</span>
           </span>
 
-          {FEED_DEFS.map((feed) => {
-            const row = bySource[feed.key];
-            const meta = getPillMeta(row, feed.key);
-            const Icon = meta.Icon;
-            const isSelected = selectedSource === feed.key;
-            return (
-              <button
-                key={feed.key}
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => setSelectedSource(isSelected ? null : feed.key)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition cursor-pointer ${meta.cls} ${
-                  isSelected ? 'ring-1 ring-white/40' : 'hover:brightness-110'
-                }`}
-              >
-                <Icon size={12} aria-hidden="true" />
-                <span>{feed.label}</span>
-                <span className="opacity-75 text-[11px]">· {meta.statusText}</span>
-              </button>
-            );
-          })}
-
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-xs font-medium">
-            <Clock size={12} aria-hidden="true" />
-            <span>
-              {leagueFilter} Slate: {withOdds}/{leagueGames.length} games have odds
-            </span>
+          <span className="text-slate-400 font-mono text-[11px] px-1.5">
+            Odds: <strong className="text-slate-200">{withOdds}/{leagueGames.length}</strong> games
           </span>
+
+          <div className="hidden sm:flex items-center gap-1 flex-wrap">
+            {FEED_DEFS.map((feed) => {
+              const state = getFeedState(bySource[feed.key], feed.key);
+              const isSelected = detailsOpen && selectedSource === feed.key;
+              return (
+                <button
+                  key={feed.key}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => handleTogglePill(feed.key)}
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-slate-800 border-indigo-400/50 text-white'
+                      : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${state.dotCls}`} aria-hidden="true" />
+                  <span>{feed.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onOpenKenpomUpload}
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer shrink-0 ${
-            kenpomOk
-              ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
-              : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-200'
-          }`}
-        >
-          <Upload size={12} aria-hidden="true" />
-          <span>{kenpomOk ? 'Refresh KenPom' : 'Enable KenPom'}</span>
-        </button>
-      </div>
-
-      {selectedSource && (
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-bold text-white">{FEED_LABEL_MAP[selectedSource] || selectedSource}:</span>
-            <span>
-              <strong className="text-slate-100">
-                {String(activeDetail?.status || '').toLowerCase() === 'ok' ? 'Active' : 'Needs Update'}
-              </strong>
-              {activeCount != null ? ` • ${activeCount} records` : ''}
-              {activeDetail?.updated_at ? ` • Checked ${formatAge(activeDetail.updated_at)}` : ''}
-              {activeNotes ? ` • ${activeNotes}` : ''}
-            </span>
-            {selectedSource === 'kenpom' && !kenpomOk && (
-              <button
-                type="button"
-                onClick={onOpenKenpomUpload}
-                className="text-amber-300 hover:text-amber-200 font-semibold underline cursor-pointer ml-1"
-              >
-                Set up KenPom now →
-              </button>
-            )}
-          </div>
-          {boardItem?.notes && selectedSource === 'odds' && (
-            <span className="text-[11px] text-slate-400">Live board pricing connected</span>
-          )}
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setSelectedSource(null)}
-            className="text-slate-400 hover:text-white underline text-[11px] cursor-pointer"
+            aria-expanded={detailsOpen}
+            onClick={() => {
+              setDetailsOpen((v) => !v);
+              if (detailsOpen) setSelectedSource(null);
+            }}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-950/70 hover:bg-slate-800 text-[11px] font-semibold text-slate-300 hover:text-white cursor-pointer"
           >
-            Dismiss
+            <span>Feed Details</span>
+            {detailsOpen ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
           </button>
+
+          {leagueFilter === 'NCAAM' && (
+            <button
+              type="button"
+              onClick={onOpenKenpomUpload}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition cursor-pointer ${
+                kenpomOk
+                  ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                  : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-200'
+              }`}
+            >
+              <Upload size={11} aria-hidden="true" />
+              <span>{kenpomOk ? 'Refresh KenPom' : 'Enable KenPom'}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {detailsOpen && (
+        <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3 text-xs space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+            {FEED_DEFS.map((feed) => {
+              const row = bySource[feed.key];
+              const state = getFeedState(row, feed.key);
+              const Icon = state.Icon;
+              const isSelected = selectedSource === feed.key;
+              return (
+                <button
+                  key={feed.key}
+                  type="button"
+                  onClick={() => setSelectedSource(isSelected ? null : feed.key)}
+                  className={`text-left rounded-lg border px-2.5 py-2 transition cursor-pointer ${
+                    isSelected
+                      ? 'border-indigo-400/50 bg-slate-900'
+                      : 'border-slate-800/90 bg-slate-900/50 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-semibold text-slate-100">{FEED_LABEL_MAP[feed.key] || feed.label}</span>
+                    <Icon size={12} className={state.textCls} aria-hidden="true" />
+                  </div>
+                  <div className={`mt-0.5 text-[11px] ${state.textCls}`}>{state.statusText}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedSource && (
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-slate-300">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-bold text-white">{FEED_LABEL_MAP[selectedSource] || selectedSource}:</span>
+                <span>
+                  <strong className="text-slate-100">
+                    {String(activeDetail?.status || '').toLowerCase() === 'ok' ? 'Active' : 'Needs Update'}
+                  </strong>
+                  {activeCount != null ? ` • ${activeCount} records` : ''}
+                  {activeDetail?.updated_at ? ` • Checked ${formatAge(activeDetail.updated_at)}` : ''}
+                  {activeNotes ? ` • ${activeNotes}` : ''}
+                </span>
+                {selectedSource === 'kenpom' && !kenpomOk && (
+                  <button
+                    type="button"
+                    onClick={onOpenKenpomUpload}
+                    className="text-amber-300 hover:text-amber-200 font-semibold underline cursor-pointer ml-1"
+                  >
+                    Set up KenPom now →
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedSource(null)}
+                className="text-slate-400 hover:text-white underline text-[11px] cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </div>
       )}
-    </section>
+    </div>
   );
 };
 

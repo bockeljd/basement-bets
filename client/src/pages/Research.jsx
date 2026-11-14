@@ -518,6 +518,27 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     return pickViewMode === 'top6' ? list.slice(0, 6) : list;
   }, [actionablePlays, pickTypeFilter, pickViewMode]);
 
+  const pickFilterCounts = useMemo(() => {
+    const nowMs = Date.now();
+    let spread = 0;
+    let total = 0;
+    let soon = 0;
+    actionablePlays.forEach(({ game, rec }) => {
+      const mkt = String(rec?.bet_type || rec?.market_type || '').toUpperCase();
+      if (mkt === 'SPREAD') spread += 1;
+      else if (mkt === 'TOTAL') total += 1;
+      const st = game?.start_time ? new Date(game.start_time).getTime() : 0;
+      if (st > nowMs - 30 * 60000 && st <= nowMs + 3 * 3600 * 1000) soon += 1;
+    });
+    return {
+      all: actionablePlays.length,
+      high_conf: slateSummary.highConfCount,
+      spread,
+      total,
+      soon,
+    };
+  }, [actionablePlays, slateSummary.highConfCount]);
+
   const closestLeans = useMemo(() => {
     const gamesForLeague = (edges || []).filter((e) => !leagueFilter || e.sport === leagueFilter);
     const leans = [];
@@ -638,15 +659,38 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         </div>
       )}
 
-      {/* Top Header + Controls */}
-      <section className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-            Today&apos;s Slate &amp; Model Edges
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Blends live sportsbook odds with team strength ratings, injuries, and sharp money movement.
-          </p>
+      {/* Unified Compact Header + Inline Summary Pills */}
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+        <div className="space-y-2">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+              Today&apos;s Slate &amp; Best Bets
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Independent team power ratings compared directly against live sportsbook odds.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-200 font-semibold">
+              <strong className="font-mono text-white">{slateSummary.totalGames}</strong>
+              <span className="text-slate-400">{leagueFilter} Games</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-semibold">
+              <strong className="font-mono">{slateSummary.actionableCount}</strong>
+              <span>Actionable Plays</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-400/30 text-indigo-200 font-semibold">
+              <strong className="font-mono">{slateSummary.highConfCount}</strong>
+              <span>High Confidence</span>
+            </span>
+            {slateSummary.sharpCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-200 font-semibold">
+                <strong className="font-mono">{slateSummary.sharpCount}</strong>
+                <span>Sharp Signals</span>
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -700,6 +744,28 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             </button>
           </div>
 
+          {selectedDate !== getTodayEtStr() && (
+            <button
+              type="button"
+              onClick={() => setSelectedDate(getTodayEtStr())}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-indigo-200 cursor-pointer"
+            >
+              Today
+            </button>
+          )}
+
+          {leagueFilter === 'NCAAM' && (
+            <button
+              type="button"
+              onClick={handleRescoreSlate}
+              disabled={loading || rescoringSlate}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-400/50 text-xs font-semibold text-indigo-100 cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles size={13} className={rescoringSlate ? 'animate-pulse' : ''} aria-hidden="true" />
+              <span>{rescoringSlate ? (rescoreProgress || 'Re-scoring...') : 'Re-Score Slate'}</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => fetchSchedule({ forceRefresh: true })}
@@ -709,18 +775,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
             <span>Refresh</span>
           </button>
-
-          {leagueFilter === 'NCAAM' && (
-            <button
-              type="button"
-              onClick={handleRescoreSlate}
-              disabled={loading || rescoringSlate}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-xs font-semibold text-indigo-200 cursor-pointer disabled:opacity-50"
-            >
-              <Sparkles size={13} className={rescoringSlate ? 'animate-pulse' : ''} aria-hidden="true" />
-              <span>{rescoringSlate ? (rescoreProgress || 'Re-scoring...') : 'Re-Score Slate'}</span>
-            </button>
-          )}
 
           <button
             type="button"
@@ -741,27 +795,9 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             <span>Model Logic</span>
           </button>
         </div>
-      </section>
+      </div>
 
-      {/* Slate Summary KPI Strip */}
-      <section aria-label="Slate summary metrics" className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: `${leagueFilter} Games`, value: slateSummary.totalGames, accent: 'text-white' },
-          { label: 'Actionable Plays', value: slateSummary.actionableCount, accent: 'text-emerald-300' },
-          { label: 'High Confidence', value: slateSummary.highConfCount, accent: 'text-indigo-300' },
-          { label: 'Sharp Money Signals', value: slateSummary.sharpCount, accent: 'text-amber-300' },
-        ].map((kpi) => (
-          <div
-            key={kpi.label}
-            className="rounded-2xl border border-slate-800 bg-slate-900/75 px-4 py-3"
-          >
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{kpi.label}</div>
-            <div className={`mt-1 text-2xl font-extrabold font-mono ${kpi.accent}`}>{kpi.value}</div>
-          </div>
-        ))}
-      </section>
-
-      {/* Data Health Pill Strip */}
+      {/* Collapsible Data Health Bar */}
       <TodayDataHealthStrip
         dataHealth={dataHealth}
         edges={edges}
@@ -769,26 +805,25 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         onOpenKenpomUpload={() => setShowModelLogicDialog(true)}
       />
 
-      {/* Single-Row Underline-Indicated Tabs (never wrap; underline shape + color; no aria-controls) */}
+      {/* Single-Row Underline-Indicated Tabs */}
       <div
         role="tablist"
         aria-label="Today dashboard views"
-        className="flex flex-nowrap overflow-x-auto items-center gap-1 border-b border-slate-800"
+        className="today-tablist"
       >
         {tabs.map((tab) => {
           const selected = activeSubTab === tab.id;
           return (
             <button
               key={tab.id}
+              id={`today-tab-${tab.id}`}
               type="button"
               role="tab"
               aria-selected={selected}
-              onClick={() => setActiveSubTab(tab.id)}
-              className={`shrink-0 whitespace-nowrap px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                selected
-                  ? 'border-indigo-400 text-white bg-indigo-500/10'
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700'
-              }`}
+              onClick={(e) => {
+                setActiveSubTab(tab.id);
+                e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+              }}
             >
               {tab.label}
             </button>
@@ -805,15 +840,15 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
       {/* Active Tab Panel */}
       {activeSubTab === 'top_plays' && (
-        <section role="tabpanel" aria-label="Today's top plays" className="space-y-4">
+        <section role="tabpanel" aria-labelledby="today-tab-top_plays" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter top plays">
               {[
-                { id: 'all', label: 'All Plays' },
-                { id: 'spread', label: 'Spreads' },
-                { id: 'total', label: 'Totals' },
-                { id: 'high_conf', label: 'High Conf' },
-                { id: 'soon', label: 'Tipping Soon' },
+                { id: 'all', label: `All Plays (${pickFilterCounts.all})` },
+                { id: 'high_conf', label: `High Conf (${pickFilterCounts.high_conf})` },
+                { id: 'spread', label: `Spreads (${pickFilterCounts.spread})` },
+                { id: 'total', label: `Totals (${pickFilterCounts.total})` },
+                { id: 'soon', label: `Tipping Soon (${pickFilterCounts.soon})` },
               ].map((pill) => {
                 const active = pickTypeFilter === pill.id;
                 return (
@@ -903,7 +938,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
           {/* Closest Model Leans (Near-Miss Board) */}
           {actionablePlays.length < 4 && closestLeans.length > 0 && (
-            <section aria-label="Closest model leans" className="pt-2 space-y-3">
+            <section className="pt-2 space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-bold text-indigo-200 tracking-tight">
@@ -963,6 +998,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                         <button
                           type="button"
                           onClick={() => handleOpenGameDetails(game)}
+                          aria-label={`Details for ${game.away_team} at ${game.home_team}`}
                           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer"
                         >
                           <BarChart2 size={12} aria-hidden="true" />
@@ -982,7 +1018,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                                 book: lean.book || 'Consensus',
                               })
                             }
-                            aria-label={`Log lean ${lean.selection}`}
+                            aria-label={`Log Lean ${lean.selection}`}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 cursor-pointer"
                           >
                             <PlusCircle size={12} aria-hidden="true" />
@@ -1000,7 +1036,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       )}
 
       {activeSubTab === 'board' && (
-        <section role="tabpanel" aria-label="Full daily betting board">
+        <section role="tabpanel" aria-labelledby="today-tab-board">
           <TodayFullBoardTable
             edges={edges}
             leagueFilter={leagueFilter}
@@ -1013,13 +1049,13 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       )}
 
       {activeSubTab === 'parlays' && leagueFilter === 'NCAAM' && (
-        <section role="tabpanel" aria-label="2-Leg Parlay Recommendations">
+        <section role="tabpanel" aria-labelledby="today-tab-parlays">
           <ParlayRecommendations date={selectedDate} />
         </section>
       )}
 
       {activeSubTab === 'march_madness' && leagueFilter === 'NCAAM' && (
-        <section role="tabpanel" aria-label="March Madness Bracket">
+        <section role="tabpanel" aria-labelledby="today-tab-march_madness">
           <MarchMadness />
         </section>
       )}
