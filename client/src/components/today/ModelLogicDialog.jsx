@@ -247,6 +247,9 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
                     Web Login / Cookie: {kpMethods.credentials || kpMethods.cookie ? 'Set' : 'Not set'}
                   </span>
                 </div>
+                <p className="text-[11px] text-amber-200/80 pt-1">
+                  Note on automation: GitHub Actions runs on shared cloud (Azure) IPs, which KenPom&apos;s Cloudflare firewall blocks with HTTP 403 even when email/password secrets are set. Use the 1-Click Bookmarklet above, a local terminal sync, or a KenPom API key to bypass cloud-IP blocking.
+                </p>
               </div>
             )}
 
@@ -428,9 +431,57 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
             </p>
           </section>
 
+          <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-2.5">
+            <h3 className="font-bold uppercase tracking-wider text-sky-300">
+              3. How Confidence Level Is Calculated (0&ndash;100 Score &amp; Tier)
+            </h3>
+            <p className="text-slate-300">
+              Confidence does <strong>not</strong> measure raw payout size &mdash; it measures how likely the bet still
+              wins after stressing our projection for real-game variance and model uncertainty:
+            </p>
+            <div className="space-y-2 text-slate-300">
+              <div className="rounded-lg border border-slate-800 bg-slate-900/75 p-2.5">
+                <span className="font-semibold text-white">Step 1 &mdash; Variance-Adjusted &amp; Calibrated Win Probability:</span>{' '}
+                We compute the probability of covering or clearing the total using our fair line (&mu;) and game-specific
+                standard deviation (&sigma;, widened for fast tempo, heavy roster turnover, 18+ point blowouts, injuries,
+                and line-movement uncertainty), subtract whole-number push odds, and apply PAVA probability calibration.
+                When projection-uncertainty bounds are enabled, we use a conservative{' '}
+                <strong>10th-percentile lower bound</strong> from 600 Monte Carlo trials instead of the midpoint.
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-2.5">
+                  <div className="font-bold text-emerald-300">HIGH (Score 80&ndash;95)</div>
+                  <div className="text-[11px] text-slate-300 mt-0.5">
+                    Calibrated win chance <strong>&ge; 55.0%</strong> with positive expected value (+EV). Comfortably
+                    clears the 52.4% break-even bar at -110 odds (scales from 80 at 55% up to 95 at 65%+).
+                  </div>
+                </div>
+                <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 p-2.5">
+                  <div className="font-bold text-amber-300">MEDIUM (Score 55&ndash;78)</div>
+                  <div className="text-[11px] text-slate-300 mt-0.5">
+                    Calibrated win chance between <strong>52.0% and 54.9%</strong> with positive +EV. Solid playable
+                    edge, scaled linearly from 55 to 78.
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-2.5">
+                  <div className="font-bold text-slate-300">LOW (Score 15&ndash;49)</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Win chance <strong>&lt; 52.0%</strong> (or non-positive EV). Prevents risky longshots with big payout
+                    odds from being labeled High Confidence.
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Any adverse steam move, book-to-book outlier, 18+ pt blowout variance guard, or unpriced key injury
+                widens uncertainty (&sigma;), which compresses win probability toward 50% and automatically lowers the
+                confidence score.
+              </p>
+            </div>
+          </section>
+
           <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 space-y-3">
             <h3 className="font-bold uppercase tracking-wider text-emerald-300">
-              3. Data Sources Overview
+              4. Data Sources Overview
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {['torvik', 'kenpom', 'haslametrics', 'odds', 'action_splits'].map((src) => {

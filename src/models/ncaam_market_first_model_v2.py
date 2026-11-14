@@ -1682,6 +1682,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
             ub90 = (round(float(r.get('win_prob_ub90')), 3) if r.get('win_prob_ub90') is not None else None)
             bounds_available = (lb10 is not None) and (ub90 is not None)
 
+            conf_label = self._confidence_label_from_winprob(
+                r.get('win_prob_lb10') if isinstance(r, dict) else None,
+                fallback_win_prob=win_prob,
+            )
+            conf_score = self._confidence_score_0_100(
+                r.get('win_prob_lb10') if isinstance(r, dict) else None,
+                fallback_win_prob=win_prob,
+                ev_per_unit=r.get('ev'),
+            )
+
             ui_rec = {
                 "bet_type": r['market'],
                 "selection": sel,
@@ -1700,7 +1710,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "price": int(r.get('price')) if r.get('price') is not None else None,
                 "kelly": float(r.get('kelly')) if r.get('kelly') is not None else None,
                 # Confidence = model confidence that the bet wins (based on calibrated win_prob lower bound)
-                "confidence": self._confidence_label_from_winprob(r.get('win_prob_lb10') if isinstance(r, dict) else None, fallback_win_prob=win_prob),
+                "confidence": conf_label,
+                "confidence_tier": str(conf_label).upper(),
+                "confidence_0_100": conf_score,
                 "book": r['book'],
                 # Movement/uncertainty instrumentation
                 "sigma_mult": r.get('sigma_mult'),

@@ -1000,6 +1000,8 @@ def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
     assert t_rec["selection"] == "OVER 143.5"
     assert t_rec["market_line"] == pytest.approx(143.5)
     assert t_rec["edge_points"] == pytest.approx(round(float(t_rec["fair_line"]) - 143.5, 1))
+    assert t_rec["confidence_tier"] in ("HIGH", "MEDIUM", "LOW")
+    assert 15 <= int(t_rec["confidence_0_100"]) <= 95
 
     adj = res["signals"]["adjustments"]
     for key in (
