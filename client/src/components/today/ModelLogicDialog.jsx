@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Info, Upload, ClipboardPaste, X, CheckCircle2, AlertCircle, Bookmark, Copy } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Info, Upload, ClipboardPaste, X, CheckCircle2, AlertCircle, Bookmark, Copy, ExternalLink } from 'lucide-react';
 import api from '../../api/axios';
 import { buildKenpomBookmarklet } from './todayHelpers';
 
@@ -11,10 +11,9 @@ const FEED_LABELS = {
   action_splits: 'Public Betting Splits',
 };
 
-const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) => {
+const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, onPasteKenpomClipboard }) => {
   const dialogRef = useRef(null);
   const fileInputRef = useRef(null);
-  const bookmarkletLinkRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [pastedText, setPastedText] = useState('');
   const [kenpomStatus, setKenpomStatus] = useState(null);
@@ -26,12 +25,15 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
     return origin ? buildKenpomBookmarklet(origin) : '';
   }, []);
 
-  useEffect(() => {
-    if (bookmarkletLinkRef.current && bookmarkletCode) {
-      // Set href imperatively via ref so React does not warn on javascript: bookmarklets
-      bookmarkletLinkRef.current.setAttribute('href', bookmarkletCode);
-    }
-  }, [bookmarkletCode, open]);
+  const setBookmarkletEl = useCallback(
+    (el) => {
+      if (el && bookmarkletCode) {
+        // Set href imperatively via callback ref without a JSX href prop so Chrome drag-to-bar always gets javascript:
+        el.setAttribute('href', bookmarkletCode);
+      }
+    },
+    [bookmarkletCode]
+  );
 
   const handleCopyBookmarklet = async () => {
     if (!bookmarkletCode) return;
@@ -216,36 +218,90 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
               </div>
             )}
 
-            {/* Option 1: 1-Click Browser Bookmarklet (Any User With a KenPom Login) */}
+            {/* Way 1: Using a normal kenpom.com Chrome bookmark (Cmd+A -> Cmd+C -> 1 click here) */}
             <div className="rounded-lg border border-emerald-500/35 bg-slate-950/60 p-3 space-y-2.5">
               <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                <Bookmark size={13} className="text-emerald-300" aria-hidden="true" />
-                <span>Option 1: 1-Click Sync From Open KenPom Tab (Any Login User)</span>
+                <ClipboardPaste size={13} className="text-emerald-300" aria-hidden="true" />
+                <span>Way 1: Sync Using Your Normal kenpom.com Chrome Bookmark (10 Seconds)</span>
               </div>
-              <p id="kenpom-bookmarklet-hint" className="text-[11px] text-slate-400">
-                No KenPom API needed and works for anyone with a KenPom login: drag this button onto your browser
-                bookmarks bar once, open{' '}
+              <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300">
+                <li>
+                  Open your{' '}
+                  <a
+                    href="https://kenpom.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-0.5 text-emerald-300 underline hover:text-emerald-200 font-semibold"
+                  >
+                    kenpom.com <ExternalLink size={10} aria-hidden="true" />
+                  </a>{' '}
+                  bookmark in Chrome and make sure you are logged in with the rankings table showing.
+                </li>
+                <li>
+                  Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono text-[10px]">Cmd + A</kbd> (select whole page), then{' '}
+                  <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-100 font-mono text-[10px]">Cmd + C</kbd> (copy).
+                </li>
+                <li>
+                  Come back to this tab and click <strong>Paste &amp; Sync From Clipboard</strong> below:
+                </li>
+              </ol>
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
                 <a
                   href="https://kenpom.com/"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-emerald-300 underline hover:text-emerald-200"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-semibold text-xs"
                 >
-                  kenpom.com
-                </a>{' '}
-                while logged in, and click the bookmark to import straight into Basement Bets.
+                  <ExternalLink size={12} aria-hidden="true" />
+                  <span>1. Open kenpom.com</span>
+                </a>
+                {onPasteKenpomClipboard && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await onPasteKenpomClipboard();
+                      if (ok) {
+                        await fetchKenpomStatus();
+                        onClose?.();
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-pointer"
+                  >
+                    <ClipboardPaste size={13} aria-hidden="true" />
+                    <span>2. Paste &amp; Sync From Clipboard</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Way 2: 1-Click Chrome Bookmarklet (zero copy/paste) */}
+            <div className="rounded-lg border border-indigo-500/30 bg-slate-950/60 p-3 space-y-2.5">
+              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                <Bookmark size={13} className="text-indigo-300" aria-hidden="true" />
+                <span>Way 2: Automated 1-Click Chrome Bookmarklet (No Copy/Paste)</span>
+              </div>
+              <p className="text-[11px] text-amber-200/90">
+                Note: A regular Chrome bookmark only saves a webpage address. To make a bookmark run the sync script automatically, drag the purple button below onto your Chrome Bookmarks Bar (<kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-200 font-mono text-[10px]">Cmd+Shift+B</kbd> to show it).
               </p>
+              <ol id="kenpom-bookmarklet-hint" className="list-decimal list-inside space-y-1 text-[11px] text-slate-300">
+                <li>
+                  <strong>Drag</strong> the button <strong>Send KenPom to Basement Bets</strong> below up to your Chrome Bookmarks Bar (don&apos;t just click it here).
+                </li>
+                <li>Open <strong>kenpom.com</strong> in Chrome and log in.</li>
+                <li>
+                  <strong>While looking at kenpom.com</strong>, click that bookmark in your bar &mdash; it pulls the table and opens right back here.
+                </li>
+              </ol>
               <div className="flex flex-wrap items-center gap-2">
                 <a
-                  ref={bookmarkletLinkRef}
-                  href="#kenpom-bookmarklet"
+                  ref={setBookmarkletEl}
                   draggable
                   onClick={handleBookmarkletClick}
                   aria-describedby="kenpom-bookmarklet-hint"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-grab active:cursor-grabbing"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs cursor-grab active:cursor-grabbing"
                 >
                   <Bookmark size={13} aria-hidden="true" />
-                  <span>Sync KenPom to Basement Bets</span>
+                  <span>Send KenPom to Basement Bets</span>
                 </a>
                 <button
                   type="button"
@@ -253,20 +309,19 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs cursor-pointer"
                 >
                   <Copy size={13} aria-hidden="true" />
-                  <span>Copy Bookmarklet Code</span>
+                  <span>Copy Script URL Manually</span>
                 </button>
               </div>
             </div>
 
-            {/* Option 2: Paste Table or Upload CSV/TSV/HTML */}
+            {/* Manual Fallback: Paste box or file upload */}
             <form onSubmit={handleKenpomUpload} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-3">
-              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                <ClipboardPaste size={13} className="text-emerald-300" aria-hidden="true" />
-                <span>Option 2: Paste Table, Upload CSV/TSV, or Saved HTML Page</span>
+              <div className="font-semibold text-slate-200 flex items-center gap-1.5">
+                <Upload size={13} className="text-slate-400" aria-hidden="true" />
+                <span>Manual Paste Box or File Upload (.html / .csv / .tsv)</span>
               </div>
               <p id="kenpom-paste-hint" className="text-[11px] text-slate-400">
-                Log into kenpom.com, copy the ratings table (or save the page via File &rarr; Save Page As .html),
-                paste or upload below, and click Import KenPom.
+                Or paste with <kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-200 font-mono text-[10px]">Cmd+V</kbd> right here (or upload a saved <code className="text-slate-300">.html</code> / <code className="text-slate-300">.csv</code> file) and click Import KenPom.
               </p>
 
               <div>

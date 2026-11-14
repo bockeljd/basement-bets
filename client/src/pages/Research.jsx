@@ -279,72 +279,118 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     }
   }, [leagueFilter, activeSubTab]);
 
-  // Auto-import KenPom ratings when opened via the 1-click browser bookmarklet (#kp_import=...)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    let payloadText = null;
+  const importKenpomPayload = async (payloadText) => {
+    setToast({
+      tone: 'warn',
+      text: 'Importing KenPom ratings from your browser...',
+    });
     try {
-      const fromHash = decodeKenpomHashImport(window.location.hash);
-      if (fromHash) {
-        payloadText = fromHash;
-        sessionStorage.setItem('pending_kenpom_import', fromHash);
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      } else {
-        payloadText = sessionStorage.getItem('pending_kenpom_import');
-      }
-    } catch (e) {
-      setToast({
-        tone: 'err',
-        text: `Could not read KenPom browser import: ${e?.message || 'invalid payload'}.`,
-      });
+      const res = await api.post('/api/admin/kenpom/upload-csv', { csv_text: payloadText });
       try {
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        sessionStorage.removeItem('pending_kenpom_import');
       } catch {
         // ignore
       }
-      return;
-    }
-    if (!payloadText) return;
-
-    let cancelled = false;
-    (async () => {
+      const rows = res?.data?.rows ?? 'all';
+      const asof = res?.data?.asof_date ? ` (${res.data.asof_date})` : '';
       setToast({
-        tone: 'warn',
-        text: 'Importing KenPom ratings from your open browser tab...',
+        tone: 'ok',
+        text: `KenPom updated (${rows} teams${asof}). Refreshing model picks...`,
       });
-      try {
-        const res = await api.post('/api/admin/kenpom/upload-csv', { csv_text: payloadText });
+      await fetchSchedule();
+      return true;
+    } catch (err) {
+      if (err?.response?.status !== 403) {
         try {
           sessionStorage.removeItem('pending_kenpom_import');
         } catch {
           // ignore
         }
-        if (cancelled) return;
-        const rows = res?.data?.rows ?? 'all';
-        const asof = res?.data?.asof_date ? ` (${res.data.asof_date})` : '';
+      }
+      setToast({
+        tone: 'err',
+        text: `KenPom import failed: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
+      });
+      return false;
+    }
+  };
+
+  const handlePasteKenpomClipboard = async () => {
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
+        setShowModelLogicDialog(true);
         setToast({
-          tone: 'ok',
-          text: `KenPom updated from your browser tab: imported ${rows} teams${asof}. Refreshing model picks...`,
+          tone: 'warn',
+          text: 'Clipboard access blocked here — press Cmd+V inside the box to import KenPom.',
         });
-        await fetchSchedule();
-      } catch (err) {
-        if (err?.response?.status !== 403) {
-          try {
-            sessionStorage.removeItem('pending_kenpom_import');
-          } catch {
-            // ignore
-          }
+        return;
+      }
+      const text = (await navigator.clipboard.readText()) || '';
+      if (text.trim().length < 50 || !/(NetRtg|AdjEM|ORtg|AdjOE|\t)/i.test(text)) {
+        setShowModelLogicDialog(true);
+        setToast({
+          tone: 'warn',
+          text: 'Copy kenpom.com first (Cmd+A then Cmd+C while viewing kenpom.com), then click Paste Sync.',
+        });
+        return;
+      }
+      await importKenpomPayload(text);
+    } catch {
+      setShowModelLogicDialog(true);
+      setToast({
+        tone: 'warn',
+        text: 'Allow clipboard access or press Cmd+V into the KenPom box below.',
+      });
+    }
+  };
+
+  // Auto-import KenPom ratings when opened via the 1-click browser bookmarklet (#kp_import=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+
+    const runHashImportCheck = () => {
+      if (window.location.hash === '#kenpom-bookmarklet') {
+        setShowModelLogicDialog(true);
+        try {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        } catch {
+          // ignore
         }
-        if (cancelled) return;
+        return;
+      }
+
+      let payloadText = null;
+      try {
+        const fromHash = decodeKenpomHashImport(window.location.hash);
+        if (fromHash) {
+          payloadText = fromHash;
+          sessionStorage.setItem('pending_kenpom_import', fromHash);
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        } else {
+          payloadText = sessionStorage.getItem('pending_kenpom_import');
+        }
+      } catch (e) {
         setToast({
           tone: 'err',
-          text: `KenPom import failed: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
+          text: `Could not read KenPom browser import: ${e?.message || 'invalid payload'}.`,
         });
+        try {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        } catch {
+          // ignore
+        }
+        return;
       }
-    })();
+      if (!payloadText || cancelled) return;
+      importKenpomPayload(payloadText);
+    };
 
+    runHashImportCheck();
+    window.addEventListener('hashchange', runHashImportCheck);
     return () => {
       cancelled = true;
+      window.removeEventListener('hashchange', runHashImportCheck);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -844,6 +890,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         edges={edges}
         leagueFilter={leagueFilter}
         onOpenKenpomUpload={() => setShowModelLogicDialog(true)}
+        onPasteKenpomClipboard={handlePasteKenpomClipboard}
       />
 
       {/* Single-Row Underline-Indicated Tabs */}
@@ -1147,6 +1194,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         onClose={() => setShowModelLogicDialog(false)}
         dataHealth={dataHealth}
         onKenpomUploaded={fetchSchedule}
+        onPasteKenpomClipboard={handlePasteKenpomClipboard}
       />
     </div>
   );

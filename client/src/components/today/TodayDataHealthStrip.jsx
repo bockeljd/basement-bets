@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, AlertTriangle, XCircle, Upload, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, Upload, ClipboardPaste, ChevronDown, ChevronUp } from 'lucide-react';
 
 const FEED_DEFS = [
   { key: 'torvik', label: 'BartTorvik' },
@@ -92,7 +92,7 @@ const getFeedState = (row, feedKey) => {
   };
 };
 
-const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCAAM', onOpenKenpomUpload }) => {
+const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCAAM', onOpenKenpomUpload, onPasteKenpomClipboard }) => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedSource, setSelectedSource] = useState(null);
 
@@ -188,18 +188,29 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
           </button>
 
           {leagueFilter === 'NCAAM' && (
-            <button
-              type="button"
-              onClick={onOpenKenpomUpload}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition cursor-pointer ${
-                kenpomOk
-                  ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
-                  : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-200'
-              }`}
-            >
-              <Upload size={11} aria-hidden="true" />
-              <span>{kenpomOk ? 'Refresh KenPom' : 'Enable KenPom'}</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onPasteKenpomClipboard}
+                title="After copying kenpom.com (Cmd+A then Cmd+C), click to import instantly"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-semibold transition cursor-pointer"
+              >
+                <ClipboardPaste size={11} aria-hidden="true" />
+                <span>Paste Sync KenPom</span>
+              </button>
+              <button
+                type="button"
+                onClick={onOpenKenpomUpload}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition cursor-pointer ${
+                  kenpomOk
+                    ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                    : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-200'
+                }`}
+              >
+                <Upload size={11} aria-hidden="true" />
+                <span>{kenpomOk ? 'Refresh KenPom' : 'Enable KenPom'}</span>
+              </button>
+            </>
           )}
         </div>
       </div>

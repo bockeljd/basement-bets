@@ -1036,7 +1036,7 @@ def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
 
     sample_lines = raw_text.splitlines()[:8]
     sample = "\n".join(sample_lines)
-    if sample.count("\t") >= max(1, sample.count(",")):
+    if raw_text.count("\t") >= 20 or sample.count("\t") >= max(1, sample.count(",")):
         reader = csv.reader(io.StringIO(raw_text), delimiter="\t")
         rows_raw = [r for r in reader if r and any(c.strip() for c in r)]
     elif sample.count(",") >= len(sample_lines):
@@ -1056,25 +1056,36 @@ def parse_kenpom_csv_text(csv_text: str) -> list[dict]:
         return []
 
     header_idx = None
-    for idx, r in enumerate(rows_raw[:15]):
+    for idx, r in enumerate(rows_raw[:80]):
         joined = " ".join(c.strip().lower() for c in r)
-        if any(tok in joined for tok in ("team", "adjem", "netrtg", "adjoe", "ortg")):
+        if ("team" in joined or "school" in joined) and any(
+            tok in joined for tok in ("adjem", "netrtg", "adjoe", "ortg")
+        ):
             header_idx = idx
             break
+    if header_idx is None:
+        for idx, r in enumerate(rows_raw[:80]):
+            joined = " ".join(c.strip().lower() for c in r)
+            if any(tok in joined for tok in ("team", "adjem", "netrtg", "adjoe", "ortg")):
+                header_idx = idx
+                break
 
     if header_idx is None:
-        # Check for headerless KenPom web-table paste: Rk | Team | Conf | W-L | NetRtg | ORtg | ...
-        first_row = rows_raw[0]
-        looks_headerless = (
-            len(first_row) >= 6
-            and _looks_like_kp_rank_cell(first_row[0])
-            and re.match(r"^\d+-\d+$", str(first_row[3] or "").strip())
-            and _parse_kp_float(first_row[4]) is not None
-        )
-        if not looks_headerless:
+        # Check for headerless KenPom web-table paste (skipping up to 80 leading nav lines if Cmd+A was used)
+        data_start_idx = None
+        for idx, candidate in enumerate(rows_raw[:80]):
+            if (
+                len(candidate) >= 6
+                and _looks_like_kp_rank_cell(candidate[0])
+                and re.match(r"^\d+-\d+$", str(candidate[3] or "").strip())
+                and _parse_kp_float(candidate[4]) is not None
+            ):
+                data_start_idx = idx
+                break
+        if data_start_idx is None:
             raise ValueError("Missing required 'Team' or 'TeamName' column in KenPom table")
         headers = ["Rk", "Team", "Conf", "W-L", "NetRtg", "ORtg", "DRtg", "AdjT"]
-        data_rows = rows_raw
+        data_rows = rows_raw[data_start_idx:]
     else:
         headers = [c.strip() for c in rows_raw[header_idx]]
         data_rows = rows_raw[header_idx + 1:]

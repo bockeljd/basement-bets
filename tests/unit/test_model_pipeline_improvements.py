@@ -1023,4 +1023,36 @@ def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
     assert "w_base" in res["context"] and "w_hasla" in res["context"]
 
 
+def test_parse_kenpom_full_page_cmd_a_copy():
+    from src.scripts.ingest_kenpom import parse_kenpom_csv_text
+
+    # Simulate Chrome Cmd+A -> Cmd+C on kenpom.com with ~15 header nav lines before the table
+    nav_preamble = "\n".join(
+        [
+            "KENPOM.COM",
+            "Ratings   FanMatch   Blog   Misc",
+            "Contact   Subscribe",
+            "Logged in as user@example.com",
+            "2027 Pomeroy College Basketball Ratings",
+            "Data through games of Friday, November 13",
+            "View: Teams | Conferences",
+            "Strength of Schedule\t\t\t\tNCSOS",
+        ]
+    )
+    table = "\n".join(
+        [
+            "Rk\tTeam\tConf\tW-L\tNetRtg\tORtg\t\tDRtg\t\tAdjT\t\tLuck\t\tNetRtg\t",
+            "1\tDuke\tACC\t3-0\t+31.4\t124.2\t3\t92.8\t2\t68.9\t110\t+.021\t150\t+5.4\t40",
+            "2\tHouston\tB12\t3-0\t+29.8\t120.1\t8\t90.3\t1\t64.2\t310\t-.010\t220\t+6.1\t28",
+        ]
+    )
+    rows = parse_kenpom_csv_text(nav_preamble + "\n" + table)
+    assert len(rows) == 2
+    assert rows[0]["team_name"] == "Duke"
+    assert rows[0]["adj_em"] == pytest.approx(31.4)
+    assert rows[0]["adj_o"] == pytest.approx(124.2)
+    assert rows[0]["adj_d"] == pytest.approx(92.8)
+    assert rows[1]["team_name"] == "Houston"
+
+
 

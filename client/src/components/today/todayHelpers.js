@@ -286,7 +286,9 @@ export const buildKenpomBookmarklet = (appOrigin) => {
       }
     }
     if(!t){
-      alert('Open kenpom.com while logged in so the ratings table is visible, then click this bookmark again.');
+      if(confirm('You are not on kenpom.com yet.\\n\\nClick OK to open kenpom.com in a new tab. Once logged in with the rankings table on screen, click this bookmark again to sync back to Basement Bets.')){
+        window.open('https://kenpom.com/','_blank');
+      }
       return;
     }
     var hTr=[].slice.call(t.querySelectorAll('thead tr')).pop();
@@ -321,10 +323,11 @@ export const buildKenpomBookmarklet = (appOrigin) => {
       bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
     }
     var b64=btoa(bin);
-    var w=window.open(${destPrefix}+encodeURIComponent(b64),'_blank');
+    var dest=${destPrefix}+encodeURIComponent(b64);
     try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(tsv).catch(function(){});}}catch(e){}
+    var w=window.open(dest,'_blank');
     if(!w){
-      alert('Pop-up was blocked — your KenPom table was copied to clipboard instead. Paste it under Option 2 in Enable KenPom.');
+      window.location.href=dest;
     }
   })();`;
   return `javascript:${body.replace(/\n\s*/g, '')}`;
