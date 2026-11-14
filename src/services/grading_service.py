@@ -144,11 +144,25 @@ class GradingService:
             except Exception as e:
                 print(f"[GRADING] Post-mortem agent failed: {e}")
 
+        live_snapshots_graded = 0
+        try:
+            from src.services.live_calibration_service import (
+                grade_pending_live_snapshots,
+                rebuild_live_calibration,
+            )
+
+            live_snapshots_graded = grade_pending_live_snapshots()
+            if live_snapshots_graded > 0:
+                rebuild_live_calibration(persist=True)
+        except Exception as e:
+            print(f"[GRADING] Live snapshot calibration warning: {e}")
+
         return {
             "status": "Success",
             "graded": graded_count,
             "scores_ingested": scores_ingested,
             "clv_updates": clv_count,
+            "live_snapshots_graded": int(live_snapshots_graded),
             "skip_clv": bool(skip_clv),
             "backfill_days": int(backfill_days),
             "backfill_pending": bool(backfill_pending),

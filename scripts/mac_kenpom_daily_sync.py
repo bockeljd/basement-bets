@@ -33,6 +33,22 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+
+def load_sync_env() -> None:
+    """Load workspace .env and ~/.basement_bets_kenpom.env without overwriting explicit env vars."""
+    home_env = Path.home() / ".basement_bets_kenpom.env"
+    if home_env.exists():
+        load_dotenv(home_env, override=False)
+    repo_env = REPO_ROOT / ".env"
+    if repo_env.exists():
+        load_dotenv(repo_env, override=False)
+
+
+# Allow API-only sync runs (without local Postgres) when DATABASE_URL is not configured.
+load_sync_env()
+if not (os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or os.getenv("POSTGRES_PRISMA_URL")):
+    os.environ.setdefault("REQUIRE_DATABASE", "0")
+
 from src.scripts.ingest_kenpom import (  # noqa: E402
     _session,
     _table_headers_and_rows,
@@ -52,16 +68,6 @@ KENPOM_ENDPOINTS: list[tuple[str, list[str], int | None]] = [
     ("refs", ["/officials.php", "/refs.php"], None),
     ("fanmatch", ["/fanmatch.php"], None),
 ]
-
-
-def load_sync_env() -> None:
-    """Load workspace .env and ~/.basement_bets_kenpom.env without overwriting explicit env vars."""
-    home_env = Path.home() / ".basement_bets_kenpom.env"
-    if home_env.exists():
-        load_dotenv(home_env, override=False)
-    repo_env = REPO_ROOT / ".env"
-    if repo_env.exists():
-        load_dotenv(repo_env, override=False)
 
 
 def _html_table_to_tsv(html: str, max_rows: int | None = None) -> str:
@@ -169,12 +175,37 @@ def run_mac_sync(dry_run: bool = False) -> dict:
     return results
 
 
+def check_setup() -> dict:
+    """Return non-secret readiness status for Mac KenPom syncing."""
+    home_env = Path.home() / ".basement_bets_kenpom.env"
+    plist_path = Path.home() / "Library" / "LaunchAgents" / "com.basementbets.kenpom-sync.plist"
+    try:
+        import cloudscraper  # noqa: F401
+        has_cloudscraper = True
+    except ImportError:
+        has_cloudscraper = False
+    return {
+        "has_cloudscraper": has_cloudscraper,
+        "has_env_file": home_env.exists(),
+        "has_credentials": bool(
+            (os.getenv("KENPOM_EMAIL") and os.getenv("KENPOM_PASSWORD"))
+            or os.getenv("KENPOM_COOKIE")
+        ),
+        "has_launchagent": plist_path.exists(),
+        "app_url": (os.getenv("BASEMENT_BETS_URL") or DEFAULT_APP_URL).strip(),
+    }
+
+
 def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Daily Mac full-bundle KenPom sync")
     parser.add_argument("--dry-run", action="store_true", help="Fetch from KenPom without uploading")
+    parser.add_argument("--check", action="store_true", help="Print local setup readiness without network calls")
     args = parser.parse_args()
+    if args.check:
+        print(json.dumps(check_setup(), indent=2))
+        return
     run_mac_sync(dry_run=args.dry_run)
 
 

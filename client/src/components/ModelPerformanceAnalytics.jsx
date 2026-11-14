@@ -107,6 +107,7 @@ const ModelPerformanceAnalytics = ({
   onSelectSport = null,
   scopeLabel = 'all recommended picks',
   filterSummary = 'All Sports • All Time',
+  liveCalibration = null,
 }) => {
   const [trendTab, setTrendTab] = useState('cumulative');
   const [edgeTab, setEdgeTab] = useState('chart');
@@ -331,10 +332,10 @@ const ModelPerformanceAnalytics = ({
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <h3 id="perf-trend-heading" className="text-lg font-bold text-slate-100">
-              Profit & Performance Over Time
+              Profit &amp; Performance Over Time
             </h3>
             <p className="text-xs text-slate-400">
-              {filterSummary} • Running 1-unit bankroll P/L across {analytics.settledDays.length} settled game days ({scopeLabel}).
+              {filterSummary} • Running 1-unit profit and loss across {analytics.settledDays.length} settled game days ({scopeLabel}).
             </p>
           </div>
 
@@ -344,7 +345,7 @@ const ModelPerformanceAnalytics = ({
             className="flex flex-wrap items-center gap-1 border-b border-slate-800 pb-0.5"
           >
             {[
-              { id: 'cumulative', label: 'Cumulative Profit (u)' },
+              { id: 'cumulative', label: 'Running Profit (units)' },
               { id: 'daily', label: 'Daily Profit & Win %' },
               { id: 'confidence', label: 'Daily Confidence' },
             ].map((t) => {
@@ -637,7 +638,7 @@ const ModelPerformanceAnalytics = ({
                       labelFormatter={(_, payload) => {
                         const p = payload?.[0]?.payload;
                         if (!p) return '';
-                        return `${p.label} Edge • ${p.recordText} • ${formatUnits(p.profitUnits)} (${formatSignedPct(p.roiPct)} ROI)`;
+                        return `${p.label} Edge • ${p.recordText} • ${formatUnits(p.profitUnits)} (${formatSignedPct(p.roiPct)} return)`;
                       }}
                     />
                     <Bar dataKey="winRate" radius={[4, 4, 0, 0]} maxBarSize={38}>
@@ -662,7 +663,7 @@ const ModelPerformanceAnalytics = ({
                     <th scope="col" className="py-2 px-3 font-medium">Record</th>
                     <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
                     <th scope="col" className="py-2 px-3 font-medium text-right">Units</th>
-                    <th scope="col" className="py-2 pl-3 font-medium text-right">ROI</th>
+                    <th scope="col" className="py-2 pl-3 font-medium text-right">Return %</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
@@ -692,10 +693,10 @@ const ModelPerformanceAnalytics = ({
         <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="conf-form-heading">
           <div>
             <h3 id="conf-form-heading" className="text-base font-bold text-slate-100">
-              Confidence Tiers & Recent Form
+              Confidence Tiers &amp; Recent Form
             </h3>
             <p className="text-xs text-slate-400">
-              Every recommended pick (&ge; +2% EV) is tracked here across High, Medium, and Low conviction.
+              Every recommended pick (+2% expected edge or higher) is tracked here across High, Medium, and Low confidence.
             </p>
           </div>
 
@@ -735,7 +736,7 @@ const ModelPerformanceAnalytics = ({
                     <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
                     <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
                     <th scope="col" className="py-1.5 px-3 font-medium text-right">Units</th>
-                    <th scope="col" className="py-1.5 pl-3 font-medium text-right">ROI</th>
+                    <th scope="col" className="py-1.5 pl-3 font-medium text-right">Return %</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
@@ -772,17 +773,17 @@ const ModelPerformanceAnalytics = ({
         </article>
 
         <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Confidence-Adjusted Sizing</h3>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Confidence-Sized Bets</h3>
           <div className={`text-xl font-mono font-bold ${analytics.stakingComparison.kellyUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {formatUnits(analytics.stakingComparison.kellyUnits)}
           </div>
           <p className="text-[11px] text-slate-400">
-            Scales bet size by confidence &amp; edge ({analytics.stakingComparison.kellyTaggedCount} sized plays)
+            Sizes each bet by confidence &amp; edge ({analytics.stakingComparison.kellyTaggedCount} sized plays)
           </p>
         </article>
 
         <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Beating the Closing Line (CLV)</h3>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Beating the Closing Line</h3>
           <div
             className={`text-xl font-mono font-bold ${
               analytics.stakingComparison.avgClv === null
@@ -798,8 +799,8 @@ const ModelPerformanceAnalytics = ({
           </div>
           <p className="text-[11px] text-slate-400">
             {analytics.stakingComparison.clvCount > 0
-              ? `Beat close ${formatPct(analytics.stakingComparison.clvBeatRate)} across ${analytics.stakingComparison.clvCount} graded picks`
-              : 'No closing snapshot comparison recorded yet'}
+              ? `Beat the final closing odds ${formatPct(analytics.stakingComparison.clvBeatRate)} across ${analytics.stakingComparison.clvCount} graded picks`
+              : 'No closing-line comparisons recorded yet'}
           </p>
         </article>
       </div>
@@ -836,7 +837,7 @@ const ModelPerformanceAnalytics = ({
                     <ReferenceLine x={0} stroke="#475569" strokeDasharray="3 3" />
                     <Tooltip
                       contentStyle={TOOLTIP_STYLE}
-                      formatter={(val) => [formatSignedPct(val), 'ROI']}
+                      formatter={(val) => [formatSignedPct(val), 'Return %']}
                       labelFormatter={(_, payload) => {
                         const p = payload?.[0]?.payload;
                         return p ? `${p.label} • ${p.recordText} • ${formatPct(p.winRate)} Win (${formatUnits(p.profitUnits)})` : '';
@@ -855,12 +856,12 @@ const ModelPerformanceAnalytics = ({
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
-                      <th scope="col" className="py-1.5 pr-3 font-medium">Market</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">Bet Type</th>
                       <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
                       <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
                       <th scope="col" className="py-1.5 px-3 font-medium text-right">Units</th>
-                      <th scope="col" className="py-1.5 px-3 font-medium text-right">ROI</th>
-                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Avg CLV</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Return %</th>
+                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Line Beat</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
@@ -960,6 +961,117 @@ const ModelPerformanceAnalytics = ({
           )}
         </article>
       </div>
+
+      {/* Row 4: Live In-Game Win-Chance Calibration */}
+      {(() => {
+        const cal = liveCalibration && typeof liveCalibration === 'object' ? liveCalibration : {};
+        const isCalibrated = Boolean(cal.active);
+        const minReq = Number(cal.min_obs_required || 25);
+        const decidedObs = Number(cal.decided_snapshots ?? cal.n_obs ?? 0);
+        const pendingObs = Number(cal.pending_snapshots || 0);
+        const params = cal.params || {};
+        const liveWtPct = Math.round((Number(params.live_weight_scale ?? 0.85)) * 100);
+        const sigmaSpread = Number(params.sigma_spread_rem ?? 10.5).toFixed(1);
+        const sigmaTotal = Number(params.sigma_total_rem ?? 13.5).toFixed(1);
+        const bins = Array.isArray(cal.bins) ? cal.bins : [];
+
+        return (
+          <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="live-cal-heading">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 id="live-cal-heading" className="text-base font-bold text-slate-100">
+                  Live In-Game Win-Chance Calibration
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Saves live score snapshots during active games and measures how often live win chances turn into real final wins.
+                </p>
+              </div>
+              <span
+                className={`px-2.5 py-1 rounded-full border text-xs font-semibold ${
+                  isCalibrated
+                    ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                    : 'bg-amber-500/15 border-amber-500/35 text-amber-300'
+                }`}
+              >
+                {isCalibrated
+                  ? `Active · ${decidedObs.toLocaleString()} settled snapshots`
+                  : `Collecting Data (${decidedObs} / ${minReq} settled)`}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Live Snapshots Tracked</div>
+                <div className="text-lg font-mono font-bold text-slate-100">
+                  {decidedObs.toLocaleString()} settled
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {pendingObs > 0 ? `${pendingObs.toLocaleString()} waiting for final score` : 'Auto-captured during live games'}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Live Prediction Error</div>
+                <div className="text-lg font-mono font-bold text-slate-100">
+                  {cal.brier_calibrated != null
+                    ? `${Number(cal.brier_calibrated).toFixed(3)}`
+                    : cal.brier_raw != null
+                      ? `${Number(cal.brier_raw).toFixed(3)} (baseline)`
+                      : '—'}
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {cal.brier_raw != null && cal.brier_calibrated != null
+                    ? `Down from ${Number(cal.brier_raw).toFixed(3)} baseline (lower is sharper)`
+                    : `Auto-tunes once ${minReq} settled live trajectories are logged`}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Active Pace &amp; Swing Settings</div>
+                <div className="text-sm font-mono font-bold text-indigo-300">
+                  {liveWtPct}% live weight · ±{sigmaSpread} spread · ±{sigmaTotal} total
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {isCalibrated ? 'Auto-tuned from settled live results' : 'Using baseline pregame-blend defaults'}
+                </div>
+              </div>
+            </div>
+
+            {bins.some((b) => Number(b.count || 0) > 0) ? (
+              <div className="table-wrapper overflow-x-auto" tabIndex={0}>
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400">
+                      <th scope="col" className="py-1.5 pr-3 font-medium">Live Win-Chance Bucket</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Snapshots</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Predicted Avg</th>
+                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Actual Win %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {bins.map((b) => (
+                      <tr key={b.label} className="hover:bg-slate-900/50">
+                        <td className="py-1.5 pr-3 font-medium text-slate-200">{b.label}</td>
+                        <td className="py-1.5 px-3 text-right font-mono text-slate-400">{b.count || 0}</td>
+                        <td className="py-1.5 px-3 text-right font-mono text-slate-300">
+                          {b.avg_predicted_pct != null ? `${Number(b.avg_predicted_pct).toFixed(1)}%` : '—'}
+                        </td>
+                        <td className="py-1.5 pl-3 text-right font-mono font-semibold text-emerald-300">
+                          {b.actual_win_pct != null ? `${Number(b.actual_win_pct).toFixed(1)}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 px-4 py-3 text-xs text-slate-400">
+                Live snapshots are recorded automatically whenever tracked college basketball games are in progress. Once {minReq}+ snapshots finish and grade against final scores, this table will compare predicted live win % vs. actual outcomes.
+              </div>
+            )}
+          </article>
+        );
+      })()}
     </section>
   );
 };

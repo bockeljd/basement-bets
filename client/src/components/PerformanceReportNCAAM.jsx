@@ -110,7 +110,7 @@ export default function PerformanceReportNCAAM() {
                       <div className="text-white font-bold">{w.win_rate}%</div>
                     </div>
                     <div>
-                      <div className="text-slate-400 text-xs">ROI</div>
+                      <div className="text-slate-400 text-xs">Return %</div>
                       <div className={`font-bold ${w.roi_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmtPct(w.roi_pct)}</div>
                     </div>
                     <div>
@@ -142,7 +142,7 @@ export default function PerformanceReportNCAAM() {
                 <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">2-Team Moneyline Parlay Results (Recommended)</div>
                 <div className="text-xs text-slate-500 mt-1">Tracked separately from straight bets.</div>
               </div>
-              <div className="text-xs text-slate-500">Source: recommended_parlays</div>
+              <div className="text-xs text-slate-500">Daily recommended parlays</div>
             </div>
             {!parlayPerf ? (
               <div className="mt-2 text-slate-500 text-sm">No parlay recommendations logged yet.</div>
@@ -153,7 +153,7 @@ export default function PerformanceReportNCAAM() {
                   <div className="text-white font-bold">{parlayPerf?.record?.won ?? 0}-{parlayPerf?.record?.lost ?? 0}-{parlayPerf?.record?.push ?? 0}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-xs">ROI</div>
+                  <div className="text-slate-400 text-xs">Return %</div>
                   <div className={`font-bold ${(parlayPerf?.roi_pct ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{fmtPct(parlayPerf?.roi_pct ?? 0)}</div>
                 </div>
                 <div>
@@ -213,7 +213,7 @@ export default function PerformanceReportNCAAM() {
                 <div key={b.bucket} className="bg-slate-950/30 border border-slate-800 rounded-xl p-4">
                   <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">{b.bucket} confidence</div>
                   <div className="mt-1 text-white font-black text-lg">{b.record.won}-{b.record.lost}-{b.record.push}</div>
-                  <div className="mt-1 text-slate-400 text-xs">Win% (W/L only): <span className="text-slate-200 font-bold">{b.win_rate}%</span> • N={b.decided}</div>
+                  <div className="mt-1 text-slate-400 text-xs">Win Rate: <span className="text-slate-200 font-bold">{b.win_rate}%</span> • {b.decided} decided</div>
                 </div>
               ))}
             </div>
@@ -222,13 +222,13 @@ export default function PerformanceReportNCAAM() {
           <div className="mt-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Model performance (recommended bets only)</h3>
-              <div className="text-xs text-slate-500">EV gate: ≥2% EV/u • cumulative units</div>
+              <div className="text-xs text-slate-500">Picks with +2% expected edge or better · running units</div>
             </div>
 
             <div className="mb-4">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Win% vs ROI scatter (all sports + bet types)</h3>
-                <div className="text-xs text-slate-500">Each dot = (sport, market_type) bucket • last {scatter?.days ?? '—'}d</div>
+                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Win Rate vs. Return % (All Sports &amp; Bet Types)</h3>
+                <div className="text-xs text-slate-500">Each dot shows one sport and bet type · last {scatter?.days ?? '—'} days</div>
               </div>
               <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-4">
                 {(!scatter || !(scatter.points || []).length) ? (
@@ -238,17 +238,17 @@ export default function PerformanceReportNCAAM() {
                     <ResponsiveContainer width="100%" height="100%">
                       <ScatterChart margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                        <XAxis type="number" dataKey="roi_pct" name="ROI%" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                        <YAxis type="number" dataKey="win_rate" name="Win%" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                        <ZAxis type="number" dataKey="n" range={[60, 300]} name="N" />
+                        <XAxis type="number" dataKey="roi_pct" name="Return %" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                        <YAxis type="number" dataKey="win_rate" name="Win Rate %" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                        <ZAxis type="number" dataKey="n" range={[60, 300]} name="Bets" />
                         <Tooltip
                           cursor={{ strokeDasharray: '3 3' }}
                           contentStyle={{ background: '#0b1220', border: '1px solid #334155', color: '#e2e8f0' }}
                           formatter={(v, name, props) => {
-                            if (name === 'roi_pct') return [`${fmtPct(v)}`, 'ROI'];
-                            if (name === 'win_rate') return [`${Number(v).toFixed(1)}%`, 'Win%'];
-                            if (name === 'n') return [v, 'N'];
-                            if (name === 'avg_confidence') return [`${Number(v).toFixed(1)}%`, 'Avg Conf'];
+                            if (name === 'roi_pct') return [`${fmtPct(v)}`, 'Return %'];
+                            if (name === 'win_rate') return [`${Number(v).toFixed(1)}%`, 'Win Rate'];
+                            if (name === 'n') return [v, 'Bets'];
+                            if (name === 'avg_confidence') return [`${Number(v).toFixed(1)}%`, 'Avg Confidence'];
                             return [v, name];
                           }}
                           labelFormatter={() => ''}
@@ -294,10 +294,10 @@ export default function PerformanceReportNCAAM() {
                         labelStyle={{ color: '#94a3b8' }}
                         formatter={(v, name, props) => {
                           const { payload } = props;
-                          if (name === 'cum_units') return [v, 'All (Cum Units)'];
-                          if (name === 'cum_units_high') return [`${v} (${payload.n_high} bets)`, 'High (Cum Units)'];
-                          if (name === 'cum_units_medium') return [`${v} (${payload.n_medium} bets)`, 'Medium (Cum Units)'];
-                          if (name === 'cum_units_low') return [`${v} (${payload.n_low} bets)`, 'Low (Cum Units)'];
+                          if (name === 'cum_units') return [v, 'All Picks'];
+                          if (name === 'cum_units_high') return [`${v} (${payload.n_high} bets)`, 'High Confidence'];
+                          if (name === 'cum_units_medium') return [`${v} (${payload.n_medium} bets)`, 'Medium Confidence'];
+                          if (name === 'cum_units_low') return [`${v} (${payload.n_low} bets)`, 'Low Confidence'];
                           return [v, name];
                         }}
                       />

@@ -183,6 +183,7 @@ def init_db():
     init_ncaam_bracket_cache_db()
     init_haslametrics_db()
     init_model_params_store_db()
+    init_live_trend_snapshots_db()
 
     # Explicitly init bets last as it depends on others conceptually (not foreign key wise mostly)
     init_bets_db()
@@ -3103,6 +3104,47 @@ def init_haslametrics_db():
             cur.execute(schema)
         conn.commit()
     print("Haslametrics table initialized.")
+
+
+def init_live_trend_snapshots_db():
+    """Create live_trend_snapshots table for tracking and calibrating mid-game win probability."""
+    schema = """
+    CREATE TABLE IF NOT EXISTS live_trend_snapshots (
+        id SERIAL PRIMARY KEY,
+        snapshot_key TEXT UNIQUE NOT NULL,
+        event_id TEXT NOT NULL,
+        league TEXT NOT NULL DEFAULT 'NCAAM',
+        home_team TEXT,
+        away_team TEXT,
+        market_type TEXT NOT NULL,
+        side TEXT,
+        selection TEXT,
+        bet_line DOUBLE PRECISION,
+        elapsed_fraction DOUBLE PRECISION NOT NULL,
+        progress_bucket INTEGER NOT NULL,
+        home_score INTEGER NOT NULL,
+        away_score INTEGER NOT NULL,
+        pregame_total DOUBLE PRECISION,
+        pregame_home_margin DOUBLE PRECISION,
+        projected_total DOUBLE PRECISION,
+        projected_home_margin DOUBLE PRECISION,
+        projected_bet_margin DOUBLE PRECISION,
+        raw_live_win_prob DOUBLE PRECISION,
+        calibrated_live_win_prob DOUBLE PRECISION,
+        outcome TEXT NOT NULL DEFAULT 'PENDING',
+        actual_home_score INTEGER,
+        actual_away_score INTEGER,
+        captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        graded_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_live_trend_snapshots_outcome ON live_trend_snapshots(outcome, captured_at);
+    CREATE INDEX IF NOT EXISTS idx_live_trend_snapshots_event ON live_trend_snapshots(event_id);
+    """
+    with get_admin_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(schema)
+        conn.commit()
+    print("Live trend snapshots table initialized.")
 
 
 def init_model_params_store_db():

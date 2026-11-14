@@ -89,6 +89,7 @@ export default function Picks() {
   const [isGrading, setIsGrading] = useState(false);
   const [gradeMessage, setGradeMessage] = useState(null);
   const [yesterdayReco, setYesterdayReco] = useState(null);
+  const [liveCalibration, setLiveCalibration] = useState(null);
 
   const defaultNcaamSeason = useMemo(() => getCurrentNcaamSeasonShort(), []);
 
@@ -112,8 +113,12 @@ export default function Picks() {
       let rows = res.data || [];
 
       try {
-        const ys = await api.get('/api/ncaam/recommended-slate/yesterday');
-        setYesterdayReco(ys.data || null);
+        const [ys, liveCalRes] = await Promise.all([
+          api.get('/api/ncaam/recommended-slate/yesterday').catch(() => ({ data: null })),
+          api.get('/api/ncaam/live-calibration').catch(() => ({ data: null })),
+        ]);
+        setYesterdayReco(ys?.data || null);
+        setLiveCalibration(liveCalRes?.data || null);
       } catch (e) {
         setYesterdayReco(null);
       }
@@ -669,7 +674,7 @@ export default function Picks() {
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
               <div className="font-bold text-emerald-300">2. What Each Outcome Means</div>
               <p className="text-xs text-slate-300">
-                <strong className="text-emerald-300">Won / Lost</strong> set Win % and 1-unit profit using the bet&apos;s posted odds. <strong className="text-slate-100">Push</strong> ties the line (<code className="text-slate-200">0.00u</code>, excluded from Win %). <strong className="text-amber-300">Void</strong> marks postponed/canceled games (<code className="text-slate-200">0.00u</code>, excluded from ROI).
+                <strong className="text-emerald-300">Won / Lost</strong> set Win % and 1-unit profit using the bet&apos;s posted odds. <strong className="text-slate-100">Push</strong> ties the line (<code className="text-slate-200">0.00u</code>, excluded from Win %). <strong className="text-amber-300">Void</strong> marks postponed/canceled games (<code className="text-slate-200">0.00u</code>, excluded from Return %).
               </p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
@@ -920,8 +925,8 @@ export default function Picks() {
             </div>
             <div className="text-xs text-slate-400">
               {clvStats.count > 0
-                ? `Tracked on ${clvStats.count.toLocaleString()} picks w/ closing line`
-                : 'No closing-line deltas logged in selection'}
+                ? `Tracked on ${clvStats.count.toLocaleString()} picks with a closing line`
+                : 'No closing-line comparisons recorded yet'}
             </div>
           </article>
         </div>
@@ -936,6 +941,7 @@ export default function Picks() {
         onSelectSport={handleSportChange}
         scopeLabel={historyScope === 'top6' ? 'Top 6 daily picks' : 'all recommended picks'}
         filterSummary={filterSummaryText}
+        liveCalibration={liveCalibration}
       />
 
       {/* Top 6 Rank Breakdown + Yesterday / Latest Slate Recap */}
@@ -1054,7 +1060,7 @@ export default function Picks() {
                       </span>
                       {(item.score || item.evPct != null) && (
                         <div className="text-[11px] font-mono text-slate-400">
-                          {item.score ? item.score : `${item.evPct >= 0 ? '+' : ''}${item.evPct.toFixed(1)}% EV`}
+                          {item.score ? item.score : `${item.evPct >= 0 ? '+' : ''}${item.evPct.toFixed(1)}% Edge`}
                         </div>
                       )}
                     </div>
@@ -1155,7 +1161,7 @@ export default function Picks() {
                 {renderSortableHeader('sport', 'Sport')}
                 {renderSortableHeader('matchup', 'Matchup')}
                 {renderSortableHeader('pick', 'Pick & Odds')}
-                {renderSortableHeader('edge', 'Edge & Tier', 'right')}
+                {renderSortableHeader('edge', 'Model Edge & Confidence', 'right')}
                 {renderSortableHeader('result', 'Grade & Score')}
                 {renderSortableHeader('pl', 'Profit', 'right')}
               </tr>
@@ -1226,7 +1232,7 @@ export default function Picks() {
                       </td>
                       <td className="py-2.5 px-2.5 text-right whitespace-nowrap">
                         <div className="font-mono text-xs font-semibold text-slate-200">
-                          {evPct != null ? `${evPct >= 0 ? '+' : ''}${evPct.toFixed(1)}% EV` : '—'}
+                          {evPct != null ? `${evPct >= 0 ? '+' : ''}${evPct.toFixed(1)}% Edge` : '—'}
                         </div>
                         <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded border text-[10px] font-semibold ${tierCls}`}>
                           {confTier}{confScore > 0 ? ` (${confScore})` : ''}

@@ -57,14 +57,14 @@ export default function Dashboard({ financials, periodStats }) {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Total In Play</div>
           <div className="mt-1 text-2xl font-black text-white">{formatCurrency(totalInPlay)}</div>
-          <div className="mt-2 text-xs text-slate-500">DK {formatCurrency(dk?.in_play || 0)} • FD {formatCurrency(fd?.in_play || 0)}</div>
+          <div className="mt-2 text-xs text-slate-500">DraftKings {formatCurrency(dk?.in_play || 0)} • FanDuel {formatCurrency(fd?.in_play || 0)}</div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-slate-500 font-black">
             <TrendingUp size={14} /> Last 7 days
           </div>
-          <div className={`mt-1 text-2xl font-black ${((p7?.roi || 0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{(p7?.roi ?? 0).toFixed(1)}% ROI</div>
+          <div className={`mt-1 text-2xl font-black ${((p7?.roi || 0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{(p7?.roi ?? 0).toFixed(1)}% Return</div>
           <div className="mt-2 text-xs text-slate-500">{p7?.wins ?? 0}W-{p7?.losses ?? 0}L • {p7?.total_bets ?? 0} bets</div>
         </div>
 
@@ -72,7 +72,7 @@ export default function Dashboard({ financials, periodStats }) {
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-slate-500 font-black">
             <Activity size={14} /> Last 30 days
           </div>
-          <div className={`mt-1 text-2xl font-black ${((p30?.roi || 0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{(p30?.roi ?? 0).toFixed(1)}% ROI</div>
+          <div className={`mt-1 text-2xl font-black ${((p30?.roi || 0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{(p30?.roi ?? 0).toFixed(1)}% Return</div>
           <div className="mt-2 text-xs text-slate-500">{p30?.wins ?? 0}W-{p30?.losses ?? 0}L • {p30?.total_bets ?? 0} bets</div>
         </div>
       </div>
@@ -80,7 +80,7 @@ export default function Dashboard({ financials, periodStats }) {
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">College Basketball Model Summary</h2>
-          <div className="text-xs text-slate-500">last 7d / 30d</div>
+          <div className="text-xs text-slate-500">Last 7 &amp; 30 days</div>
         </div>
 
         {(!modelPerf || !modelPerf.windows) ? (

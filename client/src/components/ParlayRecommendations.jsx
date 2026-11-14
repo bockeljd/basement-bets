@@ -57,11 +57,11 @@ function ComboCard({ c, color = 'amber' }) {
           )}
           <div className={`flex items-center gap-1 px-2 py-1 rounded-md border ${ac.bg} ${ac.border}`}>
             <TrendingUp size={13} className={ac.text} />
-            <span className={`text-xs font-bold ${ac.text}`}>+{fmtPct(c?.ev)} EV</span>
+            <span className={`text-xs font-bold ${ac.text}`}>+{fmtPct(c?.ev)} Edge</span>
           </div>
           <div className="flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20 hidden sm:flex">
             <Percent size={13} className="text-blue-400" />
-            <span className="text-xs font-bold text-blue-400">{fmtPct(c?.p_win)} Win</span>
+            <span className="text-xs font-bold text-blue-400">{fmtPct(c?.p_win)} Win Chance</span>
           </div>
         </div>
       </div>
@@ -80,7 +80,7 @@ function ComboCard({ c, color = 'amber' }) {
                   <span className="text-[10px] text-slate-500 font-bold uppercase">{fmtTime(leg.start_time)}</span>
                   <span className="text-xs text-slate-400 font-medium">{leg.matchup}</span>
                   {color === 'orange' && leg.is_home_pick && (
-                    <span className="text-[9px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded-full uppercase tracking-wider">Home Fav</span>
+                    <span className="text-[9px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded-full uppercase tracking-wider">Home Favorite</span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -110,7 +110,7 @@ function ParlayColumn({ title, icon: Icon, color, combos, loading }) {
         <div className="text-xs text-slate-500 p-4 text-center">Loading…</div>
       ) : combos.length === 0 ? (
         <div className="text-xs text-slate-500 bg-slate-950/50 rounded-xl p-4 text-center border border-slate-800/50 font-medium">
-          No combos
+          No matching 2-leg parlays right now
         </div>
       ) : (
         combos.map((c, i) => <ComboCard key={i} c={c} color={color} />)
@@ -167,8 +167,8 @@ export default function ParlayRecommendations() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Today's 2-Team Moneyline Parlays</div>
-            <div className="text-[11px] text-slate-500">Model-sourced combinations</div>
+            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Today&apos;s 2-Team Moneyline Parlays</div>
+            <div className="text-[11px] text-slate-500">Model-picked 2-leg combinations</div>
           </div>
           <button
             onClick={load}

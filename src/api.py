@@ -2653,8 +2653,27 @@ def _compute_live_game_pace(
         remaining_mins = reg_total - elapsed_mins
         period_label = detail_str or "Live"
 
+    live_cal = None
+    live_weight_scale = 0.85
+    sigma_total_rem = 13.5
+    sigma_spread_rem = 10.5
+    try:
+        from src.services.live_calibration_service import get_active_live_calibration
+
+        live_cal = get_active_live_calibration()
+        p_cfg = (live_cal or {}).get("params") or {}
+        if p_cfg.get("live_weight_scale") is not None:
+            live_weight_scale = float(p_cfg["live_weight_scale"])
+        if p_cfg.get("sigma_total_rem") is not None:
+            sigma_total_rem = float(p_cfg["sigma_total_rem"])
+        if p_cfg.get("sigma_spread_rem") is not None:
+            sigma_spread_rem = float(p_cfg["sigma_spread_rem"])
+    except Exception:
+        live_cal = None
+
     rem_frac = max(0.0, 1.0 - elapsed_frac)
-    live_weight = max(0.15, min(0.80, elapsed_frac * 0.85))
+    max_live_wt = 0.85 if live_weight_scale > 0.88 else 0.80
+    live_weight = max(0.15, min(max_live_wt, elapsed_frac * live_weight_scale))
     pts_per_min = round(total_now / elapsed_mins, 2) if elapsed_mins > 0.5 else None
 
     raw_pace_total = max(75.0, min(235.0, total_now / max(0.04, elapsed_frac)))
@@ -2676,7 +2695,7 @@ def _compute_live_game_pace(
         rem_away = 0.0
         rem_home = rem_total
 
-    return {
+    out = {
         "elapsed_minutes": round(elapsed_mins, 2),
         "remaining_minutes": round(max(0.0, remaining_mins), 2),
         "total_game_minutes": total_game_mins,
@@ -2687,7 +2706,13 @@ def _compute_live_game_pace(
         "projected_home_margin": proj_home_margin,
         "projected_home_score": max(hs, int(round(hs + rem_home))),
         "projected_away_score": max(as_, int(round(as_ + rem_away))),
+        "live_weight_scale": round(live_weight_scale, 3),
+        "sigma_total_rem": round(sigma_total_rem, 2),
+        "sigma_spread_rem": round(sigma_spread_rem, 2),
     }
+    if isinstance(live_cal, dict) and live_cal.get("active") and live_cal.get("points"):
+        out["calibration_points"] = live_cal.get("points")
+    return out
 
 
 def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date) -> None:
@@ -2762,6 +2787,13 @@ def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date
             )
             if live_trend:
                 item["live_trend"] = live_trend
+
+    try:
+        from src.services.live_calibration_service import maybe_record_live_snapshots
+
+        maybe_record_live_snapshots(items)
+    except Exception:
+        pass
 
 
 @app.get("/api/board")
@@ -5688,6 +5720,22 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
         "min_ev_per_unit": float(min_ev_per_unit),
         "series": series,
     }
+
+
+@app.get("/api/ncaam/live-calibration")
+async def get_ncaam_live_calibration():
+    """Return live in-game win-probability calibration status, reliability buckets, and fitted parameters."""
+    from src.services.live_calibration_service import get_live_calibration_summary
+
+    return get_live_calibration_summary()
+
+
+@app.post("/api/ncaam/live-calibration/rebuild")
+async def rebuild_ncaam_live_calibration(user: dict = Depends(get_current_user)):
+    """Grade pending live snapshots and recompute the live in-game calibration curve."""
+    from src.services.live_calibration_service import rebuild_live_calibration
+
+    return rebuild_live_calibration(persist=True)
 
 
 @app.api_route("/api/jobs/ingest_events/{league}", methods=["GET", "POST"])

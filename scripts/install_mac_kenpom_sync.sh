@@ -30,11 +30,19 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 if ! grep -q "^KENPOM_EMAIL=" "$ENV_FILE" || ! grep -q "^KENPOM_PASSWORD=" "$ENV_FILE"; then
-  echo ""
-  echo "Enter your KenPom subscriber credentials (saved locally with chmod 600 in $ENV_FILE):"
-  read -r -p "KenPom Email: " KP_EMAIL
-  read -r -s -p "KenPom Password: " KP_PASS
-  echo ""
+  KP_EMAIL="${KENPOM_EMAIL:-}"
+  KP_PASS="${KENPOM_PASSWORD:-}"
+  if [ -z "$KP_EMAIL" ] || [ -z "$KP_PASS" ]; then
+    echo ""
+    echo "Enter your KenPom subscriber credentials (saved locally with chmod 600 in $ENV_FILE):"
+    read -r -p "KenPom Email: " KP_EMAIL
+    read -r -s -p "KenPom Password: " KP_PASS
+    echo ""
+  fi
+  if [ -z "$KP_EMAIL" ] || [ -z "$KP_PASS" ]; then
+    echo "Error: Both KENPOM_EMAIL and KENPOM_PASSWORD are required."
+    exit 1
+  fi
   {
     grep -v -E "^(KENPOM_EMAIL|KENPOM_PASSWORD|BASEMENT_BETS_URL)=" "$ENV_FILE" || true
     printf 'KENPOM_EMAIL="%s"\n' "$KP_EMAIL"
@@ -50,9 +58,12 @@ if ! grep -q "^BASEMENT_BETS_URL=" "$ENV_FILE"; then
 fi
 
 if ! grep -q "^BASEMENT_PASSWORD=" "$ENV_FILE"; then
-  echo ""
-  read -r -s -p "Optional Basement Bets Password (press Enter to skip if not enabled): " BB_PW
-  echo ""
+  BB_PW="${BASEMENT_PASSWORD:-}"
+  if [ -z "$BB_PW" ] && [ -t 0 ]; then
+    echo ""
+    read -r -s -p "Optional Basement Bets Password (press Enter to skip if not enabled): " BB_PW
+    echo ""
+  fi
   if [ -n "$BB_PW" ]; then
     printf 'BASEMENT_PASSWORD="%s"\n' "$BB_PW" >> "$ENV_FILE"
     chmod 600 "$ENV_FILE"

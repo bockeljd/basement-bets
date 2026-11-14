@@ -710,6 +710,39 @@ export const normalCdf = (z) => {
   return clamp(0.5 * (1 + sign * y), 0.001, 0.999);
 };
 
+export const interpolateLiveCalProb = (pRaw, points, blendWeight = 0.5) => {
+  const pVal = Number(pRaw);
+  if (!Number.isFinite(pVal)) return pRaw;
+  if (!Array.isArray(points) || points.length < 2) return pVal;
+  const clean = points
+    .filter((pt) => pt && pt.p != null && pt.p_cal != null)
+    .map((pt) => ({ p: Number(pt.p), pCal: Number(pt.p_cal) }))
+    .filter((pt) => Number.isFinite(pt.p) && Number.isFinite(pt.pCal))
+    .sort((a, b) => a.p - b.p);
+  if (clean.length < 2) return pVal;
+
+  let pCal = pVal;
+  if (pVal <= clean[0].p) {
+    pCal = clamp(clean[0].pCal, 0, 1);
+  } else if (pVal >= clean[clean.length - 1].p) {
+    pCal = clamp(clean[clean.length - 1].pCal, 0, 1);
+  } else {
+    for (let i = 1; i < clean.length; i += 1) {
+      if (pVal <= clean[i].p) {
+        const x0 = clean[i - 1].p;
+        const x1 = clean[i].p;
+        const y0 = clean[i - 1].pCal;
+        const y1 = clean[i].pCal;
+        const t = x1 === x0 ? 1 : (pVal - x0) / (x1 - x0);
+        pCal = clamp(y0 + t * (y1 - y0), 0, 1);
+        break;
+      }
+    }
+  }
+  const w = clamp(Number(blendWeight), 0, 1);
+  return clamp((1 - w) * pVal + w * pCal, 0.01, 0.99);
+};
+
 /**
  * Parse basketball/football clock strings like "11:42", "0:48.5", or "34.2" into decimal minutes.
  */
@@ -1002,7 +1035,9 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
     } else if (isLive) {
       const elapsedFrac = progress.elapsedFraction;
       const remFrac = Math.max(0, 1 - elapsedFrac);
-      const liveWeight = clamp(elapsedFrac * 0.85, 0.15, 0.8);
+      const liveWeightScale = toNum(game?.live_trend?.live_weight_scale) ?? 0.85;
+      const maxLiveWeight = liveWeightScale > 0.88 ? 0.85 : 0.8;
+      const liveWeight = clamp(elapsedFrac * liveWeightScale, 0.15, maxLiveWeight);
       pointsPerMinute =
         progress.elapsedMinutes > 0.5 ? Number((totalNow / progress.elapsedMinutes).toFixed(2)) : null;
 
@@ -1095,8 +1130,12 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
         } else {
           const projectedEdgeVsLine = Number((isOver ? liveProjTotal - line : line - liveProjTotal).toFixed(1));
           projectedBetMargin = projectedEdgeVsLine;
-          const sigmaTotalRem = Math.max(2.0, 13.5 * Math.sqrt(remFrac));
-          liveWinProb = Number(clamp(normalCdf(projectedEdgeVsLine / sigmaTotalRem), 0.02, 0.98).toFixed(2));
+          const sigmaTotalBase = toNum(game?.live_trend?.sigma_total_rem) ?? 13.5;
+          const sigmaTotalRem = Math.max(2.0, sigmaTotalBase * Math.sqrt(remFrac));
+          const rawLiveProb = clamp(normalCdf(projectedEdgeVsLine / sigmaTotalRem), 0.02, 0.98);
+          liveWinProb = Number(
+            interpolateLiveCalProb(rawLiveProb, game?.live_trend?.calibration_points, 0.5).toFixed(2)
+          );
 
           if (projectedEdgeVsLine >= 1.5) {
             trendVerdict = 'TRENDING_WIN';
@@ -1167,8 +1206,12 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
         const liveProjMarginPick = isHomePick ? liveProjHomeMargin : -liveProjHomeMargin;
         const projectedCoverMargin = Number((liveProjMarginPick + effectiveLine).toFixed(1));
         projectedBetMargin = projectedCoverMargin;
-        const sigmaSpreadRem = Math.max(1.5, 10.5 * Math.sqrt(remFrac));
-        liveWinProb = Number(clamp(normalCdf(projectedCoverMargin / sigmaSpreadRem), 0.02, 0.98).toFixed(2));
+        const sigmaSpreadBase = toNum(game?.live_trend?.sigma_spread_rem) ?? 10.5;
+        const sigmaSpreadRem = Math.max(1.5, sigmaSpreadBase * Math.sqrt(remFrac));
+        const rawLiveProb = clamp(normalCdf(projectedCoverMargin / sigmaSpreadRem), 0.02, 0.98);
+        liveWinProb = Number(
+          interpolateLiveCalProb(rawLiveProb, game?.live_trend?.calibration_points, 0.5).toFixed(2)
+        );
 
         if (projectedCoverMargin >= 1.25) {
           trendVerdict = 'TRENDING_WIN';
