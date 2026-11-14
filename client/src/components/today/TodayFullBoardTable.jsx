@@ -5,6 +5,7 @@ import {
   fmtOdds,
   fmtSigned,
   getConfidenceMeta,
+  getRecEv,
   lookupTopPickForGame,
   safeReasonText,
 } from './todayHelpers';
@@ -52,19 +53,23 @@ const TodayFullBoardTable = ({
       .map((game) => {
         const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
         const rec = meta?.rec || null;
+        const recEv = getRecEv(rec);
+        const conf = getConfidenceMeta(rec);
         const ctx = meta?.context || {};
         const lean = ctx?.closest_lean || null;
         const isActionable = Boolean(meta?.isActionable && rec);
         const isFinal = Boolean(game.final || String(game.status || '').toUpperCase().includes('FINAL'));
         const evVal =
-          rec?.ev !== null && rec?.ev !== undefined
-            ? Number(rec.ev)
+          recEv !== null
+            ? recEv
             : (lean?.ev !== null && lean?.ev !== undefined ? Number(lean.ev) - 100 : -999);
-        const confVal = Number(rec?.confidence_0_100 ?? rec?.confidence ?? -1);
+        const confVal = conf.sortScore ?? -1;
         return {
           game,
           meta,
           rec,
+          recEv,
+          conf,
           ctx,
           lean,
           isActionable,
@@ -170,38 +175,38 @@ const TodayFullBoardTable = ({
             <tr className="border-b border-slate-800">
               <th
                 scope="col"
-                className="py-3 pl-4 pr-2 w-20"
+                className="py-2.5 pl-3 pr-1.5 w-16"
                 aria-sort={sortConfig.key === 'time' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
                 <SortHeaderButton label="Tip (ET)" column="time" sortConfig={sortConfig} onSort={handleSort} />
               </th>
               <th
                 scope="col"
-                className="py-3 px-2"
+                className="py-2.5 px-2 max-w-[200px]"
                 aria-sort={sortConfig.key === 'team' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
                 <SortHeaderButton label="Matchup" column="team" sortConfig={sortConfig} onSort={handleSort} />
               </th>
-              <th scope="col" className="py-3 px-2">
+              <th scope="col" className="py-2.5 px-2">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   Lines (Book vs Fair)
                 </span>
               </th>
               <th
                 scope="col"
-                className="py-3 px-2"
+                className="py-2.5 px-2 max-w-[220px]"
                 aria-sort={sortConfig.key === 'edge' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
                 <SortHeaderButton label="Model Pick / Lean" column="edge" sortConfig={sortConfig} onSort={handleSort} />
               </th>
               <th
                 scope="col"
-                className="py-3 px-2 text-right"
+                className="py-2.5 px-2 text-right w-20"
                 aria-sort={sortConfig.key === 'conf' ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
               >
                 <SortHeaderButton label="EV / Conf" column="conf" sortConfig={sortConfig} onSort={handleSort} align="right" />
               </th>
-              <th scope="col" className="py-3 pl-2 pr-4 text-right w-32">
+              <th scope="col" className="py-2.5 pl-1.5 pr-3 text-right w-28">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Action</span>
               </th>
             </tr>
@@ -219,13 +224,17 @@ const TodayFullBoardTable = ({
                 </td>
               </tr>
             ) : (
-              rows.map(({ game, meta, rec, ctx, lean, isActionable, isFinal }) => {
-                const conf = getConfidenceMeta(rec);
+              rows.map(({ game, meta, rec, recEv, conf, ctx, lean, isActionable, isFinal }) => {
                 const cleanReason = safeReasonText(meta?.reason);
                 const homeSpread = game.home_spread ?? game.spread_home;
                 const totalLine = game.total_line ?? game.total;
                 const mlHome = game.ml_home_odds ?? game.moneyline_home;
                 const mlAway = game.ml_away_odds ?? game.moneyline_away;
+                const showMl =
+                  mlAway != null &&
+                  mlHome != null &&
+                  Number.isFinite(Number(mlAway)) &&
+                  Math.abs(Number(mlAway)) <= 1000;
                 const hasFairLines = ctx?.fair_spread_home != null || ctx?.fair_total != null;
                 const matchupLabel = `${game.away_team || 'Away'} at ${game.home_team || 'Home'}`;
 
@@ -234,7 +243,7 @@ const TodayFullBoardTable = ({
                     key={game.id}
                     className="hover:bg-slate-800/40 transition-colors"
                   >
-                    <td data-label="Tip (ET)" className="py-3 pl-4 pr-2 font-mono text-slate-300 whitespace-nowrap">
+                    <td data-label="Tip (ET)" className="py-2.5 pl-3 pr-1.5 font-mono text-slate-300 whitespace-nowrap w-16">
                       {isFinal ? (
                         <span className="inline-flex px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold">
                           FINAL
@@ -244,7 +253,7 @@ const TodayFullBoardTable = ({
                       )}
                     </td>
 
-                    <th scope="row" data-primary="true" className="py-3 px-2 min-w-0 font-normal text-left">
+                    <th scope="row" data-primary="true" className="py-2.5 px-2 min-w-0 max-w-[200px] font-normal text-left">
                       <div className="flex flex-col gap-0.5 min-w-0">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-semibold text-slate-100 truncate">{game.away_team}</span>
@@ -262,7 +271,7 @@ const TodayFullBoardTable = ({
                       </div>
                     </th>
 
-                    <td data-label="Lines" className="py-3 px-2 font-mono text-slate-300 whitespace-nowrap">
+                    <td data-label="Lines" className="py-2.5 px-2 font-mono text-slate-300">
                       <div className="flex flex-col gap-0.5 text-[11px]">
                         <span>
                           Book:{' '}
@@ -272,9 +281,14 @@ const TodayFullBoardTable = ({
                           <span className="text-slate-500">·</span> O/U{' '}
                           <strong className="text-slate-100">
                             {totalLine !== null && totalLine !== undefined ? Number(totalLine).toFixed(1) : '—'}
-                          </strong>{' '}
-                          <span className="text-slate-500">·</span>{' '}
-                          <span className="text-slate-400">ML {fmtOdds(mlAway)}/{fmtOdds(mlHome)}</span>
+                          </strong>
+                          {showMl && (
+                            <>
+                              {' '}
+                              <span className="text-slate-500">·</span>{' '}
+                              <span className="text-slate-400">ML {fmtOdds(mlAway)}/{fmtOdds(mlHome)}</span>
+                            </>
+                          )}
                         </span>
                         {hasFairLines && (
                           <span className="text-[11px] font-medium text-indigo-300">
@@ -285,25 +299,25 @@ const TodayFullBoardTable = ({
                       </div>
                     </td>
 
-                    <td data-label="Pick / Lean" className="py-3 px-2 min-w-0 max-w-[260px]">
+                    <td data-label="Pick / Lean" className="py-2.5 px-2 min-w-0 max-w-[220px]">
                       {isActionable && rec ? (
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[10px] font-bold uppercase">
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[10px] font-bold uppercase">
                               {rec.bet_type || rec.market_type || 'BET'}
                             </span>
                             <span className="font-bold text-white truncate">
                               {rec.selection || rec.pick}
                             </span>
                           </div>
-                          <span className="text-[11px] font-mono text-slate-400">
+                          <span className="text-[11px] font-mono text-slate-400 truncate">
                             {fmtOdds(rec.price)} · {rec.book || 'Consensus'}
                           </span>
                         </div>
                       ) : (
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="inline-flex w-fit px-2 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 text-[10px] font-bold uppercase">
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="shrink-0 inline-flex w-fit px-2 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 text-[10px] font-bold uppercase">
                               PASS
                             </span>
                             {lean?.selection && (
@@ -320,11 +334,11 @@ const TodayFullBoardTable = ({
                       )}
                     </td>
 
-                    <td data-label="EV / Conf" className="py-3 px-2 text-right whitespace-nowrap">
+                    <td data-label="EV / Conf" className="py-2.5 px-2 text-right whitespace-nowrap w-20">
                       {isActionable && rec ? (
                         <div className="flex flex-col items-end gap-1">
                           <span className="font-mono font-bold text-emerald-300">
-                            {rec.ev !== null && rec.ev !== undefined ? `+${(Number(rec.ev) * 100).toFixed(1)}%` : '—'}
+                            {recEv !== null ? `+${(recEv * 100).toFixed(1)}%` : '—'}
                           </span>
                           <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${conf.badgeCls}`}>
                             {conf.tier}
@@ -342,7 +356,7 @@ const TodayFullBoardTable = ({
                       )}
                     </td>
 
-                    <td data-label="Action" className="py-3 pl-2 pr-4 text-right whitespace-nowrap">
+                    <td data-label="Action" className="py-2.5 pl-1.5 pr-3 text-right whitespace-nowrap w-28">
                       <div className="inline-flex items-center justify-end gap-1.5">
                         <button
                           type="button"

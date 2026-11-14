@@ -16,6 +16,7 @@ import {
   fmtPct,
   fmtSigned,
   getConfidenceMeta,
+  getRecEv,
   normalizeMovementTag,
   safeReasonText,
 } from './todayHelpers';
@@ -105,6 +106,7 @@ const TodayMatchupModal = ({
 
   const topRec = (analysisResult?.recommendations || [])[0] || null;
   const conf = getConfidenceMeta(topRec);
+  const topEv = getRecEv(topRec);
   const sig = topRec?.signals || analysisResult?.signals || {};
   const dbg = analysisResult?.debug || {};
   const torvikStats = analysisResult?.torvik_team_stats || {};
@@ -192,7 +194,7 @@ const TodayMatchupModal = ({
                         <p className="text-xs text-slate-300 mt-0.5">
                           {topRec.book || 'Consensus'} · Fair Line {topRec.fair_line ?? '—'} vs Market {topRec.market_line ?? '—'} ·{' '}
                           <strong className="text-emerald-300">
-                            +{Number((topRec.ev || 0) * 100).toFixed(1)}% expected value
+                            +{Number((topEv || 0) * 100).toFixed(1)}% expected value
                           </strong>{' '}
                           · Win Chance {fmtPct(topRec.calibrated_win_prob ?? topRec.win_prob, 1)}
                         </p>

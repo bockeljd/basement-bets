@@ -14,6 +14,7 @@ import {
   fmtPct,
   fmtSigned,
   getConfidenceMeta,
+  getRecEv,
   normalizeMovementTag,
   buildWhyPickReasons,
 } from './todayHelpers';
@@ -37,6 +38,7 @@ const TodayPlayCard = ({
   onAddBet,
 }) => {
   const conf = getConfidenceMeta(rec);
+  const evDecimal = getRecEv(rec);
   const betType = String(rec?.bet_type || rec?.market_type || 'BET').toUpperCase();
   const winProb = rec?.calibrated_win_prob ?? rec?.win_prob;
   const kellyRaw = Number(rec?.kelly ?? rec?.kelly_fraction);
@@ -117,7 +119,7 @@ const TodayPlayCard = ({
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Value &amp; Stake</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-emerald-300 truncate">
-            {rec?.ev !== null && rec?.ev !== undefined ? `+${(Number(rec.ev) * 100).toFixed(1)}% EV` : '—'}
+            {evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% EV` : '—'}
           </div>
           <div className="text-[11px] text-indigo-200 truncate">
             {fmtPct(winProb, 1)} win · {kellyUnits}

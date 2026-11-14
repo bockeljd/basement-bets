@@ -32,6 +32,7 @@ import {
   makeMatchupKey,
   lookupTopPickForGame,
   getConfidenceMeta,
+  getRecEv,
   decodeKenpomHashImport,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
@@ -483,7 +484,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       plays.push({ id: eid, game: synthGame, rec: meta.rec, conf: getConfidenceMeta(meta.rec) });
     });
 
-    plays.sort((a, b) => Number(b.rec?.ev || 0) - Number(a.rec?.ev || 0));
+    plays.sort((a, b) => (getRecEv(b.rec) ?? -999) - (getRecEv(a.rec) ?? -999));
 
     const highConf = plays.filter((p) => p.conf.tier === 'HIGH').length;
     const sharpCount = plays.filter((p) => {

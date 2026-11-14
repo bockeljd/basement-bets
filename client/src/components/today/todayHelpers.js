@@ -106,16 +106,51 @@ export const normalizeMovementTag = (tag) => {
   return { label: String(tag || '').replace(/_/g, ' '), tone: 'slate' };
 };
 
+export const getRecEv = (rec) => {
+  if (!rec) return null;
+  const raw = rec.ev ?? rec.ev_raw ?? rec.expected_value ?? rec.ev_per_unit;
+  if (raw !== null && raw !== undefined && raw !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return Math.abs(n) > 1.5 ? n / 100 : n;
+  }
+  if (typeof rec.edge === 'string' && rec.edge.includes('%')) {
+    const parsed = parseFloat(rec.edge.replace('%', '').trim());
+    if (Number.isFinite(parsed)) return parsed / 100;
+  }
+  return null;
+};
+
 export const getConfidenceMeta = (rec) => {
-  if (!rec) return { tier: 'LOW', score: null, badgeCls: 'bg-slate-800 text-slate-300 border-slate-700' };
-  const tier = String(rec.confidence_tier || '').toUpperCase();
-  const rawScore = Number(rec.confidence_0_100 ?? rec.confidence);
+  if (!rec) {
+    return { tier: 'LOW', score: null, sortScore: -1, badgeCls: 'bg-slate-800 text-slate-300 border-slate-700' };
+  }
+  const rawTier = String(
+    rec.confidence_tier || (typeof rec.confidence === 'string' ? rec.confidence : '') || ''
+  )
+    .trim()
+    .toUpperCase();
+  const rawScore = Number(
+    rec.confidence_0_100 ??
+      rec.confidence_score ??
+      (typeof rec.confidence === 'number' ? rec.confidence : NaN)
+  );
   const score = Number.isFinite(rawScore) ? Math.round(rawScore <= 1 ? rawScore * 100 : rawScore) : null;
-  const resolved = tier || (score >= 80 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW');
+  const resolved =
+    rawTier === 'HIGH' || rawTier === 'MEDIUM' || rawTier === 'LOW'
+      ? rawTier
+      : score !== null
+        ? score >= 80
+          ? 'HIGH'
+          : score >= 50
+            ? 'MEDIUM'
+            : 'LOW'
+        : 'LOW';
+  const sortScore = score ?? (resolved === 'HIGH' ? 85 : resolved === 'MEDIUM' ? 65 : 35);
   if (resolved === 'HIGH') {
     return {
       tier: 'HIGH',
       score,
+      sortScore,
       badgeCls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35',
     };
   }
@@ -123,12 +158,14 @@ export const getConfidenceMeta = (rec) => {
     return {
       tier: 'MEDIUM',
       score,
+      sortScore,
       badgeCls: 'bg-amber-500/15 text-amber-300 border-amber-500/35',
     };
   }
   return {
     tier: 'LOW',
     score,
+    sortScore,
     badgeCls: 'bg-slate-800 text-slate-300 border-slate-700',
   };
 };
