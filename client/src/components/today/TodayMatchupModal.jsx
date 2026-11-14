@@ -8,7 +8,6 @@ import {
   Users,
   ShieldCheck,
   RefreshCw,
-  HelpCircle,
 } from 'lucide-react';
 import api from '../../api/axios';
 import ModelVisualComparison from './ModelVisualComparison';
@@ -22,7 +21,6 @@ import {
   normalizeMovementTag,
   safeReasonText,
   getProjectedScore,
-  explainPickPlainly,
   buildVisualModelData,
   getLiveGameStatus,
 } from './todayHelpers';
@@ -125,9 +123,9 @@ const TodayMatchupModal = ({
   const rawInjuries = sig.injuries || analysisResult?.injuries || [];
   const splits = sig.public_splits || analysisResult?.action_splits || null;
   const projectedScore = getProjectedScore(game, analysisResult, topRec);
-  const plainPick = explainPickPlainly(topRec, game);
   const visualData = buildVisualModelData(topRec, game, analysisResult);
   const liveInfo = getLiveGameStatus(game, topRec);
+  const fmtStat = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : '—');
 
   return (
     <dialog
@@ -276,24 +274,6 @@ const TodayMatchupModal = ({
                       </div>
                     )}
 
-                    {plainPick && (
-                      <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 px-3 py-2.5 space-y-1 text-xs">
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-300">
-                          <HelpCircle size={12} aria-hidden="true" />
-                          <span>Plain-English Bet Guide</span>
-                        </div>
-                        <p className="font-semibold text-white">{plainPick.howItWins}</p>
-                        {plainPick.lineTranslation && (
-                          <p className="text-[11px] text-slate-300">{plainPick.lineTranslation}</p>
-                        )}
-                        {(plainPick.oddsTranslation || plainPick.evTranslation) && (
-                          <p className="text-[11px] text-slate-400">
-                            {[plainPick.oddsTranslation, plainPick.evTranslation].filter(Boolean).join(' · ')}
-                          </p>
-                        )}
-                      </div>
-                    )}
-
                     {(analysisResult.headline || topRec.narrative) && (
                       <p className="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-2.5">
                         {topRec.narrative || analysisResult.headline}
@@ -389,18 +369,18 @@ const TodayMatchupModal = ({
                       <tbody className="divide-y divide-slate-800/70 font-mono">
                         <tr>
                           <td className="py-1.5 font-sans text-slate-300">Offense (Pts / 100 poss.)</td>
-                          <td className="py-1.5 text-right">{awayStats.adj_off ?? '—'}</td>
-                          <td className="py-1.5 text-right">{homeStats.adj_off ?? '—'}</td>
+                          <td className="py-1.5 text-right">{fmtStat(awayStats.adj_off)}</td>
+                          <td className="py-1.5 text-right">{fmtStat(homeStats.adj_off)}</td>
                         </tr>
                         <tr>
                           <td className="py-1.5 font-sans text-slate-300">Defense (Allowed / 100 poss.)</td>
-                          <td className="py-1.5 text-right">{awayStats.adj_def ?? '—'}</td>
-                          <td className="py-1.5 text-right">{homeStats.adj_def ?? '—'}</td>
+                          <td className="py-1.5 text-right">{fmtStat(awayStats.adj_def)}</td>
+                          <td className="py-1.5 text-right">{fmtStat(homeStats.adj_def)}</td>
                         </tr>
                         <tr>
                           <td className="py-1.5 font-sans text-slate-300">Game Pace (Poss. / 40m)</td>
-                          <td className="py-1.5 text-right">{awayStats.adj_tempo ?? torvikStats.game_tempo ?? '—'}</td>
-                          <td className="py-1.5 text-right">{homeStats.adj_tempo ?? torvikStats.game_tempo ?? '—'}</td>
+                          <td className="py-1.5 text-right">{fmtStat(awayStats.adj_tempo ?? torvikStats.game_tempo)}</td>
+                          <td className="py-1.5 text-right">{fmtStat(homeStats.adj_tempo ?? torvikStats.game_tempo)}</td>
                         </tr>
                       </tbody>
                     </table>

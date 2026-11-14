@@ -40,6 +40,17 @@ jobs:
         run: |
           python src/scripts/ingest_haslametrics.py
 
+      - name: Ingest KenPom Ratings (email/password login or cookie/API)
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KENPOM_API_KEY: ${{ secrets.KENPOM_API_KEY }}
+          KENPOM_EMAIL: ${{ secrets.KENPOM_EMAIL }}
+          KENPOM_PASSWORD: ${{ secrets.KENPOM_PASSWORD }}
+          KENPOM_COOKIE: ${{ secrets.KENPOM_COOKIE }}
+        run: |
+          python src/scripts/ingest_kenpom.py
+
       - name: Update Data Health
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

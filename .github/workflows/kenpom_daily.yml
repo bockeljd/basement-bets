@@ -46,5 +46,11 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python src/scripts/update_data_health.py
 
+      - name: Re-score Daily Top Picks
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python src/scripts/build_daily_top_picks.py
+
       - name: Summary
         run: echo "✅ KenPom ingest complete at $(date)"

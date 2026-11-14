@@ -7,7 +7,6 @@ import {
   Sparkles,
   AlertTriangle,
   TrendingUp,
-  HelpCircle,
 } from 'lucide-react';
 import ModelVisualComparison from './ModelVisualComparison';
 import {
@@ -54,7 +53,9 @@ const TodayPlayCard = ({
       ? `${(kellyRaw * 100).toFixed(1)}% bankroll`
       : '0.5u–1.0u';
   const tags = Array.isArray(rec?.movement_tags) ? rec.movement_tags.slice(0, 3) : [];
-  const reasons = buildWhyPickReasons(rec, game);
+  const reasons = buildWhyPickReasons(rec, game).filter(
+    (r) => r.label !== 'Model vs Market' && r.label !== 'Independent Ratings'
+  );
   const primaryReason = reasons[0]?.text || null;
   const extraReasons = reasons.slice(1);
   const injImpact = rec?.signals?.injuries_impact;
@@ -110,10 +111,14 @@ const TodayPlayCard = ({
             )}
           </div>
           <h3 className="mt-1 text-base font-bold text-white leading-snug truncate">
-            {pickLabel}
+            {pickLabel}{' '}
+            {rec?.price != null && (
+              <span className="font-mono text-sm font-semibold text-emerald-300">({fmtOdds(rec.price)})</span>
+            )}
           </h3>
           <p className="text-xs text-slate-400 truncate">
             {game?.away_team} @ {game?.home_team}
+            {plain?.shortRule ? ` · ${plain.shortRule}` : ''}
           </p>
         </div>
 
@@ -149,62 +154,52 @@ const TodayPlayCard = ({
         </div>
       )}
 
-      {/* Simplified 3-column comparison strip */}
+      {/* Streamlined 3-column comparison strip (zero duplicated info) */}
       <div className="today-play-metrics">
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sportsbook Line</div>
-          <div className="mt-0.5 text-sm font-mono font-bold text-white truncate">{marketDisplay}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Book vs. Model</div>
+          <div className="mt-0.5 text-sm font-mono font-bold text-white truncate">
+            {marketDisplay} <span className="text-slate-500">→</span>{' '}
+            <span className="text-sky-300">{fairDisplay}</span>
+          </div>
           <div className="text-[11px] text-slate-400 truncate">
-            {fmtOdds(rec?.price)} odds · {rec?.book || 'Consensus'}
+            {rec?.edge_points != null ? `${Math.abs(Number(rec.edge_points)).toFixed(1)} pt cushion` : 'Fair line'} · {rec?.book || 'Consensus'}
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Basement Fair Line</div>
-          <div className="mt-0.5 text-sm font-mono font-bold text-sky-300 truncate">{fairDisplay}</div>
-          <div className="text-[11px] text-slate-400 truncate">
-            {rec?.edge_points != null ? `${Math.abs(Number(rec.edge_points)).toFixed(1)} pts better than book` : 'Fair projection'}
-          </div>
-        </div>
-
-        <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Value &amp; Win Odds</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Expected Value</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-emerald-300 truncate">
             {evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% EV` : '—'}
           </div>
           <div className="text-[11px] text-indigo-200 truncate">
-            {winProb != null ? `${fmtPct(winProb, 0)} chance` : 'Model edge'} · {kellyUnits}
+            {winProb != null ? `${fmtPct(winProb, 1)} win` : 'Model edge'} · {kellyUnits}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Proj. Score</div>
+          <div className="mt-0.5 text-sm font-mono font-bold text-sky-200 truncate">
+            {projectedScore ? projectedScore.shortText : '—'}
+          </div>
+          <div className="text-[11px] text-slate-400 truncate">
+            {projectedScore
+              ? projectedScore.margin === 0
+                ? 'Projected toss-up'
+                : `${projectedScore.winner} by ~${projectedScore.margin}`
+              : 'Model total projection'}
           </div>
         </div>
       </div>
 
-      {/* Plain-English "What This Bet Means" Box */}
-      {plain && (
-        <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/15 px-3 py-2.5 space-y-1 text-xs">
-          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-300">
-            <HelpCircle size={12} aria-hidden="true" />
-            <span>Plain-English Bet Guide</span>
-          </div>
-          <p className="font-semibold text-white leading-snug">{plain.howItWins}</p>
-          {plain.lineTranslation && (
-            <p className="text-[11px] text-slate-300 leading-relaxed">{plain.lineTranslation}</p>
-          )}
-          {(plain.oddsTranslation || plain.evTranslation) && (
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              {[plain.oddsTranslation, plain.evTranslation].filter(Boolean).join(' · ')}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Visual Sportsbook vs. Model Comparison Bar + Projected Final Score */}
+      {/* Compact Visual Sportsbook vs. Model Scale + Inputs */}
       <ModelVisualComparison
         visualData={visualData}
         projectedScore={projectedScore}
         compact
       />
 
-      {/* Primary model edge takeaway */}
+      {/* Non-duplicate qualitative edge note (e.g., sharp move, key driver) */}
       {primaryReason && (
         <div className="rounded-xl border border-indigo-500/20 bg-slate-950/60 px-3 py-2 flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
           <Sparkles size={13} className="text-indigo-400 shrink-0 mt-0.5" aria-hidden="true" />

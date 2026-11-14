@@ -17,8 +17,8 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
         compact ? 'p-3 space-y-2.5' : 'p-4 space-y-3'
       }`}
     >
-      {/* Projected Final Score */}
-      {projectedScore && (
+      {/* Projected Final Score (full mode only; compact tiles show it in the metric strip) */}
+      {!compact && projectedScore && (
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
           <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
             <Target size={12} className="text-sky-400" aria-hidden="true" />
@@ -35,15 +35,17 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
 
       {/* Visual Line Comparison Bar */}
       {visualData && (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-            <span className="font-semibold text-slate-300">
-              {visualData.sideLabel} Scale
-            </span>
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-mono font-bold">
-              {visualData.cushionPts.toFixed(1)} pt cushion vs. books
-            </span>
-          </div>
+        <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
+          {!compact && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="font-semibold text-slate-300">
+                {visualData.sideLabel} Scale
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-mono font-bold">
+                {visualData.cushionPts.toFixed(1)} pt cushion vs. books
+              </span>
+            </div>
+          )}
 
           {/* Horizontal tug-of-war scale */}
           <div className="relative pt-5 pb-4 px-1" aria-hidden="true">
@@ -112,7 +114,7 @@ const ModelVisualComparison = ({ visualData, projectedScore, compact = false }) 
             </div>
           )}
 
-          {visualData.summary && (
+          {!compact && visualData.summary && (
             <p className="text-[11px] text-slate-300 leading-relaxed">
               {visualData.summary}
             </p>

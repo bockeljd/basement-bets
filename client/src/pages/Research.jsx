@@ -12,7 +12,6 @@ import {
   PlusCircle,
   Sparkles,
   X,
-  HelpCircle,
 } from 'lucide-react';
 import api from '../api/axios';
 import { loadCache } from '../utils/httpCache';
@@ -73,7 +72,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
   const [correlationResult, setCorrelationResult] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showModelLogicDialog, setShowModelLogicDialog] = useState(false);
-  const [showBetGuide, setShowBetGuide] = useState(false);
   const [rescoringSlate, setRescoringSlate] = useState(false);
   const [rescoreProgress, setRescoreProgress] = useState('');
 
@@ -831,20 +829,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
           <button
             type="button"
-            onClick={() => setShowBetGuide((v) => !v)}
-            aria-expanded={showBetGuide}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer ${
-              showBetGuide
-                ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
-                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
-            }`}
-          >
-            <HelpCircle size={13} aria-hidden="true" />
-            <span>Betting Terms Guide</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setShowModelLogicDialog(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-xs font-semibold text-blue-200 cursor-pointer"
           >
@@ -853,36 +837,6 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
           </button>
         </div>
       </div>
-
-      {/* Collapsible Plain-English Betting Cheat Sheet */}
-      {showBetGuide && (
-        <div className="rounded-2xl border border-emerald-500/30 bg-slate-900/90 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
-            <div className="font-bold text-emerald-300">+ Underdog Spread (e.g. +37.5)</div>
-            <p className="text-slate-300 leading-relaxed">
-              The team gets <strong>+37.5 bonus points</strong> added to their final score. You win if they win OR lose by 37 or fewer points.
-            </p>
-          </div>
-          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
-            <div className="font-bold text-sky-300">- Favorite Spread (e.g. -4.5)</div>
-            <p className="text-slate-300 leading-relaxed">
-              The team is favored and spots <strong>4.5 points</strong>. You win only if they win the final score by 5 or more points.
-            </p>
-          </div>
-          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
-            <div className="font-bold text-indigo-300">Total (OVER / UNDER 146.5)</div>
-            <p className="text-slate-300 leading-relaxed">
-              Add <strong>both teams&apos; final scores</strong> together. OVER wins at 147+ combined points; UNDER wins at 146 or fewer.
-            </p>
-          </div>
-          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
-            <div className="font-bold text-amber-300">Model Cushion &amp; +EV%</div>
-            <p className="text-slate-300 leading-relaxed">
-              <strong>+EV%</strong> is expected long-term profit per $100 staked. More point cushion vs. sportsbooks = bigger margin of safety.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Collapsible Data Health Bar */}
       <TodayDataHealthStrip
