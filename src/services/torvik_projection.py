@@ -189,7 +189,7 @@ class TorvikProjectionService:
         a = stats.get('away')
         
         if not h or not a:
-             return {"margin": 0, "total": 145, "lean": "No Data"}
+             return {"margin": 0, "total": None, "lean": "No Data"}
              
         tempo = stats.get('game_tempo') or 68.0
         
@@ -203,7 +203,7 @@ class TorvikProjectionService:
 
         # If core metrics are missing, we cannot compute a projection.
         if (h_off <= 0.0) or (h_def <= 0.0) or (a_off <= 0.0) or (a_def <= 0.0):
-            return {"margin": 0, "total": 145, "lean": "No Data"}
+            return {"margin": 0, "total": None, "lean": "No Data"}
 
         h_score = (h_off * a_def / eff_factor) * (tempo / 100.0)
         a_score = (a_off * h_def / eff_factor) * (tempo / 100.0)

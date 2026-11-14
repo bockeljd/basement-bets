@@ -1923,24 +1923,32 @@ def upsert_bt_team_metrics_daily(metrics: list):
     """Upsert daily team metrics to bt_team_metrics_daily.
 
     Expected payload keys: team_text, date, adj_off, adj_def, adj_tempo
-    Optional: torvik_rank, record
+    Optional: torvik_rank, record, luck, continuity
     """
 
     query = """
-    INSERT INTO bt_team_metrics_daily (team_text, date, adj_off, adj_def, adj_tempo, torvik_rank, record)
-    VALUES (:team_text, :date, :adj_off, :adj_def, :adj_tempo, :torvik_rank, :record)
+    INSERT INTO bt_team_metrics_daily (
+        team_text, date, adj_off, adj_def, adj_tempo, torvik_rank, record, luck, continuity
+    )
+    VALUES (
+        :team_text, :date, :adj_off, :adj_def, :adj_tempo, :torvik_rank, :record, :luck, :continuity
+    )
     ON CONFLICT (team_text, date) DO UPDATE SET
         adj_off = EXCLUDED.adj_off,
         adj_def = EXCLUDED.adj_def,
         adj_tempo = EXCLUDED.adj_tempo,
-        torvik_rank = EXCLUDED.torvik_rank,
-        record = EXCLUDED.record
+        torvik_rank = COALESCE(EXCLUDED.torvik_rank, bt_team_metrics_daily.torvik_rank),
+        record = COALESCE(EXCLUDED.record, bt_team_metrics_daily.record),
+        luck = COALESCE(EXCLUDED.luck, bt_team_metrics_daily.luck),
+        continuity = COALESCE(EXCLUDED.continuity, bt_team_metrics_daily.continuity)
     """
     with get_db_connection() as conn:
         # Defensive migrations (prod DB may lag new columns)
         try:
             _exec(conn, "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS torvik_rank INTEGER;")
             _exec(conn, "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS record TEXT;")
+            _exec(conn, "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS luck REAL;")
+            _exec(conn, "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS continuity REAL;")
         except Exception:
             pass
 
@@ -1950,6 +1958,10 @@ def upsert_bt_team_metrics_daily(metrics: list):
                 m['torvik_rank'] = None
             if 'record' not in m:
                 m['record'] = None
+            if 'luck' not in m:
+                m['luck'] = None
+            if 'continuity' not in m:
+                m['continuity'] = None
             _exec(conn, query, m)
         conn.commit()
 

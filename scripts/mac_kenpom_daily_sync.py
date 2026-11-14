@@ -36,12 +36,12 @@ if str(REPO_ROOT) not in sys.path:
 
 def load_sync_env() -> None:
     """Load workspace .env and ~/.basement_bets_kenpom.env without overwriting explicit env vars."""
-    home_env = Path.home() / ".basement_bets_kenpom.env"
-    if home_env.exists():
-        load_dotenv(home_env, override=False)
-    repo_env = REPO_ROOT / ".env"
-    if repo_env.exists():
-        load_dotenv(repo_env, override=False)
+    for env_path in (Path.home() / ".basement_bets_kenpom.env", REPO_ROOT / ".env"):
+        try:
+            if env_path.exists():
+                load_dotenv(env_path, override=False)
+        except OSError:
+            pass
 
 
 # Allow API-only sync runs (without local Postgres) when DATABASE_URL is not configured.

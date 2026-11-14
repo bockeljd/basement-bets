@@ -225,14 +225,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if delta is None:
                 return 0.0
                 
-            # For every 2% above season average, subtract 0.5 points
-            # Only apply if shooting significantly hot (>4% above avg)
-            if delta > 0.04:  # 4% threshold
-                penalty = (delta * 100) / 2 * 0.5  # Convert to points
-                return -min(penalty, 2.0)  # Cap at -2 points
-            elif delta < -0.04:  # Shooting cold, bonus (regression to mean UP)
-                bonus = abs(delta * 100) / 2 * 0.25  # Smaller bonus
-                return min(bonus, 1.0)  # Cap at +1 point
+            # Smooth continuous shooting-regression ramp past a +/-2% deadzone
+            # so there is no step cliff at +/-4% (bounded to [-2.0, +1.0] pts).
+            excess = abs(float(delta)) - 0.02
+            if excess <= 0.0:
+                return 0.0
+            if delta > 0.0:
+                return -min(round(excess * 35.0, 3), 2.0)
+            return min(round(excess * 18.0, 3), 1.0)
                 
         except Exception as e:
             print(f"[MODEL] Shooting regression error for {team_name}: {e}")
@@ -273,19 +273,36 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         adj -= 1.0  # Standard letdown
                         print(f"[SPOT] {team_name} LETDOWN: Just beat ranked team (#{opponent_rank})")
             
-            # 2. LOOKAHEAD SPOT: Check if NEXT game is against a Top 25/rival
-            with get_db_connection() as conn:
-                query = """
-                SELECT e.home_team, e.away_team, e.start_time
-                FROM events e
-                WHERE (LOWER(e.home_team) LIKE LOWER(:t) OR LOWER(e.away_team) LIKE LOWER(:t))
-                  AND e.start_time > :now
-                ORDER BY e.start_time ASC
-                LIMIT 1
-                """
-                # Use named parameters
-                _ = _exec(conn, query, {"t": f"%{team_name}%", "now": current_date}).fetchone()
-                # MVP: we are not applying a lookahead penalty yet (needs ranked-opponent + rivalry logic).
+            # 2. LOOKAHEAD SPOT: Apply bounded penalty if next game within 4 days is vs a Top-25 opponent
+            if os.getenv('REQUIRE_DATABASE') != '0':
+                with get_db_connection() as conn:
+                    query = """
+                    SELECT e.home_team, e.away_team, e.start_time
+                    FROM events e
+                    WHERE (LOWER(e.home_team) LIKE LOWER(:t) OR LOWER(e.away_team) LIKE LOWER(:t))
+                      AND e.start_time > :now
+                    ORDER BY e.start_time ASC
+                    LIMIT 1
+                    """
+                    next_row = _exec(conn, query, {"t": f"%{team_name}%", "now": current_date}).fetchone()
+                    if next_row and getattr(self, 'kenpom_client', None):
+                        next_dict = dict(next_row) if not isinstance(next_row, dict) else next_row
+                        now_dt = self._parse_game_datetime(current_date)
+                        next_dt = self._parse_game_datetime(next_dict.get('start_time'))
+                        if now_dt and next_dt:
+                            if getattr(now_dt, 'tzinfo', None) is not None and getattr(next_dt, 'tzinfo', None) is None:
+                                now_dt = now_dt.replace(tzinfo=None)
+                            elif getattr(next_dt, 'tzinfo', None) is not None and getattr(now_dt, 'tzinfo', None) is None:
+                                next_dt = next_dt.replace(tzinfo=None)
+                        if now_dt and next_dt and 0.0 <= (next_dt - now_dt).total_seconds() <= 4 * 86400:
+                            nh = str(next_dict.get('home_team') or '')
+                            na = str(next_dict.get('away_team') or '')
+                            next_opp = na if team_name.lower() in nh.lower() else nh
+                            if next_opp:
+                                opp_kp = self.kenpom_client.get_team_rating(next_opp) or {}
+                                opp_rank = opp_kp.get('rank')
+                                if opp_rank is not None and int(opp_rank) <= 25:
+                                    adj -= 0.75
                 
         except Exception as e:
             print(f"[MODEL] Situational spot error for {team_name}: {e}")
@@ -410,36 +427,50 @@ class NCAAMMarketFirstModelV2(BaseModel):
             
         return 0.0
 
-    def _generate_bell_curve(self, mu: float, sigma: float, line: float) -> Dict:
+    def _generate_bell_curve(self, mu: Optional[float], sigma: Optional[float], line: Optional[float]) -> Dict:
         """
         Generates 50 points representing the Normal Distribution curve.
         Used by Frontend (Chart.js) to render the 'Cover Zone'.
         """
         import math
-        
+
+        if mu is None or line is None or sigma is None or float(sigma) <= 0.0:
+            return {
+                "points": [],
+                "mu": round(float(mu), 2) if mu is not None else None,
+                "sigma": round(float(sigma), 2) if sigma is not None else None,
+                "line": round(float(line), 2) if line is not None else None,
+                "cover_prob": None,
+                "is_under_line": False,
+            }
+
+        mu_f = float(mu)
+        sigma_f = float(sigma)
+        line_f = float(line)
+
         points = []
         # Generate points from -3 sigma to +3 sigma
-        start = mu - (3 * sigma)
-        end = mu + (3 * sigma)
+        start = mu_f - (3 * sigma_f)
+        end = mu_f + (3 * sigma_f)
         step = (end - start) / 50
-        
+
         for i in range(51):
             x = start + (i * step)
             # Standard Normal PDF Formula
-            y = (1 / (sigma * math.sqrt(2 * math.pi))) * math.exp(-0.5 * ((x - mu) / sigma)**2)
+            y = (1 / (sigma_f * math.sqrt(2 * math.pi))) * math.exp(-0.5 * ((x - mu_f) / sigma_f)**2)
             points.append({"x": round(x, 2), "y": round(y, 6)})
-        
+
         # Calculate probability of covering (CDF at line)
-        z = (line - mu) / sigma
+        z = (line_f - mu_f) / sigma_f
         cover_prob = 0.5 * (1 + math.erf(z / math.sqrt(2)))
-        
+
         return {
             "points": points,
-            "mu": round(mu, 2),
-            "sigma": round(sigma, 2),
-            "line": round(line, 2),
+            "mu": round(mu_f, 2),
+            "sigma": round(sigma_f, 2),
+            "line": round(line_f, 2),
             "cover_prob": round(cover_prob, 4),
-            "is_under_line": mu < line  # Tells UI which side is favorable
+            "is_under_line": mu_f < line_f  # Tells UI which side is favorable
         }
 
     def predict(self, game_id: str, home_team: str, away_team: str, market_total: float = 0) -> Dict[str, Any]:
@@ -765,9 +796,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
             }
 
         # If one market is missing, we still compute the other market.
-        # Use sane defaults to keep the math stable; _generate_recommendations will skip missing markets.
+        # Keep missing total as None instead of fabricating 145.0; _generate_recommendations skips missing markets.
         mu_market_spread = float(market_snapshot['spread_home']) if has_spread else 0.0
-        mu_market_total = float(market_snapshot['total']) if has_total else 145.0
+        mu_market_total = float(market_snapshot['total']) if has_total else None
 
         # 3. External Projections & Signals
         # Torvik - PRIMARY SIGNAL
@@ -882,15 +913,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
         news_context = {}
         
         # 4. Dynamic Weight Scaling
-        # If NCAAM_W_BASE is set, treat it as a fixed override (staging tuning).
-        if os.getenv('NCAAM_W_BASE') is not None:
+        # Compute local base_w_torvik per game without mutating self.W_BASE across batch runs.
+        env_w_base = os.getenv('NCAAM_W_BASE')
+        if env_w_base is not None:
             try:
-                self.W_BASE = float(os.getenv('NCAAM_W_BASE'))
+                base_w_torvik = float(env_w_base)
             except Exception:
-                self.W_BASE = self._get_dynamic_weights(game_date_obj)
+                base_w_torvik = self._get_dynamic_weights(game_date_obj)
+        elif abs(float(self.W_BASE) - float(self.DEFAULT_W_BASE)) > 1e-9:
+            base_w_torvik = float(self.W_BASE)
         else:
-            self.W_BASE = self._get_dynamic_weights(game_date_obj)
-        w_base = self.W_BASE
+            base_w_torvik = self._get_dynamic_weights(game_date_obj)
+        w_base = base_w_torvik
 
         # 5. Blend Math (Strict mu_final)
         # Defensive None handling
@@ -952,8 +986,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         home_rec_games = _parse_games_from_record((torvik_team_stats.get('home') or {}).get('record'))
         away_rec_games = _parse_games_from_record((torvik_team_stats.get('away') or {}).get('record'))
-        if (home_rec_games is not None and home_rec_games < 4) or (away_rec_games is not None and away_rec_games < 4):
-            luck_scale = 0.0
+        known_rec_games = [g for g in (home_rec_games, away_rec_games) if g is not None]
+        if known_rec_games:
+            min_rec_games = min(known_rec_games)
+            luck_scale = 0.0 if min_rec_games < 3 else min(1.0, (min_rec_games - 2) / 10.0)
+        else:
+            luck_scale = 0.30 if game_month == 11 else (0.65 if game_month == 12 else 1.0)
 
         home_luck = (torvik_team_stats.get('home') or {}).get('luck', 0.0) or 0.0
         away_luck = (torvik_team_stats.get('away') or {}).get('luck', 0.0) or 0.0
@@ -965,16 +1003,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if kp_al is not None:
                 away_luck = (away_luck + kp_al) / 2.0 if away_luck else kp_al
         
-        luck_adjustment = 0.0
-        if home_luck > 0.05:
-            luck_adjustment += (1.0 * luck_scale) # Home penalty
-        if home_luck < -0.05:
-            luck_adjustment -= (1.0 * luck_scale) # Home boost
-            
-        if away_luck > 0.05:
-            luck_adjustment -= (1.0 * luck_scale) # Away penalty
-        if away_luck < -0.05:
-            luck_adjustment += (1.0 * luck_scale) # Away boost
+        # Continuous linear regression toward the mean (bounded to +/-1.0 * luck_scale per team)
+        # Positive luck = overperformed close-game expectation -> fade team; negative luck -> boost.
+        def _luck_fade(val: float) -> float:
+            return max(-1.0, min(1.0, float(val) * 12.0))
+
+        luck_adjustment = (_luck_fade(home_luck) - _luck_fade(away_luck)) * luck_scale
             
         # --- Feature: Continuity / Transfer Portal Factor ---
         # Note: Torvik stores continuity either as 0..1 or 0..100 percentage; normalize to 0..1.
@@ -993,7 +1027,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         
         # Dynamic Weights for Torvik (w_base), KenPom (w_kp), and Haslametrics (w_hasla)
         # Keep efficiency signals meaningfully independent from Vegas when multiple systems agree.
-        w_base = self.W_BASE
+        w_base = base_w_torvik
         if avg_continuity < 0.5:
             w_base = min(w_base, 0.12)
         w_kp_target = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity)
@@ -1052,8 +1086,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
             w_base = round(w_base, 4)
             w_kp = round(w_kp, 4)
             w_hasla = round(w_hasla, 4)
-
-        self.W_BASE = w_base
         
         mu_spread_final = (
             mu_market_spread
@@ -1117,51 +1149,50 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if abs(mu_spread_final - mu_market_spread) > effective_cap_spread:
              mu_spread_final = mu_market_spread + (effective_cap_spread * math.copysign(1, mu_spread_final - mu_market_spread))
 
-        # Total - with None-safe handling
-        mu_torvik_total = torvik_view.get('total') or 145.0
-        kenpom_total_adj = (kenpom_adj.get('total_adj') if isinstance(kenpom_adj, dict) else None) or 0.0
+        # Total - None-safe handling without synthetic 145.0 fallbacks
+        torvik_total_ok = bool(torvik_view and torvik_view.get('lean') != 'No Data')
+        mu_torvik_total = _safe_float(torvik_view.get('total')) if torvik_total_ok else None
+        kenpom_total_adj = (_safe_float(kenpom_adj.get('total_adj')) if isinstance(kenpom_adj, dict) else None) or 0.0
         kp_fair_total = _safe_float(kenpom_adj.get('fair_total')) if isinstance(kenpom_adj, dict) else None
-        market_total = market_snapshot.get('total') or 145.0
-        mu_kenpom_total = kp_fair_total if kp_fair_total is not None else (market_total + kenpom_total_adj)
+        mu_kenpom_total = kp_fair_total if kp_fair_total is not None else (
+            (mu_market_total + kenpom_total_adj)
+            if (has_total and mu_market_total is not None and kp_available and abs(kenpom_total_adj) > 1e-9)
+            else None
+        )
 
         # KenPom player-based (rotation-weighted) efficiency signal (best-effort)
-        # This helps totals (PPP proxy) and later props.
+        # Only apply when KenPom team-level fair_total is unavailable so we don't double-count
+        # KenPom offensive/defensive efficiency, and center around D1 average ORtg (106.5).
         kp_player_total_adj = 0.0
         kp_team_player_home = None
         kp_team_player_away = None
         try:
             kp_team_player_home = self.kenpom_client.get_team_player_agg(event['home_team'])
             kp_team_player_away = self.kenpom_client.get_team_player_agg(event['away_team'])
-            # Use ORtg_w deltas as a very small total adjustment (capped).
-            if kp_team_player_home and kp_team_player_away:
+            if kp_fair_total is None and kp_team_player_home and kp_team_player_away:
                 h_ortg = kp_team_player_home.get('ortg_w')
                 a_ortg = kp_team_player_away.get('ortg_w')
                 if h_ortg is not None and a_ortg is not None:
-                    # ORtg is points per 100 possessions. Convert mismatch to points with a modest scale.
-                    # Roughly: 5 ORtg pts difference ~ 1.0 total point.
-                    delta = (float(h_ortg) + float(a_ortg)) / 2.0 - 105.0
+                    delta = (float(h_ortg) + float(a_ortg)) / 2.0 - 106.5
                     kp_player_total_adj = max(min(delta * 0.10, 1.5), -1.5)
         except Exception as e:
             print(f"[MODEL] KenPom player agg error: {e}")
         
-        # Ensure mu_market_total is not None
-        if mu_market_total is None:
-            mu_market_total = 145.0
-        mu_hasla_total = float(haslametrics_view.get('total') or mu_torvik_total) if hasla_available else mu_torvik_total
+        mu_hasla_total = _safe_float(haslametrics_view.get('total')) if hasla_available else None
         
         w_total_torvik = w_base + (0.5 * self.W_SCHED)
         w_total_kp = w_kp
         w_total_hasla = w_hasla
-        diff_tv_tot = mu_torvik_total - mu_market_total
-        diff_kp_tot = (mu_kenpom_total - mu_market_total) if kp_available else 0.0
-        diff_hs_tot = (mu_hasla_total - mu_market_total) if hasla_available else 0.0
+        diff_tv_tot = (mu_torvik_total - mu_market_total) if (has_total and mu_market_total is not None and torvik_total_ok and mu_torvik_total is not None) else 0.0
+        diff_kp_tot = (mu_kenpom_total - mu_market_total) if (has_total and mu_market_total is not None and kp_available and mu_kenpom_total is not None) else 0.0
+        diff_hs_tot = (mu_hasla_total - mu_market_total) if (has_total and mu_market_total is not None and hasla_available and mu_hasla_total is not None) else 0.0
 
         tot_sig_diffs = []
-        if abs(diff_tv_tot) >= 1.5:
+        if torvik_total_ok and mu_torvik_total is not None and abs(diff_tv_tot) >= 1.5:
             tot_sig_diffs.append(diff_tv_tot)
-        if kp_available and abs(diff_kp_tot) >= 1.5:
+        if kp_available and mu_kenpom_total is not None and abs(diff_kp_tot) >= 1.5:
             tot_sig_diffs.append(diff_kp_tot)
-        if hasla_available and abs(diff_hs_tot) >= 1.5:
+        if hasla_available and mu_hasla_total is not None and abs(diff_hs_tot) >= 1.5:
             tot_sig_diffs.append(diff_hs_tot)
 
         agree_count_total = 0
@@ -1178,25 +1209,47 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 w_total_kp *= mult_t
                 w_total_hasla *= mult_t
 
-        mu_total_final = (
-            mu_market_total
-            + (w_total_torvik * diff_tv_tot)
-            + (w_total_kp * diff_kp_tot)
-            + (w_total_hasla * diff_hs_tot)
-        )
-        mu_total_final += kp_player_total_adj
-        potential_adjustment_total = council_adjustment_total
-        if COUNCIL_ADJUSTMENTS_ENABLED:
-            mu_total_final += council_adjustment_total
-        else:
-            if council_adjustment_total != 0.0:
-                print(f"[MODEL] Council total adj {council_adjustment_total:+.2f} computed but GATED (Phase 1 mode).")
-        
         effective_cap_total = self.CAP_TOTAL
         if (os.getenv('NCAAM_CAP_TOTAL') is None) and agree_count_total >= 2:
             effective_cap_total = max(self.CAP_TOTAL, 4.5)
-        if abs(mu_total_final - mu_market_total) > effective_cap_total:
-             mu_total_final = mu_market_total + (effective_cap_total * math.copysign(1, mu_total_final - mu_market_total))
+
+        if has_total and mu_market_total is not None:
+            mu_total_final = (
+                mu_market_total
+                + (w_total_torvik * diff_tv_tot)
+                + (w_total_kp * diff_kp_tot)
+                + (w_total_hasla * diff_hs_tot)
+            )
+            mu_total_final += kp_player_total_adj
+            potential_adjustment_total = council_adjustment_total
+            if COUNCIL_ADJUSTMENTS_ENABLED:
+                mu_total_final += council_adjustment_total
+            else:
+                if council_adjustment_total != 0.0:
+                    print(f"[MODEL] Council total adj {council_adjustment_total:+.2f} computed but GATED (Phase 1 mode).")
+            if abs(mu_total_final - mu_market_total) > effective_cap_total:
+                mu_total_final = mu_market_total + (effective_cap_total * math.copysign(1, mu_total_final - mu_market_total))
+        else:
+            # Market total absent: compute display-only total from available real projections (never synthetic 145.0).
+            weighted_tots = [
+                (val, w)
+                for val, w in (
+                    (mu_torvik_total, max(float(w_total_torvik), 0.0)),
+                    (mu_kenpom_total, max(float(w_total_kp), 0.0)),
+                    (mu_hasla_total, max(float(w_total_hasla), 0.0)),
+                )
+                if val is not None
+            ]
+            if weighted_tots:
+                w_sum_avail = sum(w for _, w in weighted_tots)
+                if w_sum_avail > 0:
+                    mu_total_final = sum(val * w for val, w in weighted_tots) / w_sum_avail
+                else:
+                    mu_total_final = sum(val for val, _ in weighted_tots) / len(weighted_tots)
+                mu_total_final += kp_player_total_adj
+            else:
+                mu_total_final = None
+            potential_adjustment_total = council_adjustment_total
 
         # 6. Pace-Adjusted & Season-Calibrated Sigma (Refined)
         # Higher tempo = more possessions = higher variance = wider sigma
@@ -1216,7 +1269,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             blowout_sigma_add = min(4.5, (abs(float(mu_market_spread)) - 18.0) * 0.18)
 
         sigma_spread = (((base_sigma_spread + blowout_sigma_add) * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
-        sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * abs(mu_torvik_total - mu_market_total)) * early_season_sigma_mult
+        sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * (abs(mu_torvik_total - mu_market_total) if (mu_torvik_total is not None and mu_market_total is not None) else 0.0)) * early_season_sigma_mult
 
         # --- Feature: Dynamic Sigma Inflation ---
         # If the Council identifies roster instability or significant red flags, 
@@ -1307,8 +1360,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
             raw_basement_line += self.manual_adjustments.get('home_injury', 0.0)
             raw_basement_line -= self.manual_adjustments.get('away_injury', 0.0)
         
-        # 6.5 Advanced Situational Signals (scaled in early season & bounded by outer sniper guardrail)
-        situational_scale = 0.5 if game_month == 11 else 1.0
+        # 6.5 Advanced Situational Signals (smoothly ramped by min games played & bounded by outer sniper guardrail)
+        if known_rec_games:
+            min_rec_games = min(known_rec_games)
+            situational_scale = round(min(1.0, 0.35 + 0.65 * max(0, min_rec_games - 1) / 10.0), 3)
+        else:
+            situational_scale = 0.50 if game_month == 11 else (0.80 if game_month == 12 else 1.0)
 
         # -- Shooting Regression (3PT Variance) --
         shooting_regr_home = self._calculate_shooting_regression(event['home_team'], as_of_date=game_date_obj) or 0.0
@@ -1337,7 +1394,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         inj_total_adj = max(-3.0, min(0.5, inj_total_adj))
         if inj_spread_adj != 0.0:
             mu_spread_final += inj_spread_adj
-        if inj_total_adj != 0.0:
+        if inj_total_adj != 0.0 and mu_total_final is not None:
             mu_total_final += inj_total_adj
 
         # -- Strength of Schedule / Non-Conference Cupcake + Haslametrics Momentum & Inconsistency --
@@ -1391,10 +1448,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             mu_spread_final -= a_inj
         
         # -- Referee Signal (Totals) --
-        mu_total_final = self._apply_referee_signal(event['id'], mu_total_final) or mu_total_final
-        max_auto_total_dev = effective_cap_total + 1.5
-        if abs(mu_total_final - mu_market_total) > max_auto_total_dev:
-            mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
+        if mu_total_final is not None:
+            mu_total_final = self._apply_referee_signal(event['id'], mu_total_final) or mu_total_final
+            max_auto_total_dev = effective_cap_total + 1.5
+            if mu_market_total is not None and abs(mu_total_final - mu_market_total) > max_auto_total_dev:
+                mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
         
         # 6.6 Generate Bell Curve Data for UI Visualization
         bell_curve_spread = self._generate_bell_curve(mu_spread_final, sigma_spread, mu_market_spread)
@@ -1464,7 +1522,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "projected_score": projected_score_info,
             "haslametrics": {
                 "fair_spread_home": round(-float(hasla_margin), 1),
-                "fair_total": round(float(mu_hasla_total), 1),
+                "fair_total": round(float(mu_hasla_total), 1) if mu_hasla_total is not None else None,
                 "projected_score": haslametrics_view.get("projected_score"),
                 "asof_date": hasla_asof,
             } if hasla_available else None,
@@ -1478,7 +1536,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             } if kp_available else None,
             "torvik": {
                 "fair_spread_home": round(float(mu_torvik_spread), 1),
-                "fair_total": round(float(mu_torvik_total), 1),
+                "fair_total": round(float(mu_torvik_total), 1) if mu_torvik_total is not None else None,
                 "projected_score": torvik_view.get("projected_score"),
             },
             "public_splits": action_splits or None,
@@ -1526,7 +1584,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "kenpom_hca_adj": kp_hca if 'kp_hca' in locals() else 0.0,
             "is_neutral": is_neutral,
             "basement_line": raw_basement_line,
-            "w_base": self.W_BASE,
+            "w_base": w_base,
             "w_kp": w_kp,
             "w_hasla": w_hasla,
             "conviction_sources": agree_count,
@@ -2467,7 +2525,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         return self._winprob_calibration
 
     def _calibrate_win_prob(self, p: float) -> float:
-        """Calibrate raw win probability using shrinkage-blended PAVA mapping."""
+        """Calibrate raw win probability using empirical-weighted PAVA mapping."""
         try:
             p_val = float(p)
         except Exception:
@@ -2476,10 +2534,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return 0.0
         if p_val >= 1.0:
             return 1.0
+        try:
+            blend_w = float(os.getenv('NCAAM_WINPROB_CAL_BLEND', '0.65'))
+            blend_w = max(0.0, min(1.0, blend_w))
+        except Exception:
+            blend_w = 0.65
         return interpolate_pava_prob(
             p_val,
             self._load_winprob_calibration(),
-            blend_weight=0.25,
+            blend_weight=blend_w,
         )
 
     _model_conf_params: Optional[Dict[str, Any]] = None
@@ -2500,11 +2563,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
     def _tau_for_market(self, market: str) -> float:
         """Return tau for mu-uncertainty simulations.
 
-        Disabled by default (requires ENABLE_MU_UNCERTAINTY_CONF=1) because it depends on
-        close_line/mu_final data integrity.
+        Enabled by default (set ENABLE_MU_UNCERTAINTY_CONF=0 to disable) using empirical
+        closing-line dispersion params so lb10 confidence penalizes marginal/noisy edges.
         """
         try:
-            if str(os.getenv('ENABLE_MU_UNCERTAINTY_CONF', '0')).strip() != '1':
+            if str(os.getenv('ENABLE_MU_UNCERTAINTY_CONF', '1')).strip() == '0':
                 return 0.0
             params = self._load_model_conf_params() or {}
             if str(market).upper() == 'TOTAL':
@@ -2688,7 +2751,24 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     if line_aligned:
                         if "rlm_confirmed" not in tags:
                             tags.append("rlm_confirmed")
-                        rec["ev"] = round(float(rec.get("ev") or 0.0) + 0.005, 4)
+                        if rec.get("win_prob") is not None and rec.get("price") is not None:
+                            old_wp = float(rec["win_prob"])
+                            new_wp = self._clamp_prob(old_wp + 0.003)
+                            new_ev = float(self._calculate_ev(new_wp, rec["price"]))
+                            rec["win_prob"] = round(new_wp, 3)
+                            if rec.get("win_prob_lb10") is not None:
+                                rec["win_prob_lb10"] = round(self._clamp_prob(float(rec["win_prob_lb10"]) + (new_wp - old_wp)), 3)
+                            rec["ev"] = round(new_ev, 4)
+                            if "kelly_pct" in rec:
+                                rec["kelly_pct"] = round(float(self._calculate_kelly(new_wp, rec["price"])) * 100.0, 2)
+                            if "confidence_0_100" in rec:
+                                rec["confidence_0_100"] = self._confidence_score_0_100(
+                                    rec.get("win_prob_lb10"),
+                                    fallback_win_prob=new_wp,
+                                    ev_per_unit=new_ev,
+                                )
+                        else:
+                            rec["ev"] = round(float(rec.get("ev") or 0.0) + 0.005, 4)
 
                 if (
                     opp_bets is not None
@@ -2699,10 +2779,36 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 ):
                     if "contra_sharp_money" not in tags:
                         tags.append("contra_sharp_money")
-                    penalty = 0.01
-                    rec["ev_penalty"] = round(float(rec.get("ev_penalty") or 0.0) + penalty, 4)
-                    rec["ev"] = round(float(rec.get("ev") or 0.0) - penalty, 4)
-                    if not relax_gates and float(rec.get("ev") or 0.0) < float(self.PUBLISH_MIN_EV):
+                    if rec.get("win_prob") is not None and rec.get("price") is not None:
+                        old_wp = float(rec["win_prob"])
+                        old_ev = float(rec.get("ev") or 0.0)
+                        new_wp = self._clamp_prob(old_wp - 0.005)
+                        new_ev = float(self._calculate_ev(new_wp, rec["price"]))
+                        penalty = max(0.0, round(old_ev - new_ev, 4))
+                        rec["win_prob"] = round(new_wp, 3)
+                        if rec.get("win_prob_lb10") is not None:
+                            rec["win_prob_lb10"] = round(self._clamp_prob(float(rec["win_prob_lb10"]) + (new_wp - old_wp)), 3)
+                        rec["ev_penalty"] = round(float(rec.get("ev_penalty") or 0.0) + penalty, 4)
+                        rec["ev"] = round(new_ev, 4)
+                        if "kelly_pct" in rec:
+                            rec["kelly_pct"] = round(float(self._calculate_kelly(new_wp, rec["price"])) * 100.0, 2)
+                        if "confidence_0_100" in rec:
+                            rec["confidence_0_100"] = self._confidence_score_0_100(
+                                rec.get("win_prob_lb10"),
+                                fallback_win_prob=new_wp,
+                                ev_per_unit=new_ev,
+                            )
+                    else:
+                        penalty = 0.01
+                        rec["ev_penalty"] = round(float(rec.get("ev_penalty") or 0.0) + penalty, 4)
+                        rec["ev"] = round(float(rec.get("ev") or 0.0) - penalty, 4)
+                    mkt_name = str(rec.get("market") or rec.get("market_type") or "").upper()
+                    min_gate_ev = (
+                        float(self.PUBLISH_MIN_EV_TOTAL)
+                        if mkt_name == "TOTAL"
+                        else (float(self.PUBLISH_MIN_EV_ML) if mkt_name == "MONEYLINE" else float(self.PUBLISH_MIN_EV))
+                    )
+                    if not relax_gates and float(rec.get("ev") or 0.0) < min_gate_ev:
                         continue
 
             if inj_count > 0 and "injury_report_active" not in tags:

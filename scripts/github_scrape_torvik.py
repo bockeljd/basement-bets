@@ -75,19 +75,33 @@ def save_to_database(teams: list):
     
     query = """
     INSERT INTO bt_team_metrics_daily 
-        (team_text, date, adj_off, adj_def, adj_tempo, luck, created_at)
+        (team_text, date, adj_off, adj_def, adj_tempo, luck, continuity, torvik_rank, record, created_at)
     VALUES 
-        (%s, %s, %s, %s, %s, %s, %s)
+        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (team_text, date) DO UPDATE SET
         adj_off = EXCLUDED.adj_off,
         adj_def = EXCLUDED.adj_def,
         adj_tempo = EXCLUDED.adj_tempo,
-        luck = EXCLUDED.luck
+        luck = COALESCE(EXCLUDED.luck, bt_team_metrics_daily.luck),
+        continuity = COALESCE(EXCLUDED.continuity, bt_team_metrics_daily.continuity),
+        torvik_rank = COALESCE(EXCLUDED.torvik_rank, bt_team_metrics_daily.torvik_rank),
+        record = COALESCE(EXCLUDED.record, bt_team_metrics_daily.record)
     """
     
     count = 0
     with get_db_connection() as conn:
         cur = conn.cursor()
+        for ddl in (
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS luck REAL;",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS continuity REAL;",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS torvik_rank INTEGER;",
+            "ALTER TABLE bt_team_metrics_daily ADD COLUMN IF NOT EXISTS record TEXT;",
+        ):
+            try:
+                cur.execute(ddl)
+            except Exception:
+                conn.rollback()
+        conn.commit()
         
         for row in teams:
             try:
@@ -96,27 +110,48 @@ def save_to_database(teams: list):
                 if not isinstance(row, list) or len(row) < 8:
                     continue
                 
+                torvik_rank = None
+                try:
+                    torvik_rank = int(row[0]) if row[0] is not None else None
+                except Exception:
+                    pass
                 name = row[1]
+                record = str(row[3]) if len(row) > 3 and row[3] is not None else None
                 adj_oe = float(row[4]) if row[4] else None
                 adj_de = float(row[6]) if row[6] else None
                 
-                # Find tempo (usually around index 21-25, value between 55-85)
+                # Find tempo (preferred slots [21, 22, 44, 45, 42] then scan 20-25, value between 55-85)
                 tempo = None
-                for idx in range(20, 26):
+                for idx in (21, 22, 44, 45, 42, 20, 23, 24, 25):
                     try:
-                        val = float(row[idx])
-                        if 55.0 < val < 85.0:
-                            tempo = val
-                            break
-                    except:
+                        if len(row) > idx and row[idx] is not None:
+                            val = float(row[idx])
+                            if 55.0 < val < 85.0:
+                                tempo = val
+                                break
+                    except Exception:
                         continue
                 
                 # Luck is typically at index 33
                 luck = None
-                if len(row) > 33:
+                if len(row) > 33 and row[33] is not None:
                     try:
-                        luck = float(row[33])
-                    except:
+                        l_val = float(row[33])
+                        if abs(l_val) <= 1.0:
+                            luck = l_val
+                    except Exception:
+                        pass
+
+                # Continuity is typically at index 43 or 44 (0-100 or 0-1)
+                continuity = None
+                for idx in (43, 44):
+                    try:
+                        if len(row) > idx and row[idx] is not None:
+                            c_val = float(row[idx])
+                            if 0.0 <= c_val <= 100.0:
+                                continuity = c_val
+                                break
+                    except Exception:
                         pass
                 
                 cur.execute(query, (
@@ -126,6 +161,9 @@ def save_to_database(teams: list):
                     adj_de,
                     tempo,
                     luck,
+                    continuity,
+                    torvik_rank,
+                    record,
                     datetime.now()
                 ))
                 count += 1

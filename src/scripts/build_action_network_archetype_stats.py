@@ -177,6 +177,8 @@ def main() -> None:
                 proj_cache[ck] = {"margin": 0.0, "total": 0.0}
 
         proj = proj_cache.get(ck) or {}
+        if proj.get('lean') == 'No Data' or proj.get('total') is None:
+            continue
         fair_spread_home = -float(proj.get('margin') or 0.0)
         fair_total = float(proj.get('total') or 0.0)
 

@@ -157,16 +157,27 @@ def test_pava_quantile_pooling_prevents_tail_collapse():
 def test_ncaam_and_mlb_calibration_blend_preserves_strong_edges():
     ncaam = NCAAMMarketFirstModelV2.__new__(NCAAMMarketFirstModelV2)
     ncaam._winprob_calibration = {
-        "n_obs": 2747,
+        "n_obs": 250,
+        "points": [
+            {"p": 0.18, "p_cal": 0.15},
+            {"p": 0.40, "p_cal": 0.36},
+            {"p": 0.63, "p_cal": 0.57},
+        ],
+    }
+    # Strong 58% raw signal stays above -110 break-even (52.4%) while marginal 53% is shrunk below it
+    assert ncaam._calibrate_win_prob(0.58) >= 0.54
+    assert ncaam._calibrate_win_prob(0.53) < 0.51
+
+    # With empirical weight 0.65, a degraded curve where 63% raw wins only 46% suppresses false +EV
+    ncaam._winprob_calibration = {
+        "n_obs": 250,
         "points": [
             {"p": 0.18, "p_cal": 0.10},
             {"p": 0.40, "p_cal": 0.32},
             {"p": 0.63, "p_cal": 0.46},
         ],
     }
-    # Strong 58% raw signal stays above -110 break-even (52.4%) while marginal 53% is shrunk below it
-    assert ncaam._calibrate_win_prob(0.58) >= 0.54
-    assert ncaam._calibrate_win_prob(0.53) < 0.51
+    assert ncaam._calibrate_win_prob(0.58) < 0.524
 
     mlb = MLBModel()
     mlb._winprob_calibration = {

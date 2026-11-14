@@ -1440,6 +1440,148 @@ def test_compute_live_game_pace_and_board_enrichment(monkeypatch):
     assert items[0]["live_trend"]["projected_total"] > 140.0
 
 
+def test_model_v2_five_improvements_isolation_calibration_totals_and_signals(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    model = NCAAMMarketFirstModelV2()
+    assert model._tau_for_market("SPREAD") > 0.0
+    assert model._tau_for_market("TOTAL") > 0.0
+
+    # Mock external/DB collaborators cleanly
+    model.torvik_service = MagicMock()
+    model.kenpom_client = MagicMock()
+    model.haslametrics_client = MagicMock()
+    model.injury_service = MagicMock()
+    model.geo_service = MagicMock()
+    model.news_service = MagicMock()
+
+    model.injury_service.get_matchup_injuries.return_value = {"has_injuries": False, "injuries": []}
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 100.0
+    model.news_service.get_team_news.return_value = []
+    model.news_service.summarize_impact.return_value = ""
+    model.haslametrics_client.calculate_projection.return_value = None
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.kenpom_client.get_team_rating.return_value = None
+
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+
+    # 1. W_BASE stays immutable across consecutive calls with different dates
+    model.torvik_service.get_projection.return_value = {"margin": 8.0, "total": 158.0, "lean": "Home"}
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 70.0,
+        "home": {"luck": 0.0, "continuity": 75.0, "record": "12-4"},
+        "away": {"luck": 0.0, "continuity": 75.0, "record": "10-6"},
+    }
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {
+        "spread_adj": 8.0,
+        "neutral_margin": 4.8,
+        "fair_margin": 8.0,
+        "fair_total": 160.0,
+        "total_adj": 0.0,
+        "summary": "Home +8.0",
+    }
+    model.kenpom_client.get_team_player_agg.return_value = {"ortg_w": 112.0}
+
+    nov_ev = {"id": "evt_nov_w", "home_team": "Duke", "away_team": "Siena", "start_time": datetime(2026, 11, 15, 19, 0)}
+    feb_ev = {"id": "evt_feb_w", "home_team": "Duke", "away_team": "Siena", "start_time": datetime(2027, 2, 15, 19, 0)}
+
+    res_nov = model.analyze("evt_nov_w", event_context=nov_ev, market_snapshot={"spread_home": -3.5, "total": 152.0}, relax_gates=True, persist=False)
+    assert model.W_BASE == pytest.approx(model.DEFAULT_W_BASE)
+    assert res_nov["debug"]["w_base"] < 0.20
+
+    res_feb = model.analyze("evt_feb_w", event_context=feb_ev, market_snapshot={"spread_home": -3.5, "total": 152.0}, relax_gates=True, persist=False)
+    assert model.W_BASE == pytest.approx(model.DEFAULT_W_BASE)
+    assert res_feb["debug"]["w_base"] > res_nov["debug"]["w_base"]
+
+    # 2. kp_player_total_adj is suppressed when kp_fair_total already covers KenPom efficiency,
+    #    and centered at 106.5 (not 105.0) when kp_fair_total is None.
+    assert res_nov["debug"]["kenpom_player_total_adj"] == 0.0
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {
+        "spread_adj": 8.0,
+        "neutral_margin": 4.8,
+        "fair_margin": 8.0,
+        "total_adj": 0.0,
+        "summary": "Home +8.0",
+    }
+    model.kenpom_client.get_team_player_agg.return_value = {"ortg_w": 106.5}
+    res_centered = model.analyze("evt_center", event_context=feb_ev, market_snapshot={"spread_home": -3.5, "total": 152.0}, relax_gates=True, persist=False)
+    assert res_centered["debug"]["kenpom_player_total_adj"] == pytest.approx(0.0, abs=1e-6)
+
+    # 3. Missing market total does NOT inject synthetic 145.0 or crash, and missing Torvik total does NOT fabricate -17 Under diff
+    res_no_mkt_tot = model.analyze("evt_no_tot", event_context=feb_ev, market_snapshot={"spread_home": -3.5}, relax_gates=True, persist=False)
+    assert res_no_mkt_tot["debug"]["conviction_sources_total"] == 0
+    assert res_no_mkt_tot["debug"]["mu_total_final"] > 155.0
+    assert all((r.get("bet_type") or r.get("market")) != "TOTAL" for r in res_no_mkt_tot["recommendations"])
+
+    model.torvik_service.get_projection.return_value = {"margin": 3.5, "total": None, "lean": "Home"}
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = None
+    model.kenpom_client.get_team_player_agg.return_value = None
+    res_neither_tot = model.analyze("evt_no_any_tot", event_context=feb_ev, market_snapshot={"spread_home": -3.5}, relax_gates=True, persist=False)
+    assert res_neither_tot["debug"]["mu_total_final"] is None
+
+    res_no_proj_tot = model.analyze("evt_no_tv_tot", event_context=feb_ev, market_snapshot={"spread_home": -3.5, "total": 162.0}, relax_gates=True, persist=False)
+    assert res_no_proj_tot["signals"]["torvik"]["fair_total"] is None
+    assert res_no_proj_tot["debug"]["mu_total_final"] == pytest.approx(162.0, abs=0.5)
+    assert res_no_proj_tot["debug"]["conviction_sources_total"] == 0
+
+    # Continuous luck scaling: mild +0.04 luck applies proportional regression rather than zeroing out under a 0.05 cliff
+    model.torvik_service.get_projection.return_value = {"margin": 3.5, "total": 152.0, "lean": "Home"}
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 70.0,
+        "home": {"luck": 0.04, "continuity": 75.0, "record": "12-4"},
+        "away": {"luck": 0.0, "continuity": 75.0, "record": "12-4"},
+    }
+    res_luck = model.analyze("evt_luck", event_context=feb_ev, market_snapshot={"spread_home": -3.5, "total": 152.0}, relax_gates=True, persist=False)
+    assert abs(res_luck["debug"]["mu_spread_final"] - (-3.5)) > 0.25
+
+    # 4. mu-uncertainty bounds populate win_prob_lb10 < win_prob on edge picks
+    assert res_feb["recommendations"]
+    for rec in res_feb["recommendations"]:
+        if rec.get("win_prob_lb10") is not None:
+            assert rec["win_prob_lb10"] <= rec["win_prob"]
+
+    # 5. Smooth shooting curve, lookahead Top-25 penalty, and probability-aligned split gates
+    m_real = NCAAMMarketFirstModelV2()
+    monkeypatch.setattr("src.database.get_team_recent_shooting", lambda team, num_games=3, as_of_date=None: {"games_played": 8, "delta": 0.03})
+    assert m_real._calculate_shooting_regression("Duke") == pytest.approx(-0.35, abs=1e-4)
+    monkeypatch.setattr("src.database.get_team_recent_shooting", lambda team, num_games=3, as_of_date=None: {"games_played": 8, "delta": 0.04})
+    assert m_real._calculate_shooting_regression("Duke") == pytest.approx(-0.70, abs=1e-4)
+
+    # Top-25 lookahead within 4 days applies -0.75 penalty
+    class _FakeCur:
+        def __init__(self, row):
+            self._row = row
+        def fetchone(self):
+            return self._row
+    class _FakeConn:
+        def __init__(self, row):
+            self._row = row
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+    m_real.kenpom_client = MagicMock()
+    m_real.kenpom_client.get_team_rating.return_value = {"rank": 8}
+    monkeypatch.setenv("REQUIRE_DATABASE", "1")
+    monkeypatch.setattr("src.database.get_team_last_game", lambda *a, **kw: None)
+    monkeypatch.setattr("src.database.get_db_connection", lambda: _FakeConn({"home_team": "Duke", "away_team": "Kansas", "start_time": datetime.now(timezone.utc) + timedelta(days=2)}))
+    monkeypatch.setattr("src.database._exec", lambda conn, q, p=None: _FakeCur({"home_team": "Duke", "away_team": "Kansas", "start_time": datetime.now(timezone.utc) + timedelta(days=2)}))
+    assert m_real._calculate_situational_spots("Duke", {"start_time": datetime.now(timezone.utc), "home_team": "Duke", "away_team": "Siena"}) == pytest.approx(-0.75, abs=1e-4)
+
+    # Contra sharp money adjusts win_prob + ev consistently and blocks TOTAL falling under PUBLISH_MIN_EV_TOTAL (0.035)
+    full_total_rec = [{"market": "TOTAL", "side": "OVER", "win_prob": 0.544, "win_prob_lb10": 0.51, "price": -110, "ev": 0.0385, "kelly_pct": 0.9, "confidence_0_100": 62, "movement_tags": []}]
+    splits_contra = {"TOTAL": {"OVER": {"bet_pct": 75, "handle_pct": 25}, "UNDER": {"bet_pct": 25, "handle_pct": 75}}}
+    assert m_real._apply_split_and_injury_signals(full_total_rec, action_splits=splits_contra, injury_context={"has_injuries": False}, relax_gates=False) == []
+
+
+
 
 
 
