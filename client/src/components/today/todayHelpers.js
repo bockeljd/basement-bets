@@ -695,3 +695,184 @@ export const getLiveGameStatus = (game, rec) => {
     coverTone,
   };
 };
+
+/**
+ * Extract structured backend model weights, consensus counts, situational adjustments,
+ * blowout variance guard, and open-to-current line movement from rec / context / debug.
+ */
+export const getModelSignalData = (rec, context, debugInfo, game) => {
+  const sig = rec?.signals || {};
+  const ctx = context || {};
+  const dbg = debugInfo || {};
+  const adj = sig.adjustments || dbg.adjustments || {};
+  const w = sig.weights || {};
+
+  const betType = String(rec?.bet_type || rec?.market || '').toUpperCase();
+  const isTotalBet =
+    betType === 'TOTAL' || /\b(OVER|UNDER)\b/i.test(String(rec?.selection || ''));
+
+  const wTorvik = toNum(w.torvik ?? ctx.w_base ?? dbg.w_base) ?? 0;
+  const wHasla = toNum(w.haslametrics ?? ctx.w_hasla ?? dbg.w_hasla) ?? 0;
+  const wKenpom = toNum(w.kenpom ?? ctx.w_kp ?? dbg.w_kp) ?? 0;
+  const effWeight =
+    toNum(adj.efficiency_weight ?? ctx.efficiency_weight) ??
+    wTorvik + wHasla + wKenpom;
+
+  const modelPct = effWeight > 0 ? Math.min(80, Math.round(effWeight * 100)) : null;
+  const marketPct = modelPct != null ? Math.max(0, 100 - modelPct) : null;
+
+  const convSpread = Number(
+    adj.conviction_sources ?? ctx.conviction_sources ?? dbg.conviction_sources ?? 0
+  );
+  const convTotal = Number(
+    adj.conviction_sources_total ??
+      ctx.conviction_sources_total ??
+      dbg.conviction_sources_total ??
+      0
+  );
+  const convCount = isTotalBet ? (convTotal || convSpread) : (convSpread || convTotal);
+
+  const activeSourceCount =
+    [
+      sig.torvik || wTorvik > 0,
+      sig.haslametrics || wHasla > 0,
+      sig.kenpom || wKenpom > 0,
+    ].filter(Boolean).length || (effWeight > 0 ? 1 : 0);
+
+  // Convert home-spread coordinates into plain-English favored-team shifts
+  const homeName = game?.home_team || 'Home';
+  const awayName = game?.away_team || 'Away';
+  const describeSpreadShift = (homeSpreadDelta) => {
+    const val = toNum(homeSpreadDelta);
+    if (val == null || Math.abs(val) < 0.05) return null;
+    // Negative delta makes home spread more negative => favors Home
+    const favorsHome = val < 0;
+    return {
+      deltaHome: Number(val.toFixed(2)),
+      pts: Number(Math.abs(val).toFixed(1)),
+      favors: favorsHome ? homeName : awayName,
+      text: `${favorsHome ? homeName : awayName} +${Math.abs(val).toFixed(1)} pt`,
+    };
+  };
+
+  const sosVal = toNum(adj.sos_adj ?? ctx.sos_adj ?? dbg.sos_adj) ?? 0;
+  const momVal = toNum(adj.mom_adj ?? ctx.mom_adj ?? dbg.mom_adj) ?? 0;
+  const fatigueVal = toNum(adj.fatigue_adj ?? ctx.fatigue_adj ?? dbg.fatigue_adj) ?? 0;
+  const spotVal = toNum(adj.spot_adj ?? ctx.spot_adj ?? dbg.spot_adj) ?? 0;
+  const shootVal = toNum(adj.shooting_adj ?? ctx.shooting_adj ?? dbg.shooting_adj) ?? 0;
+  const injSpreadVal =
+    toNum(adj.injury_spread_adj ?? ctx.injury_spread_adj ?? dbg.injury_spread_adj) ?? 0;
+  const injTotalVal =
+    toNum(adj.injury_total_adj ?? ctx.injury_total_adj ?? dbg.injury_total_adj) ?? 0;
+  const blowoutSigmaAdd = toNum(adj.blowout_sigma_add ?? ctx.blowout_sigma_add) ?? 0;
+
+  // In model: mu_spread_final -= (sos_adj + mom_adj); others are added directly
+  const sosMomShift = describeSpreadShift(-(sosVal + momVal));
+  const restSpotShift = describeSpreadShift(fatigueVal + spotVal);
+  const shootingShift = describeSpreadShift(shootVal);
+  const injurySpreadShift = describeSpreadShift(injSpreadVal);
+
+  const openSpreadHome = toNum(ctx.open_spread_home);
+  const currentSpreadHome = toNum(ctx.current_spread_home ?? game?.home_spread);
+  const spreadMove =
+    openSpreadHome != null &&
+    currentSpreadHome != null &&
+    Math.abs(currentSpreadHome - openSpreadHome) >= 0.5
+      ? {
+          open: openSpreadHome,
+          current: currentSpreadHome,
+          text: `${fmtSigned(openSpreadHome, 1)} → ${fmtSigned(currentSpreadHome, 1)}`,
+        }
+      : null;
+
+  const openTotal = toNum(ctx.open_total);
+  const currentTotal = toNum(ctx.current_total ?? game?.total_line);
+  const totalMove =
+    openTotal != null &&
+    currentTotal != null &&
+    Math.abs(currentTotal - openTotal) >= 0.5
+      ? {
+          open: openTotal,
+          current: currentTotal,
+          text: `${openTotal.toFixed(1)} → ${currentTotal.toFixed(1)}`,
+        }
+      : null;
+
+  const pills = [];
+  if (convCount >= 2 && modelPct != null) {
+    pills.push({
+      id: 'consensus',
+      tone: 'indigo',
+      label: `${convCount}/${Math.max(convCount, activeSourceCount)} Ratings Agree · ${modelPct}% Model Wt`,
+    });
+  } else if (modelPct != null && modelPct > 0) {
+    pills.push({
+      id: 'weight',
+      tone: 'blue',
+      label: `${modelPct}% Model / ${marketPct}% Book Wt`,
+    });
+  }
+
+  if (sosMomShift && sosMomShift.pts >= 0.1) {
+    pills.push({
+      id: 'sos-mom',
+      tone: 'emerald',
+      label: `SOS/Form: ${sosMomShift.text}`,
+    });
+  }
+  if (restSpotShift && restSpotShift.pts >= 0.1) {
+    pills.push({
+      id: 'rest-spot',
+      tone: 'amber',
+      label: `Rest/Spot: ${restSpotShift.text}`,
+    });
+  }
+  if (shootingShift && shootingShift.pts >= 0.1) {
+    pills.push({
+      id: 'shooting',
+      tone: 'slate',
+      label: `3PT Regress: ${shootingShift.text}`,
+    });
+  }
+  if (blowoutSigmaAdd >= 0.1) {
+    pills.push({
+      id: 'blowout',
+      tone: 'amber',
+      label: `Blowout Guard +${blowoutSigmaAdd.toFixed(1)}σ`,
+    });
+  }
+  if (isTotalBet && totalMove) {
+    pills.push({
+      id: 'total-move',
+      tone: 'blue',
+      label: `Line Move: ${totalMove.text}`,
+    });
+  } else if (!isTotalBet && spreadMove) {
+    pills.push({
+      id: 'spread-move',
+      tone: 'blue',
+      label: `Line Move: ${spreadMove.text}`,
+    });
+  }
+
+  return {
+    modelPct,
+    marketPct,
+    convCount,
+    activeSourceCount,
+    weights: {
+      torvik: wTorvik,
+      haslametrics: wHasla,
+      kenpom: wKenpom,
+    },
+    sosMomShift,
+    restSpotShift,
+    shootingShift,
+    injurySpreadShift,
+    injTotalVal: Math.abs(injTotalVal) >= 0.1 ? Number(injTotalVal.toFixed(1)) : null,
+    blowoutSigmaAdd: blowoutSigmaAdd >= 0.1 ? Number(blowoutSigmaAdd.toFixed(1)) : null,
+    spreadMove,
+    totalMove,
+    pills,
+  };
+};

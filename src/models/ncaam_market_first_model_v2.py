@@ -43,7 +43,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.2.0-ensemble"
+    VERSION = "2.3.0-calibrated"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -1482,6 +1482,22 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "torvik": round(float(w_base), 3),
                 "kenpom": round(float(w_kp), 3),
                 "haslametrics": round(float(w_hasla), 3),
+                "torvik_total": round(float(w_total_torvik), 3),
+                "kenpom_total": round(float(w_total_kp), 3),
+                "haslametrics_total": round(float(w_total_hasla), 3),
+            },
+            "adjustments": {
+                "sos_adj": round(float(sos_adj), 2),
+                "mom_adj": round(float(mom_adj), 2),
+                "fatigue_adj": round(float(fatigue_adj), 2),
+                "spot_adj": round(float(spot_adj), 2),
+                "shooting_adj": round(float(shooting_adj), 2),
+                "injury_spread_adj": round(float(inj_spread_adj), 2),
+                "injury_total_adj": round(float(inj_total_adj), 2),
+                "blowout_sigma_add": round(float(blowout_sigma_add), 2),
+                "conviction_sources": int(agree_count),
+                "conviction_sources_total": int(agree_count_total),
+                "efficiency_weight": round(float(w_base + w_kp + w_hasla), 3),
             },
         }
 
@@ -1535,9 +1551,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
             'hasla_spread_home': round(float(mu_hasla_line), 1) if hasla_available else None,
             'kenpom_spread_home': round(float(mu_kenpom_line), 1) if kp_available else None,
             'conviction_sources': int(agree_count),
+            'conviction_sources_total': int(agree_count_total),
             'efficiency_weight': round(float(w_base + w_kp + w_hasla), 3),
+            'w_base': round(float(w_base), 3),
+            'w_kp': round(float(w_kp), 3),
+            'w_hasla': round(float(w_hasla), 3),
             'sos_adj': round(float(sos_adj), 2),
             'mom_adj': round(float(mom_adj), 2),
+            'fatigue_adj': round(float(fatigue_adj), 2),
+            'spot_adj': round(float(spot_adj), 2),
+            'shooting_adj': round(float(shooting_adj), 2),
+            'injury_spread_adj': round(float(inj_spread_adj), 2),
+            'injury_total_adj': round(float(inj_total_adj), 2),
             'closest_lean': closest_lean,
             'projected_home_score': proj_home_score,
             'projected_away_score': proj_away_score,
@@ -1614,10 +1639,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 is_home_side = (side_key == 'home') or (r.get('team') == event.get('home_team')) or (r.get('side') == event.get('home_team'))
 
                 if is_home_side:
-                    market_line_side = market_home
+                    market_line_side = r.get('line') if r.get('line') is not None else market_home
                     fair_line_side = fair_home
                 else:
-                    market_line_side = (-market_home) if market_home is not None else None
+                    market_line_side = r.get('line') if r.get('line') is not None else ((-market_home) if market_home is not None else None)
                     fair_line_side = (-fair_home) if fair_home is not None else None
 
                 if (market_line_side is not None) and (fair_line_side is not None):
@@ -1625,7 +1650,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     edge_points_side = round(float(market_line_side) - float(fair_line_side), 1)
 
             elif r['market'] == 'TOTAL':
-                market_total = market_snapshot.get('total')
+                market_total = r.get('line') if r.get('line') is not None else market_snapshot.get('total')
                 fair_total = mu_total_final
                 market_line_side = market_total
                 fair_line_side = fair_total

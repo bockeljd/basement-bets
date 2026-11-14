@@ -3111,6 +3111,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
 
     # Try cached daily picks first.
     fresh_cached_picks = {}
+    stale_cached_picks = {}
     has_stale_version = False
     try:
         with get_db_connection() as conn:
@@ -3178,9 +3179,11 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 picks[eid] = entry
                 if mv == current_ver:
                     fresh_cached_picks[eid] = entry
+                else:
+                    stale_cached_picks[eid] = entry
 
-            # Fast-return unless caller explicitly requested compute_missing or stale 0-pick cache needs auto-heal
-            if (not compute_missing) and not (actionable_cached == 0 and has_stale_version):
+            # Fast-return unless caller explicitly requested compute_missing or stale rows need recomputing
+            if (not compute_missing) and (not has_stale_version):
                 run_meta = None
                 try:
                     with get_db_connection() as conn2:
@@ -3312,6 +3315,8 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         except Exception:
             max_compute_i = 20
         max_compute_i = max(0, min(max_compute_i, 250))
+        if has_stale_version:
+            max_compute_i = max(max_compute_i, 50)
 
         import time
         t0 = time.time()
@@ -3420,6 +3425,10 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 if len(errors) < 20:
                     errors.append({'event_id': eid, 'error': msg})
                 print(f"[top-picks] analyze failed for {eid}: {e}")
+
+        for stale_eid, stale_entry in stale_cached_picks.items():
+            if stale_eid not in picks:
+                picks[stale_eid] = stale_entry
 
         if upserted_any:
             try:

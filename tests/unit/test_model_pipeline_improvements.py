@@ -917,4 +917,108 @@ def test_blowout_spread_sigma_scaling_projected_score_and_rec_normalization(monk
     assert board_items[0]["away_score"] == 29
 
 
+def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+    assert NCAAMMarketFirstModelV2.VERSION == "2.3.0-calibrated"
+    model = NCAAMMarketFirstModelV2()
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    ev_ctx = {
+        "id": "action:ncaam:777777",
+        "home_team": "Duke",
+        "away_team": "North Carolina",
+        "start_time": "2026-11-13T23:00:00+00:00",
+        "neutral_site": False,
+    }
+    monkeypatch.setattr(
+        model.torvik_service,
+        "get_projection",
+        lambda h, a, date=None, neutral_site=False: {
+            "margin": 4.5,
+            "total": 152.5,
+            "projected_score": "74-78",
+            "lean": "Home",
+        },
+    )
+    monkeypatch.setattr(
+        model.torvik_service,
+        "get_matchup_team_stats",
+        lambda h, a, date=None: {
+            "home": {"continuity": 0.72, "luck": 0.0, "record": "3-0", "adj_off": 116.0, "adj_def": 96.0},
+            "away": {"continuity": 0.72, "luck": 0.0, "record": "3-0", "adj_off": 114.0, "adj_def": 98.0},
+            "game_tempo": 71.0,
+        },
+    )
+    monkeypatch.setattr(model.kenpom_client, "calculate_kenpom_adjustment", lambda h, a, neutral_site=False: None)
+    monkeypatch.setattr(model.kenpom_client, "get_player_stats_for_team", lambda t, limit=50: [])
+    monkeypatch.setattr(model.kenpom_client, "get_team_player_agg", lambda t: None)
+    monkeypatch.setattr(model.kenpom_client, "get_team_rating", lambda t: None)
+    monkeypatch.setattr(model.kenpom_client, "get_home_court", lambda t: None)
+    monkeypatch.setattr(
+        model.haslametrics_client,
+        "calculate_projection",
+        lambda h, a, neutral_site=False, asof_date=None: {
+            "available": True,
+            "margin": 5.0,
+            "total": 153.0,
+            "projected_score": "74-79",
+            "home": {"sos": 25, "mom": 0.08, "inc": 0.05},
+            "away": {"sos": 60, "mom": -0.02, "inc": 0.05},
+        },
+    )
+    monkeypatch.setattr(model.geo_service, "get_altitude_adjustment", lambda h, neutral_site=False: 0.0)
+    monkeypatch.setattr(model.geo_service, "calculate_distance", lambda h, a: 15.0)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda t, as_of_date=None: 0.3 if t == "Duke" else 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda t, ev: -0.2 if t == "Duke" else 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda t, eid, gd: 0.4 if t == "Duke" else 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.0, "sd": 0.90})
+
+    # Consensus total is 142.5, while best Over book offers 143.5 — selection & market_line must both reflect 143.5
+    snapshot = {
+        "spread_home": -4.5,
+        "spread_price_home": -110,
+        "total": 142.5,
+        "total_over_price": -110,
+        "book_spread": "DraftKings",
+        "book_total": "DraftKings",
+        "_best_spread_home": {"line_value": -4.5, "price": -110, "book": "DraftKings"},
+        "_best_spread_away": {"line_value": 4.5, "price": -110, "book": "DraftKings"},
+        "_best_total_over": {"line_value": 143.5, "price": -105, "book": "FanDuel"},
+        "_best_total_under": {"line_value": 142.5, "price": -115, "book": "DraftKings"},
+    }
+    res = model.analyze(
+        "action:ncaam:777777",
+        market_snapshot=snapshot,
+        event_context=ev_ctx,
+        relax_gates=True,
+        persist=False,
+    )
+    total_recs = [r for r in res["recommendations"] if r["bet_type"] == "TOTAL"]
+    assert total_recs, "Expected TOTAL recommendation under relax_gates=True"
+    t_rec = total_recs[0]
+    assert t_rec["selection"] == "OVER 143.5"
+    assert t_rec["market_line"] == pytest.approx(143.5)
+    assert t_rec["edge_points"] == pytest.approx(round(float(t_rec["fair_line"]) - 143.5, 1))
+
+    adj = res["signals"]["adjustments"]
+    for key in (
+        "sos_adj",
+        "mom_adj",
+        "fatigue_adj",
+        "spot_adj",
+        "shooting_adj",
+        "blowout_sigma_add",
+        "conviction_sources",
+        "conviction_sources_total",
+        "efficiency_weight",
+    ):
+        assert key in adj
+    assert adj["fatigue_adj"] == pytest.approx(0.4, abs=0.05)
+    assert adj["spot_adj"] == pytest.approx(-0.1, abs=0.15)
+    assert adj["shooting_adj"] == pytest.approx(0.15, abs=0.2)
+    assert res["context"]["fatigue_adj"] == pytest.approx(0.4, abs=0.05)
+    assert "w_base" in res["context"] and "w_hasla" in res["context"]
+
+
 

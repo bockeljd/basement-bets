@@ -23,6 +23,7 @@ import {
   getProjectedScore,
   buildVisualModelData,
   getLiveGameStatus,
+  getModelSignalData,
 } from './todayHelpers';
 
 const TodayMatchupModal = ({
@@ -125,6 +126,7 @@ const TodayMatchupModal = ({
   const projectedScore = getProjectedScore(game, analysisResult, topRec);
   const visualData = buildVisualModelData(topRec, game, analysisResult);
   const liveInfo = getLiveGameStatus(game, topRec);
+  const modelSignals = getModelSignalData(topRec, analysisResult?.context, dbg, game);
   const fmtStat = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : '—');
 
   return (
@@ -386,6 +388,97 @@ const TodayMatchupModal = ({
                     </table>
                   </section>
                 </div>
+
+                {/* 2b. Backend Model Weighting & Situational Adjustments */}
+                {(modelSignals.modelPct != null ||
+                  modelSignals.sosMomShift ||
+                  modelSignals.restSpotShift ||
+                  modelSignals.shootingShift ||
+                  modelSignals.blowoutSigmaAdd ||
+                  modelSignals.spreadMove ||
+                  modelSignals.totalMove) && (
+                  <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                        Model Weighting &amp; Situational Adjustments
+                      </h3>
+                      {modelSignals.modelPct != null && (
+                        <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-[11px] font-semibold text-indigo-200">
+                          {modelSignals.modelPct}% Independent Ratings / {modelSignals.marketPct}% Market Anchor
+                          {modelSignals.convCount >= 2 ? ` · ${modelSignals.convCount} Sources Agree` : ''}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                      {modelSignals.modelPct != null && (
+                        <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Source Blend Weights
+                          </div>
+                          <div className="mt-0.5 font-mono text-slate-200">
+                            Torvik {Math.round(modelSignals.weights.torvik * 100)}%
+                            {modelSignals.weights.haslametrics > 0
+                              ? ` · Hasla ${Math.round(modelSignals.weights.haslametrics * 100)}%`
+                              : ''}
+                            {modelSignals.weights.kenpom > 0
+                              ? ` · KenPom ${Math.round(modelSignals.weights.kenpom * 100)}%`
+                              : ''}
+                          </div>
+                        </div>
+                      )}
+
+                      {modelSignals.sosMomShift && (
+                        <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            SOS &amp; Recent Form
+                          </div>
+                          <div className="mt-0.5 font-mono text-emerald-300">{modelSignals.sosMomShift.text}</div>
+                        </div>
+                      )}
+
+                      {modelSignals.restSpotShift && (
+                        <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Rest &amp; Situational Spot
+                          </div>
+                          <div className="mt-0.5 font-mono text-amber-300">{modelSignals.restSpotShift.text}</div>
+                        </div>
+                      )}
+
+                      {modelSignals.shootingShift && (
+                        <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            3PT Variance Regression
+                          </div>
+                          <div className="mt-0.5 font-mono text-sky-300">{modelSignals.shootingShift.text}</div>
+                        </div>
+                      )}
+
+                      {modelSignals.blowoutSigmaAdd && (
+                        <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Blowout Variance Guard
+                          </div>
+                          <div className="mt-0.5 font-mono text-amber-300">+{modelSignals.blowoutSigmaAdd}σ spread widen</div>
+                        </div>
+                      )}
+
+                      {(modelSignals.spreadMove || modelSignals.totalMove) && (
+                        <div className="rounded-lg bg-slate-900/90 border border-slate-800/80 px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Open → Current Book Move
+                          </div>
+                          <div className="mt-0.5 font-mono text-slate-200">
+                            {modelSignals.spreadMove ? `Spread ${modelSignals.spreadMove.text}` : ''}
+                            {modelSignals.spreadMove && modelSignals.totalMove ? ' · ' : ''}
+                            {modelSignals.totalMove ? `Total ${modelSignals.totalMove.text}` : ''}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
 
                 {/* 3. Injuries & Public Splits */}
                 {(injImpact || rawInjuries.length > 0 || splits) && (

@@ -12,8 +12,8 @@ import ModelVisualComparison from './ModelVisualComparison';
 import {
   fmtTimeEt,
   fmtOdds,
-  fmtPct,
   fmtSigned,
+  fmtPct,
   getConfidenceMeta,
   getRecEv,
   normalizeMovementTag,
@@ -22,6 +22,7 @@ import {
   explainPickPlainly,
   buildVisualModelData,
   getLiveGameStatus,
+  getModelSignalData,
 } from './todayHelpers';
 
 const TONE_BADGES = {
@@ -65,6 +66,7 @@ const TodayPlayCard = ({
   const plain = explainPickPlainly(rec, game);
   const visualData = buildVisualModelData(rec, game, analysisLike);
   const liveInfo = getLiveGameStatus(game, rec);
+  const modelSignals = getModelSignalData(rec, context, null, game);
 
   const pickLabel = rec?.selection || rec?.pick || game?.home_team || 'Pick';
   const matchupLabel = `${game?.away_team || 'Away'} at ${game?.home_team || 'Home'}`;
@@ -207,9 +209,17 @@ const TodayPlayCard = ({
         </div>
       )}
 
-      {/* Concise signal tags (max 3 + injury impact) */}
-      {(tags.length > 0 || injImpact) && (
+      {/* Concise backend signal & movement tags */}
+      {(modelSignals.pills.length > 0 || tags.length > 0 || injImpact) && (
         <div className="flex flex-wrap items-center gap-1.5">
+          {modelSignals.pills.map((pill) => (
+            <span
+              key={pill.id}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${TONE_BADGES[pill.tone] || TONE_BADGES.slate}`}
+            >
+              {pill.label}
+            </span>
+          ))}
           {tags.map((rawTag) => {
             const norm = normalizeMovementTag(rawTag);
             return (

@@ -11,6 +11,7 @@ import {
   getProjectedScore,
   explainPickPlainly,
   getLiveGameStatus,
+  getModelSignalData,
 } from './todayHelpers';
 
 const SortHeaderButton = ({ label, column, sortConfig, onSort, align = 'left' }) => {
@@ -65,6 +66,7 @@ const TodayFullBoardTable = ({
         const isFinal = liveInfo.isFinal;
         const projScore = getProjectedScore(game, { context: ctx }, rec);
         const plainPick = explainPickPlainly(rec || (lean ? { ...lean, bet_type: lean.bet_type || 'SPREAD' } : null), game);
+        const modelSig = getModelSignalData(rec || lean, ctx, null, game);
         const evVal =
           recEv !== null
             ? recEv
@@ -235,7 +237,7 @@ const TodayFullBoardTable = ({
                 </td>
               </tr>
             ) : (
-              rows.map(({ game, meta, rec, recEv, conf, ctx, lean, isActionable, isFinal, liveInfo, projScore, plainPick }) => {
+              rows.map(({ game, meta, rec, recEv, conf, ctx, lean, isActionable, isFinal, liveInfo, projScore, plainPick, modelSig }) => {
                 const cleanReason = safeReasonText(meta?.reason);
                 const homeSpread = game.home_spread ?? game.spread_home;
                 const totalLine = game.total_line ?? game.total;
@@ -329,6 +331,18 @@ const TodayFullBoardTable = ({
                             Model Fair: {ctx.fair_spread_home != null ? `Home ${fmtSigned(ctx.fair_spread_home, 1)}` : '—'} · Total{' '}
                             {ctx.fair_total != null ? `${Number(ctx.fair_total).toFixed(1)} pts` : '—'}
                           </span>
+                        )}
+                        {modelSig?.pills?.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-0.5 font-sans">
+                            {modelSig.pills.slice(0, 2).map((p) => (
+                              <span
+                                key={p.id}
+                                className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-[10px] text-slate-300"
+                              >
+                                {p.label}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </div>
                     </td>
