@@ -1222,17 +1222,15 @@ def get_kenpom_status() -> dict:
             f"KenPom is turned off for {season_label} games because the newest ratings in your database "
             f"are from {latest_asof_date} (prior season)."
         )
-        if has_api_key:
-            next_step = "A KenPom API key is configured on the server — click Sync Now to pull 2026-27 ratings."
-        else:
-            next_step = (
-                "Paste the ratings table from kenpom.com below for an instant update, or enter a KenPom Official API key "
-                "(from kenpom.com/register-api.php) to enable automatic daily sync."
-            )
+        next_step = (
+            "Open kenpom.com while logged in and click your Sync KenPom to Basement Bets Chrome bookmark, "
+            "or paste/upload the ratings table below."
+        )
     else:
         human_summary = f"KenPom is turned off because no {season_label} team ratings have been imported yet."
         next_step = (
-            "Paste the ratings table from kenpom.com below or enter a KenPom Official API key to turn it on."
+            "Open kenpom.com while logged in and click your Sync KenPom to Basement Bets Chrome bookmark, "
+            "or paste/upload the ratings table below."
         )
 
     return {

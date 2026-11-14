@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Info, Upload, RefreshCw, Key, ClipboardPaste, X, CheckCircle2, AlertCircle, Bookmark, Copy } from 'lucide-react';
+import { Info, Upload, ClipboardPaste, X, CheckCircle2, AlertCircle, Bookmark, Copy } from 'lucide-react';
 import api from '../../api/axios';
 import { buildKenpomBookmarklet } from './todayHelpers';
 
@@ -17,10 +17,8 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
   const bookmarkletLinkRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [pastedText, setPastedText] = useState('');
-  const [apiKeyInput, setApiKeyInput] = useState('');
   const [kenpomStatus, setKenpomStatus] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [uploadState, setUploadState] = useState({ uploading: false, status: 'idle', message: '' });
 
   const bookmarkletCode = useMemo(() => {
@@ -94,38 +92,6 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
       event.clientY <= rect.bottom;
     if (!inside) {
       onClose?.();
-    }
-  };
-
-  const handleKenpomSync = async (e) => {
-    e.preventDefault();
-    setSyncing(true);
-    setUploadState({ uploading: false, status: 'idle', message: '' });
-    try {
-      const payload = apiKeyInput.trim() ? { api_key: apiKeyInput.trim() } : {};
-      const res = await api.post('/api/admin/kenpom/sync', payload);
-      const data = res?.data || {};
-      if (data.status === 'ok') {
-        setUploadState({
-          uploading: false,
-          status: 'success',
-          message: data.message || `Synced ${data.rows} KenPom teams. Refreshing today's games...`,
-        });
-        setApiKeyInput('');
-        await fetchKenpomStatus();
-        onKenpomUploaded?.();
-      } else {
-        setUploadState({
-          uploading: false,
-          status: 'error',
-          message: data.message || 'Could not sync automatically. Try pasting the ratings table below.',
-        });
-      }
-    } catch (err) {
-      const detail = err?.response?.data?.detail || err?.message || 'KenPom sync failed';
-      setUploadState({ uploading: false, status: 'error', message: String(detail) });
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -240,15 +206,12 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
                 <p className="text-slate-200 font-medium">{kenpomStatus.human_summary}</p>
                 <p className="text-slate-400">{kenpomStatus.next_step}</p>
                 <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
-                  <span className={`px-2 py-0.5 rounded border ${kpMethods.official_api_key ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
-                    Official API Key on Server: {kpMethods.official_api_key ? 'Configured' : 'Not set'}
-                  </span>
                   <span className={`px-2 py-0.5 rounded border ${kpMethods.credentials || kpMethods.cookie ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>
                     Web Login / Cookie: {kpMethods.credentials || kpMethods.cookie ? 'Set' : 'Not set'}
                   </span>
                 </div>
                 <p className="text-[11px] text-amber-200/80 pt-1">
-                  Note on automation: GitHub Actions runs on shared cloud (Azure) IPs, which KenPom&apos;s Cloudflare firewall blocks with HTTP 403 even when email/password secrets are set. Use the 1-Click Bookmarklet above, a local terminal sync, or a KenPom API key to bypass cloud-IP blocking.
+                  Note on automation: GitHub Actions runs on shared cloud (Azure) IPs, which KenPom&apos;s Cloudflare firewall blocks with HTTP 403 even when email/password secrets are set. Click your Chrome bookmark while viewing kenpom.com, or paste/upload the table below.
                 </p>
               </div>
             )}
@@ -342,52 +305,6 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded }) 
                 >
                   <Upload size={13} aria-hidden="true" />
                   <span>{uploadState.uploading ? 'Importing...' : 'Import KenPom'}</span>
-                </button>
-              </div>
-            </form>
-
-            {/* Option 3: Official API Key (Optional) */}
-            <form onSubmit={handleKenpomSync} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-2.5">
-              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                <Key size={13} className="text-indigo-300" aria-hidden="true" />
-                <span>Option 3: Sync Automatically With Official API Key (Optional)</span>
-              </div>
-              <p id="kenpom-api-hint" className="text-[11px] text-slate-400">
-                If you have a separate KenPom API subscription key (from{' '}
-                <a
-                  href="https://kenpom.com/register-api.php"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-indigo-300 underline hover:text-indigo-200"
-                >
-                  kenpom.com/register-api.php
-                </a>
-                ), paste it below for an immediate sync. To run daily at 6:15 AM ET, add{' '}
-                <code className="px-1 py-0.5 rounded bg-slate-800 text-slate-200">KENPOM_API_KEY</code> to Vercel &amp; GitHub Secrets.
-              </p>
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex-1 min-w-[200px]">
-                  <label htmlFor="kenpom-api-key" className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    KenPom Official API Key (not saved in browser)
-                  </label>
-                  <input
-                    id="kenpom-api-key"
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder={kpMethods.official_api_key ? 'Leave blank to use server key' : 'Paste API key or leave blank if saved on server'}
-                    aria-describedby="kenpom-api-hint"
-                    autoComplete="off"
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder:text-slate-500"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={syncing || (!apiKeyInput.trim() && !kpMethods.official_api_key && !kpMethods.credentials && !kpMethods.cookie)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer"
-                >
-                  <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} aria-hidden="true" />
-                  <span>{syncing ? 'Syncing...' : 'Sync Now'}</span>
                 </button>
               </div>
             </form>
