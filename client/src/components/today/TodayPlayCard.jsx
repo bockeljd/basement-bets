@@ -7,6 +7,8 @@ import {
   Sparkles,
   AlertTriangle,
   TrendingUp,
+  TrendingDown,
+  Activity,
 } from 'lucide-react';
 import ModelVisualComparison from './ModelVisualComparison';
 import {
@@ -65,7 +67,7 @@ const TodayPlayCard = ({
   const projectedScore = getProjectedScore(game, analysisLike, rec);
   const plain = explainPickPlainly(rec, game);
   const visualData = buildVisualModelData(rec, game, analysisLike);
-  const liveInfo = getLiveGameStatus(game, rec);
+  const liveInfo = getLiveGameStatus(game, rec, context);
   const modelSignals = getModelSignalData(rec, context, null, game);
 
   const pickLabel = rec?.selection || rec?.pick || game?.home_team || 'Pick';
@@ -129,29 +131,93 @@ const TodayPlayCard = ({
         </span>
       </div>
 
-      {/* Live / Final In-Game Score & Cover Tracker */}
+      {/* Live / Final In-Game Score, Pace & Win/Loss Trend Tracker */}
       {liveInfo.hasScore && (
-        <div className="rounded-xl border border-slate-700/80 bg-slate-950/90 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2 font-mono font-bold text-white">
-            <span className="text-[10px] uppercase tracking-wider font-sans text-slate-400">
-              {liveInfo.isFinal ? 'Final Score' : 'Live Score'}
-            </span>
-            <span>
-              {game?.away_team} {liveInfo.awayScore} – {game?.home_team} {liveInfo.homeScore}
-            </span>
+        <div
+          className={`rounded-xl border px-3 py-2.5 space-y-2 text-xs ${
+            liveInfo.isLive && liveInfo.coverTone === 'win'
+              ? 'border-emerald-500/40 bg-emerald-950/20'
+              : liveInfo.isLive && liveInfo.coverTone === 'loss'
+                ? 'border-rose-500/40 bg-rose-950/20'
+                : liveInfo.isLive && liveInfo.coverTone === 'tossup'
+                  ? 'border-amber-500/40 bg-amber-950/20'
+                  : 'border-slate-700/80 bg-slate-950/90'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2 font-mono font-bold text-white">
+              <span className="text-[10px] uppercase tracking-wider font-sans text-slate-400">
+                {liveInfo.isFinal ? 'Final Score' : 'Live Score'}
+              </span>
+              <span>
+                {game?.away_team} {liveInfo.awayScore} – {game?.home_team} {liveInfo.homeScore}
+              </span>
+              {liveInfo.isLive && liveInfo.progressPct > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-[10px] font-sans font-semibold text-slate-300">
+                  {liveInfo.periodLabel} · {liveInfo.progressPct}% played
+                </span>
+              )}
+            </div>
+
+            {liveInfo.coverText && (
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                  liveInfo.coverTone === 'win'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : liveInfo.coverTone === 'loss'
+                      ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                      : liveInfo.coverTone === 'tossup'
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                        : 'bg-slate-800 border-slate-700 text-slate-200'
+                }`}
+              >
+                {liveInfo.coverTone === 'win' ? (
+                  <TrendingUp size={11} aria-hidden="true" />
+                ) : liveInfo.coverTone === 'loss' ? (
+                  <TrendingDown size={11} aria-hidden="true" />
+                ) : (
+                  <Activity size={11} aria-hidden="true" />
+                )}
+                <span>{liveInfo.coverText}</span>
+              </span>
+            )}
           </div>
-          {liveInfo.coverText && (
-            <span
-              className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
-                liveInfo.coverTone === 'win'
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                  : liveInfo.coverTone === 'loss'
-                    ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-                    : 'bg-slate-800 border-slate-700 text-slate-200'
-              }`}
-            >
-              {liveInfo.coverText}
-            </span>
+
+          {liveInfo.isLive && (
+            <div className="space-y-1.5">
+              {liveInfo.trendDetail && (
+                <p className="text-[11px] text-slate-200 leading-snug">{liveInfo.trendDetail}</p>
+              )}
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
+                <span>{liveInfo.gameTrendText}</span>
+                {liveInfo.pointsPerMinute != null && (
+                  <span className="font-mono text-slate-300">
+                    {liveInfo.pointsPerMinute.toFixed(1)} pts/min
+                  </span>
+                )}
+              </div>
+              <div
+                className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden"
+                role="progressbar"
+                aria-label="Live game progress"
+                aria-valuenow={liveInfo.progressPct || 0}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className={`h-full transition-all ${
+                    liveInfo.coverTone === 'win'
+                      ? 'bg-emerald-400'
+                      : liveInfo.coverTone === 'loss'
+                        ? 'bg-rose-400'
+                        : liveInfo.coverTone === 'tossup'
+                          ? 'bg-amber-400'
+                          : 'bg-sky-400'
+                  }`}
+                  style={{ width: `${Math.min(100, Math.max(4, liveInfo.progressPct || 0))}%` }}
+                />
+              </div>
+            </div>
           )}
         </div>
       )}

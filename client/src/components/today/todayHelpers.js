@@ -691,62 +691,519 @@ export const buildVisualModelData = (rec, game, analysis) => {
   };
 };
 
+const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+
 /**
- * Determine live scoreboard status and live bet-tracking status against an active/final score.
+ * Standard normal CDF via Abramowitz-Stegun erf approximation.
  */
-export const getLiveGameStatus = (game, rec) => {
+export const normalCdf = (z) => {
+  const x = Number(z);
+  if (!Number.isFinite(x)) return 0.5;
+  const sign = x < 0 ? -1 : 1;
+  const absX = Math.abs(x) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * absX);
+  const y =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t) *
+      Math.exp(-absX * absX);
+  return clamp(0.5 * (1 + sign * y), 0.001, 0.999);
+};
+
+/**
+ * Parse basketball/football clock strings like "11:42", "0:48.5", or "34.2" into decimal minutes.
+ */
+export const parseClockMinutes = (clockStr) => {
+  if (clockStr === null || clockStr === undefined || clockStr === '') return null;
+  const s = String(clockStr).trim();
+  if (!s) return null;
+  const mmss = s.match(/^(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/);
+  if (mmss) {
+    const mins = parseInt(mmss[1], 10);
+    const secs = parseFloat(mmss[2]);
+    if (Number.isFinite(mins) && Number.isFinite(secs)) {
+      return mins + secs / 60;
+    }
+  }
+  const secsOnly = s.match(/^(\d+(?:\.\d+)?)$/);
+  if (secsOnly) {
+    const secs = parseFloat(secsOnly[1]);
+    if (Number.isFinite(secs)) return secs / 60;
+  }
+  return null;
+};
+
+const resolveLiveFlags = (game) => {
+  const rawStatus = String(game?.live_status || game?.status || '').toUpperCase();
+  const statusDetail = String(game?.status_detail || '').trim();
+  const isFinal = Boolean(game?.final) || rawStatus === 'FINAL' || rawStatus === 'COMPLETED';
+  const isHalftime =
+    !isFinal &&
+    (rawStatus === 'HALFTIME' ||
+      /\bHALFTIME\b/i.test(statusDetail) ||
+      /^HALF$/i.test(statusDetail));
+  const isLive =
+    !isFinal && (rawStatus === 'IN_PROGRESS' || rawStatus === 'LIVE' || isHalftime);
+  return { rawStatus, statusDetail, isFinal, isHalftime, isLive };
+};
+
+/**
+ * Estimate live elapsed/remaining minutes and % played across NCAAM, NFL, and EPL.
+ */
+export const estimateLiveGameProgress = (game, pregameTotal = 142) => {
+  const sport = String(game?.sport || 'NCAAM').toUpperCase();
+  const isSoccer = sport === 'EPL' || sport === 'SOCCER';
+  const isNfl = sport === 'NFL' || sport === 'NCAAF';
+  const isNba = sport === 'NBA';
+  const regPeriods = isNfl || isNba ? 4 : 2;
+  const periodMins = isNfl ? 15 : isNba ? 12 : isSoccer ? 45 : 20;
+  const otMins = isNfl ? 10 : isSoccer ? 15 : 5;
+  const regTotalMins = regPeriods * periodMins;
+
+  const { statusDetail, isFinal, isHalftime, isLive } = resolveLiveFlags(game);
+
+  if (isFinal) {
+    return {
+      elapsedMinutes: regTotalMins,
+      remainingMinutes: 0,
+      totalGameMinutes: regTotalMins,
+      elapsedFraction: 1,
+      progressPct: 100,
+      periodLabel: 'Final',
+    };
+  }
+
+  if (!isLive) {
+    return {
+      elapsedMinutes: 0,
+      remainingMinutes: regTotalMins,
+      totalGameMinutes: regTotalMins,
+      elapsedFraction: 0,
+      progressPct: 0,
+      periodLabel: statusDetail || 'Upcoming',
+    };
+  }
+
+  if (isHalftime) {
+    return {
+      elapsedMinutes: regTotalMins / 2,
+      remainingMinutes: regTotalMins / 2,
+      totalGameMinutes: regTotalMins,
+      elapsedFraction: 0.5,
+      progressPct: 50,
+      periodLabel: 'Halftime',
+    };
+  }
+
+  let period = toNum(game?.period);
+  let clockStr = game?.clock ? String(game.clock).trim() : '';
+
+  if (!clockStr && statusDetail) {
+    const cm = statusDetail.match(/\b(\d{1,2}:\d{2}(?:\.\d+)?)\b/);
+    if (cm) clockStr = cm[1];
+  }
+
+  if (period == null && statusDetail) {
+    const otMatch = statusDetail.match(/\b(\d*)\s*OT\b/i);
+    if (otMatch) {
+      const otNum = otMatch[1] ? parseInt(otMatch[1], 10) : 1;
+      period = regPeriods + (Number.isFinite(otNum) && otNum > 0 ? otNum : 1);
+    } else if (/\b(?:1st|1H|Q1)\b/i.test(statusDetail)) {
+      period = 1;
+    } else if (/\b(?:2nd|2H|Q2)\b/i.test(statusDetail)) {
+      period = 2;
+    } else if (/\b(?:3rd|3H|Q3)\b/i.test(statusDetail)) {
+      period = 3;
+    } else if (/\b(?:4th|4H|Q4)\b/i.test(statusDetail)) {
+      period = 4;
+    }
+  }
+
+  const formatOrdinalPeriod = (p) => {
+    if (p > regPeriods) {
+      const otIdx = p - regPeriods;
+      return otIdx === 1 ? 'OT' : `${otIdx}OT`;
+    }
+    if (p === 1) return isNfl || isNba ? 'Q1' : '1st';
+    if (p === 2) return isNfl || isNba ? 'Q2' : '2nd';
+    if (p === 3) return 'Q3';
+    if (p === 4) return 'Q4';
+    return `${p}`;
+  };
+
+  if (isSoccer && statusDetail) {
+    const socMinMatch = statusDetail.match(/(\d+)(?:\+(\d+))?\s*'/);
+    if (socMinMatch) {
+      const baseM = parseInt(socMinMatch[1], 10);
+      const stopM = socMinMatch[2] ? parseInt(socMinMatch[2], 10) : 0;
+      const elapsedMinutes = clamp(baseM + stopM * 0.25, 1, 120);
+      const totalGameMinutes = elapsedMinutes > 90 ? 120 : 90;
+      const remainingMinutes = Math.max(0, totalGameMinutes - elapsedMinutes);
+      const elapsedFraction = clamp(elapsedMinutes / totalGameMinutes, 0.04, 0.98);
+      return {
+        elapsedMinutes: Number(elapsedMinutes.toFixed(1)),
+        remainingMinutes: Number(remainingMinutes.toFixed(1)),
+        totalGameMinutes,
+        elapsedFraction,
+        progressPct: Math.round(elapsedFraction * 100),
+        periodLabel: statusDetail,
+      };
+    }
+  }
+
+  const clockRemMins = parseClockMinutes(clockStr);
+  if (period != null && period >= 1) {
+    let totalGameMinutes = regTotalMins;
+    let elapsedMinutes;
+    let remainingMinutes;
+    if (period <= regPeriods) {
+      const remInPeriod = clockRemMins != null ? clamp(clockRemMins, 0, periodMins) : periodMins * 0.5;
+      elapsedMinutes = (period - 1) * periodMins + (periodMins - remInPeriod);
+      remainingMinutes = (regPeriods - period) * periodMins + remInPeriod;
+    } else {
+      const otIndex = period - regPeriods;
+      totalGameMinutes = regTotalMins + otIndex * otMins;
+      const remInOt = clockRemMins != null ? clamp(clockRemMins, 0, otMins) : otMins * 0.5;
+      elapsedMinutes = regTotalMins + (otIndex - 1) * otMins + (otMins - remInOt);
+      remainingMinutes = remInOt;
+    }
+    const elapsedFraction = clamp(elapsedMinutes / Math.max(1, totalGameMinutes), 0.04, 0.98);
+    const baseLabel = formatOrdinalPeriod(period);
+    const periodLabel = clockStr ? `${baseLabel} · ${clockStr}` : baseLabel;
+    return {
+      elapsedMinutes: Number(elapsedMinutes.toFixed(2)),
+      remainingMinutes: Number(Math.max(0, remainingMinutes).toFixed(2)),
+      totalGameMinutes,
+      elapsedFraction,
+      progressPct: Math.round(elapsedFraction * 100),
+      periodLabel,
+    };
+  }
+
+  // Fallback when period/clock metadata are absent on an active live game
+  const homeScore = toNum(game?.home_score);
+  const awayScore = toNum(game?.away_score);
+  const scoreFrac =
+    homeScore != null && awayScore != null && pregameTotal > 10
+      ? (homeScore + awayScore) / pregameTotal
+      : null;
+  let wallFrac = null;
+  if (game?.start_time) {
+    const startMs = new Date(game.start_time).getTime();
+    if (Number.isFinite(startMs)) {
+      const realMins = Math.max(0, (Date.now() - startMs) / 60000);
+      wallFrac = realMins / (isSoccer ? 110 : isNfl ? 185 : 120);
+    }
+  }
+  const fallbackFrac = clamp(
+    scoreFrac != null && wallFrac != null
+      ? scoreFrac * 0.65 + wallFrac * 0.35
+      : scoreFrac ?? wallFrac ?? 0.35,
+    0.04,
+    0.95
+  );
+  const elapsedMinutes = fallbackFrac * regTotalMins;
+  const remainingMinutes = regTotalMins - elapsedMinutes;
+  return {
+    elapsedMinutes: Number(elapsedMinutes.toFixed(1)),
+    remainingMinutes: Number(remainingMinutes.toFixed(1)),
+    totalGameMinutes: regTotalMins,
+    elapsedFraction: fallbackFrac,
+    progressPct: Math.round(fallbackFrac * 100),
+    periodLabel: statusDetail || 'Live',
+  };
+};
+
+const isHomeSelectionForGame = (selection, rec, game) => {
+  const sideRaw = String(rec?.side || '').trim().toUpperCase();
+  if (sideRaw === 'HOME') return true;
+  if (sideRaw === 'AWAY') return false;
+
+  const clean = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const parsed = extractTeamAndLineFromSelection(selection);
+  const pickNorm = clean(parsed.team.replace(/\s*\b(ml|moneyline)\b/gi, ''));
+  const homeRaw = String(game?.home_team || '');
+  const awayRaw = String(game?.away_team || '');
+  const homeNorm = clean(homeRaw);
+  const awayNorm = clean(awayRaw);
+
+  if (homeNorm && pickNorm === homeNorm) return true;
+  if (awayNorm && pickNorm === awayNorm) return false;
+
+  const selNorm = clean(selection);
+  const matchesHome = Boolean(homeNorm && (pickNorm.includes(homeNorm) || selNorm.includes(homeNorm)));
+  const matchesAway = Boolean(awayNorm && (pickNorm.includes(awayNorm) || selNorm.includes(awayNorm)));
+  if (matchesHome && !matchesAway) return true;
+  if (matchesAway && !matchesHome) return false;
+  if (matchesHome && matchesAway) {
+    return homeNorm.length >= awayNorm.length;
+  }
+  return String(selection || '').toLowerCase().includes(homeRaw.toLowerCase());
+};
+
+/**
+ * Determine live scoreboard status, live scoring pace, projected final score,
+ * and whether a bet is trending to win or lose against the clock.
+ */
+export const getLiveGameStatus = (game, rec = null, context = null) => {
   if (!game) return { state: 'UPCOMING', hasScore: false };
-  const rawStatus = String(game.live_status || game.status || '').toUpperCase();
-  const isFinal = Boolean(game.final) || rawStatus === 'FINAL' || rawStatus === 'COMPLETED';
-  const isHalftime = !isFinal && rawStatus === 'HALFTIME';
-  const isLive = !isFinal && (rawStatus === 'IN_PROGRESS' || rawStatus === 'LIVE' || isHalftime);
+  const { isFinal, isHalftime, isLive } = resolveLiveFlags(game);
 
   const homeScore = toNum(game.home_score);
   const awayScore = toNum(game.away_score);
   const hasScore = homeScore != null && awayScore != null;
 
+  const betTypeRaw = String(rec?.bet_type || rec?.market || rec?.market_type || '').toUpperCase();
+  const sel = String(rec?.selection || rec?.pick || '');
+  const isTotalBet = betTypeRaw === 'TOTAL' || /\b(OVER|UNDER)\b/i.test(sel);
+  const isMlBet = betTypeRaw === 'ML' || betTypeRaw === 'MONEYLINE' || /\b(ML|MONEYLINE)\b/i.test(sel);
+  const betType = isTotalBet ? 'TOTAL' : isMlBet ? 'ML' : betTypeRaw || 'SPREAD';
+
+  const pregameTotal =
+    toNum(
+      context?.fair_total ??
+        (isTotalBet ? rec?.fair_line : null) ??
+        rec?.market_line ??
+        game?.total_line ??
+        game?.total
+    ) ?? 142;
+
+  const isHomePickForSpread = rec ? isHomeSelectionForGame(sel, rec, game) : true;
+  const fallbackSpreadHome =
+    rec && !isTotalBet && !isMlBet && toNum(rec?.market_line ?? extractTeamAndLineFromSelection(sel).line) != null
+      ? (isHomePickForSpread
+          ? toNum(rec?.market_line ?? extractTeamAndLineFromSelection(sel).line)
+          : -toNum(rec?.market_line ?? extractTeamAndLineFromSelection(sel).line))
+      : 0;
+  const pregameHomeSpread =
+    toNum(context?.fair_spread_home ?? game?.home_spread ?? game?.spread_home) ?? fallbackSpreadHome;
+  const pregameHomeMargin = -pregameHomeSpread;
+
+  const progress = estimateLiveGameProgress(game, pregameTotal);
+
+  let totalNow = null;
+  let pointsPerMinute = null;
+  let liveProjTotal = null;
+  let liveProjHomeMargin = null;
+  let liveProjHomeScore = null;
+  let liveProjAwayScore = null;
+  let gameTrendText = '';
+
+  if (hasScore) {
+    totalNow = homeScore + awayScore;
+    if (isFinal) {
+      pointsPerMinute =
+        progress.elapsedMinutes > 0 ? Number((totalNow / progress.elapsedMinutes).toFixed(2)) : null;
+      liveProjTotal = totalNow;
+      liveProjHomeMargin = homeScore - awayScore;
+      liveProjHomeScore = homeScore;
+      liveProjAwayScore = awayScore;
+      gameTrendText = `Final: ${game.away_team || 'Away'} ${awayScore} – ${game.home_team || 'Home'} ${homeScore} (${totalNow} pts)`;
+    } else if (isLive) {
+      const elapsedFrac = progress.elapsedFraction;
+      const remFrac = Math.max(0, 1 - elapsedFrac);
+      const liveWeight = clamp(elapsedFrac * 0.85, 0.15, 0.8);
+      pointsPerMinute =
+        progress.elapsedMinutes > 0.5 ? Number((totalNow / progress.elapsedMinutes).toFixed(2)) : null;
+
+      const rawPaceTotal = clamp(totalNow / Math.max(0.04, elapsedFrac), 75, 235);
+      const blendedTotalRate = liveWeight * rawPaceTotal + (1 - liveWeight) * pregameTotal;
+      liveProjTotal = Number(Math.max(totalNow, totalNow + blendedTotalRate * remFrac).toFixed(1));
+
+      const currentHomeMargin = homeScore - awayScore;
+      const rawPaceHomeMargin = clamp(currentHomeMargin / Math.max(0.04, elapsedFrac), -35, 35);
+      const blendedMarginRate = liveWeight * rawPaceHomeMargin + (1 - liveWeight) * pregameHomeMargin;
+      liveProjHomeMargin = Number((currentHomeMargin + blendedMarginRate * remFrac).toFixed(1));
+
+      const remTotal = Math.max(0, liveProjTotal - totalNow);
+      const remMargin = liveProjHomeMargin - currentHomeMargin;
+      let remHome = (remTotal + remMargin) / 2;
+      let remAway = (remTotal - remMargin) / 2;
+      if (remHome < 0) {
+        remHome = 0;
+        remAway = remTotal;
+      } else if (remAway < 0) {
+        remAway = 0;
+        remHome = remTotal;
+      }
+      liveProjHomeScore = Math.max(homeScore, Math.round(homeScore + remHome));
+      liveProjAwayScore = Math.max(awayScore, Math.round(awayScore + remAway));
+      gameTrendText = `Live Pace: ${game.away_team || 'Away'} ${liveProjAwayScore} – ${game.home_team || 'Home'} ${liveProjHomeScore} (~${Math.round(liveProjTotal)} pts)`;
+    }
+  }
+
   let coverText = '';
   let coverTone = 'neutral';
-  if (hasScore && rec) {
-    const betType = String(rec.bet_type || rec.market || '').toUpperCase();
-    const sel = String(rec.selection || '');
-    const line = toNum(rec.market_line ?? extractTeamAndLineFromSelection(sel).line);
-    const totalNow = homeScore + awayScore;
+  let trendVerdict = null;
+  let trendLabel = '';
+  let liveWinProb = null;
+  let trendDetail = '';
+  let projectedBetMargin = null;
+
+  if (hasScore && rec && (isLive || isFinal)) {
+    const parsedSel = extractTeamAndLineFromSelection(sel);
+    const line = toNum(rec.market_line ?? rec.line ?? parsedSel.line);
+    const remFrac = Math.max(0.03, 1 - progress.elapsedFraction);
+    const remMinsLabel = `${Math.max(0, Math.round(progress.remainingMinutes))} min`;
 
     if (betType === 'TOTAL' && line != null) {
-      const isOver = /OVER|^O\b/i.test(sel);
-      const diff = totalNow - line;
+      const isOver = /OVER|^O\b/i.test(sel || String(rec.side || ''));
+      const lineStr = Number(line).toFixed(1).replace(/\.0$/, '');
+      const sideTag = isOver ? `O ${lineStr}` : `U ${lineStr}`;
+
       if (isFinal) {
+        const diff = totalNow - line;
+        projectedBetMargin = Number((isOver ? diff : -diff).toFixed(1));
         if ((isOver && diff > 0) || (!isOver && diff < 0)) {
-          coverText = `Bet Won (${totalNow} total pts)`;
+          trendVerdict = 'WON';
+          trendLabel = 'Won';
+          liveWinProb = 1;
+          coverText = `Bet Won (${totalNow} total pts vs ${sideTag})`;
           coverTone = 'win';
+          trendDetail = `Final total finished at ${totalNow} pts, clearing ${sideTag} by ${Math.abs(diff).toFixed(1)} pts.`;
         } else if (diff === 0) {
+          trendVerdict = 'PUSH';
+          trendLabel = 'Push';
+          liveWinProb = 0.5;
           coverText = `Push (${totalNow} total pts)`;
+          trendDetail = `Final total landed on ${totalNow} pts (exact push/refund).`;
         } else {
-          coverText = `Bet Lost (${totalNow} total pts)`;
+          trendVerdict = 'LOST';
+          trendLabel = 'Lost';
+          liveWinProb = 0;
+          coverText = `Bet Lost (${totalNow} total pts vs ${sideTag})`;
           coverTone = 'loss';
+          trendDetail = `Final total finished at ${totalNow} pts, missing ${sideTag} by ${Math.abs(diff).toFixed(1)} pts.`;
         }
-      } else {
-        coverText = `${totalNow} combined pts so far (${isOver ? `needs ${Math.max(0, Math.floor(line) + 1 - totalNow)} more` : `${Math.max(0, Math.ceil(line) - 1 - totalNow)} pts under cap`})`;
-        coverTone = !isOver && totalNow < line ? 'win' : isOver && totalNow >= line ? 'win' : 'neutral';
+      } else if (isLive) {
+        if (isOver && totalNow > line) {
+          trendVerdict = 'TRENDING_WIN';
+          trendLabel = 'Trending to Win';
+          liveWinProb = 0.99;
+          projectedBetMargin = Number((liveProjTotal - line).toFixed(1));
+          coverTone = 'win';
+          coverText = `Already Cashed (99%) · ${totalNow} > ${lineStr}`;
+          trendDetail = `Already over ${lineStr} with ${totalNow} combined pts and ${remMinsLabel} left — bet is locked in.`;
+        } else if (!isOver && totalNow > line) {
+          trendVerdict = 'TRENDING_LOSE';
+          trendLabel = 'Trending to Lose';
+          liveWinProb = 0.01;
+          projectedBetMargin = Number((line - totalNow).toFixed(1));
+          coverTone = 'loss';
+          coverText = `Over Limit (1%) · ${totalNow} > ${lineStr}`;
+          trendDetail = `Combined score (${totalNow} pts) already exceeded Under ${lineStr}.`;
+        } else {
+          const projectedEdgeVsLine = Number((isOver ? liveProjTotal - line : line - liveProjTotal).toFixed(1));
+          projectedBetMargin = projectedEdgeVsLine;
+          const sigmaTotalRem = Math.max(2.0, 13.5 * Math.sqrt(remFrac));
+          liveWinProb = Number(clamp(normalCdf(projectedEdgeVsLine / sigmaTotalRem), 0.02, 0.98).toFixed(2));
+
+          if (projectedEdgeVsLine >= 1.5) {
+            trendVerdict = 'TRENDING_WIN';
+            trendLabel = 'Trending to Win';
+            coverTone = 'win';
+          } else if (projectedEdgeVsLine <= -1.5) {
+            trendVerdict = 'TRENDING_LOSE';
+            trendLabel = 'Trending to Lose';
+            coverTone = 'loss';
+          } else {
+            trendVerdict = 'TOSS_UP';
+            trendLabel = 'Tight / Toss-Up';
+            coverTone = 'tossup';
+          }
+
+          const pctTxt = `${Math.round(liveWinProb * 100)}%`;
+          coverText = `${trendLabel} (${pctTxt}) · Pace ${liveProjTotal.toFixed(1)} vs ${sideTag}`;
+          const rateTxt = pointsPerMinute != null ? `${pointsPerMinute.toFixed(1)} pts/min` : 'live scoring';
+          if (isOver) {
+            const needPts = Math.max(0, Math.floor(line) + 1 - totalNow);
+            trendDetail = `Scoring at ${rateTxt}, on pace for ~${liveProjTotal.toFixed(1)} pts (${fmtSigned(projectedEdgeVsLine, 1)} vs Over ${lineStr}); needs ${needPts} more pts over the last ${remMinsLabel}.`;
+          } else {
+            const roomLeft = Math.max(0, Math.ceil(line) - 1 - totalNow);
+            trendDetail = `Scoring at ${rateTxt}, on pace for ~${liveProjTotal.toFixed(1)} pts (${fmtSigned(-projectedEdgeVsLine, 1)} vs Under ${lineStr}); needs teams to score ${roomLeft} or fewer pts in the last ${remMinsLabel}.`;
+          }
+        }
       }
-    } else if (line != null && (betType === 'SPREAD' || betType === '')) {
-      const home = String(game.home_team || '').toLowerCase();
-      const isHomePick = sel.toLowerCase().includes(home);
+    } else if ((betType === 'SPREAD' && line != null) || betType === 'ML') {
+      const effectiveLine = betType === 'ML' ? 0 : line;
+      const isHomePick = isHomeSelectionForGame(sel, rec, game);
+      const pickedTeam = isHomePick
+        ? game.home_team || parsedSel.team || 'Home'
+        : game.away_team || parsedSel.team || 'Away';
       const pickedScore = isHomePick ? homeScore : awayScore;
       const oppScore = isHomePick ? awayScore : homeScore;
-      const marginWithLine = pickedScore + line - oppScore;
-      const absDiff = Math.abs(marginWithLine).toFixed(1).replace(/\.0$/, '');
-      if (marginWithLine > 0) {
-        coverText = isFinal ? `Covered by +${absDiff} pts` : `Covering by +${absDiff} pts`;
-        coverTone = 'win';
-      } else if (marginWithLine === 0) {
-        coverText = isFinal ? 'Push (tie against spread)' : 'Even against spread';
-      } else {
-        coverText = isFinal ? `Missed spread by ${absDiff} pts` : `Trailing spread by ${absDiff} pts`;
-        coverTone = 'loss';
+      const currentGameMargin = pickedScore - oppScore;
+      const currentSpreadMargin = currentGameMargin + effectiveLine;
+      const lineStr =
+        betType === 'ML'
+          ? 'ML'
+          : `${effectiveLine > 0 ? '+' : ''}${Number(effectiveLine).toFixed(1).replace(/\.0$/, '')}`;
+
+      if (isFinal) {
+        projectedBetMargin = Number(currentSpreadMargin.toFixed(1));
+        const absDiff = Math.abs(currentSpreadMargin).toFixed(1).replace(/\.0$/, '');
+        if (currentSpreadMargin > 0) {
+          trendVerdict = 'WON';
+          trendLabel = 'Won';
+          liveWinProb = 1;
+          coverText = betType === 'ML' ? `Bet Won (+${absDiff} margin)` : `Covered by +${absDiff} pts`;
+          coverTone = 'win';
+          trendDetail = `${pickedTeam} finished ${currentGameMargin >= 0 ? `up ${currentGameMargin}` : `down ${Math.abs(currentGameMargin)}`}, winning the ${lineStr} bet.`;
+        } else if (currentSpreadMargin === 0) {
+          trendVerdict = 'PUSH';
+          trendLabel = 'Push';
+          liveWinProb = 0.5;
+          coverText = 'Push (tie against line)';
+          trendDetail = `${pickedTeam} landed directly on ${lineStr} (push/refund).`;
+        } else {
+          trendVerdict = 'LOST';
+          trendLabel = 'Lost';
+          liveWinProb = 0;
+          coverText = betType === 'ML' ? `Bet Lost (-${absDiff})` : `Missed spread by ${absDiff} pts`;
+          coverTone = 'loss';
+          trendDetail = `${pickedTeam} finished ${currentGameMargin >= 0 ? `up ${currentGameMargin}` : `down ${Math.abs(currentGameMargin)}`}, falling ${absDiff} pts short of ${lineStr}.`;
+        }
+      } else if (isLive) {
+        const liveProjMarginPick = isHomePick ? liveProjHomeMargin : -liveProjHomeMargin;
+        const projectedCoverMargin = Number((liveProjMarginPick + effectiveLine).toFixed(1));
+        projectedBetMargin = projectedCoverMargin;
+        const sigmaSpreadRem = Math.max(1.5, 10.5 * Math.sqrt(remFrac));
+        liveWinProb = Number(clamp(normalCdf(projectedCoverMargin / sigmaSpreadRem), 0.02, 0.98).toFixed(2));
+
+        if (projectedCoverMargin >= 1.25) {
+          trendVerdict = 'TRENDING_WIN';
+          trendLabel = 'Trending to Win';
+          coverTone = 'win';
+        } else if (projectedCoverMargin <= -1.25) {
+          trendVerdict = 'TRENDING_LOSE';
+          trendLabel = 'Trending to Lose';
+          coverTone = 'loss';
+        } else {
+          trendVerdict = 'TOSS_UP';
+          trendLabel = 'Tight / Toss-Up';
+          coverTone = 'tossup';
+        }
+
+        const pctTxt = `${Math.round(liveWinProb * 100)}%`;
+        const projMarginStr = `${liveProjMarginPick >= 0 ? '+' : ''}${liveProjMarginPick.toFixed(1)}`;
+        coverText = `${trendLabel} (${pctTxt}) · Pace ${projMarginStr} vs ${lineStr}`;
+
+        const scoreStateStr =
+          currentGameMargin > 0
+            ? `leading by ${currentGameMargin}`
+            : currentGameMargin < 0
+              ? `trailing by ${Math.abs(currentGameMargin)}`
+              : 'tied';
+        const paceVerdictPhrase =
+          projectedCoverMargin >= 0
+            ? `on pace to cover by +${Math.abs(projectedCoverMargin).toFixed(1)} pts`
+            : `on pace to miss ${lineStr} by ${Math.abs(projectedCoverMargin).toFixed(1)} pts`;
+        trendDetail = `${pickedTeam} is currently ${scoreStateStr}, projecting to finish ${projMarginStr} (${paceVerdictPhrase}) with ${remMinsLabel} left.`;
       }
     }
+  } else if (isLive && hasScore && gameTrendText) {
+    coverText = gameTrendText;
+    trendDetail = `${pointsPerMinute != null ? `${pointsPerMinute.toFixed(1)} combined pts/min` : 'In progress'} · Projected finish: ${game.away_team || 'Away'} ${liveProjAwayScore} – ${game.home_team || 'Home'} ${liveProjHomeScore}.`;
   }
 
   return {
@@ -758,6 +1215,23 @@ export const getLiveGameStatus = (game, rec) => {
     homeScore,
     awayScore,
     statusDetail: game.status_detail || (isFinal ? 'Final' : isHalftime ? 'Halftime' : isLive ? 'Live' : ''),
+    periodLabel: progress.periodLabel,
+    elapsedMinutes: progress.elapsedMinutes,
+    remainingMinutes: progress.remainingMinutes,
+    totalGameMinutes: progress.totalGameMinutes,
+    elapsedFraction: progress.elapsedFraction,
+    progressPct: progress.progressPct,
+    pointsPerMinute,
+    liveProjTotal,
+    liveProjHomeMargin,
+    liveProjHomeScore,
+    liveProjAwayScore,
+    gameTrendText,
+    trendVerdict,
+    trendLabel,
+    liveWinProb,
+    trendDetail,
+    projectedBetMargin,
     coverText,
     coverTone,
   };

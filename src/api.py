@@ -2541,6 +2541,155 @@ def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
     return games
 
 
+def _compute_live_game_pace(
+    home_score,
+    away_score,
+    live_status,
+    period,
+    clock,
+    status_detail,
+    total_line=None,
+    home_spread=None,
+) -> Optional[dict]:
+    """Compute live elapsed/remaining minutes, scoring pace, and projected final score/margin."""
+    import re as _re
+
+    if home_score is None or away_score is None:
+        return None
+    try:
+        hs = int(home_score)
+        as_ = int(away_score)
+    except Exception:
+        return None
+
+    status_up = str(live_status or "").upper().strip()
+    detail_str = str(status_detail or "").strip()
+    is_final = status_up in ("FINAL", "COMPLETED")
+    is_halftime = (not is_final) and (
+        status_up == "HALFTIME"
+        or bool(_re.search(r"\bHALFTIME\b", detail_str, _re.I))
+        or bool(_re.match(r"^HALF$", detail_str, _re.I))
+    )
+
+    clock_str = str(clock or "").strip()
+    if not clock_str and detail_str:
+        cm = _re.search(r"\b(\d{1,2}:\d{2}(?:\.\d+)?)\b", detail_str)
+        if cm:
+            clock_str = cm.group(1)
+
+    clock_rem_mins = None
+    if clock_str:
+        mmss = _re.match(r"^(\d{1,2}):(\d{1,2}(?:\.\d+)?)$", clock_str)
+        if mmss:
+            clock_rem_mins = int(mmss.group(1)) + float(mmss.group(2)) / 60.0
+        elif _re.match(r"^\d+(?:\.\d+)?$", clock_str):
+            clock_rem_mins = float(clock_str) / 60.0
+
+    period_num = None
+    if period is not None:
+        try:
+            period_num = int(period)
+        except Exception:
+            period_num = None
+    if period_num is None and detail_str:
+        ot_m = _re.search(r"\b(\d*)\s*OT\b", detail_str, _re.I)
+        if ot_m:
+            ot_n = int(ot_m.group(1)) if ot_m.group(1) else 1
+            period_num = 2 + max(1, ot_n)
+        elif _re.search(r"\b(?:1st|1H)\b", detail_str, _re.I):
+            period_num = 1
+        elif _re.search(r"\b(?:2nd|2H)\b", detail_str, _re.I):
+            period_num = 2
+
+    reg_total = 40.0
+    period_mins = 20.0
+    ot_mins = 5.0
+    pregame_total = float(total_line) if total_line is not None else 142.0
+    pregame_home_margin = -float(home_spread) if home_spread is not None else 0.0
+    total_now = hs + as_
+    current_home_margin = hs - as_
+
+    if is_final:
+        return {
+            "elapsed_minutes": reg_total,
+            "remaining_minutes": 0.0,
+            "total_game_minutes": reg_total,
+            "progress_pct": 100,
+            "period_label": "Final",
+            "points_per_minute": round(total_now / reg_total, 2),
+            "projected_total": float(total_now),
+            "projected_home_margin": float(current_home_margin),
+            "projected_home_score": hs,
+            "projected_away_score": as_,
+        }
+
+    if is_halftime:
+        elapsed_mins = 20.0
+        remaining_mins = 20.0
+        total_game_mins = 40.0
+        elapsed_frac = 0.5
+        period_label = "Halftime"
+    elif period_num is not None and period_num >= 1:
+        if period_num <= 2:
+            rem_in_p = max(0.0, min(period_mins, clock_rem_mins)) if clock_rem_mins is not None else 10.0
+            elapsed_mins = (period_num - 1) * period_mins + (period_mins - rem_in_p)
+            remaining_mins = (2 - period_num) * period_mins + rem_in_p
+            total_game_mins = reg_total
+            base_lbl = "1st" if period_num == 1 else "2nd"
+        else:
+            ot_idx = period_num - 2
+            rem_in_ot = max(0.0, min(ot_mins, clock_rem_mins)) if clock_rem_mins is not None else 2.5
+            total_game_mins = reg_total + ot_idx * ot_mins
+            elapsed_mins = reg_total + (ot_idx - 1) * ot_mins + (ot_mins - rem_in_ot)
+            remaining_mins = rem_in_ot
+            base_lbl = "OT" if ot_idx == 1 else f"{ot_idx}OT"
+        elapsed_frac = max(0.04, min(0.98, elapsed_mins / max(1.0, total_game_mins)))
+        period_label = f"{base_lbl} · {clock_str}" if clock_str else base_lbl
+    else:
+        total_game_mins = reg_total
+        score_frac = (total_now / pregame_total) if pregame_total > 10 else 0.35
+        elapsed_frac = max(0.04, min(0.95, score_frac))
+        elapsed_mins = elapsed_frac * reg_total
+        remaining_mins = reg_total - elapsed_mins
+        period_label = detail_str or "Live"
+
+    rem_frac = max(0.0, 1.0 - elapsed_frac)
+    live_weight = max(0.15, min(0.80, elapsed_frac * 0.85))
+    pts_per_min = round(total_now / elapsed_mins, 2) if elapsed_mins > 0.5 else None
+
+    raw_pace_total = max(75.0, min(235.0, total_now / max(0.04, elapsed_frac)))
+    blended_total_rate = live_weight * raw_pace_total + (1.0 - live_weight) * pregame_total
+    proj_total = round(max(float(total_now), total_now + blended_total_rate * rem_frac), 1)
+
+    raw_pace_margin = max(-35.0, min(35.0, current_home_margin / max(0.04, elapsed_frac)))
+    blended_margin_rate = live_weight * raw_pace_margin + (1.0 - live_weight) * pregame_home_margin
+    proj_home_margin = round(current_home_margin + blended_margin_rate * rem_frac, 1)
+
+    rem_total = max(0.0, proj_total - total_now)
+    rem_margin = proj_home_margin - current_home_margin
+    rem_home = (rem_total + rem_margin) / 2.0
+    rem_away = (rem_total - rem_margin) / 2.0
+    if rem_home < 0:
+        rem_home = 0.0
+        rem_away = rem_total
+    elif rem_away < 0:
+        rem_away = 0.0
+        rem_home = rem_total
+
+    return {
+        "elapsed_minutes": round(elapsed_mins, 2),
+        "remaining_minutes": round(max(0.0, remaining_mins), 2),
+        "total_game_minutes": total_game_mins,
+        "progress_pct": int(round(elapsed_frac * 100)),
+        "period_label": period_label,
+        "points_per_minute": pts_per_min,
+        "projected_total": proj_total,
+        "projected_home_margin": proj_home_margin,
+        "projected_home_score": max(hs, int(round(hs + rem_home))),
+        "projected_away_score": max(as_, int(round(as_ + rem_away))),
+    }
+
+
 def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date) -> None:
     from zoneinfo import ZoneInfo
 
@@ -2595,6 +2744,24 @@ def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date
                 item["away_score"] = matched["away_score"]
             if matched.get("final"):
                 item["final"] = True
+
+        if (
+            matched["live_status"] in ("IN_PROGRESS", "HALFTIME")
+            and item.get("home_score") is not None
+            and item.get("away_score") is not None
+        ):
+            live_trend = _compute_live_game_pace(
+                item["home_score"],
+                item["away_score"],
+                matched["live_status"],
+                matched.get("period"),
+                matched.get("clock"),
+                matched.get("status_detail"),
+                total_line=item.get("total_line") or item.get("total"),
+                home_spread=item.get("home_spread") or item.get("spread_home"),
+            )
+            if live_trend:
+                item["live_trend"] = live_trend
 
 
 @app.get("/api/board")

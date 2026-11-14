@@ -62,7 +62,7 @@ const TodayFullBoardTable = ({
         const ctx = meta?.context || {};
         const lean = ctx?.closest_lean || null;
         const isActionable = Boolean(meta?.isActionable && rec);
-        const liveInfo = getLiveGameStatus(game, rec || lean);
+        const liveInfo = getLiveGameStatus(game, rec || lean, ctx);
         const isFinal = liveInfo.isFinal;
         const projScore = getProjectedScore(game, { context: ctx }, rec);
         const plainPick = explainPickPlainly(rec || (lean ? { ...lean, bet_type: lean.bet_type || 'SPREAD' } : null), game);
@@ -299,11 +299,15 @@ const TodayFullBoardTable = ({
                             </span>
                           )}
                         </div>
-                        {projScore && (
+                        {liveInfo.isLive && liveInfo.liveProjTotal != null ? (
+                          <span className="text-[10px] text-amber-300/95 font-medium truncate">
+                            Live Pace: {game.away_team} {liveInfo.liveProjAwayScore} – {game.home_team} {liveInfo.liveProjHomeScore} (~{Math.round(liveInfo.liveProjTotal)} pts)
+                          </span>
+                        ) : projScore ? (
                           <span className="text-[10px] text-sky-300/90 truncate">
                             Proj Score: {projScore.text}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </th>
 
@@ -367,18 +371,25 @@ const TodayFullBoardTable = ({
                             <span>{fmtOdds(rec.price)} · {rec.book || 'Consensus'}</span>
                             {liveInfo.coverText && (
                               <span
-                                className={`font-sans font-semibold ${
+                                className={`font-sans font-bold ${
                                   liveInfo.coverTone === 'win'
                                     ? 'text-emerald-300'
                                     : liveInfo.coverTone === 'loss'
                                       ? 'text-rose-300'
-                                      : 'text-slate-300'
+                                      : liveInfo.coverTone === 'tossup'
+                                        ? 'text-amber-300'
+                                        : 'text-slate-300'
                                 }`}
                               >
                                 · {liveInfo.coverText}
                               </span>
                             )}
                           </div>
+                          {liveInfo.isLive && liveInfo.trendDetail && (
+                            <span className="text-[10px] text-slate-300 line-clamp-1">
+                              {liveInfo.trendDetail}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <div className="flex flex-col gap-0.5 min-w-0">
@@ -393,12 +404,32 @@ const TodayFullBoardTable = ({
                               </span>
                             )}
                           </div>
-                          {plainPick?.shortRule && lean?.selection && (
+                          {liveInfo.isLive && (liveInfo.coverText || liveInfo.gameTrendText) && (
+                            <span
+                              className={`text-[11px] font-semibold truncate ${
+                                liveInfo.coverTone === 'win'
+                                  ? 'text-emerald-300'
+                                  : liveInfo.coverTone === 'loss'
+                                    ? 'text-rose-300'
+                                    : liveInfo.coverTone === 'tossup'
+                                      ? 'text-amber-300'
+                                      : 'text-sky-300'
+                              }`}
+                            >
+                              {liveInfo.coverText || liveInfo.gameTrendText}
+                            </span>
+                          )}
+                          {liveInfo.isLive && liveInfo.trendDetail && (
+                            <span className="text-[10px] text-slate-300 line-clamp-1">
+                              {liveInfo.trendDetail}
+                            </span>
+                          )}
+                          {plainPick?.shortRule && lean?.selection && !liveInfo.isLive && (
                             <span className="text-[11px] text-indigo-200/90 truncate">
                               Meaning: {plainPick.shortRule}
                             </span>
                           )}
-                          {cleanReason && (
+                          {!liveInfo.isLive && cleanReason && (
                             <span className="text-[11px] text-slate-400 line-clamp-1">{cleanReason}</span>
                           )}
                         </div>

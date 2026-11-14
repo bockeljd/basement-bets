@@ -1330,5 +1330,116 @@ def test_mac_kenpom_daily_sync_builds_7_dataset_bundle(monkeypatch):
         assert key in bundle and len(bundle[key]) > 0
 
 
+def test_compute_live_game_pace_and_board_enrichment(monkeypatch):
+    import src.api as api_mod
+    from datetime import date
+
+    # 1. 1st half fast pace (10 mins elapsed out of 40)
+    p1 = api_mod._compute_live_game_pace(
+        home_score=24,
+        away_score=18,
+        live_status="IN_PROGRESS",
+        period=1,
+        clock="10:00",
+        status_detail="10:00 - 1st Half",
+        total_line=144.0,
+        home_spread=-6.0,
+    )
+    assert p1["elapsed_minutes"] == pytest.approx(10.0, abs=0.05)
+    assert p1["remaining_minutes"] == pytest.approx(30.0, abs=0.05)
+    assert p1["progress_pct"] == 25
+    assert p1["period_label"] == "1st · 10:00"
+    assert p1["points_per_minute"] == pytest.approx(4.2, abs=0.05)
+    assert p1["projected_total"] > 144.0
+    assert p1["projected_home_score"] > p1["projected_away_score"]
+
+    # 2. Halftime
+    p_ht = api_mod._compute_live_game_pace(
+        home_score=41,
+        away_score=39,
+        live_status="HALFTIME",
+        period=1,
+        clock="0:00",
+        status_detail="Halftime",
+        total_line=145.5,
+        home_spread=-4.5,
+    )
+    assert p_ht["elapsed_minutes"] == 20.0
+    assert p_ht["remaining_minutes"] == 20.0
+    assert p_ht["progress_pct"] == 50
+    assert p_ht["period_label"] == "Halftime"
+    assert p_ht["projected_total"] > 150.0  # 80 pts at half projects >145.5
+
+    # 3. 2nd half (5 mins left, elapsed = 35m)
+    p2 = api_mod._compute_live_game_pace(
+        home_score=65,
+        away_score=60,
+        live_status="IN_PROGRESS",
+        period=2,
+        clock="5:00",
+        status_detail="5:00 - 2nd Half",
+        total_line=140.0,
+        home_spread=-8.5,
+    )
+    assert p2["elapsed_minutes"] == pytest.approx(35.0, abs=0.05)
+    assert p2["remaining_minutes"] == pytest.approx(5.0, abs=0.05)
+    assert p2["progress_pct"] == 88
+    assert p2["projected_total"] >= 125.0
+
+    # 4. Overtime (period 3, 2:00 remaining in 5-min OT => 43 elapsed, 45 total)
+    pot = api_mod._compute_live_game_pace(
+        home_score=76,
+        away_score=74,
+        live_status="IN_PROGRESS",
+        period=3,
+        clock="2:00",
+        status_detail="2:00 - OT",
+        total_line=144.0,
+        home_spread=-2.5,
+    )
+    assert pot["total_game_minutes"] == 45.0
+    assert pot["elapsed_minutes"] == pytest.approx(43.0, abs=0.05)
+    assert pot["remaining_minutes"] == pytest.approx(2.0, abs=0.05)
+    assert pot["period_label"] == "OT · 2:00"
+
+    # 5. Board enrichment attaches live_trend cleanly
+    monkeypatch.setattr(
+        api_mod,
+        "_fetch_espn_live_scoreboard_date",
+        lambda yyyymmdd: [
+            {
+                "espn_id": "401999",
+                "home_variants": {"duke"},
+                "away_variants": {"northcarolina"},
+                "live_status": "IN_PROGRESS",
+                "final": False,
+                "home_score": 44,
+                "away_score": 40,
+                "period": 2,
+                "clock": "18:00",
+                "status_detail": "18:00 - 2nd Half",
+            }
+        ],
+    )
+    items = [
+        {
+            "id": "espn:ncaam:401999",
+            "home_team": "Duke",
+            "away_team": "North Carolina",
+            "total_line": 149.5,
+            "home_spread": -5.5,
+        }
+    ]
+    d = date.today()
+    api_mod._enrich_ncaam_board_with_live_scores(items, d, d)
+    assert items[0]["live_status"] == "IN_PROGRESS"
+    assert items[0]["home_score"] == 44
+    assert items[0]["away_score"] == 40
+    assert "live_trend" in items[0]
+    assert items[0]["live_trend"]["period_label"] == "2nd · 18:00"
+    assert items[0]["live_trend"]["projected_total"] > 140.0
+
+
+
 
 

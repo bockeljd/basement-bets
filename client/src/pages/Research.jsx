@@ -574,7 +574,15 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     plays.sort((a, b) => (getRecEv(b.rec) ?? -999) - (getRecEv(a.rec) ?? -999));
 
     const highConf = plays.filter((p) => p.conf.tier === 'HIGH').length;
-    const liveCount = gamesForLeague.filter((g) => getLiveGameStatus(g).isLive).length;
+    const liveGamesList = gamesForLeague.filter((g) => getLiveGameStatus(g).isLive);
+    const liveCount = liveGamesList.length;
+    const liveTrendingWinCount = liveGamesList.filter((g) => {
+      const meta = lookupTopPickForGame(g, rowTopPicks, rowTopPicksByKey);
+      const targetRec = meta?.rec || meta?.context?.closest_lean || null;
+      if (!targetRec) return false;
+      const status = getLiveGameStatus(g, targetRec, meta?.context || null);
+      return status.trendVerdict === 'TRENDING_WIN';
+    }).length;
     const sharpCount = plays.filter((p) => {
       const tags = Array.isArray(p.rec?.movement_tags) ? p.rec.movement_tags : [];
       return tags.includes('sharp_backing') || tags.includes('rlm_confirmed');
@@ -588,6 +596,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         highConfCount: highConf,
         sharpCount,
         liveCount,
+        liveTrendingWinCount,
       },
     };
   }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey, selectedDate]);
@@ -670,6 +679,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     }
     return base;
   }, [actionablePlays.length, slateSummary.totalGames, leagueFilter]);
+
+  const activeSelectedGame = selectedGame
+    ? (edges.find((g) => g.id === selectedGame.id) || selectedGame)
+    : null;
 
   return (
     <div className="space-y-5 pb-12">
@@ -778,7 +791,12 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/15 border border-rose-500/40 text-rose-200 font-semibold">
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
                 <strong className="font-mono">{slateSummary.liveCount}</strong>
-                <span>Live Now</span>
+                <span>
+                  Live Now
+                  {slateSummary.liveTrendingWinCount > 0
+                    ? ` (${slateSummary.liveTrendingWinCount} Trending Win)`
+                    : ''}
+                </span>
               </span>
             )}
             {slateSummary.sharpCount > 0 && (
@@ -1061,7 +1079,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                   const reasonTxt = safeReasonText(lean.reason || meta?.reason);
                   const projScore = getProjectedScore(game, { context: ctx }, lean);
                   const plainLean = explainPickPlainly(lean, game);
-                  const liveInfo = getLiveGameStatus(game, lean);
+                  const liveInfo = getLiveGameStatus(game, lean, ctx);
                   return (
                     <article
                       key={id}
@@ -1073,6 +1091,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-200 font-bold text-[10px]">
                               <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
                               LIVE {liveInfo.hasScore ? `(${liveInfo.awayScore}-${liveInfo.homeScore})` : ''}
+                              {liveInfo.periodLabel ? ` · ${liveInfo.periodLabel}` : ''}
                             </span>
                           ) : liveInfo.isFinal ? (
                             <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-bold text-[10px]">
@@ -1088,6 +1107,26 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                         <div className="text-xs font-semibold text-slate-200 truncate">
                           {game.away_team} @ {game.home_team}
                         </div>
+                        {(liveInfo.isLive || liveInfo.isFinal) && liveInfo.coverText && (
+                          <div className="space-y-1">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                                liveInfo.coverTone === 'win'
+                                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                  : liveInfo.coverTone === 'loss'
+                                    ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                                    : liveInfo.coverTone === 'tossup'
+                                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                                      : 'bg-slate-800 border-slate-700 text-slate-200'
+                              }`}
+                            >
+                              {liveInfo.coverText}
+                            </span>
+                            {liveInfo.trendDetail && (
+                              <p className="text-[11px] text-slate-300 leading-snug">{liveInfo.trendDetail}</p>
+                            )}
+                          </div>
+                        )}
                         {projScore && (
                           <div className="text-[11px] text-sky-300 font-medium truncate">
                             Projected Final: {projScore.text}
@@ -1185,7 +1224,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
       {/* Native <dialog> Modals */}
       <TodayMatchupModal
-        game={selectedGame}
+        game={activeSelectedGame}
         analysisResult={analysisResult}
         correlationResult={correlationResult}
         matchupProfile={selectedGame ? matchupProfiles[selectedGame.id] : null}
