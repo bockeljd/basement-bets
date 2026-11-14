@@ -2428,8 +2428,177 @@ async def trigger_odds_ingestion(request: Request, authorized: bool = Depends(ve
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_LIVE_SCOREBOARD_CACHE: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _norm_live_team_key(name: Optional[str]) -> str:
+    if not name:
+        return ""
+    s = str(name).strip()
+    replacements = [
+        ("North Carolina State", "NC State"),
+        ("N.C. State", "NC State"),
+        ("N.C. St.", "NC State"),
+        ("NC St.", "NC State"),
+        ("App State", "Appalachian State"),
+        ("Appalachian St.", "Appalachian State"),
+        ("Appalachian St", "Appalachian State"),
+        ("South Carolina Upstate", "USC Upstate"),
+        ("U.S.C. Upstate", "USC Upstate"),
+        ("Long Island University", "LIU"),
+        ("L.I.U.", "LIU"),
+        ("St. Francis", "Saint Francis"),
+        ("UConn", "Connecticut"),
+        ("Ole Miss", "Mississippi"),
+        ("Miami (OH)", "Miami OH"),
+        ("Miami (FL)", "Miami FL"),
+        ("Saint ", "St "),
+        ("St. ", "St "),
+    ]
+    for a, b in replacements:
+        s = s.replace(a, b)
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
+    import time as _time
+    import requests as _requests
+
+    now = _time.time()
+    cached = _LIVE_SCOREBOARD_CACHE.get(yyyymmdd)
+    if cached and (now - cached[0]) < 25.0:
+        return cached[1]
+
+    url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
+    params = {"dates": yyyymmdd, "limit": 1000, "groups": 50}
+    games: list[dict] = []
+    try:
+        resp = _requests.get(url, params=params, timeout=2.5)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        for ev in data.get("events", []):
+            comp = (ev.get("competitions") or [{}])[0]
+            status_obj = comp.get("status") or ev.get("status") or {}
+            status_type = status_obj.get("type") or {}
+            state = str(status_type.get("state") or "").lower()
+            type_name = str(status_type.get("name") or "").upper()
+            completed = bool(status_type.get("completed")) or state == "post"
+
+            if completed:
+                live_status = "FINAL"
+            elif "HALFTIME" in type_name:
+                live_status = "HALFTIME"
+            elif state == "in":
+                live_status = "IN_PROGRESS"
+            else:
+                live_status = "SCHEDULED"
+
+            home_variants: set[str] = set()
+            away_variants: set[str] = set()
+            home_score = None
+            away_score = None
+            for competitor in comp.get("competitors") or []:
+                side = competitor.get("homeAway")
+                team = competitor.get("team") or {}
+                raw_score = competitor.get("score")
+                score_val = None
+                if raw_score is not None and state in ("in", "post"):
+                    try:
+                        score_val = int(float(raw_score))
+                    except Exception:
+                        score_val = None
+                variants = {
+                    _norm_live_team_key(team.get("displayName")),
+                    _norm_live_team_key(team.get("shortDisplayName")),
+                    _norm_live_team_key(team.get("location")),
+                }
+                variants.discard("")
+                if side == "home":
+                    home_variants = variants
+                    home_score = score_val
+                elif side == "away":
+                    away_variants = variants
+                    away_score = score_val
+
+            games.append({
+                "espn_id": str(ev.get("id") or ""),
+                "home_variants": home_variants,
+                "away_variants": away_variants,
+                "live_status": live_status,
+                "final": bool(completed),
+                "home_score": home_score,
+                "away_score": away_score,
+                "period": status_obj.get("period"),
+                "clock": status_obj.get("displayClock"),
+                "status_detail": status_type.get("shortDetail") or status_type.get("detail") or "",
+            })
+        _LIVE_SCOREBOARD_CACHE[yyyymmdd] = (now, games)
+    except Exception:
+        # Never block board response if ESPN live feed is unreachable
+        if cached:
+            return cached[1]
+        return []
+    return games
+
+
+def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date) -> None:
+    from zoneinfo import ZoneInfo
+
+    today_et = datetime.now(ZoneInfo("America/New_York")).date()
+    total_days = max(1, (end_date - start_date).days + 1)
+    live_games: list[dict] = []
+    for offset in range(min(total_days, 3)):
+        d = start_date + timedelta(days=offset)
+        if d > today_et + timedelta(days=1):
+            continue
+        live_games.extend(_fetch_espn_live_scoreboard_date(d.strftime("%Y%m%d")))
+
+    if not live_games:
+        return
+
+    by_espn_id: dict[str, dict] = {}
+    by_pair: dict[tuple[str, str], dict] = {}
+    for g in live_games:
+        eid = g.get("espn_id")
+        if eid:
+            by_espn_id[eid] = g
+        for hk in g.get("home_variants") or ():
+            for ak in g.get("away_variants") or ():
+                by_pair[(hk, ak)] = g
+
+    for item in items:
+        matched = None
+        item_id = str(item.get("id") or "")
+        if item_id.startswith("espn:ncaam:"):
+            matched = by_espn_id.get(item_id.split(":")[-1])
+        if not matched:
+            hk = _norm_live_team_key(item.get("home_team"))
+            ak = _norm_live_team_key(item.get("away_team"))
+            matched = by_pair.get((hk, ak))
+
+        if not matched:
+            continue
+
+        item["live_status"] = matched["live_status"]
+        item["status_detail"] = matched.get("status_detail") or ""
+        item["clock"] = matched.get("clock")
+        item["period"] = matched.get("period")
+        if matched["live_status"] in ("IN_PROGRESS", "HALFTIME"):
+            item["status"] = matched["live_status"]
+        elif matched["live_status"] == "FINAL":
+            item["status"] = "FINAL"
+
+        # Prefer live/final ESPN score when DB doesn't have a final score yet
+        if matched["home_score"] is not None and matched["away_score"] is not None:
+            if not item.get("final"):
+                item["home_score"] = matched["home_score"]
+                item["away_score"] = matched["away_score"]
+            if matched.get("final"):
+                item["final"] = True
+
+
 @app.get("/api/board")
-async def get_board(request: Request, league: str, date: Optional[str] = None, days: int = 1):
+async def get_board(request: Request, league: str, date: Optional[str] = None, days: int = 1, live: bool = True):
     """
     Generic lightweight board backed by DB odds snapshots.
 
@@ -2581,7 +2750,10 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
             if ingested > 0:
                 with get_db_connection() as conn:
                     rows = _exec(conn, query, {"league": league, "start_date": str(start_date), "end_date": str(end_date)}).fetchall()
-        return _ensure_utc([dict(r) for r in rows])
+        items = _ensure_utc([dict(r) for r in rows])
+        if live and league == "NCAAM" and items and os.getenv("DISABLE_LIVE_SCOREBOARD") != "1":
+            _enrich_ncaam_board_with_live_scores(items, start_date, end_date)
+        return items
 
     # Keep TTL short to avoid stale lines.
     return _cached_json(request, cache_key, ttl_s=int(os.getenv('BOARD_TTL_SECONDS', '30')), build_fn=_build)
@@ -3145,7 +3317,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         t0 = time.time()
         # Keep on-demand top-picks computation bounded for serverless.
         time_budget_s = float(os.getenv('TOP_PICKS_TIME_BUDGET_S', '15'))
-        target_picks = int(os.getenv('TOP_PICKS_TARGET_PICKS', '5'))
+        target_picks = int(os.getenv('TOP_PICKS_TARGET_PICKS', '50'))
         upserted_any = False
 
         for eid in event_ids:

@@ -1101,10 +1101,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if council_adjustment_spread != 0.0:
                 print(f"[MODEL] Council spread adj {council_adjustment_spread:+.2f} computed but GATED (Phase 1 mode).")
         
-        # Apply Caps (widen raw cap modestly when 2+ independent sources agree)
+        # Apply Caps (widen raw cap modestly when 2+ independent sources agree;
+        # damp blowout spread cap on 25+ pt mismatches so walk-on garbage time doesn't inflate edges)
         effective_cap_spread = self.CAP_SPREAD
         if (os.getenv('NCAAM_CAP_SPREAD') is None) and agree_count >= 2:
             effective_cap_spread = max(self.CAP_SPREAD, 3.2)
+        if (os.getenv('NCAAM_CAP_SPREAD') is None) and mu_market_spread is not None and abs(float(mu_market_spread)) >= 25.0:
+            effective_cap_spread = min(effective_cap_spread, 2.4)
         if abs(mu_spread_final - mu_market_spread) > effective_cap_spread:
              mu_spread_final = mu_market_spread + (effective_cap_spread * math.copysign(1, mu_spread_final - mu_market_spread))
 
@@ -1201,8 +1204,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         early_season_sigma_mult = 1.08 if game_month == 11 else (1.04 if game_month == 12 else 1.0)
         if avg_continuity < 0.5:
             early_season_sigma_mult *= 1.05
-        
-        sigma_spread = ((base_sigma_spread * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
+
+        blowout_sigma_add = 0.0
+        if mu_market_spread is not None and abs(float(mu_market_spread)) >= 18.0:
+            blowout_sigma_add = min(4.5, (abs(float(mu_market_spread)) - 18.0) * 0.18)
+
+        sigma_spread = (((base_sigma_spread + blowout_sigma_add) * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
         sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * abs(mu_torvik_total - mu_market_total)) * early_season_sigma_mult
 
         # --- Feature: Dynamic Sigma Inflation ---
@@ -1359,8 +1366,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # Positive sos_adj / mom_adj favors home team -> lower (more negative) home spread
         mu_spread_final -= (sos_adj + mom_adj) * situational_scale
 
-        # Re-clamp automated spread adjustments (allow up to effective_cap + 1.0 when consensus agrees)
-        max_auto_spread_dev = effective_cap_spread + 1.0
+        # Re-clamp automated spread adjustments (allow up to effective_cap + 1.0 when consensus agrees,
+        # but tighter +0.4 buffer on 25+ pt blowouts)
+        blowout_buffer = 0.4 if (mu_market_spread is not None and abs(float(mu_market_spread)) >= 25.0) else 1.0
+        max_auto_spread_dev = effective_cap_spread + blowout_buffer
         if abs(mu_spread_final - mu_market_spread) > max_auto_spread_dev:
             mu_spread_final = mu_market_spread + (max_auto_spread_dev * math.copysign(1, mu_spread_final - mu_market_spread))
 
@@ -1425,7 +1434,24 @@ class NCAAMMarketFirstModelV2(BaseModel):
         elif hasla_asof is not None:
             hasla_asof = str(hasla_asof)
 
+        projected_score_info = None
+        proj_home_score = None
+        proj_away_score = None
+        if mu_total_final is not None and mu_spread_final is not None:
+            proj_home_exact = round((float(mu_total_final) - float(mu_spread_final)) / 2.0, 1)
+            proj_away_exact = round((float(mu_total_final) + float(mu_spread_final)) / 2.0, 1)
+            proj_home_score = int(round(proj_home_exact))
+            proj_away_score = int(round(proj_away_exact))
+            projected_score_info = {
+                "home": proj_home_score,
+                "away": proj_away_score,
+                "home_exact": proj_home_exact,
+                "away_exact": proj_away_exact,
+                "formatted": f"{event.get('away_team', 'Away')} {proj_away_score} - {event.get('home_team', 'Home')} {proj_home_score}",
+            }
+
         matchup_signals = {
+            "projected_score": projected_score_info,
             "haslametrics": {
                 "fair_spread_home": round(-float(hasla_margin), 1),
                 "fair_total": round(float(mu_hasla_total), 1),
@@ -1513,6 +1539,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
             'sos_adj': round(float(sos_adj), 2),
             'mom_adj': round(float(mom_adj), 2),
             'closest_lean': closest_lean,
+            'projected_home_score': proj_home_score,
+            'projected_away_score': proj_away_score,
+            'projected_score': (projected_score_info or {}).get('formatted'),
+            'blowout_sigma_add': round(float(blowout_sigma_add), 2),
             'sigma_spread': float(sigma_spread) if sigma_spread is not None else None,
             'sigma_total': float(sigma_total) if sigma_total is not None else None,
             'line_at_prediction_spread_home': (float(market_snapshot.get('spread_home')) if market_snapshot.get('spread_home') is not None else None) if isinstance(market_snapshot, dict) else None,
@@ -1630,7 +1660,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
             ui_rec = {
                 "bet_type": r['market'],
                 "selection": sel,
-                # Keep legacy key name for UI, but this is EV% not points.
+                # Numeric EV (decimal & %) + legacy 'edge' string for backward compatibility
+                "ev": round(float(r['ev']), 4),
+                "ev_pct": round(float(r['ev']) * 100.0, 2),
                 "edge": f"{(r['ev']*100):.1f}%",
                 "win_prob": round(float(win_prob), 3) if win_prob is not None else None,
                 "win_prob_lb10": lb10,

@@ -8,6 +8,9 @@ import {
   getRecEv,
   lookupTopPickForGame,
   safeReasonText,
+  getProjectedScore,
+  explainPickPlainly,
+  getLiveGameStatus,
 } from './todayHelpers';
 
 const SortHeaderButton = ({ label, column, sortConfig, onSort, align = 'left' }) => {
@@ -58,7 +61,10 @@ const TodayFullBoardTable = ({
         const ctx = meta?.context || {};
         const lean = ctx?.closest_lean || null;
         const isActionable = Boolean(meta?.isActionable && rec);
-        const isFinal = Boolean(game.final || String(game.status || '').toUpperCase().includes('FINAL'));
+        const liveInfo = getLiveGameStatus(game, rec || lean);
+        const isFinal = liveInfo.isFinal;
+        const projScore = getProjectedScore(game, { context: ctx }, rec);
+        const plainPick = explainPickPlainly(rec || (lean ? { ...lean, bet_type: lean.bet_type || 'SPREAD' } : null), game);
         const evVal =
           recEv !== null
             ? recEv
@@ -74,6 +80,9 @@ const TodayFullBoardTable = ({
           lean,
           isActionable,
           isFinal,
+          liveInfo,
+          projScore,
+          plainPick,
           evVal: Number.isFinite(evVal) ? evVal : -999,
           confVal: Number.isFinite(confVal) ? confVal : -1,
         };
@@ -84,6 +93,7 @@ const TodayFullBoardTable = ({
           if (!hay.includes(q)) return false;
         }
         if (statusFilter === 'picks') return row.isActionable;
+        if (statusFilter === 'live') return row.liveInfo.isLive;
         if (statusFilter === 'nobet') return !row.isActionable && !row.isFinal;
         if (statusFilter === 'final') return row.isFinal;
         return true;
@@ -137,6 +147,7 @@ const TodayFullBoardTable = ({
           {[
             { id: 'all', label: 'All Games' },
             { id: 'picks', label: 'Actionable Picks' },
+            { id: 'live', label: 'Live Now' },
             { id: 'nobet', label: 'Pass / Leans' },
             { id: 'final', label: 'Final Scores' },
           ].map((opt) => {
@@ -224,7 +235,7 @@ const TodayFullBoardTable = ({
                 </td>
               </tr>
             ) : (
-              rows.map(({ game, meta, rec, recEv, conf, ctx, lean, isActionable, isFinal }) => {
+              rows.map(({ game, meta, rec, recEv, conf, ctx, lean, isActionable, isFinal, liveInfo, projScore, plainPick }) => {
                 const cleanReason = safeReasonText(meta?.reason);
                 const homeSpread = game.home_spread ?? game.spread_home;
                 const totalLine = game.total_line ?? game.total;
@@ -244,7 +255,19 @@ const TodayFullBoardTable = ({
                     className="hover:bg-slate-800/40 transition-colors"
                   >
                     <td data-label="Tip (ET)" className="py-2.5 pl-3 pr-1.5 font-mono text-slate-300 whitespace-nowrap w-16">
-                      {isFinal ? (
+                      {liveInfo.isLive ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="inline-flex items-center gap-1 w-fit px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/45 text-rose-200 text-[10px] font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
+                            LIVE
+                          </span>
+                          {liveInfo.statusDetail && (
+                            <span className="text-[10px] text-rose-200/90 font-sans truncate max-w-[78px]">
+                              {liveInfo.statusDetail}
+                            </span>
+                          )}
+                        </div>
+                      ) : isFinal ? (
                         <span className="inline-flex px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold">
                           FINAL
                         </span>
@@ -253,21 +276,32 @@ const TodayFullBoardTable = ({
                       )}
                     </td>
 
-                    <th scope="row" data-primary="true" className="py-2.5 px-2 min-w-0 max-w-[200px] font-normal text-left">
+                    <th scope="row" data-primary="true" className="py-2.5 px-2 min-w-0 max-w-[230px] font-normal text-left">
                       <div className="flex flex-col gap-0.5 min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center justify-between gap-2 min-w-0">
                           <span className="font-semibold text-slate-100 truncate">{game.away_team}</span>
                           {game.away_score != null && (
-                            <span className="font-mono font-bold text-slate-200">{game.away_score}</span>
+                            <span className={`font-mono font-bold ${liveInfo.isLive ? 'text-amber-300' : 'text-slate-200'}`}>
+                              {game.away_score}
+                            </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 min-w-0 text-slate-300">
-                          <span className="text-[10px] uppercase tracking-wide text-slate-500">@</span>
-                          <span className="font-semibold text-slate-200 truncate">{game.home_team}</span>
+                        <div className="flex items-center justify-between gap-2 min-w-0 text-slate-300">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-[10px] uppercase tracking-wide text-slate-500">@</span>
+                            <span className="font-semibold text-slate-200 truncate">{game.home_team}</span>
+                          </div>
                           {game.home_score != null && (
-                            <span className="font-mono font-bold text-white">{game.home_score}</span>
+                            <span className={`font-mono font-bold ${liveInfo.isLive ? 'text-amber-300' : 'text-white'}`}>
+                              {game.home_score}
+                            </span>
                           )}
                         </div>
+                        {projScore && (
+                          <span className="text-[10px] text-sky-300/90 truncate">
+                            Proj Score: {projScore.text}
+                          </span>
+                        )}
                       </div>
                     </th>
 
@@ -276,11 +310,11 @@ const TodayFullBoardTable = ({
                         <span>
                           Book:{' '}
                           <strong className="text-slate-100">
-                            {homeSpread !== null && homeSpread !== undefined ? fmtSigned(homeSpread, 1) : '—'}
+                            {homeSpread !== null && homeSpread !== undefined ? `Home ${fmtSigned(homeSpread, 1)}` : '—'}
                           </strong>{' '}
-                          <span className="text-slate-500">·</span> O/U{' '}
+                          <span className="text-slate-500">·</span> Total{' '}
                           <strong className="text-slate-100">
-                            {totalLine !== null && totalLine !== undefined ? Number(totalLine).toFixed(1) : '—'}
+                            {totalLine !== null && totalLine !== undefined ? `${Number(totalLine).toFixed(1)} pts` : '—'}
                           </strong>
                           {showMl && (
                             <>
@@ -292,14 +326,14 @@ const TodayFullBoardTable = ({
                         </span>
                         {hasFairLines && (
                           <span className="text-[11px] font-medium text-indigo-300">
-                            Fair: {ctx.fair_spread_home != null ? fmtSigned(ctx.fair_spread_home, 1) : '—'} · O/U{' '}
-                            {ctx.fair_total != null ? Number(ctx.fair_total).toFixed(1) : '—'}
+                            Model Fair: {ctx.fair_spread_home != null ? `Home ${fmtSigned(ctx.fair_spread_home, 1)}` : '—'} · Total{' '}
+                            {ctx.fair_total != null ? `${Number(ctx.fair_total).toFixed(1)} pts` : '—'}
                           </span>
                         )}
                       </div>
                     </td>
 
-                    <td data-label="Pick / Lean" className="py-2.5 px-2 min-w-0 max-w-[220px]">
+                    <td data-label="Pick / Lean" className="py-2.5 px-2 min-w-0 max-w-[240px]">
                       {isActionable && rec ? (
                         <div className="flex flex-col gap-0.5 min-w-0">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -310,9 +344,27 @@ const TodayFullBoardTable = ({
                               {rec.selection || rec.pick}
                             </span>
                           </div>
-                          <span className="text-[11px] font-mono text-slate-400 truncate">
-                            {fmtOdds(rec.price)} · {rec.book || 'Consensus'}
-                          </span>
+                          {plainPick?.shortRule && (
+                            <span className="text-[11px] text-emerald-200/90 truncate">
+                              {plainPick.shortRule}
+                            </span>
+                          )}
+                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono text-slate-400">
+                            <span>{fmtOdds(rec.price)} · {rec.book || 'Consensus'}</span>
+                            {liveInfo.coverText && (
+                              <span
+                                className={`font-sans font-semibold ${
+                                  liveInfo.coverTone === 'win'
+                                    ? 'text-emerald-300'
+                                    : liveInfo.coverTone === 'loss'
+                                      ? 'text-rose-300'
+                                      : 'text-slate-300'
+                                }`}
+                              >
+                                · {liveInfo.coverText}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         <div className="flex flex-col gap-0.5 min-w-0">
@@ -327,6 +379,11 @@ const TodayFullBoardTable = ({
                               </span>
                             )}
                           </div>
+                          {plainPick?.shortRule && lean?.selection && (
+                            <span className="text-[11px] text-indigo-200/90 truncate">
+                              Meaning: {plainPick.shortRule}
+                            </span>
+                          )}
                           {cleanReason && (
                             <span className="text-[11px] text-slate-400 line-clamp-1">{cleanReason}</span>
                           )}

@@ -8,8 +8,10 @@ import {
   Users,
   ShieldCheck,
   RefreshCw,
+  HelpCircle,
 } from 'lucide-react';
 import api from '../../api/axios';
+import ModelVisualComparison from './ModelVisualComparison';
 import {
   fmtTimeEt,
   fmtOdds,
@@ -19,6 +21,10 @@ import {
   getRecEv,
   normalizeMovementTag,
   safeReasonText,
+  getProjectedScore,
+  explainPickPlainly,
+  buildVisualModelData,
+  getLiveGameStatus,
 } from './todayHelpers';
 
 const TodayMatchupModal = ({
@@ -118,6 +124,10 @@ const TodayMatchupModal = ({
     null;
   const rawInjuries = sig.injuries || analysisResult?.injuries || [];
   const splits = sig.public_splits || analysisResult?.action_splits || null;
+  const projectedScore = getProjectedScore(game, analysisResult, topRec);
+  const plainPick = explainPickPlainly(topRec, game);
+  const visualData = buildVisualModelData(topRec, game, analysisResult);
+  const liveInfo = getLiveGameStatus(game, topRec);
 
   return (
     <dialog
@@ -140,10 +150,34 @@ const TodayMatchupModal = ({
                 <span className="px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 font-bold uppercase">
                   {game.sport || 'NCAAM'}
                 </span>
-                <time dateTime={game.start_time || ''}>{fmtTimeEt(game.start_time)} ET</time>
-                {(game.away_score != null || game.home_score != null) && (
+                {liveInfo.isLive ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/45 text-rose-200 font-bold text-[11px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
+                    LIVE {liveInfo.statusDetail ? `· ${liveInfo.statusDetail}` : ''}
+                  </span>
+                ) : liveInfo.isFinal ? (
+                  <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-200 font-bold text-[11px]">
+                    FINAL
+                  </span>
+                ) : (
+                  <time dateTime={game.start_time || ''}>{fmtTimeEt(game.start_time)} ET</time>
+                )}
+                {liveInfo.hasScore && (
                   <span className="font-mono font-bold text-white">
-                    Score: {game.away_score ?? 0} – {game.home_score ?? 0}
+                    {game.away_team} {liveInfo.awayScore} – {game.home_team} {liveInfo.homeScore}
+                  </span>
+                )}
+                {liveInfo.coverText && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                      liveInfo.coverTone === 'win'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : liveInfo.coverTone === 'loss'
+                          ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-200'
+                    }`}
+                  >
+                    {liveInfo.coverText}
                   </span>
                 )}
               </div>
@@ -242,6 +276,24 @@ const TodayMatchupModal = ({
                       </div>
                     )}
 
+                    {plainPick && (
+                      <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 px-3 py-2.5 space-y-1 text-xs">
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+                          <HelpCircle size={12} aria-hidden="true" />
+                          <span>Plain-English Bet Guide</span>
+                        </div>
+                        <p className="font-semibold text-white">{plainPick.howItWins}</p>
+                        {plainPick.lineTranslation && (
+                          <p className="text-[11px] text-slate-300">{plainPick.lineTranslation}</p>
+                        )}
+                        {(plainPick.oddsTranslation || plainPick.evTranslation) && (
+                          <p className="text-[11px] text-slate-400">
+                            {[plainPick.oddsTranslation, plainPick.evTranslation].filter(Boolean).join(' · ')}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {(analysisResult.headline || topRec.narrative) && (
                       <p className="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-2.5">
                         {topRec.narrative || analysisResult.headline}
@@ -259,6 +311,12 @@ const TodayMatchupModal = ({
                     </p>
                   </section>
                 )}
+
+                {/* Visual Sportsbook vs. Model Comparison + Projected Final Score */}
+                <ModelVisualComparison
+                  visualData={visualData}
+                  projectedScore={projectedScore}
+                />
 
                 {/* 2. Source Projections & Team Efficiency */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

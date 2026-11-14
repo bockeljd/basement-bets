@@ -349,3 +349,349 @@ export const decodeKenpomHashImport = (hashStr) => {
   }
   return new TextDecoder().decode(bytes);
 };
+
+const toNum = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const extractTeamAndLineFromSelection = (selection, fallbackTeam = '') => {
+  const raw = String(selection || '').trim();
+  const match = raw.match(/^(.*?)\s+([+-]?\d+(?:\.\d+)?)$/);
+  if (match) {
+    return { team: match[1].trim() || fallbackTeam, line: toNum(match[2]) };
+  }
+  return { team: raw || fallbackTeam, line: null };
+};
+
+/**
+ * Derive a projected final score for both teams from model fair total and fair home spread.
+ */
+export const getProjectedScore = (game, analysis, rec) => {
+  const home = game?.home_team || analysis?.matchup?.split(' @ ')?.[1] || 'Home';
+  const away = game?.away_team || analysis?.matchup?.split(' @ ')?.[0] || 'Away';
+  const ctx = analysis?.context || {};
+  const sig = rec?.signals || analysis?.signals || analysis?.matchup_signals || {};
+
+  let homeScore = toNum(ctx.projected_home_score ?? sig?.projected_score?.home);
+  let awayScore = toNum(ctx.projected_away_score ?? sig?.projected_score?.away);
+
+  if (homeScore == null || awayScore == null) {
+    let fairTotal = toNum(ctx.fair_total ?? analysis?.fair_total ?? (String(rec?.bet_type || '').toUpperCase() === 'TOTAL' ? rec?.fair_line : null) ?? game?.total_line);
+    let fairSpreadHome = toNum(ctx.fair_spread_home ?? analysis?.fair_spread_home);
+
+    if (fairSpreadHome == null && String(rec?.bet_type || '').toUpperCase() === 'SPREAD' && toNum(rec?.fair_line) != null) {
+      const selLow = String(rec?.selection || '').toLowerCase();
+      const isHomePick = selLow.includes(home.toLowerCase());
+      fairSpreadHome = isHomePick ? toNum(rec.fair_line) : -toNum(rec.fair_line);
+    } else if (fairSpreadHome == null && toNum(game?.home_spread) != null) {
+      fairSpreadHome = toNum(game.home_spread);
+    }
+
+    if (fairTotal != null && fairSpreadHome != null) {
+      homeScore = Math.round((fairTotal - fairSpreadHome) / 2);
+      awayScore = Math.round((fairTotal + fairSpreadHome) / 2);
+    }
+  }
+
+  if (homeScore == null || awayScore == null) return null;
+
+  const winner = homeScore >= awayScore ? home : away;
+  const margin = Math.abs(homeScore - awayScore);
+  return {
+    homeTeam: home,
+    awayTeam: away,
+    homeScore,
+    awayScore,
+    winner,
+    margin,
+    text: `${away} ${awayScore} – ${home} ${homeScore}`,
+    shortText: `${awayScore}–${homeScore}`,
+    marginText:
+      margin === 0
+        ? `Projected toss-up (${awayScore}–${homeScore})`
+        : `${winner} projected to win by ~${margin} ${margin === 1 ? 'pt' : 'pts'}`,
+  };
+};
+
+/**
+ * Translate spread (+37.5 / -4.5), total (OVER/UNDER), moneyline, odds (-110), and EV% into plain English.
+ */
+export const explainPickPlainly = (rec, game) => {
+  if (!rec) return null;
+  const betTypeRaw = String(rec.bet_type || rec.market || '').toUpperCase();
+  const isTotal = betTypeRaw === 'TOTAL' || /\b(OVER|UNDER)\b/i.test(String(rec.selection || ''));
+  const isMl = betTypeRaw === 'ML' || betTypeRaw === 'MONEYLINE';
+  const betType = isTotal ? 'TOTAL' : isMl ? 'ML' : 'SPREAD';
+
+  const parsed = extractTeamAndLineFromSelection(rec.selection || rec.pick, game?.home_team || 'Team');
+  const line = toNum(rec.market_line ?? rec.line ?? parsed.line);
+  const price = toNum(rec.price ?? rec.odds);
+  const evDec = getRecEv(rec);
+
+  let headline = String(rec.selection || rec.pick || 'Model Lean');
+  let howItWins = '';
+  let lineTranslation = '';
+  let shortRule = '';
+
+  if (betType === 'SPREAD' && line != null) {
+    const absLine = Math.abs(line);
+    const isWhole = Number.isInteger(absLine);
+    const team = parsed.team;
+    if (line > 0) {
+      const loseUpTo = isWhole ? absLine - 1 : Math.floor(absLine);
+      headline = `Bet on ${team} with a +${absLine}-point head start`;
+      howItWins = isWhole
+        ? `Wins if ${team} wins OR loses by ${loseUpTo} points or fewer (losing by exactly ${absLine} is a tie/refund).`
+        : `Wins if ${team} wins OR loses by ${loseUpTo} points or fewer.`;
+      lineTranslation = `+${absLine} means ${team} is the underdog getting ${absLine} bonus points added to their final score.`;
+      shortRule = `Can lose by up to ${loseUpTo} pts`;
+    } else if (line < 0) {
+      const winBy = isWhole ? absLine + 1 : Math.floor(absLine) + 1;
+      headline = `Bet on ${team} to win by ${winBy}+ points`;
+      howItWins = isWhole
+        ? `Wins if ${team} wins by ${winBy} or more points (winning by exactly ${absLine} is a tie/refund).`
+        : `Wins if ${team} wins by ${winBy} or more points.`;
+      lineTranslation = `${line} means ${team} is the favorite and must win by more than ${absLine} points.`;
+      shortRule = `Must win by ${winBy}+ pts`;
+    } else {
+      headline = `Bet on ${team} to win (Pick'em)`;
+      howItWins = `Wins if ${team} outscores their opponent (no point handicap).`;
+      lineTranslation = `0 (Pick'em) means both teams start even — just pick the game winner.`;
+      shortRule = `Must win outright`;
+    }
+  } else if (betType === 'TOTAL' && line != null) {
+    const isOver = /OVER|^O\b/i.test(String(rec.selection || rec.side || ''));
+    const isWhole = Number.isInteger(line);
+    if (isOver) {
+      const needPts = Math.floor(line) + 1;
+      headline = `Combined Score OVER ${line} points`;
+      howItWins = isWhole
+        ? `Wins if both teams combine for ${needPts}+ total points (exactly ${line} is a tie/refund).`
+        : `Wins if both teams combine for ${needPts}+ total points.`;
+      lineTranslation = `Add both teams' final scores together — you want a higher-scoring game (${needPts}+ combined pts).`;
+      shortRule = `Needs ${needPts}+ combined pts`;
+    } else {
+      const maxPts = isWhole ? line - 1 : Math.ceil(line) - 1;
+      headline = `Combined Score UNDER ${line} points`;
+      howItWins = isWhole
+        ? `Wins if both teams combine for ${maxPts} or fewer total points (exactly ${line} is a tie/refund).`
+        : `Wins if both teams combine for ${maxPts} or fewer total points.`;
+      lineTranslation = `Add both teams' final scores together — you want a lower-scoring game (${maxPts} or fewer combined pts).`;
+      shortRule = `Needs ${maxPts} or fewer total pts`;
+    }
+  } else if (betType === 'ML') {
+    const team = parsed.team.replace(/\s*\b(ML|Moneyline)\b/i, '').trim();
+    headline = `Bet on ${team} to win outright`;
+    howItWins = `Wins if ${team} wins the game by any score (point spread does not matter).`;
+    lineTranslation = `Moneyline = straight-up game winner with no point spread.`;
+    shortRule = `Just needs to win`;
+  }
+
+  let oddsTranslation = '';
+  if (price != null) {
+    if (price < 0) {
+      const profit = Math.round((100 / Math.abs(price)) * 100);
+      oddsTranslation = `Odds ${price}: a $100 bet wins ~$${profit} profit (or bet $${Math.abs(price)} to win $100).`;
+    } else if (price > 0) {
+      oddsTranslation = `Odds +${price}: a $100 bet wins $${Math.round(price)} profit (underdog payout).`;
+    }
+  }
+
+  let evTranslation = '';
+  if (evDec != null) {
+    const evPct = evDec * 100;
+    const estProfit = evPct.toFixed(2);
+    if (evPct >= 6) {
+      evTranslation = `Strong Value (+${evPct.toFixed(1)}%): projected +$${estProfit} long-term profit per $100 staked.`;
+    } else if (evPct >= 0) {
+      evTranslation = `Positive Edge (+${evPct.toFixed(1)}%): projected +$${estProfit} long-term profit per $100 staked.`;
+    } else {
+      evTranslation = `Below Break-Even (${evPct.toFixed(1)}%): sportsbook price is too expensive vs our fair line.`;
+    }
+  }
+
+  return {
+    betType,
+    headline,
+    howItWins,
+    lineTranslation,
+    shortRule,
+    oddsTranslation,
+    evTranslation,
+  };
+};
+
+/**
+ * Build visual comparison bar data (Sportsbook vs Basement Fair Line + Torvik/Hasla/KenPom markers).
+ */
+export const buildVisualModelData = (rec, game, analysis) => {
+  const betTypeRaw = String(rec?.bet_type || rec?.market || '').toUpperCase();
+  const isTotal = betTypeRaw === 'TOTAL' || /\b(OVER|UNDER)\b/i.test(String(rec?.selection || ''));
+  const home = game?.home_team || 'Home';
+  const away = game?.away_team || 'Away';
+  const sel = String(rec?.selection || '');
+  const sig = rec?.signals || analysis?.signals || analysis?.matchup_signals || {};
+  const ctx = analysis?.context || {};
+
+  let mode = isTotal ? 'TOTAL' : 'SPREAD';
+  let bookLine = toNum(rec?.market_line);
+  let fairLine = toNum(rec?.fair_line);
+  let sideLabel = '';
+  let pickedHome = true;
+
+  if (mode === 'TOTAL') {
+    if (bookLine == null) bookLine = toNum(ctx.current_total ?? game?.total_line);
+    if (fairLine == null) fairLine = toNum(ctx.fair_total ?? analysis?.fair_total);
+    sideLabel = 'Combined Points';
+  } else {
+    pickedHome =
+      sel.toLowerCase().includes(home.toLowerCase()) ||
+      String(rec?.pick || '').toLowerCase() === home.toLowerCase() ||
+      !sel;
+    if (bookLine == null && toNum(game?.home_spread) != null) {
+      bookLine = pickedHome ? toNum(game.home_spread) : -toNum(game.home_spread);
+    }
+    if (fairLine == null && toNum(ctx.fair_spread_home ?? analysis?.fair_spread_home) != null) {
+      const hFair = toNum(ctx.fair_spread_home ?? analysis?.fair_spread_home);
+      fairLine = pickedHome ? hFair : -hFair;
+    }
+    sideLabel = pickedHome ? `${home} Spread` : `${away} Spread`;
+  }
+
+  if (bookLine == null || fairLine == null || betTypeRaw === 'ML' || betTypeRaw === 'MONEYLINE') {
+    return null;
+  }
+
+  const toSide = (homeVal) => {
+    const n = toNum(homeVal);
+    if (n == null) return null;
+    return mode === 'TOTAL' ? n : pickedHome ? n : -n;
+  };
+
+  const sources = [];
+  const tvLine = toSide(mode === 'TOTAL' ? sig.torvik?.fair_total : sig.torvik?.fair_spread_home);
+  const hsLine = toSide(mode === 'TOTAL' ? sig.haslametrics?.fair_total : sig.haslametrics?.fair_spread_home);
+  const kpLine = toSide(mode === 'TOTAL' ? sig.kenpom?.fair_total : sig.kenpom?.fair_spread_home);
+  if (tvLine != null) sources.push({ id: 'torvik', label: 'BartTorvik', line: Number(tvLine.toFixed(1)), color: '#0ea5e9' });
+  if (hsLine != null) sources.push({ id: 'hasla', label: 'Haslametrics', line: Number(hsLine.toFixed(1)), color: '#8b5cf6' });
+  if (kpLine != null) sources.push({ id: 'kenpom', label: 'KenPom', line: Number(kpLine.toFixed(1)), color: '#10b981' });
+
+  const allVals = [bookLine, fairLine, ...sources.map((s) => s.line)];
+  const rawMin = Math.min(...allVals);
+  const rawMax = Math.max(...allVals);
+  const pad = Math.max(1.5, (rawMax - rawMin) * 0.25);
+  const minVal = rawMin - pad;
+  const maxVal = rawMax + pad;
+  const span = Math.max(0.1, maxVal - minVal);
+  const pct = (v) => Math.max(4, Math.min(96, ((v - minVal) / span) * 100));
+
+  const diff = fairLine - bookLine;
+  const cushionPts = Math.abs(diff);
+  const fmtLine = (v) => (mode === 'TOTAL' ? Number(v).toFixed(1) : `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}`);
+
+  let summary = '';
+  if (mode === 'TOTAL') {
+    summary =
+      diff >= 0
+        ? `Sportsbook sets total at ${fmtLine(bookLine)} pts vs. Model projection of ${fmtLine(fairLine)} pts (+${cushionPts.toFixed(1)} pts higher).`
+        : `Sportsbook sets total at ${fmtLine(bookLine)} pts vs. Model projection of ${fmtLine(fairLine)} pts (${cushionPts.toFixed(1)} pts lower).`;
+  } else {
+    const team = pickedHome ? home : away;
+    summary =
+      bookLine > fairLine
+        ? `Sportsbook gives ${team} ${fmtLine(bookLine)} pts, while our model thinks ${team} only needs ${fmtLine(fairLine)} pts (${cushionPts.toFixed(1)} pts of extra safety cushion).`
+        : `Sportsbook prices ${team} at ${fmtLine(bookLine)} pts vs. Model fair line of ${fmtLine(fairLine)} pts (${cushionPts.toFixed(1)} pts difference).`;
+  }
+
+  return {
+    mode,
+    sideLabel,
+    bookLine: Number(bookLine.toFixed(1)),
+    fairLine: Number(fairLine.toFixed(1)),
+    bookLabel: fmtLine(bookLine),
+    fairLabel: fmtLine(fairLine),
+    bookPct: pct(bookLine),
+    fairPct: pct(fairLine),
+    cushionPts: Number(cushionPts.toFixed(1)),
+    summary,
+    sources: sources.map((s) => ({
+      ...s,
+      displayLine: fmtLine(s.line),
+      pct: pct(s.line),
+    })),
+  };
+};
+
+/**
+ * Determine live scoreboard status and live bet-tracking status against an active/final score.
+ */
+export const getLiveGameStatus = (game, rec) => {
+  if (!game) return { state: 'UPCOMING', hasScore: false };
+  const rawStatus = String(game.live_status || game.status || '').toUpperCase();
+  const isFinal = Boolean(game.final) || rawStatus === 'FINAL' || rawStatus === 'COMPLETED';
+  const isHalftime = !isFinal && rawStatus === 'HALFTIME';
+  const isLive = !isFinal && (rawStatus === 'IN_PROGRESS' || rawStatus === 'LIVE' || isHalftime);
+
+  const homeScore = toNum(game.home_score);
+  const awayScore = toNum(game.away_score);
+  const hasScore = homeScore != null && awayScore != null;
+
+  let coverText = '';
+  let coverTone = 'neutral';
+  if (hasScore && rec) {
+    const betType = String(rec.bet_type || rec.market || '').toUpperCase();
+    const sel = String(rec.selection || '');
+    const line = toNum(rec.market_line ?? extractTeamAndLineFromSelection(sel).line);
+    const totalNow = homeScore + awayScore;
+
+    if (betType === 'TOTAL' && line != null) {
+      const isOver = /OVER|^O\b/i.test(sel);
+      const diff = totalNow - line;
+      if (isFinal) {
+        if ((isOver && diff > 0) || (!isOver && diff < 0)) {
+          coverText = `Bet Won (${totalNow} total pts)`;
+          coverTone = 'win';
+        } else if (diff === 0) {
+          coverText = `Push (${totalNow} total pts)`;
+        } else {
+          coverText = `Bet Lost (${totalNow} total pts)`;
+          coverTone = 'loss';
+        }
+      } else {
+        coverText = `${totalNow} combined pts so far (${isOver ? `needs ${Math.max(0, Math.floor(line) + 1 - totalNow)} more` : `${Math.max(0, Math.ceil(line) - 1 - totalNow)} pts under cap`})`;
+        coverTone = !isOver && totalNow < line ? 'win' : isOver && totalNow >= line ? 'win' : 'neutral';
+      }
+    } else if (line != null && (betType === 'SPREAD' || betType === '')) {
+      const home = String(game.home_team || '').toLowerCase();
+      const isHomePick = sel.toLowerCase().includes(home);
+      const pickedScore = isHomePick ? homeScore : awayScore;
+      const oppScore = isHomePick ? awayScore : homeScore;
+      const marginWithLine = pickedScore + line - oppScore;
+      const absDiff = Math.abs(marginWithLine).toFixed(1).replace(/\.0$/, '');
+      if (marginWithLine > 0) {
+        coverText = isFinal ? `Covered by +${absDiff} pts` : `Covering by +${absDiff} pts`;
+        coverTone = 'win';
+      } else if (marginWithLine === 0) {
+        coverText = isFinal ? 'Push (tie against spread)' : 'Even against spread';
+      } else {
+        coverText = isFinal ? `Missed spread by ${absDiff} pts` : `Trailing spread by ${absDiff} pts`;
+        coverTone = 'loss';
+      }
+    }
+  }
+
+  return {
+    state: isFinal ? 'FINAL' : isLive ? 'LIVE' : 'UPCOMING',
+    isFinal,
+    isLive,
+    isHalftime,
+    hasScore,
+    homeScore,
+    awayScore,
+    statusDetail: game.status_detail || (isFinal ? 'Final' : isHalftime ? 'Halftime' : isLive ? 'Live' : ''),
+    coverText,
+    coverTone,
+  };
+};

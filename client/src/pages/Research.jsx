@@ -12,6 +12,7 @@ import {
   PlusCircle,
   Sparkles,
   X,
+  HelpCircle,
 } from 'lucide-react';
 import api from '../api/axios';
 import { loadCache } from '../utils/httpCache';
@@ -34,6 +35,9 @@ import {
   getConfidenceMeta,
   getRecEv,
   decodeKenpomHashImport,
+  getProjectedScore,
+  explainPickPlainly,
+  getLiveGameStatus,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
 
@@ -69,6 +73,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
   const [correlationResult, setCorrelationResult] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showModelLogicDialog, setShowModelLogicDialog] = useState(false);
+  const [showBetGuide, setShowBetGuide] = useState(false);
   const [rescoringSlate, setRescoringSlate] = useState(false);
   const [rescoreProgress, setRescoreProgress] = useState('');
 
@@ -241,6 +246,34 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     fetchSchedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueFilter, selectedDate]);
+
+  // Quietly poll live in-game scores every 60s when viewing today's active slate
+  useEffect(() => {
+    if (selectedDate !== getTodayEtStr()) return undefined;
+    const nowMs = Date.now();
+    const hasActiveWindow = (edges || []).some((g) => {
+      const liveInfo = getLiveGameStatus(g);
+      if (liveInfo.isLive) return true;
+      if (liveInfo.isFinal) return false;
+      const st = g?.start_time ? new Date(g.start_time).getTime() : 0;
+      return st > 0 && st <= nowMs + 10 * 60 * 1000 && st >= nowMs - 4 * 3600 * 1000;
+    });
+    if (!hasActiveWindow) return undefined;
+
+    const timer = setInterval(async () => {
+      try {
+        const res = await api.get('/api/board', {
+          params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT, live: true },
+        });
+        if (Array.isArray(res?.data)) {
+          setEdges(res.data);
+        }
+      } catch {
+        // Ignore silent live-poll errors
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [edges, leagueFilter, selectedDate, BOARD_DAYS_DEFAULT]);
 
   useEffect(() => {
     if (leagueFilter !== 'NCAAM' && (activeSubTab === 'march_madness' || activeSubTab === 'parlays')) {
@@ -458,7 +491,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
       if (meta?.isActionable && meta.rec) {
         seenIds.add(game.id);
-        plays.push({ id: game.id, game, rec: meta.rec, conf: getConfidenceMeta(meta.rec) });
+        plays.push({ id: game.id, game, rec: meta.rec, context: meta.context || null, conf: getConfidenceMeta(meta.rec) });
       }
     });
 
@@ -481,12 +514,13 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         day_et: ev.day_et || selectedDate,
       };
       seenIds.add(eid);
-      plays.push({ id: eid, game: synthGame, rec: meta.rec, conf: getConfidenceMeta(meta.rec) });
+      plays.push({ id: eid, game: synthGame, rec: meta.rec, context: meta.context || null, conf: getConfidenceMeta(meta.rec) });
     });
 
     plays.sort((a, b) => (getRecEv(b.rec) ?? -999) - (getRecEv(a.rec) ?? -999));
 
     const highConf = plays.filter((p) => p.conf.tier === 'HIGH').length;
+    const liveCount = gamesForLeague.filter((g) => getLiveGameStatus(g).isLive).length;
     const sharpCount = plays.filter((p) => {
       const tags = Array.isArray(p.rec?.movement_tags) ? p.rec.movement_tags : [];
       return tags.includes('sharp_backing') || tags.includes('rlm_confirmed');
@@ -499,6 +533,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         actionableCount: plays.length,
         highConfCount: highConf,
         sharpCount,
+        liveCount,
       },
     };
   }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey, selectedDate]);
@@ -685,6 +720,13 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               <strong className="font-mono">{slateSummary.highConfCount}</strong>
               <span>High Confidence</span>
             </span>
+            {slateSummary.liveCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/15 border border-rose-500/40 text-rose-200 font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
+                <strong className="font-mono">{slateSummary.liveCount}</strong>
+                <span>Live Now</span>
+              </span>
+            )}
             {slateSummary.sharpCount > 0 && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-200 font-semibold">
                 <strong className="font-mono">{slateSummary.sharpCount}</strong>
@@ -789,6 +831,20 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
           <button
             type="button"
+            onClick={() => setShowBetGuide((v) => !v)}
+            aria-expanded={showBetGuide}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer ${
+              showBetGuide
+                ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+            }`}
+          >
+            <HelpCircle size={13} aria-hidden="true" />
+            <span>Betting Terms Guide</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowModelLogicDialog(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-xs font-semibold text-blue-200 cursor-pointer"
           >
@@ -797,6 +853,36 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
           </button>
         </div>
       </div>
+
+      {/* Collapsible Plain-English Betting Cheat Sheet */}
+      {showBetGuide && (
+        <div className="rounded-2xl border border-emerald-500/30 bg-slate-900/90 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
+            <div className="font-bold text-emerald-300">+ Underdog Spread (e.g. +37.5)</div>
+            <p className="text-slate-300 leading-relaxed">
+              The team gets <strong>+37.5 bonus points</strong> added to their final score. You win if they win OR lose by 37 or fewer points.
+            </p>
+          </div>
+          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
+            <div className="font-bold text-sky-300">- Favorite Spread (e.g. -4.5)</div>
+            <p className="text-slate-300 leading-relaxed">
+              The team is favored and spots <strong>4.5 points</strong>. You win only if they win the final score by 5 or more points.
+            </p>
+          </div>
+          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
+            <div className="font-bold text-indigo-300">Total (OVER / UNDER 146.5)</div>
+            <p className="text-slate-300 leading-relaxed">
+              Add <strong>both teams&apos; final scores</strong> together. OVER wins at 147+ combined points; UNDER wins at 146 or fewer.
+            </p>
+          </div>
+          <div className="rounded-xl bg-slate-950/75 border border-slate-800 p-3 space-y-1">
+            <div className="font-bold text-amber-300">Model Cushion &amp; +EV%</div>
+            <p className="text-slate-300 leading-relaxed">
+              <strong>+EV%</strong> is expected long-term profit per $100 staked. More point cushion vs. sportsbooks = bigger margin of safety.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Collapsible Data Health Bar */}
       <TodayDataHealthStrip
@@ -928,6 +1014,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                   rank={idx + 1}
                   game={item.game}
                   rec={item.rec}
+                  context={item.context}
                   isExpanded={expandedPickIds.has(item.id)}
                   onToggleExpand={() => toggleWhyPick(item.id)}
                   onOpenDetails={handleOpenGameDetails}
@@ -959,8 +1046,11 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {closestLeans.map(({ id, game, lean, meta }) => {
+                {closestLeans.map(({ id, game, lean, meta, ctx }) => {
                   const reasonTxt = safeReasonText(lean.reason || meta?.reason);
+                  const projScore = getProjectedScore(game, { context: ctx }, lean);
+                  const plainLean = explainPickPlainly(lean, game);
+                  const liveInfo = getLiveGameStatus(game, lean);
                   return (
                     <article
                       key={id}
@@ -968,7 +1058,18 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                     >
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
-                          <span>{fmtTimeEt(game.start_time)} ET</span>
+                          {liveInfo.isLive ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-200 font-bold text-[10px]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
+                              LIVE {liveInfo.hasScore ? `(${liveInfo.awayScore}-${liveInfo.homeScore})` : ''}
+                            </span>
+                          ) : liveInfo.isFinal ? (
+                            <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-bold text-[10px]">
+                              FINAL {liveInfo.hasScore ? `(${liveInfo.awayScore}-${liveInfo.homeScore})` : ''}
+                            </span>
+                          ) : (
+                            <span>{fmtTimeEt(game.start_time)} ET</span>
+                          )}
                           <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-indigo-200 font-bold uppercase text-[10px]">
                             {lean.bet_type || 'LEAN'} NEAR-MISS
                           </span>
@@ -976,17 +1077,27 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                         <div className="text-xs font-semibold text-slate-200 truncate">
                           {game.away_team} @ {game.home_team}
                         </div>
+                        {projScore && (
+                          <div className="text-[11px] text-sky-300 font-medium truncate">
+                            Projected Final: {projScore.text}
+                          </div>
+                        )}
                         <div className="flex items-baseline justify-between gap-2 pt-0.5">
                           <span className="text-sm font-bold text-white truncate">
                             {lean.selection}
                           </span>
                           <span className="text-xs font-mono font-bold text-indigo-300 shrink-0">
-                            {lean.edge_points != null ? `${fmtSigned(lean.edge_points, 1)} pts` : ''}{' '}
+                            {lean.edge_points != null ? `${Math.abs(Number(lean.edge_points)).toFixed(1)} pt gap` : ''}{' '}
                             {lean.ev_pct != null ? `(${fmtSigned(lean.ev_pct, 1)}%)` : ''}
                           </span>
                         </div>
+                        {plainLean?.howItWins && (
+                          <p className="text-[11px] text-emerald-200/90 leading-snug">
+                            {plainLean.howItWins}
+                          </p>
+                        )}
                         <div className="text-[11px] font-mono text-slate-400 flex flex-wrap items-center gap-x-2">
-                          <span>Book: {lean.market_line != null ? lean.market_line : '—'} ({fmtOdds(lean.price)})</span>
+                          <span>Sportsbook: {lean.market_line != null ? lean.market_line : '—'} ({fmtOdds(lean.price)})</span>
                           <span>·</span>
                           <span className="text-indigo-300">Model Fair: {lean.fair_line != null ? lean.fair_line : '—'}</span>
                         </div>

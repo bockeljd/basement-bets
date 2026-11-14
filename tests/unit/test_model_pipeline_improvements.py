@@ -777,3 +777,144 @@ def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monk
     assert upserted == [("2026-11-13", "action:ncaam:111")]
 
 
+def test_blowout_spread_sigma_scaling_projected_score_and_rec_normalization(monkeypatch):
+    from datetime import date
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    import src.api as api_mod
+
+    model = NCAAMMarketFirstModelV2()
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    ev_ctx = {
+        "id": "action:ncaam:888888",
+        "home_team": "Florida",
+        "away_team": "Merrimack",
+        "start_time": "2026-11-13T23:00:00+00:00",
+        "neutral_site": False,
+    }
+    monkeypatch.setattr(
+        model.torvik_service,
+        "get_projection",
+        lambda h, a, date=None, neutral_site=False: {
+            "margin": 31.0,  # Blowout mismatch where raw linear margin differs from -37.5 book
+            "total": 146.5,
+            "projected_score": "58-89",
+            "lean": "Away",
+        },
+    )
+    monkeypatch.setattr(
+        model.torvik_service,
+        "get_matchup_team_stats",
+        lambda h, a, date=None: {
+            "home": {"continuity": 0.72, "luck": 0.0, "record": "3-0", "adj_off": 122.0, "adj_def": 94.0},
+            "away": {"continuity": 0.72, "luck": 0.0, "record": "3-0", "adj_off": 99.0, "adj_def": 112.0},
+            "game_tempo": 69.0,
+        },
+    )
+    monkeypatch.setattr(model.kenpom_client, "calculate_kenpom_adjustment", lambda h, a, neutral_site=False: None)
+    monkeypatch.setattr(model.kenpom_client, "get_player_stats_for_team", lambda t, limit=50: [])
+    monkeypatch.setattr(model.kenpom_client, "get_team_player_agg", lambda t: None)
+    monkeypatch.setattr(model.kenpom_client, "get_team_rating", lambda t: None)
+    monkeypatch.setattr(model.kenpom_client, "get_home_court", lambda t: None)
+    monkeypatch.setattr(
+        model.haslametrics_client,
+        "calculate_projection",
+        lambda h, a, neutral_site=False, asof_date=None: {"available": False},
+    )
+    monkeypatch.setattr(model.geo_service, "get_altitude_adjustment", lambda h, neutral_site=False: 0.0)
+    monkeypatch.setattr(model.geo_service, "calculate_distance", lambda h, a: 100.0)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda t, as_of_date=None: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda t, ev: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda t, eid, gd: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.0, "sd": 0.90})
+
+    snapshot = {
+        "spread_home": -37.5,
+        "spread_price_home": -110,
+        "total": 146.5,
+        "total_over_price": -110,
+        "book_spread": "DraftKings",
+        "book_total": "DraftKings",
+        "_best_spread_home": {"line_value": -37.5, "price": -110, "book": "DraftKings"},
+        "_best_spread_away": {"line_value": 37.5, "price": -110, "book": "DraftKings"},
+        "_best_total_over": {"line_value": 146.5, "price": -110, "book": "DraftKings"},
+        "_best_total_under": {"line_value": 146.5, "price": -110, "book": "DraftKings"},
+    }
+    res = model.analyze(
+        "action:ncaam:888888",
+        market_snapshot=snapshot,
+        event_context=ev_ctx,
+        persist=False,
+    )
+    ctx = res["context"]
+    assert ctx["blowout_sigma_add"] > 2.5
+    assert ctx["sigma_spread"] > 13.0
+    assert abs(ctx["fair_spread_home"] - (-37.5)) <= 2.9
+    assert ctx["projected_home_score"] > ctx["projected_away_score"]
+    assert "Florida" in ctx["projected_score"] and "Merrimack" in ctx["projected_score"]
+
+    # Verify upsert_pick normalizes string edge/confidence fields for storage
+    import json
+    mock_conn = MagicMock()
+    with patch("src.scripts.build_daily_top_picks._exec") as mock_exec:
+        upsert_pick(
+            "2026-11-13",
+            "evt_norm_1",
+            {
+                "model_version": "ncaam_market_first_v2",
+                "recommendations": [
+                    {
+                        "bet_type": "SPREAD",
+                        "selection": "Merrimack +37.5",
+                        "edge": "4.2%",
+                        "confidence": "MEDIUM",
+                        "market_line": 37.5,
+                        "fair_line": 35.1,
+                        "price": -110,
+                    }
+                ],
+            },
+            conn=mock_conn,
+        )
+    stored_rec = json.loads(mock_exec.call_args[0][2]["rec"])
+    assert stored_rec["ev"] == pytest.approx(0.042, abs=1e-5)
+    assert stored_rec["ev_pct"] == pytest.approx(4.2, abs=1e-2)
+    assert stored_rec["confidence_tier"] == "MEDIUM"
+    assert stored_rec["confidence_0_100"] == 62
+
+    # Verify live scoreboard enrichment matches ESPN variants to Action Network team names
+    fake_sb = [
+        {
+            "espn_id": "401800001",
+            "home_variants": {"floridagators", "florida"},
+            "away_variants": {"merrimackwarriors", "merrimack"},
+            "live_status": "IN_PROGRESS",
+            "final": False,
+            "home_score": 48,
+            "away_score": 29,
+            "period": 2,
+            "clock": "12:14",
+            "status_detail": "12:14 - 2nd",
+        }
+    ]
+    board_items = [
+        {
+            "id": "action:ncaam:888888",
+            "home_team": "Florida",
+            "away_team": "Merrimack",
+            "home_score": None,
+            "away_score": None,
+            "final": False,
+            "status": "SCHEDULED",
+        }
+    ]
+    with patch.object(api_mod, "_fetch_espn_live_scoreboard_date", return_value=fake_sb):
+        api_mod._enrich_ncaam_board_with_live_scores(board_items, date(2026, 11, 13), date(2026, 11, 13))
+
+    assert board_items[0]["live_status"] == "IN_PROGRESS"
+    assert board_items[0]["status_detail"] == "12:14 - 2nd"
+    assert board_items[0]["home_score"] == 48
+    assert board_items[0]["away_score"] == 29
+
+
+

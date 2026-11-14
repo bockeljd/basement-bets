@@ -98,10 +98,70 @@ def fetch_event_ids_for_date(date_et: str, limit_games: int = 250, days: int = 3
         return out
 
 
+def _normalize_rec_for_storage(rec: dict | None) -> dict | None:
+    if not isinstance(rec, dict):
+        return rec
+    norm = dict(rec)
+
+    ev_dec = None
+    raw_ev = norm.get("ev")
+    if raw_ev is not None:
+        try:
+            v = float(raw_ev)
+            ev_dec = (v / 100.0) if abs(v) > 1.0 else v
+        except Exception:
+            ev_dec = None
+    if ev_dec is None and norm.get("edge") is not None:
+        try:
+            edge_str = str(norm.get("edge")).replace("%", "").replace("+", "").strip()
+            v = float(edge_str)
+            ev_dec = v / 100.0
+        except Exception:
+            ev_dec = None
+    if ev_dec is not None:
+        norm["ev"] = round(ev_dec, 4)
+        norm["ev_pct"] = round(ev_dec * 100.0, 2)
+        if not norm.get("edge"):
+            norm["edge"] = f"{ev_dec * 100.0:.1f}%"
+
+    raw_conf = norm.get("confidence_0_100")
+    if raw_conf is None:
+        raw_conf = norm.get("confidence")
+    conf_num = None
+    conf_tier = norm.get("confidence_tier")
+    if isinstance(raw_conf, (int, float)):
+        v = float(raw_conf)
+        conf_num = int(round(v * 100.0 if v <= 1.0 else v))
+    elif isinstance(raw_conf, str):
+        u = raw_conf.strip().upper()
+        if u in ("HIGH", "MEDIUM", "MED", "LOW"):
+            conf_tier = "MEDIUM" if u == "MED" else u
+            conf_num = {"HIGH": 80, "MEDIUM": 62, "LOW": 45}[conf_tier]
+        else:
+            try:
+                v = float(u.replace("%", ""))
+                conf_num = int(round(v * 100.0 if v <= 1.0 else v))
+            except Exception:
+                conf_num = None
+
+    if conf_tier is None and conf_num is not None:
+        conf_tier = "HIGH" if conf_num >= 75 else ("MEDIUM" if conf_num >= 58 else "LOW")
+    elif isinstance(conf_tier, str):
+        conf_tier = "MEDIUM" if conf_tier.strip().upper() == "MED" else conf_tier.strip().upper()
+
+    if conf_num is not None:
+        norm["confidence_0_100"] = max(0, min(100, conf_num))
+    if conf_tier in ("HIGH", "MEDIUM", "LOW"):
+        norm["confidence_tier"] = conf_tier
+
+    return norm
+
+
 def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
     rec = None
     try:
-        rec = (res.get('recommendations') or [None])[0]
+        raw_rec = (res.get('recommendations') or [None])[0]
+        rec = _normalize_rec_for_storage(raw_rec)
     except Exception:
         rec = None
 

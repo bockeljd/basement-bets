@@ -7,7 +7,9 @@ import {
   Sparkles,
   AlertTriangle,
   TrendingUp,
+  HelpCircle,
 } from 'lucide-react';
+import ModelVisualComparison from './ModelVisualComparison';
 import {
   fmtTimeEt,
   fmtOdds,
@@ -17,6 +19,10 @@ import {
   getRecEv,
   normalizeMovementTag,
   buildWhyPickReasons,
+  getProjectedScore,
+  explainPickPlainly,
+  buildVisualModelData,
+  getLiveGameStatus,
 } from './todayHelpers';
 
 const TONE_BADGES = {
@@ -32,6 +38,7 @@ const TodayPlayCard = ({
   rank,
   game,
   rec,
+  context = null,
   isExpanded,
   onToggleExpand,
   onOpenDetails,
@@ -51,6 +58,12 @@ const TodayPlayCard = ({
   const primaryReason = reasons[0]?.text || null;
   const extraReasons = reasons.slice(1);
   const injImpact = rec?.signals?.injuries_impact;
+
+  const analysisLike = context ? { context } : null;
+  const projectedScore = getProjectedScore(game, analysisLike, rec);
+  const plain = explainPickPlainly(rec, game);
+  const visualData = buildVisualModelData(rec, game, analysisLike);
+  const liveInfo = getLiveGameStatus(game, rec);
 
   const pickLabel = rec?.selection || rec?.pick || game?.home_team || 'Pick';
   const matchupLabel = `${game?.away_team || 'Away'} at ${game?.home_team || 'Home'}`;
@@ -83,7 +96,18 @@ const TodayPlayCard = ({
             </span>
             <span className="font-semibold uppercase tracking-wide text-slate-300">{betType}</span>
             <span>·</span>
-            <time dateTime={game?.start_time || ''}>{fmtTimeEt(game?.start_time)} ET</time>
+            {liveInfo.isLive ? (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/45 text-rose-200 font-bold text-[11px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
+                LIVE {liveInfo.statusDetail ? `· ${liveInfo.statusDetail}` : ''}
+              </span>
+            ) : liveInfo.isFinal ? (
+              <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-200 font-bold text-[11px]">
+                FINAL
+              </span>
+            ) : (
+              <time dateTime={game?.start_time || ''}>{fmtTimeEt(game?.start_time)} ET</time>
+            )}
           </div>
           <h3 className="mt-1 text-base font-bold text-white leading-snug truncate">
             {pickLabel}
@@ -98,36 +122,89 @@ const TodayPlayCard = ({
         </span>
       </div>
 
+      {/* Live / Final In-Game Score & Cover Tracker */}
+      {liveInfo.hasScore && (
+        <div className="rounded-xl border border-slate-700/80 bg-slate-950/90 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 font-mono font-bold text-white">
+            <span className="text-[10px] uppercase tracking-wider font-sans text-slate-400">
+              {liveInfo.isFinal ? 'Final Score' : 'Live Score'}
+            </span>
+            <span>
+              {game?.away_team} {liveInfo.awayScore} – {game?.home_team} {liveInfo.homeScore}
+            </span>
+          </div>
+          {liveInfo.coverText && (
+            <span
+              className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                liveInfo.coverTone === 'win'
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                  : liveInfo.coverTone === 'loss'
+                    ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-200'
+              }`}
+            >
+              {liveInfo.coverText}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Simplified 3-column comparison strip */}
       <div className="today-play-metrics">
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Book Line</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sportsbook Line</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-white truncate">{marketDisplay}</div>
           <div className="text-[11px] text-slate-400 truncate">
-            {fmtOdds(rec?.price)} · {rec?.book || 'Consensus'}
+            {fmtOdds(rec?.price)} odds · {rec?.book || 'Consensus'}
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Model Fair</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Basement Fair Line</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-sky-300 truncate">{fairDisplay}</div>
           <div className="text-[11px] text-slate-400 truncate">
-            {rec?.edge_points != null ? `${fmtSigned(rec.edge_points, 1)} pt edge` : 'Fair projection'}
+            {rec?.edge_points != null ? `${Math.abs(Number(rec.edge_points)).toFixed(1)} pts better than book` : 'Fair projection'}
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 px-3 py-2 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Value &amp; Stake</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Value &amp; Win Odds</div>
           <div className="mt-0.5 text-sm font-mono font-bold text-emerald-300 truncate">
             {evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% EV` : '—'}
           </div>
           <div className="text-[11px] text-indigo-200 truncate">
-            {fmtPct(winProb, 1)} win · {kellyUnits}
+            {winProb != null ? `${fmtPct(winProb, 0)} chance` : 'Model edge'} · {kellyUnits}
           </div>
         </div>
       </div>
 
-      {/* Primary plain-English takeaway visible right away */}
+      {/* Plain-English "What This Bet Means" Box */}
+      {plain && (
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/15 px-3 py-2.5 space-y-1 text-xs">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+            <HelpCircle size={12} aria-hidden="true" />
+            <span>Plain-English Bet Guide</span>
+          </div>
+          <p className="font-semibold text-white leading-snug">{plain.howItWins}</p>
+          {plain.lineTranslation && (
+            <p className="text-[11px] text-slate-300 leading-relaxed">{plain.lineTranslation}</p>
+          )}
+          {(plain.oddsTranslation || plain.evTranslation) && (
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              {[plain.oddsTranslation, plain.evTranslation].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Visual Sportsbook vs. Model Comparison Bar + Projected Final Score */}
+      <ModelVisualComparison
+        visualData={visualData}
+        projectedScore={projectedScore}
+        compact
+      />
+
+      {/* Primary model edge takeaway */}
       {primaryReason && (
         <div className="rounded-xl border border-indigo-500/20 bg-slate-950/60 px-3 py-2 flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
           <Sparkles size={13} className="text-indigo-400 shrink-0 mt-0.5" aria-hidden="true" />
