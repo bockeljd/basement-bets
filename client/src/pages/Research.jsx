@@ -1228,6 +1228,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         analysisResult={analysisResult}
         correlationResult={correlationResult}
         matchupProfile={selectedGame ? matchupProfiles[selectedGame.id] : null}
+        cachedMeta={activeSelectedGame ? lookupTopPickForGame(activeSelectedGame, rowTopPicks, rowTopPicksByKey) : null}
         isAnalyzing={isAnalyzing}
         onClose={() => {
           setSelectedGame(null);

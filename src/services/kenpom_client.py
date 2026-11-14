@@ -12,7 +12,11 @@ from src.utils.team_matcher import TeamMatcher
 
 class KenPomClient:
     """Client for KenPom efficiency data + related daily tables."""
-    
+
+    _ALL_RATINGS_CACHE: Dict[str, Dict[str, Dict]] = {}
+    _ALL_HCA_CACHE: Dict[str, Dict[str, Dict]] = {}
+    _ALL_FANMATCH_CACHE: Dict[str, List[Dict]] = {}
+
     def __init__(self):
         self.matcher = TeamMatcher()
         self._rating_cache = {} # memoize ratings for simulation loops
@@ -83,8 +87,77 @@ class KenPomClient:
             with get_db_connection() as c:
                 return self._exec_rating_query(c, matched_name)
 
+    @staticmethod
+    def _row_to_rating_dict(row) -> Optional[Dict]:
+        if not row:
+            return None
+        raw_val = row.get('raw') if isinstance(row, dict) else (row[6] if len(row) > 6 else None)
+        if isinstance(raw_val, str):
+            try:
+                raw_val = json.loads(raw_val)
+            except Exception:
+                raw_val = {}
+        raw_dict = raw_val if isinstance(raw_val, dict) else {}
+        return {
+            'team': row['team_name'] if isinstance(row, dict) else row[0],
+            'rank': row['rank'] if isinstance(row, dict) else row[1],
+            'adj_em': row['adj_em'] if isinstance(row, dict) else row[2],
+            'adj_o': row['adj_o'] if isinstance(row, dict) else row[3],
+            'adj_d': row['adj_d'] if isinstance(row, dict) else row[4],
+            'adj_t': row['adj_t'] if isinstance(row, dict) else row[5],
+            'luck': raw_dict.get('luck'),
+            'sos_adj_em': raw_dict.get('sos_adj_em'),
+            'opp_o': raw_dict.get('opp_o'),
+            'opp_d': raw_dict.get('opp_d'),
+            'ncsos_adj_em': raw_dict.get('ncsos_adj_em'),
+            'off_efg': raw_dict.get('off_efg'),
+            'off_to': raw_dict.get('off_to'),
+            'off_or': raw_dict.get('off_or'),
+            'off_ftr': raw_dict.get('off_ftr'),
+            'def_efg': raw_dict.get('def_efg'),
+            'def_to': raw_dict.get('def_to'),
+            'def_or': raw_dict.get('def_or'),
+            'def_ftr': raw_dict.get('def_ftr'),
+            'avg_hgt': raw_dict.get('avg_hgt'),
+            'eff_hgt': raw_dict.get('eff_hgt'),
+            'experience': raw_dict.get('experience'),
+            'bench_pct': raw_dict.get('bench_pct'),
+            'continuity': raw_dict.get('continuity'),
+        }
+
     def _exec_rating_query(self, conn, matched_name, asof_date: Optional[str] = None):
         season_start = season_start_date_for_game(asof_date)
+        season_map = KenPomClient._ALL_RATINGS_CACHE.get(season_start)
+        if season_map is None:
+            loaded: Dict[str, Dict] = {}
+            try:
+                bulk_cur = _exec(
+                    conn,
+                    """
+                    SELECT DISTINCT ON (team_name) team_name, rank, adj_em, adj_o, adj_d, adj_t, raw
+                    FROM kenpom_team_ratings_daily
+                    WHERE asof_date >= %s
+                    ORDER BY team_name, asof_date DESC
+                    """,
+                    (season_start,),
+                )
+                rows = bulk_cur.fetchall() if bulk_cur else []
+                for r in rows or []:
+                    item = self._row_to_rating_dict(r)
+                    if item and item.get('team'):
+                        loaded[str(item['team'])] = item
+            except Exception:
+                loaded = {}
+            if len(loaded) > 1:
+                KenPomClient._ALL_RATINGS_CACHE[season_start] = loaded
+                self._rating_cache.update(loaded)
+                season_map = loaded
+
+        if season_map is not None:
+            res = season_map.get(matched_name)
+            self._rating_cache[matched_name] = res
+            return res
+
         query = """
         SELECT team_name, rank, adj_em, adj_o, adj_d, adj_t, raw
         FROM kenpom_team_ratings_daily
@@ -94,43 +167,7 @@ class KenPomClient:
         """
         cursor = _exec(conn, query, (matched_name, season_start))
         row = cursor.fetchone()
-        
-        res = None
-        if row:
-            raw_val = row.get('raw') if isinstance(row, dict) else (row[6] if len(row) > 6 else None)
-            if isinstance(raw_val, str):
-                try:
-                    raw_val = json.loads(raw_val)
-                except Exception:
-                    raw_val = {}
-            raw_dict = raw_val if isinstance(raw_val, dict) else {}
-            res = {
-                'team': row['team_name'] if isinstance(row, dict) else row[0],
-                'rank': row['rank'] if isinstance(row, dict) else row[1],
-                'adj_em': row['adj_em'] if isinstance(row, dict) else row[2],
-                'adj_o': row['adj_o'] if isinstance(row, dict) else row[3],
-                'adj_d': row['adj_d'] if isinstance(row, dict) else row[4],
-                'adj_t': row['adj_t'] if isinstance(row, dict) else row[5],
-                'luck': raw_dict.get('luck'),
-                'sos_adj_em': raw_dict.get('sos_adj_em'),
-                'opp_o': raw_dict.get('opp_o'),
-                'opp_d': raw_dict.get('opp_d'),
-                'ncsos_adj_em': raw_dict.get('ncsos_adj_em'),
-                'off_efg': raw_dict.get('off_efg'),
-                'off_to': raw_dict.get('off_to'),
-                'off_or': raw_dict.get('off_or'),
-                'off_ftr': raw_dict.get('off_ftr'),
-                'def_efg': raw_dict.get('def_efg'),
-                'def_to': raw_dict.get('def_to'),
-                'def_or': raw_dict.get('def_or'),
-                'def_ftr': raw_dict.get('def_ftr'),
-                'avg_hgt': raw_dict.get('avg_hgt'),
-                'eff_hgt': raw_dict.get('eff_hgt'),
-                'experience': raw_dict.get('experience'),
-                'bench_pct': raw_dict.get('bench_pct'),
-                'continuity': raw_dict.get('continuity'),
-            }
-        
+        res = self._row_to_rating_dict(row)
         self._rating_cache[matched_name] = res
         return res
 
@@ -147,6 +184,35 @@ class KenPomClient:
 
     def _exec_home_court(self, conn, matched_name, asof_date: Optional[str] = None):
         season_start = season_start_date_for_game(asof_date)
+        hca_map = KenPomClient._ALL_HCA_CACHE.get(season_start)
+        if hca_map is None:
+            loaded_hca: Dict[str, Dict] = {}
+            try:
+                bulk = _exec(
+                    conn,
+                    """
+                    SELECT DISTINCT ON (team_name) team_name, hca, asof_date
+                    FROM kenpom_home_court_daily
+                    WHERE asof_date >= %s
+                    ORDER BY team_name, asof_date DESC
+                    """,
+                    (season_start,),
+                )
+                for r in (bulk.fetchall() if bulk else []) or []:
+                    t_name = r["team_name"] if isinstance(r, dict) else r[0]
+                    hca_val = r["hca"] if isinstance(r, dict) else r[1]
+                    a_date = r["asof_date"] if isinstance(r, dict) else r[2]
+                    if t_name:
+                        loaded_hca[str(t_name)] = {"team": t_name, "hca": hca_val, "asof_date": a_date}
+            except Exception:
+                loaded_hca = {}
+            if len(loaded_hca) > 1:
+                KenPomClient._ALL_HCA_CACHE[season_start] = loaded_hca
+                hca_map = loaded_hca
+
+        if hca_map is not None:
+            return hca_map.get(matched_name)
+
         row = _exec(conn, """
             SELECT team_name, hca, asof_date
             FROM kenpom_home_court_daily
@@ -156,7 +222,9 @@ class KenPomClient:
         """, (matched_name, season_start)).fetchone()
         if not row:
             return None
-        return {"team": row["team_name"], "hca": row["hca"], "asof_date": row["asof_date"]}
+        res = {"team": row["team_name"], "hca": row["hca"], "asof_date": row["asof_date"]}
+        hca_map[matched_name] = res
+        return res
 
     def get_ref_metrics(self, ref_names: List[str], conn=None) -> List[Dict]:
         if not ref_names:
@@ -309,68 +377,81 @@ class KenPomClient:
         """Best-effort lookup of KenPom FanMatch daily prediction for home_team vs away_team."""
         try:
             matcher = getattr(self, "matcher", None)
-            if matcher is None:
-                return None
-            h_match = matcher.find_source_name(home_team, "kenpom_fanmatch_daily", "home_team") or home_team
-            a_match = matcher.find_source_name(away_team, "kenpom_fanmatch_daily", "away_team") or away_team
             season_start = season_start_date_for_game(None)
+            rows = KenPomClient._ALL_FANMATCH_CACHE.get(season_start)
+            if rows is None:
+                def _load_all(c):
+                    try:
+                        fetched = _exec(
+                            c,
+                            """
+                            SELECT asof_date::text AS asof_date, home_team, away_team,
+                                   pred_winner, winner_score, loser_score, win_prob, thrill_score
+                            FROM kenpom_fanmatch_daily
+                            WHERE asof_date >= %s
+                            ORDER BY asof_date DESC
+                            """,
+                            (season_start,),
+                        ).fetchall()
+                        return [dict(r) for r in (fetched or [])]
+                    except Exception:
+                        return []
 
-            def _query(c):
-                row = _exec(
-                    c,
-                    """
-                    SELECT asof_date::text AS asof_date, home_team, away_team,
-                           pred_winner, winner_score, loser_score, win_prob, thrill_score
-                    FROM kenpom_fanmatch_daily
-                    WHERE asof_date >= %s
-                      AND (
-                        (LOWER(home_team) = LOWER(%s) AND LOWER(away_team) = LOWER(%s))
-                        OR (LOWER(home_team) = LOWER(%s) AND LOWER(away_team) = LOWER(%s))
-                      )
-                    ORDER BY asof_date DESC
-                    LIMIT 1
-                    """,
-                    (season_start, h_match, a_match, a_match, h_match),
-                ).fetchone()
-                if not row:
-                    return None
-                d = dict(row)
-                w_sc = d.get("winner_score")
-                l_sc = d.get("loser_score")
-                winner = str(d.get("pred_winner") or "").strip()
-                total = (float(w_sc) + float(l_sc)) if (w_sc is not None and l_sc is not None) else None
-                margin_abs = abs(float(w_sc) - float(l_sc)) if (w_sc is not None and l_sc is not None) else None
-                home_won = bool(
-                    winner
-                    and (
-                        winner.lower() == str(h_match).lower()
-                        or winner.lower() == str(home_team).lower()
-                    )
-                )
-                home_margin = None
-                if margin_abs is not None and winner:
-                    home_margin = margin_abs if home_won else -margin_abs
-                proj_score = None
-                if w_sc is not None and l_sc is not None:
-                    h_pts = int(round(w_sc if home_won else l_sc))
-                    a_pts = int(round(l_sc if home_won else w_sc))
-                    proj_score = f"{a_pts}-{h_pts}"
-                return {
-                    "asof_date": d.get("asof_date"),
-                    "pred_winner": d.get("pred_winner"),
-                    "winner_score": w_sc,
-                    "loser_score": l_sc,
-                    "win_prob": d.get("win_prob"),
-                    "thrill_score": d.get("thrill_score"),
-                    "fair_margin": home_margin,
-                    "fair_total": total,
-                    "projected_score": proj_score,
-                }
+                if conn is not None:
+                    rows = _load_all(conn)
+                else:
+                    with get_db_connection() as c:
+                        rows = _load_all(c)
+                KenPomClient._ALL_FANMATCH_CACHE[season_start] = rows
 
-            if conn is not None:
-                return _query(conn)
-            with get_db_connection() as c:
-                return _query(c)
+            if not rows:
+                return None
+
+            norm_fn = (
+                matcher.normalize
+                if matcher is not None and hasattr(matcher, "normalize")
+                else lambda s: str(s or "").lower().strip()
+            )
+            h_norm = norm_fn(home_team)
+            a_norm = norm_fn(away_team)
+            if not h_norm or not a_norm:
+                return None
+
+            matched_row = None
+            for d in rows:
+                dh = norm_fn(d.get("home_team"))
+                da = norm_fn(d.get("away_team"))
+                if (dh == h_norm and da == a_norm) or (dh == a_norm and da == h_norm):
+                    matched_row = d
+                    break
+            if not matched_row:
+                return None
+
+            w_sc = matched_row.get("winner_score")
+            l_sc = matched_row.get("loser_score")
+            winner = str(matched_row.get("pred_winner") or "").strip()
+            total = (float(w_sc) + float(l_sc)) if (w_sc is not None and l_sc is not None) else None
+            margin_abs = abs(float(w_sc) - float(l_sc)) if (w_sc is not None and l_sc is not None) else None
+            home_won = bool(winner and norm_fn(winner) == h_norm)
+            home_margin = None
+            if margin_abs is not None and winner:
+                home_margin = margin_abs if home_won else -margin_abs
+            proj_score = None
+            if w_sc is not None and l_sc is not None:
+                h_pts = int(round(w_sc if home_won else l_sc))
+                a_pts = int(round(l_sc if home_won else w_sc))
+                proj_score = f"{a_pts}-{h_pts}"
+            return {
+                "asof_date": matched_row.get("asof_date"),
+                "pred_winner": matched_row.get("pred_winner"),
+                "winner_score": w_sc,
+                "loser_score": l_sc,
+                "win_prob": matched_row.get("win_prob"),
+                "thrill_score": matched_row.get("thrill_score"),
+                "fair_margin": home_margin,
+                "fair_total": total,
+                "projected_score": proj_score,
+            }
         except Exception:
             return None
 

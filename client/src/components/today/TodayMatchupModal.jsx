@@ -33,6 +33,7 @@ const TodayMatchupModal = ({
   analysisResult,
   correlationResult,
   matchupProfile,
+  cachedMeta = null,
   isAnalyzing,
   onClose,
   onAddBet,
@@ -127,8 +128,9 @@ const TodayMatchupModal = ({
   const splits = sig.public_splits || analysisResult?.action_splits || null;
   const projectedScore = getProjectedScore(game, analysisResult, topRec);
   const visualData = buildVisualModelData(topRec, game, analysisResult);
-  const liveTargetPick = topRec || analysisResult?.context?.closest_lean || null;
-  const liveInfo = getLiveGameStatus(game, liveTargetPick, analysisResult?.context);
+  const effectiveContext = analysisResult?.context || cachedMeta?.context || null;
+  const liveTargetPick = topRec || cachedMeta?.rec || effectiveContext?.closest_lean || null;
+  const liveInfo = getLiveGameStatus(game, liveTargetPick, effectiveContext);
   const modelSignals = getModelSignalData(topRec, analysisResult?.context, dbg, game);
   const fmtStat = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : '—');
 
@@ -206,6 +208,116 @@ const TodayMatchupModal = ({
 
           {/* Scrollable Body */}
           <div className="p-5 overflow-y-auto space-y-5 text-sm">
+            {/* 0. Live In-Game Bet Trend & Pace Tracker (always visible immediately when score exists) */}
+            {liveInfo.hasScore && (
+              <section
+                className={`rounded-xl border p-4 space-y-3 ${
+                  liveInfo.coverTone === 'win'
+                    ? 'border-emerald-500/40 bg-emerald-950/20'
+                    : liveInfo.coverTone === 'loss'
+                      ? 'border-rose-500/40 bg-rose-950/20'
+                      : liveInfo.coverTone === 'tossup'
+                        ? 'border-amber-500/40 bg-amber-950/20'
+                        : 'border-slate-700/80 bg-slate-950/75'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      {liveInfo.isFinal ? 'Final Score & Grade' : 'Live In-Game Bet Trend & Pace Tracker'}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-slate-200">
+                      {liveInfo.periodLabel} · {liveInfo.progressPct}% played
+                    </span>
+                  </div>
+
+                  {liveInfo.trendLabel && (
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold ${
+                        liveInfo.coverTone === 'win'
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                          : liveInfo.coverTone === 'loss'
+                            ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                            : liveInfo.coverTone === 'tossup'
+                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                              : 'bg-slate-800 border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      {liveInfo.coverTone === 'win' ? (
+                        <TrendingUp size={13} aria-hidden="true" />
+                      ) : liveInfo.coverTone === 'loss' ? (
+                        <TrendingDown size={13} aria-hidden="true" />
+                      ) : (
+                        <Activity size={13} aria-hidden="true" />
+                      )}
+                      <span>
+                        {liveInfo.trendLabel}
+                        {liveInfo.liveWinProb != null ? ` (${fmtPct(liveInfo.liveWinProb, 0)} Win Prob)` : ''}
+                      </span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                  <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                      Current Score
+                    </div>
+                    <div className="mt-0.5 font-mono font-bold text-white text-sm">
+                      {game.away_team} {liveInfo.awayScore} – {game.home_team} {liveInfo.homeScore}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {liveInfo.pointsPerMinute != null
+                        ? `${liveInfo.pointsPerMinute.toFixed(1)} pts/min (${liveInfo.awayScore + liveInfo.homeScore} total)`
+                        : `${liveInfo.awayScore + liveInfo.homeScore} combined pts`}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                      Live Projected Final
+                    </div>
+                    <div className="mt-0.5 font-mono font-bold text-sky-200 text-sm">
+                      {liveInfo.liveProjAwayScore != null && liveInfo.liveProjHomeScore != null
+                        ? `${game.away_team} ${liveInfo.liveProjAwayScore} – ${game.home_team} ${liveInfo.liveProjHomeScore}`
+                        : '—'}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {liveInfo.liveProjTotal != null ? `Pace ~${liveInfo.liveProjTotal.toFixed(1)} total pts` : ''}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                      Pace vs. Bet Line
+                    </div>
+                    <div
+                      className={`mt-0.5 font-mono font-bold text-sm ${
+                        liveInfo.coverTone === 'win'
+                          ? 'text-emerald-300'
+                          : liveInfo.coverTone === 'loss'
+                            ? 'text-rose-300'
+                            : liveInfo.coverTone === 'tossup'
+                              ? 'text-amber-200'
+                              : 'text-slate-200'
+                      }`}
+                    >
+                      {liveInfo.projectedBetMargin != null
+                        ? `${fmtSigned(liveInfo.projectedBetMargin, 1)} pts cushion`
+                        : liveTargetPick?.selection || liveInfo.trendLabel || 'Track live margin'}
+                    </div>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {liveTargetPick?.selection || `${game.away_team} @ ${game.home_team}`}
+                    </div>
+                  </div>
+                </div>
+
+                {liveInfo.trendDetail && (
+                  <p className="text-xs text-slate-200 leading-relaxed">{liveInfo.trendDetail}</p>
+                )}
+              </section>
+            )}
+
             {isAnalyzing ? (
               <div className="py-14 flex flex-col items-center justify-center gap-3 text-slate-300">
                 <Loader2 size={28} className="animate-spin text-indigo-400" aria-hidden="true" />
@@ -218,116 +330,6 @@ const TodayMatchupModal = ({
               </div>
             ) : (
               <>
-                {/* 0. Live In-Game Bet Trend & Pace Tracker */}
-                {liveInfo.hasScore && (
-                  <section
-                    className={`rounded-xl border p-4 space-y-3 ${
-                      liveInfo.coverTone === 'win'
-                        ? 'border-emerald-500/40 bg-emerald-950/20'
-                        : liveInfo.coverTone === 'loss'
-                          ? 'border-rose-500/40 bg-rose-950/20'
-                          : liveInfo.coverTone === 'tossup'
-                            ? 'border-amber-500/40 bg-amber-950/20'
-                            : 'border-slate-700/80 bg-slate-950/75'
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                          {liveInfo.isFinal ? 'Final Score & Grade' : 'Live In-Game Bet Trend & Pace Tracker'}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-slate-200">
-                          {liveInfo.periodLabel} · {liveInfo.progressPct}% played
-                        </span>
-                      </div>
-
-                      {liveInfo.trendLabel && (
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold ${
-                            liveInfo.coverTone === 'win'
-                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                              : liveInfo.coverTone === 'loss'
-                                ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-                                : liveInfo.coverTone === 'tossup'
-                                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
-                                  : 'bg-slate-800 border-slate-700 text-slate-200'
-                          }`}
-                        >
-                          {liveInfo.coverTone === 'win' ? (
-                            <TrendingUp size={13} aria-hidden="true" />
-                          ) : liveInfo.coverTone === 'loss' ? (
-                            <TrendingDown size={13} aria-hidden="true" />
-                          ) : (
-                            <Activity size={13} aria-hidden="true" />
-                          )}
-                          <span>
-                            {liveInfo.trendLabel}
-                            {liveInfo.liveWinProb != null ? ` (${fmtPct(liveInfo.liveWinProb, 0)} Win Prob)` : ''}
-                          </span>
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-                      <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
-                          Current Score
-                        </div>
-                        <div className="mt-0.5 font-mono font-bold text-white text-sm">
-                          {game.away_team} {liveInfo.awayScore} – {game.home_team} {liveInfo.homeScore}
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          {liveInfo.pointsPerMinute != null
-                            ? `${liveInfo.pointsPerMinute.toFixed(1)} pts/min (${liveInfo.awayScore + liveInfo.homeScore} total)`
-                            : `${liveInfo.awayScore + liveInfo.homeScore} combined pts`}
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
-                          Live Projected Final
-                        </div>
-                        <div className="mt-0.5 font-mono font-bold text-sky-200 text-sm">
-                          {liveInfo.liveProjAwayScore != null && liveInfo.liveProjHomeScore != null
-                            ? `${game.away_team} ${liveInfo.liveProjAwayScore} – ${game.home_team} ${liveInfo.liveProjHomeScore}`
-                            : '—'}
-                        </div>
-                        <div className="text-[11px] text-slate-400">
-                          {liveInfo.liveProjTotal != null ? `Pace ~${liveInfo.liveProjTotal.toFixed(1)} total pts` : ''}
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
-                          Pace vs. Bet Line
-                        </div>
-                        <div
-                          className={`mt-0.5 font-mono font-bold text-sm ${
-                            liveInfo.coverTone === 'win'
-                              ? 'text-emerald-300'
-                              : liveInfo.coverTone === 'loss'
-                                ? 'text-rose-300'
-                                : liveInfo.coverTone === 'tossup'
-                                  ? 'text-amber-200'
-                                  : 'text-slate-200'
-                          }`}
-                        >
-                          {liveInfo.projectedBetMargin != null
-                            ? `${fmtSigned(liveInfo.projectedBetMargin, 1)} pts cushion`
-                            : liveTargetPick?.selection || 'Track live margin'}
-                        </div>
-                        <div className="text-[11px] text-slate-400 truncate">
-                          {liveTargetPick?.selection || `${game.away_team} @ ${game.home_team}`}
-                        </div>
-                      </div>
-                    </div>
-
-                    {liveInfo.trendDetail && (
-                      <p className="text-xs text-slate-200 leading-relaxed">{liveInfo.trendDetail}</p>
-                    )}
-                  </section>
-                )}
-
                 {/* 1. Primary Recommendation / Pass Status */}
                 {topRec ? (
                   <section className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-950/45 to-slate-950 p-4 space-y-3">

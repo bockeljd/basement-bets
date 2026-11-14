@@ -70,26 +70,29 @@ class TeamMatcher:
         # Use class-level cache for source names to avoid repeated SELECT DISTINCT
         source_cache_key = (source_table, source_col)
         if source_cache_key not in TeamMatcher._source_names_cache:
-            with get_db_connection() as conn:
-                rows = []
-                if source_table == "bt_team_metrics_daily":
-                    try:
-                        from src.utils.ncaam_season import current_ncaam_season_start_date
-                        s_start = current_ncaam_season_start_date()
-                        rows = _exec(
-                            conn,
-                            f"SELECT DISTINCT {source_col} FROM {source_table} WHERE date >= :s_start",
-                            {"s_start": s_start},
-                        ).fetchall()
-                    except Exception:
-                        rows = []
-                if not rows:
-                    rows = _exec(conn, f"SELECT DISTINCT {source_col} FROM {source_table}").fetchall()
-                TeamMatcher._source_names_cache[source_cache_key] = [
-                    (r[source_col] if isinstance(r, dict) else r[0])
-                    for r in rows
-                    if (r[source_col] if isinstance(r, dict) else r[0])
-                ]
+            try:
+                with get_db_connection() as conn:
+                    rows = []
+                    if source_table == "bt_team_metrics_daily":
+                        try:
+                            from src.utils.ncaam_season import current_ncaam_season_start_date
+                            s_start = current_ncaam_season_start_date()
+                            rows = _exec(
+                                conn,
+                                f"SELECT DISTINCT {source_col} FROM {source_table} WHERE date >= :s_start",
+                                {"s_start": s_start},
+                            ).fetchall()
+                        except Exception:
+                            rows = []
+                    if not rows:
+                        rows = _exec(conn, f"SELECT DISTINCT {source_col} FROM {source_table}").fetchall()
+                    TeamMatcher._source_names_cache[source_cache_key] = [
+                        (r[source_col] if isinstance(r, dict) else r[0])
+                        for r in rows
+                        if (r[source_col] if isinstance(r, dict) else r[0])
+                    ]
+            except Exception:
+                TeamMatcher._source_names_cache[source_cache_key] = []
 
         source_names = TeamMatcher._source_names_cache[source_cache_key]
         norm_event = self.normalize(event_team_name)

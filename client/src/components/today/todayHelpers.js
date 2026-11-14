@@ -1201,9 +1201,65 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
         trendDetail = `${pickedTeam} is currently ${scoreStateStr}, projecting to finish ${projMarginStr} (${paceVerdictPhrase}) with ${remMinsLabel} left.`;
       }
     }
-  } else if (isLive && hasScore && gameTrendText) {
-    coverText = gameTrendText;
-    trendDetail = `${pointsPerMinute != null ? `${pointsPerMinute.toFixed(1)} combined pts/min` : 'In progress'} · Projected finish: ${game.away_team || 'Away'} ${liveProjAwayScore} – ${game.home_team || 'Home'} ${liveProjHomeScore}.`;
+  }
+
+  if (!trendVerdict && hasScore && (isLive || isFinal)) {
+    const mktTotal = toNum(game.total_line ?? game.total);
+    const mktHomeSpread = toNum(game.home_spread ?? game.spread_home);
+    const homeTeam = game.home_team || 'Home';
+    const awayTeam = game.away_team || 'Away';
+
+    if (isLive) {
+      let totalTrend = '';
+      if (mktTotal != null && liveProjTotal != null) {
+        const totalDiff = liveProjTotal - mktTotal;
+        const totalStr = Number(mktTotal).toFixed(1).replace(/\.0$/, '');
+        totalTrend =
+          totalDiff >= 1.5
+            ? `Trending OVER ${totalStr} (Pace ~${liveProjTotal.toFixed(1)})`
+            : totalDiff <= -1.5
+              ? `Trending UNDER ${totalStr} (Pace ~${liveProjTotal.toFixed(1)})`
+              : `On Total Pace ~${liveProjTotal.toFixed(1)} vs ${totalStr}`;
+      }
+
+      let spreadTrend = '';
+      if (mktHomeSpread != null && liveProjHomeMargin != null) {
+        const favTeam = mktHomeSpread <= 0 ? homeTeam : awayTeam;
+        const dogTeam = mktHomeSpread <= 0 ? awayTeam : homeTeam;
+        const favLine = mktHomeSpread <= 0 ? mktHomeSpread : -mktHomeSpread;
+        const projFavMargin = mktHomeSpread <= 0 ? liveProjHomeMargin : -liveProjHomeMargin;
+        const projFavCover = projFavMargin + favLine;
+        const favLineStr = `${favLine > 0 ? '+' : ''}${Number(favLine).toFixed(1).replace(/\.0$/, '')}`;
+        spreadTrend =
+          projFavCover >= 1.25
+            ? `${favTeam} ${favLineStr} Trending to Cover`
+            : projFavCover <= -1.25
+              ? `${dogTeam} Trending to Cover vs ${favTeam} ${favLineStr}`
+              : `Spread Tight vs ${favTeam} ${favLineStr}`;
+      }
+
+      const combined = [totalTrend, spreadTrend].filter(Boolean);
+      coverText = combined.length > 0 ? combined.join(' · ') : gameTrendText;
+      trendLabel = totalTrend || spreadTrend || 'Live Pace';
+      coverTone = 'neutral';
+      const ratePart = pointsPerMinute != null ? `${pointsPerMinute.toFixed(1)} pts/min` : 'In progress';
+      const projPart = `Proj Final: ${awayTeam} ${liveProjAwayScore} – ${homeTeam} ${liveProjHomeScore}`;
+      trendDetail = spreadTrend ? `${ratePart} · ${projPart} (${spreadTrend})` : `${ratePart} · ${projPart}`;
+    } else if (isFinal && (mktTotal != null || mktHomeSpread != null)) {
+      const parts = [];
+      if (mktTotal != null) {
+        const totalStr = Number(mktTotal).toFixed(1).replace(/\.0$/, '');
+        const resTag = totalNow > mktTotal ? 'OVER' : totalNow < mktTotal ? 'UNDER' : 'PUSH';
+        parts.push(`Total ${totalNow} (${resTag} ${totalStr})`);
+      }
+      if (mktHomeSpread != null) {
+        const homeCover = homeScore - awayScore + mktHomeSpread;
+        const winnerCover = homeCover > 0 ? `${homeTeam} Covered` : homeCover < 0 ? `${awayTeam} Covered` : 'Spread Push';
+        parts.push(winnerCover);
+      }
+      coverText = parts.join(' · ');
+      trendLabel = 'Final Result';
+    }
   }
 
   return {
