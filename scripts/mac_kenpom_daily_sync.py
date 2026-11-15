@@ -122,8 +122,8 @@ def build_kenpom_bundle_from_session(sess: requests.Session, sleep_s: float = 1.
     return bundle
 
 
-def fetch_torvik_bundle_data(season_year: int | None = None, days_back: int = 10) -> dict:
-    """Fetch BartTorvik efficiency ratings JSON + recent schedule game logs from residential IP."""
+def fetch_torvik_bundle_data(season_year: int | None = None, days_back: int = 5) -> dict:
+    """Fetch BartTorvik efficiency ratings JSON + recent ESPN D1 boxscore game logs."""
     from datetime import timedelta
     from src.utils.ncaam_season import current_ncaam_season_end_year
 
@@ -139,7 +139,7 @@ def fetch_torvik_bundle_data(season_year: int | None = None, days_back: int = 10
         "Accept": "application/json,text/plain,*/*",
     })
 
-    # 1. Team efficiency ratings + luck / continuity
+    # 1. Team efficiency ratings + luck / continuity (BartTorvik static JSON endpoint)
     try:
         url = f"https://barttorvik.com/{year_val}_team_results.json"
         resp = sess.get(url, timeout=25)
@@ -155,71 +155,104 @@ def fetch_torvik_bundle_data(season_year: int | None = None, days_back: int = 10
     except Exception as exc:
         print(f"[mac-torvik] team_results warning: {exc}")
 
-    # 2. Recent completed D1 schedule game logs
+    # 2. Recent completed D1 game logs (including 3PT% for shooting regression) via public ESPN API
     logs: list[dict] = []
     seen_logs: set[tuple[str, str, str]] = set()
     today_dt = datetime.now(timezone.utc)
+    espn_url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
     for offset in range(max(0, int(days_back))):
         dt = today_dt - timedelta(days=offset)
         date_compact = dt.strftime("%Y%m%d")
         date_iso = dt.strftime("%Y-%m-%d")
         try:
-            r = sess.get(f"https://barttorvik.com/schedule.php?date={date_compact}&json=1", timeout=15)
-            if r.status_code != 200 or not r.text.lstrip().startswith("["):
+            r = sess.get(espn_url, params={"groups": 50, "limit": 1000, "dates": date_compact}, timeout=15)
+            if r.status_code != 200:
                 continue
-            items = r.json()
-            if not isinstance(items, list):
-                continue
-            for g in items:
-                if not isinstance(g, dict):
+            payload = r.json()
+            for ev in payload.get("events") or []:
+                status_type = ((ev.get("status") or {}).get("type") or {})
+                if not status_type.get("completed"):
                     continue
-                home = str(g.get("home") or g.get("team_home") or "").strip()
-                away = str(g.get("away") or g.get("team_away") or "").strip()
-                if not home or not away:
+                comps = ev.get("competitions") or []
+                if not comps:
                     continue
-                margin_raw = g.get("margin")
-                pts_h = g.get("score_home")
-                pts_a = g.get("score_away")
-                if margin_raw is None and (pts_h is None or pts_a is None):
+                competitors = comps[0].get("competitors") or []
+                if len(competitors) != 2:
                     continue
-                try:
-                    margin_home = int(round(float(margin_raw))) if margin_raw is not None else int(round(float(pts_h) - float(pts_a)))
-                except (TypeError, ValueError):
+
+                def _stat_map(comp: dict) -> dict[str, float]:
+                    smap: dict[str, float] = {}
+                    for item in comp.get("statistics") or []:
+                        name = item.get("name")
+                        val = item.get("displayValue")
+                        if name and val is not None:
+                            try:
+                                smap[str(name)] = float(val)
+                            except (TypeError, ValueError):
+                                pass
+                    return smap
+
+                parsed = []
+                for comp in competitors:
+                    team_info = comp.get("team") or {}
+                    t_name = str(
+                        team_info.get("shortDisplayName")
+                        or team_info.get("location")
+                        or team_info.get("displayName")
+                        or ""
+                    ).strip()
+                    try:
+                        score = int(round(float(comp.get("score"))))
+                    except (TypeError, ValueError):
+                        score = None
+                    if not t_name or score is None:
+                        continue
+                    stats = _stat_map(comp)
+                    fg3m = stats.get("threePointFieldGoalsMade")
+                    fg3a = stats.get("threePointFieldGoalsAttempted")
+                    fg3_pct_raw = stats.get("threePointFieldGoalPct")
+                    fg3_pct = None
+                    if fg3_pct_raw is not None:
+                        fg3_pct = round(fg3_pct_raw / 100.0 if fg3_pct_raw > 1.0 else fg3_pct_raw, 4)
+                    parsed.append({
+                        "team": t_name,
+                        "is_home": str(comp.get("homeAway") or "").lower() == "home",
+                        "score": score,
+                        "fg3m": int(round(fg3m)) if fg3m is not None else None,
+                        "fg3a": int(round(fg3a)) if fg3a is not None else None,
+                        "fg3_pct": fg3_pct,
+                    })
+
+                if len(parsed) != 2:
                     continue
-                g_date = str(g.get("date") or date_iso)[:10]
-                for team, opp, is_h, m_val, pts_val in (
-                    (home, away, True, margin_home, pts_h),
-                    (away, home, False, -margin_home, pts_a),
-                ):
-                    key = (team, g_date, opp)
+                a_info, b_info = parsed[0], parsed[1]
+                g_date = str(ev.get("date") or date_iso)[:10]
+                for side_i, opp_i in ((a_info, b_info), (b_info, a_info)):
+                    key = (side_i["team"], g_date, opp_i["team"])
                     if key in seen_logs:
                         continue
                     seen_logs.add(key)
-                    try:
-                        pts_int = int(pts_val) if pts_val is not None else None
-                    except (TypeError, ValueError):
-                        pts_int = None
                     logs.append({
-                        "team_text": team,
+                        "team_text": side_i["team"],
                         "game_date": g_date,
-                        "opponent": opp,
-                        "points": pts_int,
-                        "three_p_made": None,
-                        "three_p_attempted": None,
-                        "three_p_pct": None,
+                        "opponent": opp_i["team"],
+                        "points": side_i["score"],
+                        "three_p_made": side_i["fg3m"],
+                        "three_p_attempted": side_i["fg3a"],
+                        "three_p_pct": side_i["fg3_pct"],
                         "fouls": None,
                         "opponent_rank": None,
-                        "is_home": is_h,
-                        "margin": m_val,
+                        "is_home": side_i["is_home"],
+                        "margin": side_i["score"] - opp_i["score"],
                     })
         except Exception:
             continue
         if offset + 1 < int(days_back):
-            time.sleep(0.25)
+            time.sleep(0.15)
 
     if logs:
         out["torvik_game_logs"] = logs
-        print(f"[mac-torvik] Pulled {len(logs)} completed schedule game-log rows")
+        print(f"[mac-torvik] Pulled {len(logs)} completed ESPN D1 game-log rows")
     return out
 
 

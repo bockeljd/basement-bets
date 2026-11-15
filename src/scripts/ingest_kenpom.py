@@ -2090,7 +2090,7 @@ def _ingest_torvik_team_rows(rows: list, asof: str, season_year: int | None = No
             "team_name": name,
             "year": year_val,
             "adj_oe": float(adj_oe),
-            "adj_def": float(adj_de),
+            "adj_de": float(adj_de),
             "barthag": barthag,
             "record": record,
             "conf_record": conf_rec,
@@ -2112,6 +2112,71 @@ def _ingest_torvik_team_rows(rows: list, asof: str, season_year: int | None = No
         notes=f"Mac sync ({asof}): {saved} teams",
     )
     return saved
+
+
+def _ingest_game_log_rows(logs: list) -> int:
+    """Persist recent D1 game logs (including 3PT%) into team_game_logs."""
+    if not logs:
+        return 0
+    ddl = """
+    CREATE TABLE IF NOT EXISTS team_game_logs (
+        id SERIAL PRIMARY KEY,
+        team_text TEXT NOT NULL,
+        game_date DATE NOT NULL,
+        opponent TEXT,
+        points INTEGER,
+        three_p_made INTEGER,
+        three_p_attempted INTEGER,
+        three_p_pct REAL,
+        fouls INTEGER,
+        opponent_rank INTEGER,
+        is_home BOOLEAN,
+        margin INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(team_text, game_date, opponent)
+    );
+    """
+    upsert_sql = """
+    INSERT INTO team_game_logs
+        (team_text, game_date, opponent, points, three_p_made, three_p_attempted,
+         three_p_pct, fouls, opponent_rank, is_home, margin)
+    VALUES
+        (:team_text, :game_date, :opponent, :points, :three_p_made, :three_p_attempted,
+         :three_p_pct, :fouls, :opponent_rank, :is_home, :margin)
+    ON CONFLICT (team_text, game_date, opponent) DO UPDATE SET
+        points = COALESCE(EXCLUDED.points, team_game_logs.points),
+        three_p_made = COALESCE(EXCLUDED.three_p_made, team_game_logs.three_p_made),
+        three_p_attempted = COALESCE(EXCLUDED.three_p_attempted, team_game_logs.three_p_attempted),
+        three_p_pct = COALESCE(EXCLUDED.three_p_pct, team_game_logs.three_p_pct),
+        fouls = COALESCE(EXCLUDED.fouls, team_game_logs.fouls),
+        margin = COALESCE(EXCLUDED.margin, team_game_logs.margin)
+    """
+    count = 0
+    with get_db_connection() as conn:
+        try:
+            _exec(conn, ddl)
+        except Exception:
+            pass
+        for g in logs:
+            if not isinstance(g, dict) or not g.get("team_text") or not g.get("game_date"):
+                continue
+            row = {
+                "team_text": str(g.get("team_text")),
+                "game_date": str(g.get("game_date"))[:10],
+                "opponent": g.get("opponent"),
+                "points": g.get("points"),
+                "three_p_made": g.get("three_p_made"),
+                "three_p_attempted": g.get("three_p_attempted"),
+                "three_p_pct": g.get("three_p_pct"),
+                "fouls": g.get("fouls"),
+                "opponent_rank": g.get("opponent_rank"),
+                "is_home": bool(g.get("is_home")) if g.get("is_home") is not None else None,
+                "margin": g.get("margin"),
+            }
+            _exec(conn, upsert_sql, row)
+            count += 1
+        conn.commit()
+    return count
 
 
 def ingest_kenpom_bundle(bundle: dict, asof_date: str | None = None) -> dict:
@@ -2218,11 +2283,7 @@ def ingest_kenpom_bundle(bundle: dict, asof_date: str | None = None) -> dict:
 
     if isinstance(bundle.get("torvik_game_logs"), list) and bundle.get("torvik_game_logs"):
         try:
-            from src.database import init_team_game_logs_table
-            from src.scrapers.torvik_game_logs import TorvikGameLogsScraper
-
-            init_team_game_logs_table()
-            counts["torvik_game_logs"] = int(TorvikGameLogsScraper().save_games(bundle["torvik_game_logs"]) or 0)
+            counts["torvik_game_logs"] = int(_ingest_game_log_rows(bundle["torvik_game_logs"]) or 0)
         except Exception as e:
             warnings.append(f"torvik_game_logs: {e}")
 

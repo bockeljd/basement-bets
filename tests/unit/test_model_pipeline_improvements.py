@@ -1696,19 +1696,19 @@ def test_model_v2_six_edge_and_calibration_improvements(monkeypatch):
     monkeypatch.setattr(ik, "ensure_tables", lambda: None)
     monkeypatch.setattr("src.database.upsert_bt_team_metrics_daily", lambda rows: captured_tv.setdefault("daily", rows))
     monkeypatch.setattr("src.database.upsert_team_metrics", lambda rows: captured_tv.setdefault("live", rows))
-    monkeypatch.setattr("src.database.init_team_game_logs_table", lambda: None)
-    monkeypatch.setattr("src.scrapers.torvik_game_logs.TorvikGameLogsScraper.save_games", lambda self, g: len(g))
+    monkeypatch.setattr(ik, "_ingest_game_log_rows", lambda rows: (captured_tv.setdefault("logs", rows), len(rows))[1])
     monkeypatch.setattr("src.scripts.update_data_health.upsert", lambda src_name, status, row_count=0, notes="": captured_tv.setdefault("health", {}) .__setitem__(src_name, (status, row_count)))
     res_tv = ik.ingest_kenpom_bundle(
         {
             "_kp_bundle": 1,
             "torvik_teams": [[1, "Duke", "ACC", "3-0", 125.0, 1, 90.0, 2, 0.97] + [None] * 36],
-            "torvik_game_logs": [{"team_text": "Duke", "game_date": "2026-11-14", "opponent": "Kansas", "points": 80, "three_p_made": None, "three_p_attempted": None, "three_p_pct": None, "fouls": None, "opponent_rank": None, "is_home": True, "margin": 8}],
+            "torvik_game_logs": [{"team_text": "Duke", "game_date": "2026-11-14", "opponent": "Kansas", "points": 80, "three_p_made": 9, "three_p_attempted": 24, "three_p_pct": 0.375, "fouls": None, "opponent_rank": None, "is_home": True, "margin": 8}],
         },
         asof_date="2026-11-15",
     )
     assert res_tv["datasets_synced"]["torvik_teams"] == 1
     assert res_tv["datasets_synced"]["torvik_game_logs"] == 1
+    assert "adj_de" in captured_tv["live"][0]
     assert captured_tv["health"]["torvik"] == ("ok", 1)
 
 
