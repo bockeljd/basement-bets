@@ -85,7 +85,7 @@ cat > "$PLIST_PATH" <<EOF
   <key>WorkingDirectory</key>
   <string>$REPO_DIR</string>
   <key>RunAtLoad</key>
-  <true/>
+  <false/>
   <key>StartCalendarInterval</key>
   <array>
     <dict>

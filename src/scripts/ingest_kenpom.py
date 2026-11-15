@@ -61,64 +61,84 @@ def _make_cloudscraper():
 def _login_with_credentials(s, email: str, password: str) -> bool:
     """
     POST credentials to kenpom.com and return True if login succeeded.
-    KenPom uses a simple PHP form: POST /user.php with email + password.
+    KenPom's homepage form uses id="login" and action="handlers/login_handler.php".
     """
+    from urllib.parse import urljoin
+
     try:
         # First GET the homepage to let cloudscraper solve any CF challenge
-        # and to grab any hidden fields / CSRF tokens.
+        # and to grab any hidden/submit/CSRF fields.
         print("[kenpom] fetching homepage for CF clearance...")
         r = s.get(BASE, timeout=30)
         if r.status_code == 403:
-            print(f"[kenpom] CF blocked homepage (403) — check that cloudscraper is installed")
+            print("[kenpom] CF blocked homepage (403) — check that cloudscraper is installed")
             return False
 
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # Find the login form action URL.
-        login_form = soup.find("form", {"id": "login-form"}) or soup.find("form", action=lambda a: a and "user" in a)
+        # Find the login form action URL (modern KenPom uses id="login", action="handlers/login_handler.php").
+        login_form = (
+            soup.find("form", {"id": "login"})
+            or soup.find("form", {"id": "login-form"})
+            or soup.find("form", action=lambda a: a and ("login" in a.lower() or "user" in a.lower()))
+        )
         if login_form:
-            action = login_form.get("action", "/user.php")
-            if not action.startswith("http"):
-                action = BASE + ("" if action.startswith("/") else "/") + action
+            raw_action = (login_form.get("action") or "handlers/login_handler.php").strip()
+            action = urljoin(r.url or (BASE + "/"), raw_action)
         else:
-            action = BASE + "/user.php"
+            action = BASE + "/handlers/login_handler.php"
 
-        # Collect any hidden inputs (CSRF, etc.)
+        # Collect form inputs including hidden tokens and submit button (PHP handlers check submit).
         payload = {}
         if login_form:
-            for inp in login_form.find_all("input", {"type": ["hidden", "text", "email", "password"]}):
+            for inp in login_form.find_all("input"):
                 n = inp.get("name")
-                v = inp.get("value", "")
-                if n:
-                    payload[n] = v
+                if not n:
+                    continue
+                itype = str(inp.get("type") or "").lower()
+                if itype in ("hidden", "text", "email", "password", "submit"):
+                    payload[n] = inp.get("value", "")
+                elif itype == "checkbox" and n == "remember":
+                    payload[n] = inp.get("value") or "1"
 
         # Override with actual credentials
         payload["email"] = email
         payload["password"] = password
+        payload.setdefault("submit", "Login!")
 
         print(f"[kenpom] POSTing credentials to {action} ...")
-        time.sleep(1)
-        r2 = s.post(action, data=payload, timeout=30, allow_redirects=True)
+        time.sleep(1.2)
+        r2 = s.post(
+            action,
+            data=payload,
+            headers={"Referer": r.url or (BASE + "/")},
+            timeout=30,
+            allow_redirects=True,
+        )
 
-        # Detect failed login: kenpom shows "Incorrect" or redirects back to login form
         body = r2.text or ""
-        if "Incorrect" in body or "incorrect" in body or "Invalid" in body:
+        body_lower = body.lower()
+        final_url_lower = (r2.url or "").lower()
+        if "incorrect" in body_lower or "invalid email" in body_lower or "invalid password" in body_lower:
             print("[kenpom] Login failed: invalid credentials")
             return False
 
-        # Check we got a PHPSESSID in the cookie jar
         phpsessid = s.cookies.get("PHPSESSID")
         if not phpsessid:
-            # Some CF setups store cookies differently
             print(f"[kenpom] No PHPSESSID in cookie jar after login (status={r2.status_code}). Cookies: {dict(s.cookies)}")
 
-        # Treat as success if we're not on the login/error page
-        if "login" not in r2.url.lower() and r2.status_code < 400:
+        soup2 = BeautifulSoup(body, "html.parser")
+        has_logout = bool(soup2.find("a", href=lambda h: h and "logout" in h.lower())) or ("logout" in body_lower)
+        still_on_login_form = bool(soup2.find("form", {"id": "login"}))
+        # Note: handlers/login_handler.php often returns 200 + meta/JS redirect with PHPSESSID set.
+        failed_redirect = any(tok in final_url_lower for tok in ("user.php", "register-kenpom"))
+
+        if r2.status_code < 400 and (has_logout or (phpsessid and not still_on_login_form and not failed_redirect)):
             print(f"[kenpom] Login successful (PHPSESSID={'set' if phpsessid else 'not visible'})")
             return True
 
-        print(f"[kenpom] Login may have failed (redirected to {r2.url})")
-        return bool(phpsessid)
+        print(f"[kenpom] Login may have failed (status={r2.status_code}, url={r2.url})")
+        return False
 
     except Exception as e:
         print(f"[kenpom] Login error: {e}")
@@ -407,7 +427,7 @@ def _extract_headers_and_rows_from_any(
         .replace("\u2212", "-")
         .replace("\u2013", "-")
         .replace("\xa0", " ")
-        .strip()
+        .strip(" \r\n")
     )
     if not raw_text:
         return [], []
@@ -720,23 +740,40 @@ def parse_kenpom_refs_text(text_or_html: str) -> list[dict]:
     """Parse KenPom Referee Ratings (/officials.php or /refs.php) HTML or TSV/CSV."""
     headers, rows = _extract_headers_and_rows_from_any(
         text_or_html,
-        header_tokens=("official", "referee", "ref", "pf", "foul", "rtg"),
+        header_tokens=("official", "referee", "ref", "pf", "foul", "rtg", "name faa", "rating"),
         min_cols=2,
     )
     if not rows:
         return []
     norm_headers = ["".join(ch for ch in str(h or "").lower() if ch.isalnum()) for h in headers]
-    idx_name = next((i for i, h in enumerate(norm_headers) if h in ("official", "referee", "ref", "name")), None)
+    idx_name = next(
+        (
+            i
+            for i, h in enumerate(norm_headers)
+            if h in ("official", "referee", "ref", "name", "namefaa") or h.startswith("name")
+        ),
+        None,
+    )
     if idx_name is None:
-        idx_name = 1 if (norm_headers and norm_headers[0] in ("rk", "rank")) else 0
+        idx_name = 1 if (norm_headers and norm_headers[0] in ("rk", "rank", "")) else 0
 
     out: list[dict] = []
     for raw_row in rows:
         row = _align_kp_row_with_headers(headers, raw_row)
-        if len(row) <= idx_name:
+        eff_idx = idx_name
+        # Handle copy-pasted TSV where leading blank rank column header was stripped
+        if eff_idx == 0 and len(row) > 1 and str(row[0] or "").strip().isdigit() and not str(row[1] or "").strip().isdigit():
+            eff_idx = 1
+        if len(row) <= eff_idx:
             continue
-        name = str(row[idx_name] or "").strip()
-        if not name or name.isdigit() or name.lower() in ("official", "ref", "referee", "rk", "rank"):
+        name = str(row[eff_idx] or "").strip()
+        name_low = name.lower()
+        if (
+            not name
+            or name.isdigit()
+            or name_low in ("official", "ref", "referee", "rk", "rank", "name", "name faa")
+            or name_low.startswith("name ")
+        ):
             continue
         out.append({
             "ref_name": name,

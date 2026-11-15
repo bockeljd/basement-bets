@@ -110,3 +110,97 @@ def test_mac_sync_cli_check_without_database_url():
     payload = json.loads(proc.stdout)
     assert payload["has_cloudscraper"] is True
     assert "app_url" in payload
+
+
+def test_kenpom_login_posts_to_handlers_login_handler_with_submit():
+    from src.scripts import ingest_kenpom
+
+    homepage_html = """
+    <html><body>
+      <form id="login" action="handlers/login_handler.php" method="post">
+        <input type="email" name="email" />
+        <input type="password" name="password" />
+        <input type="submit" name="submit" value="Login!" />
+        <input type="checkbox" name="remember" />
+      </form>
+    </body></html>
+    """
+    logged_in_html = '<html><body><a href="/handlers/logout_handler.php">Logout</a></body></html>'
+
+    get_resp = MagicMock(status_code=200, url="https://kenpom.com/", text=homepage_html)
+    post_resp = MagicMock(status_code=200, url="https://kenpom.com/", text=logged_in_html)
+
+    sess = MagicMock()
+    sess.cookies = {"PHPSESSID": "abc123"}
+    sess.get.return_value = get_resp
+    sess.post.return_value = post_resp
+
+    with patch.object(ingest_kenpom.time, "sleep"):
+        ok = ingest_kenpom._login_with_credentials(sess, "user@example.com", "secret-pw")
+
+    assert ok is True
+    post_url, kwargs = sess.post.call_args[0][0], sess.post.call_args[1]
+    assert post_url == "https://kenpom.com/handlers/login_handler.php"
+    assert kwargs["data"]["email"] == "user@example.com"
+    assert kwargs["data"]["password"] == "secret-pw"
+    assert kwargs["data"]["submit"] == "Login!"
+    assert kwargs["data"]["remember"] == "1"
+
+    # Success when handlers/login_handler.php renders HTTP 200 meta/JS redirect with PHPSESSID set
+    meta_resp = MagicMock(
+        status_code=200,
+        url="https://kenpom.com/handlers/login_handler.php",
+        text='<html><head><meta http-equiv="refresh" content="0;url=/"></head></html>',
+    )
+    sess.post.return_value = meta_resp
+    with patch.object(ingest_kenpom.time, "sleep"):
+        assert ingest_kenpom._login_with_credentials(sess, "user@example.com", "secret-pw") is True
+
+    # Failed login (still has login form, no logout link) returns False even with status 200
+    fail_resp = MagicMock(status_code=200, url="https://kenpom.com/user.php", text=homepage_html)
+    sess.post.return_value = fail_resp
+    with patch.object(ingest_kenpom.time, "sleep"):
+        ok_fail = ingest_kenpom._login_with_credentials(sess, "user@example.com", "bad-pw")
+    assert ok_fail is False
+
+
+def test_build_kenpom_bundle_stops_fallback_on_429_or_login_gate():
+    sess = MagicMock()
+    calls = []
+
+    def fake_fetch(s, path):
+        calls.append(path)
+        if path == "/":
+            return "<table id='ratings-table'><thead><tr><th>Rk</th><th>Team</th></tr></thead><tbody>" + "".join(
+                f"<tr><td>{i}</td><td>T{i}</td></tr>" for i in range(1, 13)
+            ) + "</tbody></table>"
+        if path == "/hca.php":
+            raise RuntimeError("429 Client Error: Too Many Requests")
+        return '<html><form id="login"></form><a href="register-kenpom.php">Register</a></html>'
+
+    with patch.object(kp_sync, "fetch_html", side_effect=fake_fetch):
+        bundle = kp_sync.build_kenpom_bundle_from_session(sess, sleep_s=0.0)
+
+    assert len(bundle["ratings"].splitlines()) == 13
+    assert "/home.php" not in calls
+    assert "/refs.php" not in calls
+    assert bundle["hca"] == ""
+    assert bundle["refs"] == ""
+
+
+def test_parse_kenpom_refs_handles_live_officials_tsv_format():
+    from src.scripts.ingest_kenpom import parse_kenpom_refs_text
+
+    tsv = (
+        "\tName FAA\tRating\tGms\tLast Game\tLast Game Rank\tLast Game Rank\n"
+        "\tName FAA\tRating\tGms\tLast Game\n"
+        "1\tPaul Szelc\t9.66\t9\tFri 11/13\t10 Virginia 87, 62 Maryland 83\tbox · win prob\n"
+        "2\tTony Padilla\t8.65\t11\tFri 11/13\t12 Arizona 80, 21 Auburn 69\tbox · win prob\n"
+    )
+    parsed = parse_kenpom_refs_text(tsv)
+    assert [r["ref_name"] for r in parsed] == ["Paul Szelc", "Tony Padilla"]
+
+    # Also verify copy-pasted variant where leading tab was trimmed
+    trimmed = "\n".join(line.lstrip("\t") for line in tsv.splitlines())
+    parsed_trimmed = parse_kenpom_refs_text(trimmed)
+    assert [r["ref_name"] for r in parsed_trimmed] == ["Paul Szelc", "Tony Padilla"]

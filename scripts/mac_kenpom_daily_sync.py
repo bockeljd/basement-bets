@@ -92,7 +92,7 @@ def _html_table_to_tsv(html: str, max_rows: int | None = None) -> str:
     return "\n".join(lines)
 
 
-def build_kenpom_bundle_from_session(sess: requests.Session, sleep_s: float = 0.7) -> dict:
+def build_kenpom_bundle_from_session(sess: requests.Session, sleep_s: float = 1.8) -> dict:
     """Fetch all 7 KenPom pages using an authenticated session and return a _kp_bundle dict."""
     bundle: dict[str, object] = {"_kp_bundle": 1}
     for key, paths, max_rows in KENPOM_ENDPOINTS:
@@ -100,11 +100,22 @@ def build_kenpom_bundle_from_session(sess: requests.Session, sleep_s: float = 0.
         for path in paths:
             try:
                 html = fetch_html(sess, path)
+                if "register-kenpom" in (html or "").lower() or (
+                    key != "ratings" and 'id="login"' in (html or "") and "logout" not in (html or "").lower()
+                ):
+                    print(f"[mac-kenpom] {key} ({path}) requires active subscriber login; skipping fallbacks")
+                    break
                 tsv = _html_table_to_tsv(html, max_rows=max_rows)
                 if tsv and (key != "ratings" or len(tsv.splitlines()) >= 10):
                     break
             except Exception as exc:
-                print(f"[mac-kenpom] {key} ({path}) warning: {exc}")
+                msg = str(exc)
+                print(f"[mac-kenpom] {key} ({path}) warning: {msg}")
+                if "429" in msg:
+                    # Back off politely instead of hammering fallback URLs on rate-limit
+                    if sleep_s > 0:
+                        time.sleep(max(sleep_s * 2.0, 3.0))
+                    break
         bundle[key] = tsv
         if sleep_s > 0 and key != KENPOM_ENDPOINTS[-1][0]:
             time.sleep(sleep_s)
