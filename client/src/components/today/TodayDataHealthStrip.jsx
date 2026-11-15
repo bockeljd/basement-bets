@@ -9,6 +9,23 @@ const FEED_DEFS = [
   { key: 'action_splits', label: 'Splits' },
 ];
 
+const MAX_AGE_HOURS_BY_SOURCE = {
+  torvik: 36,
+  kenpom: 36,
+  haslametrics: 36,
+  odds: 12,
+  action_splits: 12,
+};
+
+const isTimestampStale = (row, feedKey) => {
+  const ts = row?.last_success_at || row?.updated_at;
+  if (!ts) return false;
+  const ageMs = Date.now() - new Date(ts).getTime();
+  if (!Number.isFinite(ageMs)) return false;
+  const maxHours = MAX_AGE_HOURS_BY_SOURCE[feedKey] ?? 36;
+  return ageMs > maxHours * 3600000;
+};
+
 const FEED_LABEL_MAP = {
   torvik: 'BartTorvik',
   kenpom: 'KenPom',
@@ -66,9 +83,19 @@ const getFeedState = (row, feedKey) => {
   }
   const st = String(row.status || '').toLowerCase();
   if (st === 'ok') {
+    const syncTs = row.last_success_at || row.updated_at;
+    if (isTimestampStale(row, feedKey)) {
+      return {
+        ok: false,
+        statusText: feedKey === 'kenpom' ? 'Needs Update' : 'Stale',
+        dotCls: 'bg-amber-400',
+        textCls: 'text-amber-300',
+        Icon: AlertTriangle,
+      };
+    }
     return {
       ok: true,
-      statusText: formatAge(row.updated_at),
+      statusText: formatAge(syncTs),
       dotCls: 'bg-emerald-400',
       textCls: 'text-emerald-300',
       Icon: CheckCircle2,
@@ -110,11 +137,11 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
       e.moneyline_home !== null
   ).length;
 
-  const activeFeedCount = FEED_DEFS.filter((f) => String(bySource[f.key]?.status || '').toLowerCase() === 'ok').length;
+  const activeFeedCount = FEED_DEFS.filter((f) => getFeedState(bySource[f.key], f.key).ok).length;
   const feedsHealthy = activeFeedCount >= 4;
 
   const kenpomRow = bySource.kenpom;
-  const kenpomOk = String(kenpomRow?.status || '').toLowerCase() === 'ok';
+  const kenpomOk = getFeedState(kenpomRow, 'kenpom').ok;
 
   const activeDetail = selectedSource ? bySource[selectedSource] : null;
   const activeNotes = selectedSource ? formatFeedNotes(selectedSource, activeDetail) : '';
@@ -233,10 +260,12 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
                 <span className="font-bold text-white">{FEED_LABEL_MAP[selectedSource] || selectedSource}:</span>
                 <span>
                   <strong className="text-slate-100">
-                    {String(activeDetail?.status || '').toLowerCase() === 'ok' ? 'Active' : 'Needs Update'}
+                    {getFeedState(activeDetail, selectedSource).ok ? 'Active' : 'Needs Update'}
                   </strong>
                   {activeCount != null ? ` • ${activeCount} records` : ''}
-                  {activeDetail?.updated_at ? ` • Checked ${formatAge(activeDetail.updated_at)}` : ''}
+                  {(activeDetail?.last_success_at || activeDetail?.updated_at)
+                    ? ` • Synced ${formatAge(activeDetail.last_success_at || activeDetail.updated_at)}`
+                    : ''}
                   {activeNotes ? ` • ${activeNotes}` : ''}
                 </span>
                 {selectedSource === 'kenpom' && !kenpomOk && (

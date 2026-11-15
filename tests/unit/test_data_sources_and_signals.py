@@ -563,3 +563,114 @@ def test_oracle_fast_mode_and_gemini_rest_no_sleep_on_400(monkeypatch):
     assert len(calls) == 1
     assert calls[0] == "gemini-2.5-flash-lite"
     assert out["evt_fast_1"]["oracle_verdict"] == "Lean Duke -3.5"
+
+
+def test_update_data_health_upsert_preserves_last_success_and_torvik_uses_1_day(monkeypatch):
+    from contextlib import contextmanager
+    import src.scripts.update_data_health as udh
+
+    captured = []
+
+    class _FakeCursor:
+        def __init__(self):
+            self._sql = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params=None):
+            self._sql = str(sql)
+            captured.append((self._sql, params))
+
+        def fetchone(self):
+            if "bt_team_metrics_daily" in self._sql:
+                return (0,)
+            return (100,)
+
+        def fetchall(self):
+            return []
+
+    class _FakeConn:
+        def cursor(self):
+            return _FakeCursor()
+
+        def commit(self):
+            pass
+
+    @contextmanager
+    def _fake_conn():
+        yield _FakeConn()
+
+    monkeypatch.setattr(udh, "get_admin_db_connection", _fake_conn)
+
+    # 1) Direct upsert SQL check: non-ok statuses preserve prior last_success_at
+    udh.upsert("torvik", "stale", row_count=None, notes="blocked")
+    assert len(captured) == 1
+    sql_text, params = captured[0]
+    assert "CASE WHEN %s = 'ok' THEN NOW() ELSE NULL END" in sql_text
+    assert "WHEN EXCLUDED.status = 'ok' THEN NOW()" in sql_text
+    assert "ELSE data_health.last_success_at" in sql_text
+    assert params == ("torvik", "stale", None, "stale", "blocked")
+
+    # 2) main() uses INTERVAL '1 day' for Torvik and records stale when count == 0
+    recorded = {}
+    torvik_sqls = []
+    orig_exec = _FakeCursor.execute
+
+    def _spy_exec(self, sql, params=None):
+        orig_exec(self, sql, params)
+        if "bt_team_metrics_daily" in self._sql:
+            torvik_sqls.append(self._sql)
+
+    monkeypatch.setattr(_FakeCursor, "execute", _spy_exec)
+    monkeypatch.setattr(udh, "ensure_table", lambda: None)
+    monkeypatch.setattr(udh, "upsert", lambda src, status, row_count=None, notes=None: recorded.__setitem__(src, (status, row_count, notes)))
+
+    udh.main()
+    assert len(torvik_sqls) == 1
+    assert "INTERVAL '1 day'" in torvik_sqls[0]
+    assert recorded["torvik"] == ("stale", 0, "no rows in last 1 day")
+
+
+def test_torvik_cron_endpoint_updates_data_health_on_empty_and_success(monkeypatch):
+    import asyncio
+    from contextlib import contextmanager
+    import src.api as api_mod
+    import src.database as db_mod
+    import src.services.barttorvik as bt_mod
+    import src.services.job_service as js_mod
+    import src.scripts.update_data_health as udh
+
+    class _FakeCtx:
+        def __init__(self):
+            self.state = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    @contextmanager
+    def _fake_job_ctx(job_key):
+        yield _FakeCtx()
+
+    health_calls = []
+    monkeypatch.setattr(js_mod, "JobContext", _fake_job_ctx)
+    monkeypatch.setattr(db_mod, "init_bt_team_metrics_db", lambda: None)
+    monkeypatch.setattr(udh, "upsert", lambda src, status, row_count=None, notes=None: health_calls.append((src, status, row_count, notes)))
+
+    # Empty response -> warning + torvik marked stale
+    monkeypatch.setattr(bt_mod.BartTorvikClient, "get_efficiency_ratings", lambda self: {})
+    res_empty = asyncio.run(api_mod.trigger_torvik_ingestion(request=None, authorized=True))
+    assert res_empty["status"] == "warning"
+    assert health_calls[-1][0:3] == ("torvik", "stale", None)
+
+    # Populated response -> success + torvik marked ok
+    monkeypatch.setattr(bt_mod.BartTorvikClient, "get_efficiency_ratings", lambda self: {"Duke": {"adjoe": 122.0}})
+    res_ok = asyncio.run(api_mod.trigger_torvik_ingestion(request=None, authorized=True))
+    assert res_ok["status"] == "success"
+    assert health_calls[-1][0:3] == ("torvik", "ok", 1)

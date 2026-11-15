@@ -27,9 +27,12 @@ def ensure_table():
 def upsert(source: str, status: str, row_count: int | None = None, notes: str | None = None):
     sql = """
     INSERT INTO data_health(source, last_success_at, last_row_count, status, notes, updated_at)
-    VALUES (%s, NOW(), %s, %s, %s, NOW())
+    VALUES (%s, CASE WHEN %s = 'ok' THEN NOW() ELSE NULL END, %s, %s, %s, NOW())
     ON CONFLICT (source) DO UPDATE SET
-      last_success_at=EXCLUDED.last_success_at,
+      last_success_at=CASE
+        WHEN EXCLUDED.status = 'ok' THEN NOW()
+        ELSE data_health.last_success_at
+      END,
       last_row_count=COALESCE(EXCLUDED.last_row_count, data_health.last_row_count),
       status=EXCLUDED.status,
       notes=EXCLUDED.notes,
@@ -37,7 +40,7 @@ def upsert(source: str, status: str, row_count: int | None = None, notes: str | 
     """
     with get_admin_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (source, row_count, status, notes))
+            cur.execute(sql, (source, status, row_count, status, notes))
         conn.commit()
 
 
@@ -139,7 +142,7 @@ def main():
                           WHEN TRIM(date::text) ~ '^\\d{8}$' THEN to_date(TRIM(date::text), 'YYYYMMDD')
                           ELSE TRIM(date::text)::date
                         END
-                      ) >= ((NOW() AT TIME ZONE 'America/New_York')::date - INTERVAL '2 days')
+                      ) >= ((NOW() AT TIME ZONE 'America/New_York')::date - INTERVAL '1 day')
                     """
                 )
                 n = cur.fetchone()[0]
@@ -149,7 +152,7 @@ def main():
                 status = 'error'
                 notes = str(e)
             else:
-                notes = 'rows in last 2 days'
+                notes = 'rows in last 1 day' if status == 'ok' else 'no rows in last 1 day'
     upsert('torvik', status=status, row_count=n, notes=notes)
 
     # Results health

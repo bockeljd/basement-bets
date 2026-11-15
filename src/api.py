@@ -2313,6 +2313,7 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
     # Imports inside to avoid heavy loading on startup if possible
     from src.database import init_bt_team_metrics_db
     from src.services.barttorvik import BartTorvikClient
+    from src.scripts.update_data_health import upsert as upsert_health
     
     try:
         with JobContext(job_key) as ctx:
@@ -2329,6 +2330,10 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
                 # Update State
                 ctx.state["last_run_date"] = datetime.now().strftime("%Y-%m-%d")
                 ctx.state["teams_count"] = len(ratings)
+                try:
+                    upsert_health("torvik", "ok", row_count=len(ratings), notes=f"Cron sync: {len(ratings)} teams")
+                except Exception as health_err:
+                    print(f"[Job] Torvik Health Upsert Warning: {health_err}")
                 
                 return {
                     "status": "success", 
@@ -2336,12 +2341,20 @@ async def trigger_torvik_ingestion(request: Request, authorized: bool = Depends(
                     "teams_count": len(ratings)
                 }
             else:
+                try:
+                    upsert_health("torvik", "stale", row_count=None, notes="Torvik cron returned no ratings (blocked or empty)")
+                except Exception as health_err:
+                    print(f"[Job] Torvik Health Upsert Warning: {health_err}")
                 return {"status": "warning", "message": "No ratings found"}
                 
     except JobLockedException:
         return {"status": "skipped", "reason": "Locked"}
     except Exception as e:
         print(f"[Job] Torvik Ingestion Failed: {e}")
+        try:
+            upsert_health("torvik", "error", row_count=None, notes=str(e)[:200])
+        except Exception as health_err:
+            print(f"[Job] Torvik Health Error Upsert Warning: {health_err}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
