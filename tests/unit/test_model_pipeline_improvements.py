@@ -1581,6 +1581,138 @@ def test_model_v2_five_improvements_isolation_calibration_totals_and_signals(mon
     assert m_real._apply_split_and_injury_signals(full_total_rec, action_splits=splits_contra, injury_context={"has_injuries": False}, relax_gates=False) == []
 
 
+def test_model_v2_six_edge_and_calibration_improvements(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from src.services.odds_selection_service import OddsSelectionService
+    from src.services.haslametrics_client import compute_matchup_projection
+    import src.scripts.ingest_kenpom as ik
+
+    # 1. Odds deduplication + target_line selection
+    selector = OddsSelectionService()
+    snaps = [
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 146.5, "price": -110, "captured_at": "2026-11-15T18:00:00Z"},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 144.0, "price": 120, "captured_at": "2026-11-15T12:00:00Z"},  # stale
+        {"book": "FanDuel", "market_type": "TOTAL", "side": "OVER", "line_value": 146.0, "price": -112, "captured_at": "2026-11-15T18:05:00Z"},
+        {"book": "BetMGM", "market_type": "TOTAL", "side": "OVER", "line_value": 149.0, "price": 105, "captured_at": "2026-11-15T18:05:00Z"},  # alt/worse line outside 0.5
+    ]
+    best_over = selector.get_best_price_for_side(snaps, "TOTAL", "OVER", target_line=146.5)
+    assert best_over is not None
+    # FanDuel 146.0 beats DK 146.5 on favorable OVER line; BetMGM +105 at 149.0 is ignored
+    assert best_over["book"] == "FanDuel"
+    assert best_over["line_value"] == 146.0
+
+    # _get_all_recent_odds keeps latest per (book, market_type, side)
+    model = NCAAMMarketFirstModelV2()
+    fake_rows = [
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -110, "captured_at": "2026-11-15T18:00:00Z"},
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -3.0, "price": 105, "captured_at": "2026-11-15T10:00:00Z"},
+        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -108, "captured_at": "2026-11-15T17:55:00Z"},
+    ]
+    class _OddsCur:
+        def fetchall(self):
+            return fake_rows
+    class _OddsConn:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr("src.models.ncaam_market_first_model_v2.get_db_connection", lambda: _OddsConn())
+    monkeypatch.setattr("src.models.ncaam_market_first_model_v2._exec", lambda c, q, p=None: _OddsCur())
+    deduped = model._get_all_recent_odds("evt_1")
+    assert len(deduped) == 2
+    assert deduped[0]["line_value"] == -4.5
+
+    # 2. tau shrinkage (~0.25), deterministic bounds & lb10 publish gate
+    monkeypatch.delenv("NCAAM_MU_TAU_SHRINKAGE", raising=False)
+    tau_sp = model._tau_for_market("SPREAD")
+    assert 0.4 < tau_sp < 1.0
+    b_a = model._confidence_bounds_from_mu_uncertainty("SPREAD", mu=-6.5, sigma=11.0, line=-4.5, side="home")
+    b_b = model._confidence_bounds_from_mu_uncertainty("SPREAD", mu=-6.5, sigma=11.0, line=-4.5, side="home")
+    assert b_a == b_b  # deterministic analytical quantiles
+    assert b_a["lb10"] is not None and b_a["lb10"] < b_a["ub90"]
+
+    model._get_archetype_stats = lambda k: {"n": 80, "mean": 0.03, "sd": 0.10}
+    assert model._passes_publish_gates({"market": "SPREAD", "side": "HOME", "ev": 0.05, "edge_points": 2.0, "win_prob_lb10": 0.49}, -4.5, True) is False
+    assert model._passes_publish_gates({"market": "SPREAD", "side": "HOME", "ev": 0.05, "edge_points": 2.0, "win_prob_lb10": 0.525}, -4.5, True) is True
+
+    # 3. Tightened ML gate blocks plus-money underdogs (+125 / <52%) and calibrates ML confidence
+    assert model._passes_ml_persist_gates(win_prob=0.49, ev=0.09, price=125) is False
+    assert model._passes_ml_persist_gates(win_prob=0.58, ev=0.06, price=-115) is True
+
+    # 4. TOTAL OVER (+4.1% EV) vs UNDER (+3.5% EV) and Haslametrics 106.5/68.0 defaults
+    assert model._passes_publish_gates({"market": "TOTAL", "side": "over", "ev": 0.038, "edge_points": 2.0}, None, True) is False
+    assert model._passes_publish_gates({"market": "TOTAL", "side": "under", "ev": 0.038, "edge_points": 2.0}, None, True) is True
+    proj_default = compute_matchup_projection({"oe": 106.5, "de": 106.5}, {"oe": 106.5, "de": 106.5}, neutral_site=True)
+    assert proj_default is not None
+    # Two average D1 teams on neutral court -> 68.0 * 1.065 * 2 = 144.84 (not ~152.5 from inflated 109.7/69.5 defaults)
+    assert proj_default["total"] == pytest.approx(144.84, abs=0.2)
+
+    # 5. Nov/Dec early-season cap damping + no duplicate persistence of best_rec
+    model.torvik_service = MagicMock()
+    model.torvik_service.get_projection.return_value = {"margin": 11.0, "official_margin": 11.0, "total": 152.0, "lean": "Home"}
+    model.torvik_service.get_matchup_team_stats.return_value = {"game_tempo": 68.0, "home": {"luck": 0.0, "continuity": 75.0}, "away": {"luck": 0.0, "continuity": 75.0}}
+    model.kenpom_client = MagicMock()
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 11.0, "fair_margin": 11.0, "fair_total": 154.0, "total_adj": 0.0, "summary": "Home"}
+    model.kenpom_client.get_team_player_agg.return_value = None
+    model.kenpom_client.get_team_rating.return_value = None
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.haslametrics_client = MagicMock()
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 11.0, "total": 152.0}
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 100.0
+    model.injury_service = MagicMock()
+    model.injury_service.get_matchup_injuries.return_value = {"has_injuries": False, "injuries": []}
+    model.news_service = MagicMock()
+    model.news_service.get_team_news.return_value = []
+    model.news_service.summarize_impact.return_value = ""
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+
+    persisted_docs = []
+    monkeypatch.setattr("src.models.ncaam_market_first_model_v2.insert_model_prediction", lambda doc: persisted_docs.append(doc) or True)
+    nov_ev = {"id": "evt_nov_cap", "home_team": "Team A", "away_team": "Team B", "start_time": datetime.now(timezone.utc) + timedelta(hours=3)}
+    # Force month=11 for early-season check via explicit November timestamp (>now if 2026-11-15)
+    nov_ev["start_time"] = datetime(2026, 11, 20, 19, 0, tzinfo=timezone.utc)
+    res_nov = model.analyze(
+        "evt_nov_cap",
+        event_context=nov_ev,
+        market_snapshot={"spread_home": -3.5, "total": 144.0, "moneyline_price_home": -155, "moneyline_price_away": 135},
+        persist=True,
+    )
+    assert abs(res_nov["context"]["fair_spread_home"] - (-3.5)) <= 2.25
+    assert abs(res_nov["context"]["fair_total"] - 144.0) <= 3.05
+    # Guarantee no duplicate row insertion for best_rec
+    spread_rows = [d for d in persisted_docs if d["market_type"] == "SPREAD"]
+    assert len(spread_rows) <= 1
+
+    # 6. ingest_kenpom_bundle supports torvik_teams + torvik_game_logs
+    captured_tv = {}
+    monkeypatch.setattr(ik, "ensure_tables", lambda: None)
+    monkeypatch.setattr("src.database.upsert_bt_team_metrics_daily", lambda rows: captured_tv.setdefault("daily", rows))
+    monkeypatch.setattr("src.database.upsert_team_metrics", lambda rows: captured_tv.setdefault("live", rows))
+    monkeypatch.setattr("src.database.init_team_game_logs_table", lambda: None)
+    monkeypatch.setattr("src.scrapers.torvik_game_logs.TorvikGameLogsScraper.save_games", lambda self, g: len(g))
+    monkeypatch.setattr("src.scripts.update_data_health.upsert", lambda src_name, status, row_count=0, notes="": captured_tv.setdefault("health", {}) .__setitem__(src_name, (status, row_count)))
+    res_tv = ik.ingest_kenpom_bundle(
+        {
+            "_kp_bundle": 1,
+            "torvik_teams": [[1, "Duke", "ACC", "3-0", 125.0, 1, 90.0, 2, 0.97] + [None] * 36],
+            "torvik_game_logs": [{"team_text": "Duke", "game_date": "2026-11-14", "opponent": "Kansas", "points": 80, "three_p_made": None, "three_p_attempted": None, "three_p_pct": None, "fouls": None, "opponent_rank": None, "is_home": True, "margin": 8}],
+        },
+        asof_date="2026-11-15",
+    )
+    assert res_tv["datasets_synced"]["torvik_teams"] == 1
+    assert res_tv["datasets_synced"]["torvik_game_logs"] == 1
+    assert captured_tv["health"]["torvik"] == ("ok", 1)
+
+
+
 
 
 

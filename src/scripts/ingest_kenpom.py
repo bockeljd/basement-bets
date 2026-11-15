@@ -1995,6 +1995,125 @@ def run_kenpom_sync(
     }
 
 
+def _ingest_torvik_team_rows(rows: list, asof: str, season_year: int | None = None) -> int:
+    """Persist BartTorvik `{year}_team_results.json` rows uploaded from Mac sync into DB."""
+    from src.database import upsert_bt_team_metrics_daily, upsert_team_metrics
+    from src.scripts.update_data_health import upsert as upsert_health
+    from src.utils.ncaam_season import current_ncaam_season_end_year
+
+    year_val = int(season_year or current_ncaam_season_end_year())
+    metrics_payload: list[dict] = []
+    live_payload: list[dict] = []
+
+    for row in rows or []:
+        if isinstance(row, dict):
+            name = str(row.get("team_text") or row.get("team_name") or "").strip()
+            adj_oe = row.get("adj_off") if row.get("adj_off") is not None else row.get("adj_oe")
+            adj_de = row.get("adj_def") if row.get("adj_def") is not None else row.get("adj_de")
+            tempo = row.get("adj_tempo") or 68.0
+            torvik_rank = row.get("torvik_rank")
+            record = row.get("record")
+            luck = row.get("luck")
+            continuity = row.get("continuity")
+            barthag = row.get("barthag")
+            conf_rec = row.get("conf_record")
+        elif isinstance(row, (list, tuple)) and len(row) >= 8:
+            name = str(row[1] or "").strip()
+            try:
+                adj_oe = float(row[4]) if row[4] is not None else None
+                adj_de = float(row[6]) if row[6] is not None else None
+            except (TypeError, ValueError):
+                adj_oe, adj_de = None, None
+            torvik_rank = None
+            try:
+                torvik_rank = int(row[0]) if row[0] is not None else None
+            except (TypeError, ValueError):
+                pass
+            conf_rec = str(row[2]) if len(row) > 2 and row[2] is not None else None
+            record = str(row[3]) if len(row) > 3 and row[3] is not None else None
+            tempo = 68.0
+            for idx in (21, 22, 44, 45, 42, 20, 23, 24, 25):
+                try:
+                    if len(row) > idx and row[idx] is not None:
+                        tv = float(row[idx])
+                        if 55.0 < tv < 85.0:
+                            tempo = tv
+                            break
+                except (TypeError, ValueError):
+                    continue
+            luck = None
+            try:
+                if len(row) > 33 and row[33] is not None:
+                    lv = float(row[33])
+                    if abs(lv) <= 1.0:
+                        luck = lv
+            except (TypeError, ValueError):
+                pass
+            continuity = None
+            for idx in (43, 44):
+                try:
+                    if len(row) > idx and row[idx] is not None:
+                        cv = float(row[idx])
+                        if 0.0 <= cv <= 100.0:
+                            continuity = cv
+                            break
+                except (TypeError, ValueError):
+                    continue
+            barthag = None
+            for idx in (8, 32):
+                try:
+                    if len(row) > idx and row[idx] is not None:
+                        bv = float(row[idx])
+                        if 0.0 <= bv <= 1.0:
+                            barthag = bv
+                            break
+                except (TypeError, ValueError):
+                    continue
+        else:
+            continue
+
+        if not name or adj_oe is None or adj_de is None:
+            continue
+
+        metrics_payload.append({
+            "team_text": name,
+            "date": asof,
+            "adj_off": float(adj_oe),
+            "adj_def": float(adj_de),
+            "adj_tempo": float(tempo),
+            "torvik_rank": torvik_rank,
+            "record": record,
+            "luck": luck,
+            "continuity": continuity,
+        })
+        live_payload.append({
+            "team_name": name,
+            "year": year_val,
+            "adj_oe": float(adj_oe),
+            "adj_def": float(adj_de),
+            "barthag": barthag,
+            "record": record,
+            "conf_record": conf_rec,
+            "adj_tempo": float(tempo),
+        })
+
+    if not metrics_payload:
+        return 0
+
+    upsert_bt_team_metrics_daily(metrics_payload)
+    if live_payload:
+        upsert_team_metrics(live_payload)
+
+    saved = len(metrics_payload)
+    upsert_health(
+        "torvik",
+        "ok",
+        row_count=saved,
+        notes=f"Mac sync ({asof}): {saved} teams",
+    )
+    return saved
+
+
 def ingest_kenpom_bundle(bundle: dict, asof_date: str | None = None) -> dict:
     """Ingest a multi-dataset KenPom JSON bundle emitted by the Chrome bookmarklet or Mac auto-sync."""
     from src.scripts.update_data_health import upsert as upsert_health
@@ -2091,21 +2210,50 @@ def ingest_kenpom_bundle(bundle: dict, asof_date: str | None = None) -> dict:
         except Exception as e:
             warnings.append(f"fanmatch: {e}")
 
+    if isinstance(bundle.get("torvik_teams"), list) and bundle.get("torvik_teams"):
+        try:
+            counts["torvik_teams"] = _ingest_torvik_team_rows(bundle["torvik_teams"], asof)
+        except Exception as e:
+            warnings.append(f"torvik_teams: {e}")
+
+    if isinstance(bundle.get("torvik_game_logs"), list) and bundle.get("torvik_game_logs"):
+        try:
+            from src.database import init_team_game_logs_table
+            from src.scrapers.torvik_game_logs import TorvikGameLogsScraper
+
+            init_team_game_logs_table()
+            counts["torvik_game_logs"] = int(TorvikGameLogsScraper().save_games(bundle["torvik_game_logs"]) or 0)
+        except Exception as e:
+            warnings.append(f"torvik_game_logs: {e}")
+
+    kenpom_synced = sum(
+        counts[k]
+        for k in (
+            "ratings",
+            "four_factors",
+            "height_experience",
+            "home_court",
+            "player_stats",
+            "ref_ratings",
+            "fanmatch_games",
+        )
+    )
     total_synced = sum(counts.values())
     if total_synced == 0:
-        raise ValueError("Could not parse any valid KenPom rows from the uploaded bundle.")
+        raise ValueError("Could not parse any valid KenPom or Torvik rows from the uploaded bundle.")
 
-    notes = (
-        f"Imported bundle ({asof}): ratings={counts['ratings']}, four_factors={counts['four_factors']}, "
-        f"height_exp={counts['height_experience']}, hca={counts['home_court']}, "
-        f"players={counts['player_stats']}, refs={counts['ref_ratings']}, fanmatch={counts['fanmatch_games']}"
-    )
-    upsert_health(
-        "kenpom",
-        "ok",
-        row_count=counts["ratings"] or total_synced,
-        notes=notes[:240],
-    )
+    if kenpom_synced > 0:
+        notes = (
+            f"Imported bundle ({asof}): ratings={counts['ratings']}, four_factors={counts['four_factors']}, "
+            f"height_exp={counts['height_experience']}, hca={counts['home_court']}, "
+            f"players={counts['player_stats']}, refs={counts['ref_ratings']}, fanmatch={counts['fanmatch_games']}"
+        )
+        upsert_health(
+            "kenpom",
+            "ok",
+            row_count=counts["ratings"] or kenpom_synced,
+            notes=notes[:240],
+        )
     return {
         "status": "ok",
         "asof_date": asof,
@@ -2127,7 +2275,20 @@ def ingest_kenpom_csv(csv_text: str, asof_date: str | None = None) -> dict:
             raise ValueError(f"Invalid KenPom JSON bundle: {e}") from e
         if isinstance(bundle, dict) and (
             bundle.get("_kp_bundle")
-            or any(k in bundle for k in ("ratings", "stats", "height", "hca", "playerstats", "refs", "fanmatch"))
+            or any(
+                k in bundle
+                for k in (
+                    "ratings",
+                    "stats",
+                    "height",
+                    "hca",
+                    "playerstats",
+                    "refs",
+                    "fanmatch",
+                    "torvik_teams",
+                    "torvik_game_logs",
+                )
+            )
         ):
             return ingest_kenpom_bundle(bundle, asof_date=asof_date)
         raise ValueError("JSON payload is missing KenPom dataset keys.")

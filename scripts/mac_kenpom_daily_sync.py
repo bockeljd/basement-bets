@@ -122,11 +122,112 @@ def build_kenpom_bundle_from_session(sess: requests.Session, sleep_s: float = 1.
     return bundle
 
 
+def fetch_torvik_bundle_data(season_year: int | None = None, days_back: int = 10) -> dict:
+    """Fetch BartTorvik efficiency ratings JSON + recent schedule game logs from residential IP."""
+    from datetime import timedelta
+    from src.utils.ncaam_season import current_ncaam_season_end_year
+
+    year_val = int(season_year or current_ncaam_season_end_year())
+    out: dict[str, object] = {}
+
+    sess = requests.Session()
+    sess.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json,text/plain,*/*",
+    })
+
+    # 1. Team efficiency ratings + luck / continuity
+    try:
+        url = f"https://barttorvik.com/{year_val}_team_results.json"
+        resp = sess.get(url, timeout=25)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) >= 100:
+                out["torvik_teams"] = data
+                print(f"[mac-torvik] Pulled {len(data)} teams from {year_val}_team_results.json")
+            else:
+                print(f"[mac-torvik] Unexpected team_results payload size: {len(data) if isinstance(data, list) else type(data).__name__}")
+        else:
+            print(f"[mac-torvik] team_results HTTP {resp.status_code}")
+    except Exception as exc:
+        print(f"[mac-torvik] team_results warning: {exc}")
+
+    # 2. Recent completed D1 schedule game logs
+    logs: list[dict] = []
+    seen_logs: set[tuple[str, str, str]] = set()
+    today_dt = datetime.now(timezone.utc)
+    for offset in range(max(0, int(days_back))):
+        dt = today_dt - timedelta(days=offset)
+        date_compact = dt.strftime("%Y%m%d")
+        date_iso = dt.strftime("%Y-%m-%d")
+        try:
+            r = sess.get(f"https://barttorvik.com/schedule.php?date={date_compact}&json=1", timeout=15)
+            if r.status_code != 200 or not r.text.lstrip().startswith("["):
+                continue
+            items = r.json()
+            if not isinstance(items, list):
+                continue
+            for g in items:
+                if not isinstance(g, dict):
+                    continue
+                home = str(g.get("home") or g.get("team_home") or "").strip()
+                away = str(g.get("away") or g.get("team_away") or "").strip()
+                if not home or not away:
+                    continue
+                margin_raw = g.get("margin")
+                pts_h = g.get("score_home")
+                pts_a = g.get("score_away")
+                if margin_raw is None and (pts_h is None or pts_a is None):
+                    continue
+                try:
+                    margin_home = int(round(float(margin_raw))) if margin_raw is not None else int(round(float(pts_h) - float(pts_a)))
+                except (TypeError, ValueError):
+                    continue
+                g_date = str(g.get("date") or date_iso)[:10]
+                for team, opp, is_h, m_val, pts_val in (
+                    (home, away, True, margin_home, pts_h),
+                    (away, home, False, -margin_home, pts_a),
+                ):
+                    key = (team, g_date, opp)
+                    if key in seen_logs:
+                        continue
+                    seen_logs.add(key)
+                    try:
+                        pts_int = int(pts_val) if pts_val is not None else None
+                    except (TypeError, ValueError):
+                        pts_int = None
+                    logs.append({
+                        "team_text": team,
+                        "game_date": g_date,
+                        "opponent": opp,
+                        "points": pts_int,
+                        "three_p_made": None,
+                        "three_p_attempted": None,
+                        "three_p_pct": None,
+                        "fouls": None,
+                        "opponent_rank": None,
+                        "is_home": is_h,
+                        "margin": m_val,
+                    })
+        except Exception:
+            continue
+        if offset + 1 < int(days_back):
+            time.sleep(0.25)
+
+    if logs:
+        out["torvik_game_logs"] = logs
+        print(f"[mac-torvik] Pulled {len(logs)} completed schedule game-log rows")
+    return out
+
+
 def upload_bundle_to_api(
     bundle_json: str,
     app_url: str,
     basement_password: str | None = None,
-    timeout: int = 60,
+    timeout: int = 90,
 ) -> dict:
     """POST the `_kp_bundle` JSON payload to Basement Bets `/api/admin/kenpom/upload-csv`."""
     endpoint = app_url.rstrip("/") + "/api/admin/kenpom/upload-csv"
@@ -162,6 +263,12 @@ def run_mac_sync(dry_run: bool = False) -> dict:
 
     summary = {k: len(str(bundle.get(k) or "").splitlines()) for k, _, _ in KENPOM_ENDPOINTS}
     print(f"[mac-kenpom] Pulled line counts: {summary}")
+
+    torvik_extra = fetch_torvik_bundle_data()
+    if torvik_extra:
+        bundle.update(torvik_extra)
+        summary["torvik_teams"] = len(torvik_extra.get("torvik_teams") or [])
+        summary["torvik_game_logs"] = len(torvik_extra.get("torvik_game_logs") or [])
 
     bundle_json = json.dumps(bundle)
     if dry_run:

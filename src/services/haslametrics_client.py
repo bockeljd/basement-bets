@@ -334,13 +334,13 @@ def compute_matchup_projection(
     if None in (h_oe, h_de, a_oe, a_de) or min(h_oe, h_de, a_oe, a_de) <= 0:
         return None
 
-    av_eff = _to_float(home.get("av_eff")) or _to_float(away.get("av_eff")) or 109.7
-    av_pace = _to_float(home.get("av_pace")) or _to_float(away.get("av_pace")) or 69.5
+    av_eff = _to_float(home.get("av_eff")) or _to_float(away.get("av_eff")) or 106.5
+    av_pace = _to_float(home.get("av_pace")) or _to_float(away.get("av_pace")) or 68.0
     hca_eff = _to_float(home.get("hca_eff")) or _to_float(away.get("hca_eff")) or 4.27
     hca_pace = _to_float(home.get("hca_pace")) or _to_float(away.get("hca_pace")) or 0.08
 
-    h_tempo = _to_float(home.get("tempo")) or 69.5
-    a_tempo = _to_float(away.get("tempo")) or 69.5
+    h_tempo = _to_float(home.get("tempo")) or av_pace
+    a_tempo = _to_float(away.get("tempo")) or av_pace
     expected_pace = (h_tempo + a_tempo - av_pace) + (0.0 if neutral_site else hca_pace)
     expected_pace = max(55.0, min(85.0, expected_pace))
 

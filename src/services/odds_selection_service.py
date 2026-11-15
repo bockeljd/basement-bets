@@ -131,19 +131,79 @@ class OddsSelectionService:
             'selection_method': 'median_consensus'
         }
 
-    def get_best_price_for_side(self, snapshots: List[Dict], market_type: str, side: str) -> Optional[Dict]:
+    def get_best_price_for_side(
+        self,
+        snapshots: List[Dict],
+        market_type: str,
+        side: str,
+        target_line: Optional[float] = None,
+    ) -> Optional[Dict]:
+        """Find the best available price for a specific side (HOME/AWAY or OVER/UNDER).
+
+        Deduplicates by book (keeping newest ``captured_at``), restricts SPREAD/TOTAL
+        shopping to within 0.5 pts of ``target_line`` (or the median line), and ranks
+        by most favorable line first then highest American price.
         """
-        Find the best available price for a specific side (HOME/AWAY or OVER/UNDER).
-        Used AFTER identifying an edge to find the optimal book to bet.
-        """
-        filtered = [s for s in snapshots if s.get('market_type') == market_type and s.get('side') == side]
+        filtered = [
+            s for s in snapshots
+            if s.get('market_type') == market_type
+            and s.get('side') == side
+            and s.get('price') is not None
+        ]
         if not filtered:
             return None
-        
-        # Best price = highest American odds (e.g., -105 > -110 > -115)
-        # For positive odds, also higher is better (+120 > +110)
-        filtered.sort(key=lambda x: x.get('price', -999), reverse=True)
-        
-        best = filtered[0].copy()
+
+        # Keep latest snapshot per book so stale outlier prices never win line-shopping.
+        latest_by_book: Dict[str, Dict] = {}
+        ordered_books: List[str] = []
+        for s in filtered:
+            book_key = str(s.get('book') or '__unknown__')
+            prev = latest_by_book.get(book_key)
+            if prev is None:
+                latest_by_book[book_key] = s
+                ordered_books.append(book_key)
+            else:
+                ts_new = str(s.get('captured_at') or '')
+                ts_old = str(prev.get('captured_at') or '')
+                if ts_new and ts_new > ts_old:
+                    latest_by_book[book_key] = s
+        candidates = [latest_by_book[b] for b in ordered_books]
+
+        mkt_upper = str(market_type or '').upper()
+        side_upper = str(side or '').upper()
+
+        if mkt_upper in ('SPREAD', 'TOTAL'):
+            with_lines = [s for s in candidates if s.get('line_value') is not None]
+            if with_lines:
+                anchor = (
+                    float(target_line)
+                    if target_line is not None
+                    else statistics.median(float(s['line_value']) for s in with_lines)
+                )
+                near = [s for s in with_lines if abs(float(s['line_value']) - anchor) <= 0.5]
+                if near:
+                    near.sort(
+                        key=lambda x: (
+                            (-float(x['line_value']) if (mkt_upper == 'TOTAL' and side_upper == 'OVER') else float(x['line_value'])),
+                            int(x.get('price', -999)),
+                        ),
+                        reverse=True,
+                    )
+                    best = near[0].copy()
+                else:
+                    with_lines.sort(
+                        key=lambda x: (
+                            -abs(float(x['line_value']) - anchor),
+                            (-float(x['line_value']) if (mkt_upper == 'TOTAL' and side_upper == 'OVER') else float(x['line_value'])),
+                            int(x.get('price', -999)),
+                        ),
+                        reverse=True,
+                    )
+                    best = with_lines[0].copy()
+                best['selection_method'] = 'best_price'
+                return best
+
+        candidates.sort(key=lambda x: int(x.get('price', -999)), reverse=True)
+        best = candidates[0].copy()
         best['selection_method'] = 'best_price'
         return best

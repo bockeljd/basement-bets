@@ -734,15 +734,24 @@ class NCAAMMarketFirstModelV2(BaseModel):
             
             # Step A: Get CONSENSUS lines (median of all books) for model input
             consensus_spread = self.odds_selector.get_consensus_snapshot(raw_snaps, 'SPREAD', 'HOME')
+            consensus_spread_away = self.odds_selector.get_consensus_snapshot(raw_snaps, 'SPREAD', 'AWAY')
             consensus_total = self.odds_selector.get_consensus_snapshot(raw_snaps, 'TOTAL', 'OVER')
             consensus_ml_home = self.odds_selector.get_consensus_snapshot(raw_snaps, 'MONEYLINE', 'HOME')
             consensus_ml_away = self.odds_selector.get_consensus_snapshot(raw_snaps, 'MONEYLINE', 'AWAY')
-            
-            # Step B: Get BEST PRICES for later (after we find an edge)
-            best_spread_home = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'HOME')
-            best_spread_away = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'AWAY')
-            best_total_over = self.odds_selector.get_best_price_for_side(raw_snaps, 'TOTAL', 'OVER')
-            best_total_under = self.odds_selector.get_best_price_for_side(raw_snaps, 'TOTAL', 'UNDER')
+
+            spread_target_home = consensus_spread['line_value'] if consensus_spread else None
+            spread_target_away = (
+                consensus_spread_away['line_value']
+                if consensus_spread_away
+                else (-float(consensus_spread['line_value']) if consensus_spread and consensus_spread.get('line_value') is not None else None)
+            )
+            total_target = consensus_total['line_value'] if consensus_total else None
+
+            # Step B: Get BEST PRICES for later (after we find an edge), anchored within 0.5 pts of consensus
+            best_spread_home = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'HOME', target_line=spread_target_home)
+            best_spread_away = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'AWAY', target_line=spread_target_away)
+            best_total_over = self.odds_selector.get_best_price_for_side(raw_snaps, 'TOTAL', 'OVER', target_line=total_target)
+            best_total_under = self.odds_selector.get_best_price_for_side(raw_snaps, 'TOTAL', 'UNDER', target_line=total_target)
             best_ml_home = self.odds_selector.get_best_price_for_side(raw_snaps, 'MONEYLINE', 'HOME')
             best_ml_away = self.odds_selector.get_best_price_for_side(raw_snaps, 'MONEYLINE', 'AWAY')
             
@@ -1139,11 +1148,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if council_adjustment_spread != 0.0:
                 print(f"[MODEL] Council spread adj {council_adjustment_spread:+.2f} computed but GATED (Phase 1 mode).")
         
-        # Apply Caps (widen raw cap modestly when 2+ independent sources agree;
+        # Apply Caps (widen raw cap modestly when 2+ independent sources agree,
+        # but keep Nov/Dec early-season spread cap tighter so unpriced roster variance doesn't overshoot market;
         # damp blowout spread cap on 25+ pt mismatches so walk-on garbage time doesn't inflate edges)
+        is_early_season = game_month in (11, 12)
         effective_cap_spread = self.CAP_SPREAD
         if (os.getenv('NCAAM_CAP_SPREAD') is None) and agree_count >= 2:
-            effective_cap_spread = max(self.CAP_SPREAD, 3.2)
+            if is_early_season:
+                effective_cap_spread = max(self.CAP_SPREAD, 2.2 if agree_count >= 3 else self.CAP_SPREAD)
+            else:
+                effective_cap_spread = max(self.CAP_SPREAD, 3.2)
         if (os.getenv('NCAAM_CAP_SPREAD') is None) and mu_market_spread is not None and abs(float(mu_market_spread)) >= 25.0:
             effective_cap_spread = min(effective_cap_spread, 2.4)
         if abs(mu_spread_final - mu_market_spread) > effective_cap_spread:
@@ -1211,7 +1225,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         effective_cap_total = self.CAP_TOTAL
         if (os.getenv('NCAAM_CAP_TOTAL') is None) and agree_count_total >= 2:
-            effective_cap_total = max(self.CAP_TOTAL, 4.5)
+            if is_early_season:
+                effective_cap_total = max(self.CAP_TOTAL, 3.0)
+            else:
+                effective_cap_total = max(self.CAP_TOTAL, 4.5 if agree_count_total >= 3 else 3.8)
 
         if has_total and mu_market_total is not None:
             mu_total_final = (
@@ -1270,6 +1287,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         sigma_spread = (((base_sigma_spread + blowout_sigma_add) * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
         sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * (abs(mu_torvik_total - mu_market_total) if (mu_torvik_total is not None and mu_market_total is not None) else 0.0)) * early_season_sigma_mult
+        if is_early_season and abs(diff_torvik) >= 4.5:
+            sigma_spread *= 1.06
+        if is_early_season and abs(diff_tv_tot) >= 6.0:
+            sigma_total *= 1.06
 
         # --- Feature: Dynamic Sigma Inflation ---
         # If the Council identifies roster instability or significant red flags, 
@@ -1828,7 +1849,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
         context_json_str = json.dumps(ctx, default=str)
 
         inserted_best_doc_id = None
+        persisted_best = False
         persisted_spread_sides = set()
+        within_lock_window = False
+        try:
+            from datetime import timezone
+            st = event.get('start_time')
+            if st is not None:
+                if isinstance(st, str):
+                    st = datetime.fromisoformat(st.replace('Z', '+00:00'))
+                if getattr(st, 'tzinfo', None) is None:
+                    st = st.replace(tzinfo=timezone.utc)
+                now_dt = datetime.now(timezone.utc)
+                if now_dt >= (st - timedelta(minutes=10)):
+                    within_lock_window = True
+        except Exception:
+            within_lock_window = False
+
         if recs:
             def _normalize_spread_line(side, raw_line):
                 if raw_line is None:
@@ -1891,7 +1928,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     except Exception:
                         bet_line = None
                     selection = selection or (f"{pick} {bet_line}" if bet_line is not None else pick)
-                    mu_market = float(market_snapshot.get('total') or 145.0)
+                    mu_market = _safe_float(market_snapshot.get('total'))
                     mu_torvik_val = mu_torvik_total
                     mu_final_val = mu_total_final
                     sigma_val = sigma_total
@@ -1901,7 +1938,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     pick = rec.get('team') or event.get('home_team')
                     bet_line = line_val
                     selection = selection or pick
-                    mu_market = float(market_snapshot.get('total') or 145.0)
+                    mu_market = _safe_float(market_snapshot.get('total'))
                     mu_torvik_val = mu_torvik_total
                     mu_final_val = mu_total_final
                     sigma_val = sigma_total
@@ -1944,7 +1981,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
             ordered_recs.extend([r for r in recs if r is not best_rec])
             for rec in ordered_recs:
                 doc = _build_rec_doc(rec)
+                if not persist or within_lock_window:
+                    continue
+                if relax_gates and (
+                    int(doc.get("confidence_0_100") or 0) < 55
+                    or float(doc.get("ev_per_unit") or 0.0) < self.PUBLISH_MIN_EV
+                ):
+                    continue
                 try:
+                    import uuid
+                    doc.setdefault("id", str(uuid.uuid4()))
                     insert_model_prediction(doc)
                 except Exception as e:
                     print(f"[MODEL] failed to persist rec {rec.get('market')} {rec.get('side')}: {e}")
@@ -1957,6 +2003,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     ui_ref['prediction_id'] = doc.get('id')
                 if rec is best_rec:
                     inserted_best_doc_id = doc.get('id')
+                    persisted_best = True
         best_prediction_id = inserted_best_doc_id
         # --- Persisted pick normalization ---
         # For SPREAD we want the persisted `pick` to be the actual team name (not "home/away"),
@@ -2142,22 +2189,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         should_persist = should_persist and str(res.get('pick') or '').upper() not in ('', 'NONE')
         should_persist = should_persist and (res.get('selection') is not None and str(res.get('selection')).strip() not in ('', '—'))
 
-        # Lock window: do not persist new/updated picks inside 10 minutes to tip.
-        try:
-            from datetime import timezone
-            st = event.get('start_time')
-            if st is not None:
-                if isinstance(st, str):
-                    st = datetime.fromisoformat(st.replace('Z', '+00:00'))
-                if getattr(st, 'tzinfo', None) is None:
-                    st = st.replace(tzinfo=timezone.utc)
-                now_dt = datetime.now(timezone.utc)
-                if now_dt >= (st - timedelta(minutes=10)):
-                    should_persist = False
-        except Exception:
-            pass
+        if within_lock_window:
+            should_persist = False
 
-        if persist and should_persist:
+        if persist and should_persist and not persisted_best:
             insert_model_prediction(res)
             if str(res.get('market_type') or '').upper() == 'SPREAD':
                 rec_side = str((best_rec or {}).get('side') or '').strip().upper()
@@ -2250,26 +2285,33 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     except Exception:
                         edge_prob = None
 
-                    doc_ml = {
-                        **{k: res.get(k) for k in ("event_id", "user_id", "analyzed_at", "model_version", "mu_market", "mu_torvik", "mu_final", "sigma", "inputs_json", "outputs_json", "narrative_json", "context_json")},
-                        "id": str(uuid.uuid4()),
-                        "market_type": "MONEYLINE",
-                        "pick": team,
-                        "bet_line": None,
-                        "bet_price": price,
-                        "book": book,
-                        "win_prob": float(wp),
-                        "ev_per_unit": float(ev),
-                        "confidence_0_100": self._confidence_score_0_100(None, fallback_win_prob=float(wp), ev_per_unit=float(ev)),
-                        "selection": str(team),
-                        "price": price,
-                        # Store probability edge as edge_points for ML (not points).
-                        "edge_points": (round(float(edge_prob), 4) if edge_prob is not None else None),
-                        "open_line": None,
-                        "open_price": price,
-                        "clv_method": "odds_selector_v1",
-                    }
-                    insert_model_prediction(doc_ml)
+                    equiv_ml_lb10 = (0.50 + float(edge_prob) - 0.015) if edge_prob is not None else None
+                    ml_conf_0_100 = self._confidence_score_0_100(
+                        equiv_ml_lb10,
+                        fallback_win_prob=(0.50 + max(0.0, float(edge_prob or 0.0))),
+                        ev_per_unit=float(ev),
+                    )
+                    if relax_gates or ml_conf_0_100 >= 55:
+                        doc_ml = {
+                            **{k: res.get(k) for k in ("event_id", "user_id", "analyzed_at", "model_version", "mu_market", "mu_torvik", "mu_final", "sigma", "inputs_json", "outputs_json", "narrative_json", "context_json")},
+                            "id": str(uuid.uuid4()),
+                            "market_type": "MONEYLINE",
+                            "pick": team,
+                            "bet_line": None,
+                            "bet_price": price,
+                            "book": book,
+                            "win_prob": float(wp),
+                            "ev_per_unit": float(ev),
+                            "confidence_0_100": ml_conf_0_100,
+                            "selection": str(team),
+                            "price": price,
+                            # Store probability edge as edge_points for ML (not points).
+                            "edge_points": (round(float(edge_prob), 4) if edge_prob is not None else None),
+                            "open_line": None,
+                            "open_price": price,
+                            "clv_method": "odds_selector_v1",
+                        }
+                        insert_model_prediction(doc_ml)
         except Exception as e:
             # never block analyze() on ML persistence
             try:
@@ -2283,11 +2325,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
     # Straight bets only for now. (Correlation/parlays are handled elsewhere.)
     PUBLISH_MIN_EV = 0.02  # +2.0% per unit
     PUBLISH_MIN_EV_TOTAL = 0.035  # +3.5% EV required on Over/Under totals (curbs O/U bleed)
+    PUBLISH_MIN_EV_TOTAL_OVER = 0.041  # +4.1% EV required on TOTAL OVER (curbs early-season O/U inflation)
+    PUBLISH_MIN_WINPROB_LB10 = 0.52  # Require >= 52% 10th-pct cover prob (maps to >= 55 conf / Medium+)
     PUBLISH_MIN_EV_ML = 0.05  # +5.0% EV required on Moneyline picks
-    MIN_ML_WIN_PROB = 0.45    # Exclude <45% longshots (historically ~31.8% win, -10.4% ROI)
-    MAX_ML_UNDERDOG_PRICE = 185
+    MIN_ML_WIN_PROB = 0.52    # Exclude plus-money / sub-52% underdogs (historically ~20% win rate)
+    MAX_ML_UNDERDOG_PRICE = 105
     MAX_ML_FAVORITE_PRICE = -250
-    MIN_ML_PROB_EDGE = 0.03   # Require >= +3.0% calibrated win-prob edge vs market implied
+    MIN_ML_PROB_EDGE = 0.035  # Require >= +3.5% calibrated win-prob edge vs market implied
     PUBLISH_CI_Z = 1.96    # 95% CI on archetype mean
     PUBLISH_MIN_N_TORVIK_OK = 40
     PUBLISH_MIN_N_TORVIK_MISSING = 60
@@ -2470,11 +2514,30 @@ class NCAAMMarketFirstModelV2(BaseModel):
         stats = self._get_archetype_stats(key)
 
         min_n = self.PUBLISH_MIN_N_TORVIK_OK if torvik_ok else self.PUBLISH_MIN_N_TORVIK_MISSING
-        base_ev = float(self.PUBLISH_MIN_EV_TOTAL) if market == 'TOTAL' else float(self.PUBLISH_MIN_EV)
+        side_lower = str(rec.get("side") or "").strip().lower()
+        if market == "TOTAL":
+            base_ev = (
+                float(getattr(self, "PUBLISH_MIN_EV_TOTAL_OVER", 0.041))
+                if side_lower == "over"
+                else float(self.PUBLISH_MIN_EV_TOTAL)
+            )
+        else:
+            base_ev = float(self.PUBLISH_MIN_EV)
         min_ev = base_ev if torvik_ok else (base_ev + float(self.PUBLISH_MIN_EV_TORVIK_MISSING_BUMP))
 
         if ev < min_ev:
             return False
+
+        lb10 = rec.get("win_prob_lb10")
+        if lb10 is not None:
+            min_lb10 = float(
+                os.getenv(
+                    "PUBLISH_MIN_WINPROB_LB10",
+                    str(getattr(self, "PUBLISH_MIN_WINPROB_LB10", 0.52)),
+                )
+            )
+            if float(lb10) < min_lb10:
+                return False
 
         if (stats.get("n") or 0) < min_n:
             return False
@@ -2561,18 +2624,25 @@ class NCAAMMarketFirstModelV2(BaseModel):
         return self._model_conf_params
 
     def _tau_for_market(self, market: str) -> float:
-        """Return tau for mu-uncertainty simulations.
+        """Return shrinkage-adjusted tau for mu-uncertainty bounds.
 
         Enabled by default (set ENABLE_MU_UNCERTAINTY_CONF=0 to disable) using empirical
-        closing-line dispersion params so lb10 confidence penalizes marginal/noisy edges.
+        closing-line dispersion scaled by posterior market-anchor shrinkage so lb10
+        penalizes noisy/thin edges without crushing capped consensus edges.
         """
         try:
             if str(os.getenv('ENABLE_MU_UNCERTAINTY_CONF', '1')).strip() == '0':
                 return 0.0
             params = self._load_model_conf_params() or {}
             if str(market).upper() == 'TOTAL':
-                return float(params.get('tau_total') or 0.0)
-            return float(params.get('tau_spread') or 0.0)
+                raw_tau = float(params.get('tau_total') or 0.0)
+            else:
+                raw_tau = float(params.get('tau_spread') or 0.0)
+            if raw_tau <= 0.0:
+                return 0.0
+            shrinkage = float(os.getenv('NCAAM_MU_TAU_SHRINKAGE', '0.25'))
+            shrinkage = max(0.10, min(1.0, shrinkage))
+            return raw_tau * shrinkage
         except Exception:
             return 0.0
 
@@ -2594,13 +2664,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         side: str,
         n_sims: int = 600,
     ) -> Dict[str, Optional[float]]:
-        """Compute win_prob bounds by sampling uncertainty in mu.
+        """Compute deterministic win_prob p10/p90 bounds from uncertainty in mu.
 
-        Returns calibrated p10/p90 bounds for P(bet wins).
         NOTE: `mu` and `line` are passed in HOME perspective for SPREAD, and absolute for TOTAL.
         """
-        import random
-
         tau = self._tau_for_market(market)
         if not (tau and tau > 0.0 and sigma and sigma > 0.0):
             return {"lb10": None, "ub90": None}
@@ -2618,8 +2685,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
             except Exception:
                 return 0.0
 
-        for _ in range(int(n_sims)):
-            mu_true = float(mu) + random.gauss(0.0, float(tau))
+        z_10 = -1.2815515655446004
+        z_90 = 1.2815515655446004
+        for z_val in (z_10, z_90):
+            mu_true = float(mu) + z_val * float(tau)
 
             if mkt == 'SPREAD':
                 # Home cover probability using same convention as main path
@@ -2628,7 +2697,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 p_home = prob_home_raw - (push_prob / 2)
                 p_away = (1.0 - prob_home_raw) - (push_prob / 2)
                 p = p_home if side == 'home' else p_away
-
             else:
                 prob_over_raw = 1.0 - self._normal_cdf(float(line), float(mu_true), float(sigma))
                 push_prob = _push_prob(float(line))
@@ -2639,8 +2707,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             probs.append(self._calibrate_win_prob(p))
 
         return {
-            "lb10": self._quantile(probs, 0.10),
-            "ub90": self._quantile(probs, 0.90),
+            "lb10": float(min(probs)),
+            "ub90": float(max(probs)),
         }
 
     def _confidence_label_from_winprob(self, lb10: Optional[float], fallback_win_prob: Optional[float] = None) -> str:
@@ -3018,45 +3086,54 @@ class NCAAMMarketFirstModelV2(BaseModel):
         book_consensus = snap.get("book_spread", "Consensus")
 
         if line_s is not None:
-            prob_home = _spread_cover_prob_home(mu_s, sig_s, line_s)
-            prob_home_cal = self._calibrate_win_prob(prob_home)
-            push_prob = get_push_prob(float(line_s), float(sig_s))
-
-            ev_home = self._calculate_ev(prob_home_cal, price_home, push_prob=push_prob)
-            kelly_home = self._calculate_kelly(prob_home_cal, price_home)
-
-            # No hard EV caps; extreme EVs are handled by sanity scoring (below).
-            prob_home_raw = 1.0 - self._normal_cdf(-float(line_s), -float(mu_s), float(sig_s))
-            prob_away = 1.0 - prob_home_raw
-            prob_away_cal = self._calibrate_win_prob(prob_away)
-
-            ev_away = self._calculate_ev(prob_away_cal, price_away, push_prob=push_prob)
-            kelly_away = self._calculate_kelly(prob_away_cal, price_away)
-            # (removed hard EV cap; handled by sanity scoring)
-
-            # Use consensus for model math, but use a bettable line for the displayed recommendation.
-            # Some consensus aggregations can produce quarter-points (e.g. -10.25) which are not real lines.
-            market_line_s = float(line_s)
-            fair_line_s = float(mu_s)
-            edge_pts = abs(fair_line_s - market_line_s)
-
             def _snap_half(x: float) -> float:
                 try:
                     return round(float(x) * 2.0) / 2.0
                 except Exception:
                     return float(x)
 
-            # Candidate recs first
-            # Prefer best available line+price for the bet display (avoid quarter-point consensus lines).
+            # Use consensus for model math, and evaluate prob/bounds/EV at the exact bettable
+            # line & price (constrained near consensus so stale alt lines never distort EV).
+            market_line_s = float(line_s)
+            fair_line_s = float(mu_s)
+
             best_home = snap.get('_best_spread_home') or {}
-            best_away_line = (best_away or {}).get('line_value')
             best_home_line = best_home.get('line_value')
+            best_away_line = (best_away or {}).get('line_value')
+
+            line_home_bet = _snap_half(
+                best_home_line
+                if (best_home_line is not None and abs(float(best_home_line) - market_line_s) <= 1.0)
+                else market_line_s
+            )
+            line_away_bet = _snap_half(
+                best_away_line
+                if (best_away_line is not None and abs(float(best_away_line) - (-market_line_s)) <= 1.0)
+                else -market_line_s
+            )
+            price_home_bet = int(best_home.get('price')) if best_home.get('price') is not None else int(price_home)
+            price_away_bet = int(best_away.get('price')) if (best_away and best_away.get('price') is not None) else int(price_away)
+
+            prob_home = _spread_cover_prob_home(mu_s, sig_s, line_home_bet)
+            prob_home_cal = self._calibrate_win_prob(prob_home)
+            push_prob_home = get_push_prob(float(line_home_bet), float(sig_s))
+            ev_home = self._calculate_ev(prob_home_cal, price_home_bet, push_prob=push_prob_home)
+            kelly_home = self._calculate_kelly(prob_home_cal, price_home_bet)
+
+            prob_away = 1.0 - _spread_cover_prob_home(mu_s, sig_s, -float(line_away_bet))
+            prob_away_cal = self._calibrate_win_prob(prob_away)
+            push_prob_away = get_push_prob(float(line_away_bet), float(sig_s))
+            ev_away = self._calculate_ev(prob_away_cal, price_away_bet, push_prob=push_prob_away)
+            kelly_away = self._calculate_kelly(prob_away_cal, price_away_bet)
+
+            edge_pts_home = abs(fair_line_s - float(line_home_bet))
+            edge_pts_away = abs(fair_line_s - (-float(line_away_bet)))
 
             bounds_home = self._confidence_bounds_from_mu_uncertainty(
                 market='SPREAD',
                 mu=float(mu_s),
                 sigma=float(sig_s),
-                line=float(line_s),
+                line=float(line_home_bet),
                 side='home',
             )
 
@@ -3064,8 +3141,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "market": "SPREAD",
                 "side": "home",
                 "team": event["home_team"],
-                "line": _snap_half(best_home_line if best_home_line is not None else market_line_s),
-                "price": int(best_home.get('price')) if best_home.get('price') is not None else int(price_home),
+                "line": line_home_bet,
+                "price": price_home_bet,
                 "prob": round(prob_home_cal, 3),
                 "win_prob": round(prob_home_cal, 3),
                 "win_prob_lb10": (round(float(bounds_home.get('lb10')), 3) if bounds_home.get('lb10') is not None else None),
@@ -3073,14 +3150,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_home, 4)),
                 "kelly": float(round(kelly_home, 4)),
                 "book": best_home.get('book') or book_consensus,
-                "edge_points": float(round(edge_pts, 2)),
+                "edge_points": float(round(edge_pts_home, 2)),
             }
 
             bounds_away = self._confidence_bounds_from_mu_uncertainty(
                 market='SPREAD',
                 mu=float(mu_s),
                 sigma=float(sig_s),
-                line=float(line_s),
+                line=-float(line_away_bet),
                 side='away',
             )
 
@@ -3088,8 +3165,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "market": "SPREAD",
                 "side": "away",
                 "team": event["away_team"],
-                "line": _snap_half((best_away_line if best_away_line is not None else -market_line_s)),
-                "price": int(price_away),
+                "line": line_away_bet,
+                "price": price_away_bet,
                 "prob": round(prob_away_cal, 3),
                 "win_prob": round(prob_away_cal, 3),
                 "win_prob_lb10": (round(float(bounds_away.get('lb10')), 3) if bounds_away.get('lb10') is not None else None),
@@ -3097,7 +3174,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_away, 4)),
                 "kelly": float(round(kelly_away, 4)),
                 "book": (best_away or {}).get('book') or book_consensus,
-                "edge_points": float(round(edge_pts, 2)),
+                "edge_points": float(round(edge_pts_away, 2)),
             }
 
             # Choose the higher-EV side, then gate it.
@@ -3148,12 +3225,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
                             # Recompute bounds with inflated sigma (movement/disagreement => more uncertainty)
                             try:
+                                out_side = str(out.get('side') or '').lower()
+                                home_persp_line = float(out['line']) if out_side == 'home' else -float(out['line'])
                                 b2 = self._confidence_bounds_from_mu_uncertainty(
                                     market='SPREAD',
                                     mu=float(mu_s),
                                     sigma=float(sig_s) * float(out.get('sigma_mult') or 1.0),
-                                    line=float(line_s),
-                                    side=str(out.get('side') or ''),
+                                    line=home_persp_line,
+                                    side=out_side,
                                 )
                                 if b2:
                                     out['win_prob_lb10'] = (round(float(b2.get('lb10')), 3) if b2.get('lb10') is not None else out.get('win_prob_lb10'))
@@ -3162,7 +3241,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                 pass
 
                             out['ev'] = float(round(ev_adj, 4))
-                            recs.append(out)
+                            if relax_gates or self._passes_publish_gates(out, market_line_home=market_line_s, torvik_ok=torvik_ok):
+                                recs.append(out)
                     else:
                         recs.append({**best, 'steam_blocked': False})
 
@@ -3177,36 +3257,50 @@ class NCAAMMarketFirstModelV2(BaseModel):
         book_under = best_under["book"] if best_under else snap.get("book_total", "Consensus")
 
         if line_t is not None:
-            prob_over_raw = 1.0 - self._normal_cdf(line_t, mu_t, sig_t)
-            push_prob_t = get_push_prob(line_t, sig_t)
-            prob_over = prob_over_raw
-            prob_under = 1.0 - prob_over_raw
-
-            prob_over_cal = self._calibrate_win_prob(prob_over)
-            prob_under_cal = self._calibrate_win_prob(prob_under)
-
-            ev_over = self._calculate_ev(prob_over_cal, price_over, push_prob=push_prob_t)
-            kelly_over = self._calculate_kelly(prob_over_cal, price_over)
-            ev_under = self._calculate_ev(prob_under_cal, price_under, push_prob=push_prob_t)
-            kelly_under = self._calculate_kelly(prob_under_cal, price_under)
-
-            # No hard EV caps; extreme EVs are handled by sanity scoring (below).
             market_line_t = float(line_t)
             fair_line_t = float(mu_t)
-            edge_pts_t = abs(fair_line_t - market_line_t)
+
+            over_raw_line = best_over.get("line_value") if isinstance(best_over, dict) else None
+            under_raw_line = best_under.get("line_value") if isinstance(best_under, dict) else None
+            line_over_bet = (
+                float(over_raw_line)
+                if (over_raw_line is not None and abs(float(over_raw_line) - market_line_t) <= 1.0)
+                else market_line_t
+            )
+            line_under_bet = (
+                float(under_raw_line)
+                if (under_raw_line is not None and abs(float(under_raw_line) - market_line_t) <= 1.0)
+                else market_line_t
+            )
+
+            prob_over_raw = 1.0 - self._normal_cdf(line_over_bet, mu_t, sig_t)
+            prob_under_raw = self._normal_cdf(line_under_bet, mu_t, sig_t)
+            push_prob_over = get_push_prob(line_over_bet, sig_t)
+            push_prob_under = get_push_prob(line_under_bet, sig_t)
+
+            prob_over_cal = self._calibrate_win_prob(prob_over_raw)
+            prob_under_cal = self._calibrate_win_prob(prob_under_raw)
+
+            ev_over = self._calculate_ev(prob_over_cal, price_over, push_prob=push_prob_over)
+            kelly_over = self._calculate_kelly(prob_over_cal, price_over)
+            ev_under = self._calculate_ev(prob_under_cal, price_under, push_prob=push_prob_under)
+            kelly_under = self._calculate_kelly(prob_under_cal, price_under)
+
+            edge_pts_over = abs(fair_line_t - line_over_bet)
+            edge_pts_under = abs(fair_line_t - line_under_bet)
 
             bounds_over = self._confidence_bounds_from_mu_uncertainty(
                 market='TOTAL',
                 mu=float(mu_t),
                 sigma=float(sig_t),
-                line=float(line_t),
+                line=float(line_over_bet),
                 side='over',
             )
 
             cand_over = {
                 "market": "TOTAL",
                 "side": "over",
-                "line": float(best_over["line_value"] if best_over else line_t),
+                "line": line_over_bet,
                 "price": int(price_over),
                 "prob": round(prob_over_cal, 3),
                 "win_prob": round(prob_over_cal, 3),
@@ -3215,21 +3309,21 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_over, 4)),
                 "kelly": float(round(kelly_over, 4)),
                 "book": book_over,
-                "edge_points": float(round(edge_pts_t, 2)),
+                "edge_points": float(round(edge_pts_over, 2)),
             }
 
             bounds_under = self._confidence_bounds_from_mu_uncertainty(
                 market='TOTAL',
                 mu=float(mu_t),
                 sigma=float(sig_t),
-                line=float(line_t),
+                line=float(line_under_bet),
                 side='under',
             )
 
             cand_under = {
                 "market": "TOTAL",
                 "side": "under",
-                "line": float(best_under["line_value"] if best_under else line_t),
+                "line": line_under_bet,
                 "price": int(price_under),
                 "prob": round(prob_under_cal, 3),
                 "win_prob": round(prob_under_cal, 3),
@@ -3238,7 +3332,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_under, 4)),
                 "kelly": float(round(kelly_under, 4)),
                 "book": book_under,
-                "edge_points": float(round(edge_pts_t, 2)),
+                "edge_points": float(round(edge_pts_under, 2)),
             }
 
             best = cand_over if cand_over["ev"] >= cand_under["ev"] else cand_under
@@ -3286,7 +3380,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                     market='TOTAL',
                                     mu=float(mu_t),
                                     sigma=float(sig_t) * float(out.get('sigma_mult') or 1.0),
-                                    line=float(line_t),
+                                    line=float(out['line']),
                                     side=str(out.get('side') or ''),
                                 )
                                 if b2:
@@ -3296,7 +3390,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                 pass
 
                             out['ev'] = float(round(ev_adj, 4))
-                            recs.append(out)
+                            if relax_gates or self._passes_publish_gates(out, market_line_home=None, torvik_ok=torvik_ok):
+                                recs.append(out)
                     else:
                         recs.append({**best, 'steam_blocked': False})
 
@@ -3660,7 +3755,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
         """
         with get_db_connection() as conn:
             rows = _exec(conn, query, {"eid": event_id}).fetchall()
-            return [dict(r) for r in rows]
+            raw_rows = [dict(r) for r in rows] if rows else []
+
+        # Deduplicate to latest snapshot per (book, market_type, side) so stale history
+        # cannot outrank current lines during consensus/best-price selection.
+        seen_keys = set()
+        deduped: List[Dict] = []
+        for row in raw_rows:
+            key = (row.get("book"), row.get("market_type"), row.get("side"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(row)
+        return deduped
 
     def _get_council_verdict(self, event_id: str) -> Optional[Dict]:
         """
