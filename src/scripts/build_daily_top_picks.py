@@ -164,6 +164,27 @@ def _normalize_rec_for_storage(rec: dict | None) -> dict | None:
     except Exception:
         pass
 
+    try:
+        from src.utils.ev import compute_recommended_bet_size
+
+        if norm.get("suggested_units") is None:
+            sizing = compute_recommended_bet_size(
+                norm.get("win_prob"),
+                norm.get("price"),
+                confidence_tier=norm.get("confidence_tier"),
+                confidence_score=norm.get("confidence_0_100"),
+                ev=norm.get("ev"),
+                kelly_q=norm.get("kelly"),
+            )
+            norm["suggested_units"] = sizing["units"]
+            norm["recommended_units"] = sizing["units"]
+            norm["bankroll_pct"] = sizing["bankroll_pct"]
+            norm["sizing_tier"] = sizing["sizing_tier"]
+            if norm.get("kelly") is None:
+                norm["kelly"] = sizing["kelly_fraction"]
+    except Exception:
+        pass
+
     return norm
 
 

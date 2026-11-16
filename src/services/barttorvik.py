@@ -111,9 +111,9 @@ class BartTorvikClient:
                 "team": 1,
                 "adj_oe": 4,
                 "adj_de": 6,
-                "tempo": 21, # Default/Fallback
+                "tempo": 44, # Live BartTorvik AdjTempo slot
                 "luck": 33,
-                "continuity": 43
+                "continuity": None
             }
 
             for row in data:
@@ -140,14 +140,14 @@ class BartTorvikClient:
 
                 record = str(row[3]) if len(row) > 3 else None
                 
-                # Tempo Detection (Robust)
+                # Tempo Detection (Robust: index 44 is live BartTorvik AdjTempo)
                 tempo = 68.0
-                tempo_indices = [21, 22, 44, 45, 42] # Common Torvik tempo slots
+                tempo_indices = [44, 21, 22, 45, 42] # Common Torvik tempo slots
                 for idx in tempo_indices:
                     try:
                         if len(row) > idx:
                             val = float(row[idx])
-                            if 58.0 < val < 82.0:
+                            if 55.0 < val < 85.0:
                                 tempo = val
                                 break
                     except: pass
@@ -165,16 +165,8 @@ class BartTorvikClient:
                         if abs(luck) > 1.0: luck = None # Sanity check
                 except: pass
                 
+                # BartTorvik team_results.json places AdjTempo at [44] and does not expose roster continuity
                 continuity = None
-                try:
-                    # Continuity is typically 0-100 or 0-1
-                    for idx in [43, 44]:
-                        if len(row) > idx:
-                            c = float(row[idx])
-                            if 0.0 <= c <= 100.0:
-                                continuity = c
-                                break
-                except: pass
                 
                 metrics_payload.append({
                     "team_text": name,

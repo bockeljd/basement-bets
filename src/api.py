@@ -3220,9 +3220,29 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         if not rec:
             return {"bet_type": "AUTO", "selection": "—", "price": None, "edge": "0.00%", "confidence": 0}
 
-        # Newer model format already matches
+        # Newer model format already matches; still ensure sizing & quality fields exist
         if rec.get('bet_type') is not None:
-            return rec
+            out = dict(rec)
+            if out.get('suggested_units') is None:
+                try:
+                    from src.utils.ev import compute_recommended_bet_size
+                    sizing = compute_recommended_bet_size(
+                        out.get('win_prob'),
+                        out.get('price'),
+                        confidence_tier=out.get('confidence_tier') or (out.get('confidence') if isinstance(out.get('confidence'), str) else None),
+                        confidence_score=out.get('confidence_0_100') if out.get('confidence_0_100') is not None else (out.get('confidence') if isinstance(out.get('confidence'), (int, float)) else None),
+                        ev=out.get('ev'),
+                        kelly_q=out.get('kelly'),
+                    )
+                    out['suggested_units'] = sizing['units']
+                    out['recommended_units'] = sizing['units']
+                    out['bankroll_pct'] = sizing['bankroll_pct']
+                    out['sizing_tier'] = sizing['sizing_tier']
+                    if out.get('kelly') is None:
+                        out['kelly'] = sizing['kelly_fraction']
+                except Exception:
+                    pass
+            return out
 
         # Older/alternate format: {market, side, team, line, price, ev, ...}
         market = (rec.get('market') or rec.get('market_type') or '').upper()
@@ -3289,8 +3309,12 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         }
         if rec.get('ev') is not None:
             out['ev'] = rec.get('ev')
+        if rec.get('win_prob') is not None:
+            out['win_prob'] = rec.get('win_prob')
         if rec.get('win_prob_lb10') is not None:
             out['win_prob_lb10'] = rec.get('win_prob_lb10')
+        if rec.get('kelly') is not None:
+            out['kelly'] = rec.get('kelly')
         if rec.get('signals') is not None:
             out['signals'] = rec.get('signals')
         if rec.get('movement_tags') is not None:
@@ -3298,6 +3322,30 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
         out['top6_eligible'] = bool(rec.get('top6_eligible', not has_top6_risk_flag(rec)))
         out['quality_score'] = rec.get('quality_score') if rec.get('quality_score') is not None else compute_top6_quality_score(rec)
+        try:
+            from src.utils.ev import compute_recommended_bet_size
+            if rec.get('suggested_units') is not None:
+                out['suggested_units'] = rec.get('suggested_units')
+                out['recommended_units'] = rec.get('recommended_units', rec.get('suggested_units'))
+                out['bankroll_pct'] = rec.get('bankroll_pct')
+                out['sizing_tier'] = rec.get('sizing_tier')
+            else:
+                sizing = compute_recommended_bet_size(
+                    rec.get('win_prob'),
+                    price,
+                    confidence_tier=rec.get('confidence_tier') or (conf if isinstance(conf, str) else None),
+                    confidence_score=rec.get('confidence_0_100') if rec.get('confidence_0_100') is not None else (conf if isinstance(conf, (int, float)) else None),
+                    ev=rec.get('ev'),
+                    kelly_q=rec.get('kelly'),
+                )
+                out['suggested_units'] = sizing['units']
+                out['recommended_units'] = sizing['units']
+                out['bankroll_pct'] = sizing['bankroll_pct']
+                out['sizing_tier'] = sizing['sizing_tier']
+                if out.get('kelly') is None:
+                    out['kelly'] = sizing['kelly_fraction']
+        except Exception:
+            pass
         return out
 
     def _load_latest_stored_pick(conn, eid: str):
@@ -5432,6 +5480,18 @@ async def get_ncaam_parlays_today(
             amer = american_from_dec(dec)
             # EV approximation using independent p
             ev = p * (dec - 1.0) - (1.0 - p)
+            try:
+                from src.utils.ev import compute_recommended_bet_size
+                parlay_sizing = compute_recommended_bet_size(
+                    p,
+                    amer,
+                    ev=ev,
+                    confidence_tier="LOW" if ev < 0.08 else "MEDIUM",
+                    min_units=0.25,
+                    max_units=0.75,
+                )
+            except Exception:
+                parlay_sizing = {"units": 0.5, "bankroll_pct": 0.5, "kelly_fraction": 0.005, "sizing_tier": "Half-Unit Play"}
             combos.append({
                 "legs": [a, b],
                 "p_win": p,
@@ -5439,6 +5499,10 @@ async def get_ncaam_parlays_today(
                 "american_odds": amer,
                 "ev": ev,
                 "outcome": parlay_outcome,
+                "suggested_units": parlay_sizing["units"],
+                "bankroll_pct": parlay_sizing["bankroll_pct"],
+                "sizing_tier": parlay_sizing["sizing_tier"],
+                "kelly": parlay_sizing["kelly_fraction"],
             })
 
     # Filter combos by TOTAL parlay odds band (user spec)

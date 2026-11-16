@@ -5,13 +5,21 @@ class GeoService:
     Calculates travel distance and altitude adjustments for NCAAM teams.
     """
     
-    # High Altitude Schools (>4000 ft) - Simplified List
+    # High Altitude Schools (>4000 ft)
     HIGH_ALTITUDE_TEAMS = {
-        "Wyoming", "Air Force", "Colorado", "Colorado State", "Denver", 
-        "Utah", "Utah State", "BYU", "Utah Valley", "Weber State", 
-        "New Mexico", "New Mexico State", "Northern Arizona", "Southern Utah"
+        "Wyoming", "Air Force", "Colorado", "Colorado State", "Denver", "Northern Colorado",
+        "Utah", "Utah State", "BYU", "Utah Valley", "Weber State", "Southern Utah", "Utah Tech",
+        "New Mexico", "New Mexico State", "Northern Arizona",
     }
-    
+
+    HIGH_ALTITUDE_CITIES = {
+        "laramie", "colorado springs", "usaf academy", "boulder", "fort collins",
+        "denver", "greeley", "salt lake city", "logan", "provo", "orem", "ogden",
+        "cedar city", "st. george", "albuquerque", "las cruces", "flagstaff",
+    }
+
+    HIGH_ALTITUDE_STATES = {"CO", "WY", "UT", "NM"}
+
     # Coordinates (Approximate Lat/Lon for major schools - expandable)
     # This is a placeholder. In production, use a full CSV or API.
     # For now, we return 0 distance if unknown to be safe.
@@ -22,19 +30,40 @@ class GeoService:
         # ... add more as needed or integrate external data
     }
 
-    def get_altitude_adjustment(self, home_team: str, neutral_site: bool = False) -> float:
+    @classmethod
+    def is_high_altitude_team(cls, team_name: str) -> bool:
+        t = str(team_name or "").strip().lower()
+        if not t:
+            return False
+        for team in cls.HIGH_ALTITUDE_TEAMS:
+            if team.lower() in t:
+                return True
+        return False
+
+    def get_altitude_adjustment(
+        self,
+        home_team: str,
+        neutral_site: bool = False,
+        away_team: str = None,
+        venue_city: str = None,
+        venue_state: str = None,
+    ) -> float:
         """
         Returns point adjustment for home team altitude advantage.
-        Standard: +1.0 pts for high altitude.
-        Returns 0.0 if neutral site.
+        Standard: +1.0 pts for high altitude venue vs non-altitude visitor.
+        Returns 0.0 on neutral courts or when visiting team is also acclimated.
         """
         if neutral_site:
             return 0.0
-            
-        # Fuzzy match or direct check
-        for team in self.HIGH_ALTITUDE_TEAMS:
-            if team.lower() in home_team.lower():
-                return 1.0
+        if away_team and self.is_high_altitude_team(away_team):
+            return 0.0
+
+        if self.is_high_altitude_team(home_team):
+            return 1.0
+        if venue_city and str(venue_city).strip().lower() in self.HIGH_ALTITUDE_CITIES:
+            return 1.0
+        if venue_state and str(venue_state).strip().upper() in self.HIGH_ALTITUDE_STATES and not away_team:
+            return 1.0
         return 0.0
 
     def calculate_distance(self, team_a: str, team_b: str) -> float:

@@ -136,6 +136,8 @@ class EspnClient(IngestionEngine):
                     abbreviation=away['team'].get('abbreviation')
                 )
                 
+                venue_obj = comp.get('venue') or {}
+                venue_addr = venue_obj.get('address') or {}
                 norm_event = {
                     "id": None, # Canonical ID not generated yet.
                     "provider_id": ev['id'],
@@ -149,7 +151,10 @@ class EspnClient(IngestionEngine):
                     "away_team_id": away['team']['id'],
                     "away_team_uuid": away_id,
                     "status": status_raw,
-                    "venue": comp.get('venue', {}).get('fullName'),
+                    "neutral_site": bool(comp.get('neutralSite', False)),
+                    "venue": venue_obj.get('fullName'),
+                    "venue_city": venue_addr.get('city'),
+                    "venue_state": venue_addr.get('state'),
                     "result": {
                         "home_score": home_score,
                         "away_score": away_score,

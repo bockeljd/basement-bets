@@ -599,16 +599,31 @@ function App() {
 
                     {page === 'today' ? (
                         <Research
+                            bankroll={Number(financials?.total_in_play || 0) > 0 ? Number(financials.total_in_play) : null}
                             onAddBet={(prefill) => {
                                 // If a pick row is passed, open manual add-bet prefilled.
                                 if (prefill && typeof prefill === 'object') {
                                     setAddBetMode('manual');
+                                    const br = Number(financials?.total_in_play || 0);
+                                    const preStake =
+                                        prefill.stake != null && Number.isFinite(Number(prefill.stake)) && Number(prefill.stake) > 0
+                                            ? String(Number(prefill.stake).toFixed(2).replace(/\.00$/, ''))
+                                            : (prefill.units != null && Number(prefill.units) > 0 && br > 0
+                                                ? String(Math.max(1, Math.round((Number(prefill.units) * 0.01) * br)))
+                                                : null);
+                                    const matchedBook =
+                                        prefill.book === 'DraftKings' || prefill.book === 'FanDuel'
+                                            ? prefill.book
+                                            : null;
                                     setManualBet(prev => ({
                                         ...prev,
                                         sport: prefill.sport || prev.sport,
+                                        sportsbook: matchedBook || prev.sportsbook,
+                                        market_type: prefill.market || prefill.market_type || prev.market_type,
                                         event_name: prefill.game || prev.event_name,
                                         selection: prefill.pick || prev.selection,
                                         odds: (prefill.odds !== null && prefill.odds !== undefined) ? String(prefill.odds) : prev.odds,
+                                        stake: preStake !== null ? preStake : prev.stake,
                                         placed_at: prev.placed_at || new Date().toISOString().slice(0, 10),
                                     }));
                                 } else {

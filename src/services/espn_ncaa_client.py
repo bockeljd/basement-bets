@@ -324,6 +324,7 @@ class ESPNNCAAClient:
 
         matched_events = 0
         crews_saved = 0
+        neutral_synced = 0
         espn_injuries: List[Dict] = []
 
         for d_str in dates_yyyymmdd:
@@ -334,7 +335,8 @@ class ESPNNCAAClient:
                 comps = ev.get("competitions") or []
                 if not eid_espn or not comps:
                     continue
-                competitors = comps[0].get("competitors") or []
+                comp0 = comps[0]
+                competitors = comp0.get("competitors") or []
                 h_team = next((c.get("team", {}).get("displayName") for c in competitors if c.get("homeAway") == "home"), None)
                 a_team = next((c.get("team", {}).get("displayName") for c in competitors if c.get("homeAway") == "away"), None)
                 if not h_team or not a_team:
@@ -350,6 +352,35 @@ class ESPNNCAAClient:
                     continue
 
                 matched_events += len(matching_db_ids)
+
+                # Persist ESPN neutralSite + venue metadata onto matching DB events (including action:ncaam:*)
+                ns_flag = bool(comp0.get("neutralSite", False))
+                venue_obj = comp0.get("venue") or {}
+                venue_addr = venue_obj.get("address") or {}
+                venue_name = venue_obj.get("fullName")
+                venue_city = venue_addr.get("city")
+                venue_state = venue_addr.get("state")
+                try:
+                    with get_db_connection() as conn:
+                        for db_eid in matching_db_ids:
+                            _exec(
+                                conn,
+                                """
+                                UPDATE events
+                                SET neutral_site = %s,
+                                    venue = COALESCE(%s, venue),
+                                    venue_city = COALESCE(%s, venue_city),
+                                    venue_state = COALESCE(%s, venue_state),
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = %s
+                                """,
+                                (ns_flag, venue_name, venue_city, venue_state, db_eid),
+                            )
+                            neutral_synced += 1
+                        conn.commit()
+                except Exception:
+                    pass
+
                 summary = self.get_event_summary(str(eid_espn))
                 officials = self.extract_officials_from_summary(summary)
                 inj_rows = self.extract_injuries_from_summary(summary)
@@ -381,8 +412,111 @@ class ESPNNCAAClient:
         return {
             "matched_events": matched_events,
             "crews_saved": crews_saved,
+            "neutral_synced": neutral_synced,
             "espn_injuries": espn_injuries,
         }
+
+    def sync_completed_game_logs(self, days_back: int = 3) -> int:
+        """Fetch completed D1 scoreboard stats (3PT%, margin, AP rank) into team_game_logs."""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        from src.database import upsert_team_game_logs
+
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        seen: set = set()
+        logs: List[Dict] = []
+
+        for offset in range(max(1, int(days_back))):
+            dt = now_et - timedelta(days=offset)
+            d_compact = dt.strftime("%Y%m%d")
+            d_iso = dt.strftime("%Y-%m-%d")
+            sb = self.get_scoreboard(date=d_compact)
+            for ev in (sb or {}).get("events", []):
+                status_type = ((ev.get("status") or {}).get("type") or {})
+                if not status_type.get("completed"):
+                    continue
+                comps = ev.get("competitions") or []
+                if not comps:
+                    continue
+                competitors = comps[0].get("competitors") or []
+                if len(competitors) != 2:
+                    continue
+
+                parsed = []
+                for comp in competitors:
+                    team_info = comp.get("team") or {}
+                    t_name = str(
+                        team_info.get("shortDisplayName")
+                        or team_info.get("location")
+                        or team_info.get("displayName")
+                        or ""
+                    ).strip()
+                    try:
+                        score = int(round(float(comp.get("score"))))
+                    except (TypeError, ValueError):
+                        score = None
+                    if not t_name or score is None:
+                        continue
+
+                    smap: Dict[str, float] = {}
+                    for item in comp.get("statistics") or []:
+                        sname = item.get("name")
+                        sval = item.get("displayValue")
+                        if sname and sval is not None:
+                            try:
+                                smap[str(sname)] = float(sval)
+                            except (TypeError, ValueError):
+                                pass
+
+                    fg3m = smap.get("threePointFieldGoalsMade")
+                    fg3a = smap.get("threePointFieldGoalsAttempted")
+                    fg3_pct_raw = smap.get("threePointFieldGoalPct")
+                    fg3_pct = None
+                    if fg3_pct_raw is not None:
+                        fg3_pct = round(fg3_pct_raw / 100.0 if fg3_pct_raw > 1.0 else fg3_pct_raw, 4)
+
+                    rank_val = None
+                    try:
+                        cr = (comp.get("curatedRank") or {}).get("current")
+                        if cr is not None and 1 <= int(cr) <= 25:
+                            rank_val = int(cr)
+                    except (TypeError, ValueError):
+                        rank_val = None
+
+                    parsed.append({
+                        "team": t_name,
+                        "is_home": str(comp.get("homeAway") or "").lower() == "home",
+                        "score": score,
+                        "fg3m": int(round(fg3m)) if fg3m is not None else None,
+                        "fg3a": int(round(fg3a)) if fg3a is not None else None,
+                        "fg3_pct": fg3_pct,
+                        "rank": rank_val,
+                    })
+
+                if len(parsed) != 2:
+                    continue
+                a_info, b_info = parsed[0], parsed[1]
+                g_date = str(ev.get("date") or d_iso)[:10]
+                for side_i, opp_i in ((a_info, b_info), (b_info, a_info)):
+                    key = (side_i["team"], g_date, opp_i["team"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    logs.append({
+                        "team_text": side_i["team"],
+                        "game_date": g_date,
+                        "opponent": opp_i["team"],
+                        "points": side_i["score"],
+                        "three_p_made": side_i["fg3m"],
+                        "three_p_attempted": side_i["fg3a"],
+                        "three_p_pct": side_i["fg3_pct"],
+                        "fouls": None,
+                        "opponent_rank": opp_i["rank"],
+                        "is_home": side_i["is_home"],
+                        "margin": side_i["score"] - opp_i["score"],
+                    })
+
+        return upsert_team_game_logs(logs) if logs else 0
 
     def fetch_odds(self, date: Optional[str] = None) -> List[Dict]:
         """

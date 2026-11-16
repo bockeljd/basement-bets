@@ -120,9 +120,9 @@ def save_to_database(teams: list):
                 adj_oe = float(row[4]) if row[4] else None
                 adj_de = float(row[6]) if row[6] else None
                 
-                # Find tempo (preferred slots [21, 22, 44, 45, 42] then scan 20-25, value between 55-85)
+                # Find tempo (live BartTorvik places AdjTempo at [44], then fallback slots)
                 tempo = None
-                for idx in (21, 22, 44, 45, 42, 20, 23, 24, 25):
+                for idx in (44, 21, 22, 45, 42, 20, 23, 24, 25):
                     try:
                         if len(row) > idx and row[idx] is not None:
                             val = float(row[idx])
@@ -142,17 +142,8 @@ def save_to_database(teams: list):
                     except Exception:
                         pass
 
-                # Continuity is typically at index 43 or 44 (0-100 or 0-1)
+                # BartTorvik team_results.json places AdjTempo at [44] and does not publish roster continuity
                 continuity = None
-                for idx in (43, 44):
-                    try:
-                        if len(row) > idx and row[idx] is not None:
-                            c_val = float(row[idx])
-                            if 0.0 <= c_val <= 100.0:
-                                continuity = c_val
-                                break
-                    except Exception:
-                        pass
                 
                 cur.execute(query, (
                     name,

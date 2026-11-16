@@ -1575,3 +1575,48 @@ export const getModelSignalData = (rec, context, debugInfo, game) => {
     pills,
   };
 };
+
+export const getRecommendedBetSize = (rec, bankroll = null) => {
+  if (!rec) return null;
+  const parsePos = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  let units = parsePos(rec.suggested_units ?? rec.recommended_units);
+  if (units === null) {
+    const rawKelly = Number(rec.kelly ?? rec.kelly_fraction);
+    if (Number.isFinite(rawKelly) && rawKelly > 0) {
+      const kPct = rawKelly <= 1 ? rawKelly * 100 : rawKelly;
+      units = Math.min(2.0, Math.max(0.5, Math.round(kPct * 4) / 4));
+    } else {
+      const conf = getConfidenceMeta(rec);
+      units = conf.tier === 'HIGH' ? 1.5 : conf.tier === 'LOW' ? 0.5 : 1.0;
+    }
+  }
+  const pctBankroll = parsePos(rec.bankroll_pct) ?? Number(units.toFixed(2));
+  const unitsStr = Number.isInteger(units) ? `${units}u` : `${Number(units.toFixed(2))}u`;
+  const pctStr = Number.isInteger(pctBankroll) ? `${pctBankroll}%` : `${Number(pctBankroll.toFixed(1))}%`;
+  const br = parsePos(bankroll);
+  const dollarStake = br ? Math.max(1, Math.round((pctBankroll / 100) * br)) : null;
+  const tierLabel =
+    rec.sizing_tier ||
+    (units >= 1.5
+      ? 'Strong Play'
+      : units >= 1.0
+        ? 'Standard Play'
+        : units >= 0.4
+          ? 'Half-Unit Play'
+          : 'Quarter-Unit Play');
+
+  return {
+    units,
+    unitsLabel: unitsStr,
+    bankrollPct: pctBankroll,
+    pctLabel: pctStr,
+    dollarStake,
+    tierLabel,
+    summary: dollarStake != null ? `${unitsStr} ($${dollarStake})` : `${unitsStr} · ${pctStr} bankroll`,
+    detailedLabel:
+      dollarStake != null ? `${unitsStr} · ${pctStr} ($${dollarStake})` : `${unitsStr} · ${pctStr} of bankroll`,
+  };
+};

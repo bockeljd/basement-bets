@@ -26,6 +26,7 @@ import {
   buildVisualModelData,
   getLiveGameStatus,
   getModelSignalData,
+  getRecommendedBetSize,
 } from './todayHelpers';
 
 const TodayMatchupModal = ({
@@ -34,6 +35,7 @@ const TodayMatchupModal = ({
   correlationResult,
   matchupProfile,
   cachedMeta = null,
+  bankroll = null,
   isAnalyzing,
   onClose,
   onAddBet,
@@ -115,6 +117,7 @@ const TodayMatchupModal = ({
   const topRec = (analysisResult?.recommendations || [])[0] || null;
   const conf = getConfidenceMeta(topRec);
   const topEv = getRecEv(topRec);
+  const sizeInfo = getRecommendedBetSize(topRec, bankroll);
   const sig = topRec?.signals || analysisResult?.signals || {};
   const dbg = analysisResult?.debug || {};
   const torvikStats = analysisResult?.torvik_team_stats || {};
@@ -351,6 +354,14 @@ const TodayMatchupModal = ({
                           </strong>{' '}
                           (+{Number((topEv || 0) * 100).toFixed(1)}% profit edge)
                         </p>
+                        {sizeInfo && (
+                          <div className="mt-2 inline-flex flex-wrap items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-400/35 text-xs text-indigo-100">
+                            <span className="font-bold text-indigo-300">Suggested Bet Size:</span>
+                            <span className="font-mono font-bold text-white">{sizeInfo.detailedLabel}</span>
+                            <span className="text-slate-400">·</span>
+                            <span className="text-indigo-200">{sizeInfo.tierLabel}</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -368,6 +379,8 @@ const TodayMatchupModal = ({
                               line: topRec.market_line,
                               odds: topRec.price,
                               book: topRec.book || 'Consensus',
+                              units: sizeInfo?.units,
+                              stake: sizeInfo?.dollarStake,
                             })
                           }
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer"

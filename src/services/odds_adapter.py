@@ -329,47 +329,75 @@ class OddsAdapter:
         if not event_id:
             return []
 
+        def _append_book_snaps(book_name: str, payload: Dict, out: List[Dict]):
+            if not isinstance(payload, dict):
+                return
+            hs = payload.get('home_spread')
+            if hs is not None:
+                try:
+                    hs_f = float(hs)
+                except Exception:
+                    hs_f = None
+                if hs_f is not None:
+                    if payload.get('home_spread_odds') is not None:
+                        out.append({
+                            "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                            "market_type": "SPREAD", "side": "HOME", "line_value": hs_f,
+                            "price": payload.get('home_spread_odds'), "captured_at": captured_at,
+                        })
+                    if payload.get('away_spread_odds') is not None:
+                        away_line = payload.get('away_spread')
+                        try:
+                            away_line_f = float(away_line) if away_line is not None else -hs_f
+                        except Exception:
+                            away_line_f = -hs_f
+                        out.append({
+                            "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                            "market_type": "SPREAD", "side": "AWAY", "line_value": away_line_f,
+                            "price": payload.get('away_spread_odds'), "captured_at": captured_at,
+                        })
+            tot = payload.get('total_score')
+            if tot is not None:
+                if payload.get('over_odds') is not None:
+                    out.append({
+                        "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                        "market_type": "TOTAL", "side": "OVER", "line_value": tot,
+                        "price": payload.get('over_odds'), "captured_at": captured_at,
+                    })
+                if payload.get('under_odds') is not None:
+                    out.append({
+                        "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                        "market_type": "TOTAL", "side": "UNDER", "line_value": tot,
+                        "price": payload.get('under_odds'), "captured_at": captured_at,
+                    })
+            if payload.get('home_money_line') is not None:
+                out.append({
+                    "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                    "market_type": "MONEYLINE", "side": "HOME", "line_value": None,
+                    "price": payload.get('home_money_line'), "captured_at": captured_at,
+                })
+            if payload.get('away_money_line') is not None:
+                out.append({
+                    "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                    "market_type": "MONEYLINE", "side": "AWAY", "line_value": None,
+                    "price": payload.get('away_money_line'), "captured_at": captured_at,
+                })
+
         snaps = []
-        # Spread
-        if event.get('home_spread') is not None and event.get('home_spread_odds') is not None:
-             snaps.append({
-                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
-                 "market_type": "SPREAD", "side": "HOME", "line_value": event.get('home_spread'),
-                 "price": event.get('home_spread_odds'), "captured_at": captured_at
-             })
-        if event.get('home_spread') is not None and event.get('away_spread_odds') is not None:
-             snaps.append({
-                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
-                 "market_type": "SPREAD", "side": "AWAY", "line_value": -event.get('home_spread'),
-                 "price": event.get('away_spread_odds'), "captured_at": captured_at
-             })
-        # Total
-        if event.get('total_score') is not None:
-            if event.get('over_odds') is not None:
-                 snaps.append({
-                     "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
-                     "market_type": "TOTAL", "side": "OVER", "line_value": event.get('total_score'),
-                     "price": event.get('over_odds'), "captured_at": captured_at
-                 })
-            if event.get('under_odds') is not None:
-                 snaps.append({
-                     "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
-                     "market_type": "TOTAL", "side": "UNDER", "line_value": event.get('total_score'),
-                     "price": event.get('under_odds'), "captured_at": captured_at
-                 })
-        # ML
-        if event.get('home_money_line') is not None:
-             snaps.append({
-                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
-                 "market_type": "MONEYLINE", "side": "HOME", "line_value": None,
-                 "price": event.get('home_money_line'), "captured_at": captured_at
-             })
-        if event.get('away_money_line') is not None:
-             snaps.append({
-                 "event_id": event_id, "provider": "ACTION_NETWORK", "book": "consensus",
-                 "market_type": "MONEYLINE", "side": "AWAY", "line_value": None,
-                 "price": event.get('away_money_line'), "captured_at": captured_at
-             })
+        book_lines = event.get('book_lines')
+        if isinstance(book_lines, dict) and book_lines:
+            for bname, bpayload in book_lines.items():
+                if str(bname or '').strip().lower() in ('action_open', 'open'):
+                    continue
+                _append_book_snaps(str(bname), bpayload, snaps)
+            if 'consensus' not in book_lines:
+                _append_book_snaps('consensus', event, snaps)
+        else:
+            _append_book_snaps('consensus', event, snaps)
+
+        open_lines = event.get('open_lines')
+        if isinstance(open_lines, dict) and open_lines:
+            _append_book_snaps('action_open', open_lines, snaps)
         return snaps
 
     def _detect_side(self, outcome_name, home_team, away_team):

@@ -33,14 +33,20 @@ def ensure_objects():
              MAX(price) FILTER (WHERE market_type='SPREAD' AND side='HOME' AND book='consensus') AS current_spread_price_home,
              (MAX(line_value) FILTER (WHERE market_type='SPREAD' AND side='HOME') - MIN(line_value) FILTER (WHERE market_type='SPREAD' AND side='HOME')) AS spread_disagreement
       FROM latest
-      WHERE market_type='SPREAD'
+      WHERE market_type='SPREAD' AND book <> 'action_open'
       GROUP BY event_id
     ),
     spread_open AS (
       SELECT event_id,
              MIN(captured_at) AS open_as_of,
-             MAX(line_value) FILTER (WHERE market_type='SPREAD' AND side='HOME' AND book='consensus') AS open_spread_home,
-             MAX(price) FILTER (WHERE market_type='SPREAD' AND side='HOME' AND book='consensus') AS open_spread_price_home
+             COALESCE(
+               MAX(line_value) FILTER (WHERE market_type='SPREAD' AND side='HOME' AND book='action_open'),
+               MAX(line_value) FILTER (WHERE market_type='SPREAD' AND side='HOME' AND book='consensus')
+             ) AS open_spread_home,
+             COALESCE(
+               MAX(price) FILTER (WHERE market_type='SPREAD' AND side='HOME' AND book='action_open'),
+               MAX(price) FILTER (WHERE market_type='SPREAD' AND side='HOME' AND book='consensus')
+             ) AS open_spread_price_home
       FROM open
       WHERE market_type='SPREAD'
       GROUP BY event_id
@@ -53,14 +59,23 @@ def ensure_objects():
              MAX(price) FILTER (WHERE market_type='TOTAL' AND side='UNDER' AND book='consensus') AS current_total_under_price,
              (MAX(line_value) FILTER (WHERE market_type='TOTAL' AND side='OVER') - MIN(line_value) FILTER (WHERE market_type='TOTAL' AND side='OVER')) AS total_disagreement
       FROM latest
-      WHERE market_type='TOTAL'
+      WHERE market_type='TOTAL' AND book <> 'action_open'
       GROUP BY event_id
     ),
     total_open AS (
       SELECT event_id,
-             MAX(line_value) FILTER (WHERE market_type='TOTAL' AND side='OVER' AND book='consensus') AS open_total,
-             MAX(price) FILTER (WHERE market_type='TOTAL' AND side='OVER' AND book='consensus') AS open_total_over_price,
-             MAX(price) FILTER (WHERE market_type='TOTAL' AND side='UNDER' AND book='consensus') AS open_total_under_price
+             COALESCE(
+               MAX(line_value) FILTER (WHERE market_type='TOTAL' AND side='OVER' AND book='action_open'),
+               MAX(line_value) FILTER (WHERE market_type='TOTAL' AND side='OVER' AND book='consensus')
+             ) AS open_total,
+             COALESCE(
+               MAX(price) FILTER (WHERE market_type='TOTAL' AND side='OVER' AND book='action_open'),
+               MAX(price) FILTER (WHERE market_type='TOTAL' AND side='OVER' AND book='consensus')
+             ) AS open_total_over_price,
+             COALESCE(
+               MAX(price) FILTER (WHERE market_type='TOTAL' AND side='UNDER' AND book='action_open'),
+               MAX(price) FILTER (WHERE market_type='TOTAL' AND side='UNDER' AND book='consensus')
+             ) AS open_total_under_price
       FROM open
       WHERE market_type='TOTAL'
       GROUP BY event_id
@@ -95,6 +110,14 @@ def ensure_objects():
 
     with get_admin_db_connection() as conn:
         with conn.cursor() as cur:
+            try:
+                cur.execute("SELECT pg_get_viewdef('market_consensus'::regclass, true);")
+                vrow = cur.fetchone()
+                vdef = (vrow[0] if vrow else '') or ''
+                if vdef and 'action_open' not in vdef:
+                    cur.execute("DROP MATERIALIZED VIEW IF EXISTS market_consensus;")
+            except Exception:
+                conn.rollback()
             cur.execute(mv_sql)
             cur.execute(ux_sql)
         conn.commit()

@@ -29,6 +29,7 @@ from src.utils.model_calibration import (
     resolve_model_param_path,
 )
 from src.utils.naming import standardize_team_name
+from src.utils.ev import compute_recommended_bet_size
 
 # Phase gate: council qualitative adjustments are only applied to model outputs
 # once Phase 2 offline evaluation confirms positive CLV/ROI contribution.
@@ -805,7 +806,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
             best_ml_away = self.odds_selector.get_best_price_for_side(raw_snaps, 'MONEYLINE', 'AWAY')
             
             # Composite Snapshot for Analysis (uses CONSENSUS for model math)
-            mc = self._get_market_consensus(event_id)
+            mc = self._derive_market_consensus_from_snaps(
+                raw_snaps,
+                consensus_spread=consensus_spread,
+                consensus_total=consensus_total,
+                base_mc=self._get_market_consensus(event_id),
+            )
             market_snapshot = {
                 # Consensus for model input
                 'spread_home': consensus_spread['line_value'] if consensus_spread else None,
@@ -817,7 +823,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 'moneyline_price_away': consensus_ml_away['price'] if consensus_ml_away else None,
                 'book_spread': 'Consensus',
                 'book_total': 'Consensus',
-                'book_ml': 'Consensus',
                 'book_ml': 'Consensus',
                 # Movement / derived
                 '_market_consensus': mc,
@@ -1073,13 +1078,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
         luck_adjustment = (_luck_fade(home_luck) - _luck_fade(away_luck)) * luck_scale
             
         # --- Feature: Continuity / Transfer Portal Factor ---
-        # Note: Torvik stores continuity either as 0..1 or 0..100 percentage; normalize to 0..1.
-        raw_h_cont = (torvik_team_stats.get('home') or {}).get('continuity')
-        raw_a_cont = (torvik_team_stats.get('away') or {}).get('continuity')
-        if raw_h_cont is None and isinstance(kenpom_adj, dict):
-            raw_h_cont = kenpom_adj.get('home_continuity')
-        if raw_a_cont is None and isinstance(kenpom_adj, dict):
-            raw_a_cont = kenpom_adj.get('away_continuity')
+        # Prefer KenPom height_experience continuity when present (BartTorvik historical rows
+        # previously mis-stored AdjTempo at row[44] as continuity; filter any value matching tempo).
+        def _clean_cont(val: Any, tempo_val: Any) -> Optional[float]:
+            v = _safe_float(val)
+            if v is None:
+                return None
+            t = _safe_float(tempo_val)
+            if t is not None and abs(v - t) <= 0.5:
+                return None
+            return v
+
+        h_stats_tv = (torvik_team_stats or {}).get('home') or {}
+        a_stats_tv = (torvik_team_stats or {}).get('away') or {}
+        kp_h_cont = _safe_float(kenpom_adj.get('home_continuity')) if isinstance(kenpom_adj, dict) else None
+        kp_a_cont = _safe_float(kenpom_adj.get('away_continuity')) if isinstance(kenpom_adj, dict) else None
+        raw_h_cont = kp_h_cont if kp_h_cont is not None else _clean_cont(h_stats_tv.get('continuity'), h_stats_tv.get('tempo'))
+        raw_a_cont = kp_a_cont if kp_a_cont is not None else _clean_cont(a_stats_tv.get('continuity'), a_stats_tv.get('tempo'))
         raw_h_cont = 0.7 if raw_h_cont is None else raw_h_cont
         raw_a_cont = 0.7 if raw_a_cont is None else raw_a_cont
         home_continuity = float(raw_h_cont) / 100.0 if float(raw_h_cont) > 1.5 else float(raw_h_cont)
@@ -1468,7 +1483,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
         
         # --- Feature: Advanced Home Court (Geo) ---
         # Altitude
-        altitude_adj = self.geo_service.get_altitude_adjustment(event['home_team'], neutral_site=is_neutral) or 0.0
+        try:
+            altitude_adj = (
+                self.geo_service.get_altitude_adjustment(
+                    event['home_team'],
+                    neutral_site=is_neutral,
+                    away_team=event.get('away_team'),
+                    venue_city=event.get('venue_city'),
+                    venue_state=event.get('venue_state'),
+                )
+                or 0.0
+            )
+        except TypeError:
+            altitude_adj = self.geo_service.get_altitude_adjustment(event['home_team'], neutral_site=is_neutral) or 0.0
         if altitude_adj > 0:
             mu_spread_final -= altitude_adj
 
@@ -1811,6 +1838,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             'total_move': _safe_float(mc.get('total_move')) if mc else None,
             'spread_disagreement': _safe_float(mc.get('spread_disagreement')) if mc else None,
             'total_disagreement': _safe_float(mc.get('total_disagreement')) if mc else None,
+            'books_count': (int(mc.get('books_count')) if mc and mc.get('books_count') is not None else None),
             'as_of': (mc.get('as_of') if mc else None),
         }
 
@@ -1942,6 +1970,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
             r['top6_eligible'] = top6_eligible
             r['quality_score'] = quality_score
 
+            sizing = compute_recommended_bet_size(
+                win_prob,
+                r.get('price'),
+                confidence_tier=conf_label,
+                confidence_score=conf_score,
+                ev=r.get('ev'),
+                kelly_q=r.get('kelly'),
+            )
+            r['suggested_units'] = sizing['units']
+            r['recommended_units'] = sizing['units']
+            r['bankroll_pct'] = sizing['bankroll_pct']
+            r['sizing_tier'] = sizing['sizing_tier']
+
             ui_rec = {
                 "bet_type": r['market'],
                 "selection": sel,
@@ -1959,6 +2000,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "edge_points": edge_points_side,
                 "price": int(r.get('price')) if r.get('price') is not None else None,
                 "kelly": float(r.get('kelly')) if r.get('kelly') is not None else None,
+                "suggested_units": sizing['units'],
+                "recommended_units": sizing['units'],
+                "bankroll_pct": sizing['bankroll_pct'],
+                "sizing_tier": sizing['sizing_tier'],
                 # Confidence = model confidence that the bet wins (based on calibrated win_prob lower bound)
                 "confidence": conf_label,
                 "confidence_tier": str(conf_label).upper(),
@@ -3005,8 +3050,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             if rec.get("win_prob_lb10") is not None:
                                 rec["win_prob_lb10"] = round(self._clamp_prob(float(rec["win_prob_lb10"]) + (new_wp - old_wp)), 3)
                             rec["ev"] = round(new_ev, 4)
+                            new_kelly = float(self._calculate_kelly(new_wp, rec["price"]))
+                            rec["kelly"] = round(new_kelly, 4)
                             if "kelly_pct" in rec:
-                                rec["kelly_pct"] = round(float(self._calculate_kelly(new_wp, rec["price"])) * 100.0, 2)
+                                rec["kelly_pct"] = round(new_kelly * 100.0, 2)
                             if "confidence_0_100" in rec:
                                 rec["confidence_0_100"] = self._confidence_score_0_100(
                                     rec.get("win_prob_lb10"),
@@ -3039,8 +3086,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             rec["win_prob_lb10"] = round(min(new_lb10, 0.548), 3)
                         rec["ev_penalty"] = round(float(rec.get("ev_penalty") or 0.0) + penalty, 4)
                         rec["ev"] = round(new_ev, 4)
+                        new_kelly = float(self._calculate_kelly(new_wp, rec["price"]))
+                        rec["kelly"] = round(new_kelly, 4)
                         if "kelly_pct" in rec:
-                            rec["kelly_pct"] = round(float(self._calculate_kelly(new_wp, rec["price"])) * 100.0, 2)
+                            rec["kelly_pct"] = round(new_kelly * 100.0, 2)
                         if "confidence_0_100" in rec:
                             scored = self._confidence_score_0_100(
                                 rec.get("win_prob_lb10"),
@@ -3055,6 +3104,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         penalty = 0.01
                         rec["ev_penalty"] = round(float(rec.get("ev_penalty") or 0.0) + penalty, 4)
                         rec["ev"] = round(float(rec.get("ev") or 0.0) - penalty, 4)
+                        if float(rec.get("ev") or 0.0) <= 0:
+                            rec["kelly"] = 0.0
+                            if "kelly_pct" in rec:
+                                rec["kelly_pct"] = 0.0
                     mkt_name = str(rec.get("market") or rec.get("market_type") or "").upper()
                     if mkt_name == "TOTAL":
                         min_gate_ev = (
@@ -3732,16 +3785,24 @@ class NCAAMMarketFirstModelV2(BaseModel):
         
         debug_info = debug_info or {}
 
-        # --- Line movement (best effort) ---
-        line_move = None
+        # --- Line movement (open -> current consensus, best effort) ---
+        line_move = _safe_float(snap.get('spread_move_home')) if isinstance(snap, dict) else None
         try:
-            if raw_snaps:
-                home_spreads = [s for s in raw_snaps if s.get('market_type') == 'SPREAD' and s.get('side') == 'HOME' and s.get('line_value') is not None]
-                if home_spreads:
-                    latest = home_spreads[0].get('line_value')
-                    earliest = home_spreads[-1].get('line_value')
-                    if latest is not None and earliest is not None:
-                        line_move = float(latest) - float(earliest)
+            if line_move is None and raw_snaps:
+                open_sp = next(
+                    (
+                        _safe_float(s.get('line_value'))
+                        for s in raw_snaps
+                        if str(s.get('book') or '').strip().lower() == 'action_open'
+                        and s.get('market_type') == 'SPREAD'
+                        and s.get('side') == 'HOME'
+                        and s.get('line_value') is not None
+                    ),
+                    None,
+                )
+                cur_sp = _safe_float(spread_mkt)
+                if open_sp is not None and cur_sp is not None:
+                    line_move = round(cur_sp - open_sp, 2)
         except Exception:
             line_move = None
 
@@ -3921,6 +3982,101 @@ class NCAAMMarketFirstModelV2(BaseModel):
             row = _exec(conn, query, {"id": event_id}).fetchone()
             if row: return dict(row)
         return None
+
+    def _derive_market_consensus_from_snaps(
+        self,
+        raw_snaps: List[Dict[str, Any]],
+        consensus_spread: Optional[Dict[str, Any]] = None,
+        consensus_total: Optional[Dict[str, Any]] = None,
+        base_mc: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Enrich market_consensus metrics live from multi-book raw_snaps + action_open."""
+        mc: Dict[str, Any] = dict(base_mc) if isinstance(base_mc, dict) else {}
+        snaps = raw_snaps or []
+
+        cur_sp = _safe_float((consensus_spread or {}).get('line_value'))
+        if cur_sp is None:
+            cur_sp = _safe_float(mc.get('current_spread_home'))
+        elif mc.get('current_spread_home') is None:
+            mc['current_spread_home'] = cur_sp
+
+        cur_tot = _safe_float((consensus_total or {}).get('line_value'))
+        if cur_tot is None:
+            cur_tot = _safe_float(mc.get('current_total'))
+        elif mc.get('current_total') is None:
+            mc['current_total'] = cur_tot
+
+        live_sp_rows = [
+            s for s in snaps
+            if s.get('market_type') == 'SPREAD'
+            and s.get('side') == 'HOME'
+            and s.get('line_value') is not None
+            and str(s.get('book') or '').strip().lower() not in ('action_open', 'open')
+        ]
+        if live_sp_rows:
+            sp_vals = [_safe_float(s.get('line_value')) for s in live_sp_rows]
+            sp_vals = [v for v in sp_vals if v is not None]
+            books = {str(s.get('book')).strip() for s in live_sp_rows if s.get('book')}
+            if books and (mc.get('books_count') is None or len(books) > int(mc.get('books_count') or 0)):
+                mc['books_count'] = len(books)
+            if len(sp_vals) >= 2:
+                mc['spread_disagreement'] = round(max(sp_vals) - min(sp_vals), 2)
+
+        live_tot_rows = [
+            s for s in snaps
+            if s.get('market_type') == 'TOTAL'
+            and s.get('side') == 'OVER'
+            and s.get('line_value') is not None
+            and str(s.get('book') or '').strip().lower() not in ('action_open', 'open')
+        ]
+        if live_tot_rows:
+            tot_vals = [_safe_float(s.get('line_value')) for s in live_tot_rows]
+            tot_vals = [v for v in tot_vals if v is not None]
+            if len(tot_vals) >= 2:
+                mc['total_disagreement'] = round(max(tot_vals) - min(tot_vals), 2)
+
+        open_sp = next(
+            (
+                _safe_float(s.get('line_value'))
+                for s in snaps
+                if str(s.get('book') or '').strip().lower() == 'action_open'
+                and s.get('market_type') == 'SPREAD'
+                and s.get('side') == 'HOME'
+                and s.get('line_value') is not None
+            ),
+            None,
+        )
+        if open_sp is not None and (
+            _safe_float(mc.get('open_spread_home')) is None
+            or (cur_sp is not None and abs(float(_safe_float(mc.get('open_spread_home'))) - float(cur_sp)) < 1e-6)
+        ):
+            mc['open_spread_home'] = open_sp
+
+        open_tot = next(
+            (
+                _safe_float(s.get('line_value'))
+                for s in snaps
+                if str(s.get('book') or '').strip().lower() == 'action_open'
+                and s.get('market_type') == 'TOTAL'
+                and s.get('side') == 'OVER'
+                and s.get('line_value') is not None
+            ),
+            None,
+        )
+        if open_tot is not None and (
+            _safe_float(mc.get('open_total')) is None
+            or (cur_tot is not None and abs(float(_safe_float(mc.get('open_total'))) - float(cur_tot)) < 1e-6)
+        ):
+            mc['open_total'] = open_tot
+
+        if _safe_float(mc.get('open_spread_home')) is not None and cur_sp is not None:
+            mc['current_spread_home'] = cur_sp
+            mc['spread_move_home'] = round(float(cur_sp) - float(mc['open_spread_home']), 2)
+        if _safe_float(mc.get('open_total')) is not None and cur_tot is not None:
+            mc['current_total'] = cur_tot
+            mc['total_move'] = round(float(cur_tot) - float(mc['open_total']), 2)
+
+        return mc or None
 
     def _get_market_consensus(self, event_id: str) -> Optional[Dict[str, Any]]:
         """Fetch derived open/current movement metrics for an event (fast path)."""

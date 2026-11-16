@@ -343,9 +343,14 @@ export const computeRecordStats = (rows) => {
 };
 
 export const getConfidenceTierWeightUnits = (row) => {
+  const explicitUnits = parseFloat(row?.suggested_units ?? row?.recommended_units);
+  if (Number.isFinite(explicitUnits) && explicitUnits > 0) {
+    return Math.max(0.25, Math.min(2.0, explicitUnits));
+  }
   const rawKelly = parseFloat(row?.kelly ?? row?.kelly_fraction);
   if (Number.isFinite(rawKelly) && rawKelly > 0) {
-    return Math.max(0.25, Math.min(2.0, rawKelly <= 1 ? rawKelly * 25 : rawKelly / 4));
+    const kPct = rawKelly <= 1 ? rawKelly * 100 : rawKelly;
+    return Math.max(0.5, Math.min(2.0, Math.round(kPct * 4) / 4));
   }
   const tier = getConfidenceBucket(row);
   if (tier === 'High') return 1.5;

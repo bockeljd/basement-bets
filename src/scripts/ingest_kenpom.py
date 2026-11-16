@@ -2032,7 +2032,7 @@ def _ingest_torvik_team_rows(rows: list, asof: str, season_year: int | None = No
             conf_rec = str(row[2]) if len(row) > 2 and row[2] is not None else None
             record = str(row[3]) if len(row) > 3 and row[3] is not None else None
             tempo = 68.0
-            for idx in (21, 22, 44, 45, 42, 20, 23, 24, 25):
+            for idx in (44, 21, 22, 45, 42, 20, 23, 24, 25):
                 try:
                     if len(row) > idx and row[idx] is not None:
                         tv = float(row[idx])
@@ -2049,16 +2049,8 @@ def _ingest_torvik_team_rows(rows: list, asof: str, season_year: int | None = No
                         luck = lv
             except (TypeError, ValueError):
                 pass
+            # BartTorvik team_results.json places AdjTempo at [44] and does not publish roster continuity
             continuity = None
-            for idx in (43, 44):
-                try:
-                    if len(row) > idx and row[idx] is not None:
-                        cv = float(row[idx])
-                        if 0.0 <= cv <= 100.0:
-                            continuity = cv
-                            break
-                except (TypeError, ValueError):
-                    continue
             barthag = None
             for idx in (8, 32):
                 try:
@@ -2116,67 +2108,8 @@ def _ingest_torvik_team_rows(rows: list, asof: str, season_year: int | None = No
 
 def _ingest_game_log_rows(logs: list) -> int:
     """Persist recent D1 game logs (including 3PT%) into team_game_logs."""
-    if not logs:
-        return 0
-    ddl = """
-    CREATE TABLE IF NOT EXISTS team_game_logs (
-        id SERIAL PRIMARY KEY,
-        team_text TEXT NOT NULL,
-        game_date DATE NOT NULL,
-        opponent TEXT,
-        points INTEGER,
-        three_p_made INTEGER,
-        three_p_attempted INTEGER,
-        three_p_pct REAL,
-        fouls INTEGER,
-        opponent_rank INTEGER,
-        is_home BOOLEAN,
-        margin INTEGER,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(team_text, game_date, opponent)
-    );
-    """
-    upsert_sql = """
-    INSERT INTO team_game_logs
-        (team_text, game_date, opponent, points, three_p_made, three_p_attempted,
-         three_p_pct, fouls, opponent_rank, is_home, margin)
-    VALUES
-        (:team_text, :game_date, :opponent, :points, :three_p_made, :three_p_attempted,
-         :three_p_pct, :fouls, :opponent_rank, :is_home, :margin)
-    ON CONFLICT (team_text, game_date, opponent) DO UPDATE SET
-        points = COALESCE(EXCLUDED.points, team_game_logs.points),
-        three_p_made = COALESCE(EXCLUDED.three_p_made, team_game_logs.three_p_made),
-        three_p_attempted = COALESCE(EXCLUDED.three_p_attempted, team_game_logs.three_p_attempted),
-        three_p_pct = COALESCE(EXCLUDED.three_p_pct, team_game_logs.three_p_pct),
-        fouls = COALESCE(EXCLUDED.fouls, team_game_logs.fouls),
-        margin = COALESCE(EXCLUDED.margin, team_game_logs.margin)
-    """
-    count = 0
-    with get_db_connection() as conn:
-        try:
-            _exec(conn, ddl)
-        except Exception:
-            pass
-        for g in logs:
-            if not isinstance(g, dict) or not g.get("team_text") or not g.get("game_date"):
-                continue
-            row = {
-                "team_text": str(g.get("team_text")),
-                "game_date": str(g.get("game_date"))[:10],
-                "opponent": g.get("opponent"),
-                "points": g.get("points"),
-                "three_p_made": g.get("three_p_made"),
-                "three_p_attempted": g.get("three_p_attempted"),
-                "three_p_pct": g.get("three_p_pct"),
-                "fouls": g.get("fouls"),
-                "opponent_rank": g.get("opponent_rank"),
-                "is_home": bool(g.get("is_home")) if g.get("is_home") is not None else None,
-                "margin": g.get("margin"),
-            }
-            _exec(conn, upsert_sql, row)
-            count += 1
-        conn.commit()
-    return count
+    from src.database import upsert_team_game_logs
+    return upsert_team_game_logs(logs)
 
 
 def ingest_kenpom_bundle(bundle: dict, asof_date: str | None = None) -> dict:

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
-import { Zap, Target, Home, TrendingUp, Percent, RefreshCw } from 'lucide-react';
+import { Zap, Target, Home, TrendingUp, Percent, RefreshCw, PlusCircle } from 'lucide-react';
+import { getRecommendedBetSize } from './today/todayHelpers';
 
 const fmtPct = (x) => {
   const n = Number(x);
@@ -27,9 +28,20 @@ const ACCENT = {
   orange: { text: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20', head: 'border-orange-500/30 text-orange-300' },
 };
 
-function ComboCard({ c, color = 'amber' }) {
+function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
   const legs = c?.legs || [];
   const ac = ACCENT[color] || ACCENT.amber;
+  const sizeInfo = getRecommendedBetSize(
+    {
+      suggested_units: c?.suggested_units ?? 0.5,
+      bankroll_pct: c?.bankroll_pct ?? c?.suggested_units ?? 0.5,
+      sizing_tier: c?.sizing_tier,
+      kelly: c?.kelly,
+      ev: c?.ev,
+      confidence_tier: Number(c?.ev) >= 0.08 ? 'MEDIUM' : 'LOW',
+    },
+    bankroll
+  );
 
   const out = c?.outcome;
   const isWon = out === 'WON' || out === 'WON (partial)';
@@ -92,11 +104,43 @@ function ComboCard({ c, color = 'amber' }) {
           );
         })}
       </div>
+
+      {/* Bet sizing & Add Bet footer */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-800/70">
+        {sizeInfo ? (
+          <div className="inline-flex items-center gap-1.5 text-xs text-indigo-200 font-medium">
+            <span className="text-slate-400">Suggested Bet:</span>
+            <span className="font-mono font-bold text-white">{sizeInfo.detailedLabel}</span>
+          </div>
+        ) : (
+          <span />
+        )}
+        {onAddBet && legs.length >= 2 && (
+          <button
+            type="button"
+            onClick={() =>
+              onAddBet({
+                sport: 'NCAAM',
+                market: 'Parlay',
+                game: legs.map((l) => l.matchup).filter(Boolean).join(' + '),
+                pick: legs.map((l) => l.team_pick).filter(Boolean).join(' + '),
+                odds: c?.american_odds,
+                units: sizeInfo?.units,
+                stake: sizeInfo?.dollarStake,
+              })
+            }
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-xs font-bold text-emerald-300 cursor-pointer transition"
+          >
+            <PlusCircle size={12} aria-hidden="true" />
+            <span>Add Bet</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-function ParlayColumn({ title, icon: Icon, color, combos, loading }) {
+function ParlayColumn({ title, icon: Icon, color, combos, loading, bankroll = null, onAddBet = null }) {
   const ac = ACCENT[color] || ACCENT.amber;
   return (
     <div className="flex flex-col gap-3">
@@ -113,13 +157,13 @@ function ParlayColumn({ title, icon: Icon, color, combos, loading }) {
           No matching 2-leg parlays right now
         </div>
       ) : (
-        combos.map((c, i) => <ComboCard key={i} c={c} color={color} />)
+        combos.map((c, i) => <ComboCard key={i} c={c} color={color} bankroll={bankroll} onAddBet={onAddBet} />)
       )}
     </div>
   );
 }
 
-export default function ParlayRecommendations({ date, onSelectDate }) {
+export default function ParlayRecommendations({ date, onSelectDate, bankroll = null, onAddBet = null }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [allData, setAllData] = useState(null);
@@ -243,6 +287,8 @@ export default function ParlayRecommendations({ date, onSelectDate }) {
             color="amber"
             combos={highConf}
             loading={loading}
+            bankroll={bankroll}
+            onAddBet={onAddBet}
           />
           <ParlayColumn
             title="Best Payout Value"
@@ -250,6 +296,8 @@ export default function ParlayRecommendations({ date, onSelectDate }) {
             color="purple"
             combos={valuePick}
             loading={loading}
+            bankroll={bankroll}
+            onAddBet={onAddBet}
           />
           <ParlayColumn
             title="Safe Home Favorites"
@@ -257,6 +305,8 @@ export default function ParlayRecommendations({ date, onSelectDate }) {
             color="orange"
             combos={homeFav}
             loading={loading}
+            bankroll={bankroll}
+            onAddBet={onAddBet}
           />
         </div>
       )}

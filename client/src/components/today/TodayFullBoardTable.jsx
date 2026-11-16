@@ -12,6 +12,7 @@ import {
   explainPickPlainly,
   getLiveGameStatus,
   getModelSignalData,
+  getRecommendedBetSize,
 } from './todayHelpers';
 
 const SortHeaderButton = ({ label, column, sortConfig, onSort, align = 'left' }) => {
@@ -36,6 +37,7 @@ const TodayFullBoardTable = ({
   leagueFilter = 'NCAAM',
   rowTopPicks = {},
   rowTopPicksByKey = {},
+  bankroll = null,
   onOpenDetails,
   onAddBet,
 }) => {
@@ -260,6 +262,7 @@ const TodayFullBoardTable = ({
                   Math.abs(Number(mlAway)) <= 1000;
                 const hasFairLines = ctx?.fair_spread_home != null || ctx?.fair_total != null;
                 const matchupLabel = `${game.away_team || 'Away'} at ${game.home_team || 'Home'}`;
+                const sizeInfo = isActionable && rec ? getRecommendedBetSize(rec, bankroll) : null;
 
                 return (
                   <tr
@@ -462,6 +465,11 @@ const TodayFullBoardTable = ({
                           <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${conf.badgeCls}`}>
                             {conf.tier}
                           </span>
+                          {sizeInfo && (
+                            <span className="text-[10px] font-mono font-semibold text-indigo-200" title={sizeInfo.tierLabel}>
+                              Bet {sizeInfo.summary}
+                            </span>
+                          )}
                         </div>
                       ) : lean?.ev_pct != null ? (
                         <div className="flex flex-col items-end gap-1">
@@ -504,6 +512,8 @@ const TodayFullBoardTable = ({
                                 line: rec.market_line,
                                 odds: rec.price,
                                 book: rec.book || 'Consensus',
+                                units: sizeInfo?.units,
+                                stake: sizeInfo?.dollarStake,
                               })
                             }
                             aria-label={`Add Bet ${rec.selection || rec.pick}`}

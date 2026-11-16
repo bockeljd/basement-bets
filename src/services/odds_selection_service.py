@@ -23,45 +23,49 @@ class OddsSelectionService:
     
     DEFAULT_PRIORITY = 99
 
+    EXCLUDED_LIVE_BOOKS = {"action_open", "open"}
+
+    @classmethod
+    def _is_live_book(cls, book_name: Optional[str]) -> bool:
+        return str(book_name or "").strip().lower() not in cls.EXCLUDED_LIVE_BOOKS
+
+    @classmethod
+    def _is_named_retail_or_consensus(cls, book_name: Optional[str]) -> bool:
+        b = str(book_name or "").strip().lower()
+        return cls._is_live_book(b) and not b.startswith("action_book_")
+
+    def _book_priority_for(self, book_name: Optional[str]) -> int:
+        b = str(book_name or "Unknown")
+        if b.strip().lower() == "consensus":
+            return 50
+        for key, val in self.BOOK_PRIORITY.items():
+            if key.lower() in b.lower():
+                return val
+        return self.DEFAULT_PRIORITY
+
     def select_best_snapshot(self, snapshots: List[Dict], market_type: str, side: str = None) -> Optional[Dict]:
         """
         Selects the most representative 'market' snapshot from a list of candidates.
-        
-        Policy:
-        1. Filter by market_type (already done by caller usually, but good to verify).
-        2. Sort by:
-           - Recency (Bucketed? Or strict?) -> Let's prioritize Recency first if gap is large.
-           - Book Priority (Sharpest first).
-        
-        Refined Policy:
-        - If we have a 'Sharp' book (Pinnacle/Circa) within last 30 mins, use it.
-        - Else, use the most recent line from any major book.
-        - If multiple books have same timestamp, use Priority.
         """
         if not snapshots:
             return None
-            
+
         # 1. Enrich with Priority and Timestamp
         annotated = []
         for snap in snapshots:
-            # Basic filters
             if snap['market_type'] != market_type:
                 continue
             if side and snap.get('side') != side:
                 continue
-            
             book_name = snap.get('book', 'Unknown')
-            # Check priority
-            prio = self.DEFAULT_PRIORITY
-            for key, val in self.BOOK_PRIORITY.items():
-                if key.lower() in book_name.lower():
-                    prio = val
-                    break
-            
+            if not self._is_live_book(book_name):
+                continue
+
+            prio = self._book_priority_for(book_name)
             annotated.append({
                 "snap": snap,
                 "priority": prio,
-                "ts": snap['captured_at'] # ISO String
+                "ts": snap['captured_at']
             })
             
         if not annotated:
@@ -95,9 +99,12 @@ class OddsSelectionService:
 
     def get_consensus_line(self, snapshots: List[Dict], market_type: str, side: str = None) -> Optional[float]:
         """
-        Compute median line value from all books.
+        Compute median line value from all live books (excluding opening-line baselines).
         """
-        filtered = [s for s in snapshots if s.get('market_type') == market_type]
+        filtered = [
+            s for s in snapshots
+            if s.get('market_type') == market_type and self._is_live_book(s.get('book'))
+        ]
         if side:
             filtered = [s for s in filtered if s.get('side') == side]
         lines = [s['line_value'] for s in filtered if s.get('line_value') is not None]
@@ -109,7 +116,10 @@ class OddsSelectionService:
         Get a "consensus" snapshot with median line and median price.
         This represents what the "market average" thinks.
         """
-        filtered = [s for s in snapshots if s.get('market_type') == market_type]
+        filtered = [
+            s for s in snapshots
+            if s.get('market_type') == market_type and self._is_live_book(s.get('book'))
+        ]
         if side:
             filtered = [s for s in filtered if s.get('side') == side]
         
@@ -149,9 +159,13 @@ class OddsSelectionService:
             if s.get('market_type') == market_type
             and s.get('side') == side
             and s.get('price') is not None
+            and self._is_live_book(s.get('book'))
         ]
         if not filtered:
             return None
+        named_only = [s for s in filtered if self._is_named_retail_or_consensus(s.get('book'))]
+        if named_only:
+            filtered = named_only
 
         # Keep latest snapshot per book so stale outlier prices never win line-shopping.
         latest_by_book: Dict[str, Dict] = {}
@@ -186,6 +200,7 @@ class OddsSelectionService:
                         key=lambda x: (
                             (-float(x['line_value']) if (mkt_upper == 'TOTAL' and side_upper == 'OVER') else float(x['line_value'])),
                             int(x.get('price', -999)),
+                            -self._book_priority_for(x.get('book')),
                         ),
                         reverse=True,
                     )
@@ -196,6 +211,7 @@ class OddsSelectionService:
                             -abs(float(x['line_value']) - anchor),
                             (-float(x['line_value']) if (mkt_upper == 'TOTAL' and side_upper == 'OVER') else float(x['line_value'])),
                             int(x.get('price', -999)),
+                            -self._book_priority_for(x.get('book')),
                         ),
                         reverse=True,
                     )
@@ -203,7 +219,10 @@ class OddsSelectionService:
                 best['selection_method'] = 'best_price'
                 return best
 
-        candidates.sort(key=lambda x: int(x.get('price', -999)), reverse=True)
+        candidates.sort(
+            key=lambda x: (int(x.get('price', -999)), -self._book_priority_for(x.get('book'))),
+            reverse=True,
+        )
         best = candidates[0].copy()
         best['selection_method'] = 'best_price'
         return best

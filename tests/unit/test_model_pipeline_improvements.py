@@ -2132,6 +2132,291 @@ def test_kenpom_fanmatch_total_ff_and_hasla_pace_sigma(monkeypatch):
     assert res_mismatch["debug"]["sigma_total"] > res_aligned["debug"]["sigma_total"]
 
 
+def test_recommended_bet_sizing_and_split_kelly_update():
+    from src.utils.ev import compute_recommended_bet_size
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+    high_s = compute_recommended_bet_size(0.585, -110, confidence_tier="HIGH", confidence_score=86, ev=0.116)
+    med_s = compute_recommended_bet_size(0.545, -110, confidence_tier="MEDIUM", confidence_score=64, ev=0.04)
+    low_s = compute_recommended_bet_size(0.545, 110, confidence_tier="LOW", confidence_score=45, ev=0.14)
+    neg_s = compute_recommended_bet_size(0.49, -110, confidence_tier="LOW", ev=-0.06)
+    parlay_s = compute_recommended_bet_size(0.34, 240, confidence_tier="MEDIUM", ev=0.156, min_units=0.25, max_units=0.75)
+
+    assert 1.25 <= high_s["units"] <= 2.0
+    assert high_s["sizing_tier"] in ("Strong Play", "Standard Play")
+    assert 0.5 <= med_s["units"] <= 1.5
+    assert 0.5 <= low_s["units"] <= 0.75  # Low confidence cannot size up even on dog odds
+    assert neg_s["units"] == 0.0 and neg_s["sizing_tier"] == "Pass"
+    assert 0.25 <= parlay_s["units"] <= 0.75
+
+    model = NCAAMMarketFirstModelV2()
+    recs = [
+        {
+            "market": "SPREAD",
+            "side": "home",
+            "line": -4.5,
+            "price": -110,
+            "win_prob": 0.56,
+            "win_prob_lb10": 0.55,
+            "ev": 0.069,
+            "kelly": 0.019,
+            "confidence": "Medium",
+            "confidence_0_100": 68,
+            "book": "FanDuel",
+        }
+    ]
+    # Contra sharp money fades against pick and updates rec['kelly'] (previously broken by 'kelly_pct' check)
+    out = model._apply_split_and_injury_signals(
+        recs,
+        action_splits={
+            "SPREAD": {
+                "HOME": {"bet_pct": 75.0, "handle_pct": 30.0},
+                "AWAY": {"bet_pct": 25.0, "handle_pct": 70.0},
+            }
+        },
+        injury_context=None,
+        market_consensus={"open_spread_home": -4.5, "current_spread_home": -4.5},
+        relax_gates=True,
+    )
+    assert len(out) == 1
+    assert "contra_sharp_money" in out[0]["movement_tags"]
+    assert out[0]["kelly"] < 0.019
+
+
+def test_action_network_multibook_and_open_line_pipeline(monkeypatch):
+    from unittest.mock import MagicMock
+    from src.services.odds_fetcher_service import OddsFetcherService
+    from src.services.odds_adapter import OddsAdapter
+    from src.services.odds_selection_service import OddsSelectionService
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+    sample_game = {
+        "id": 999001,
+        "start_time": "2026-11-16T23:00:00Z",
+        "status": "scheduled",
+        "home_team_id": 1,
+        "away_team_id": 2,
+        "teams": [
+            {"id": 1, "full_name": "Duke Blue Devils"},
+            {"id": 2, "full_name": "Kentucky Wildcats"},
+        ],
+        "markets": {
+            "15": {"event": {"spread": [{"side": "home", "value": -6.5, "odds": -110}, {"side": "away", "value": 6.5, "odds": -110}], "total": [{"side": "over", "value": 152.5, "odds": -110}, {"side": "under", "value": 152.5, "odds": -110}]}},
+            "30": {"event": {"spread": [{"side": "home", "value": -4.5, "odds": -108}, {"side": "away", "value": 4.5, "odds": -112}], "total": [{"side": "over", "value": 150.0, "odds": -110}, {"side": "under", "value": 150.0, "odds": -110}]}},
+            "68": {"event": {"spread": [{"side": "home", "value": -6.5, "odds": -114}, {"side": "away", "value": 6.5, "odds": -108}]}},
+            "69": {"event": {"spread": [{"side": "home", "value": -6.0, "odds": -110}, {"side": "away", "value": 6.0, "odds": -110}]}},
+            "75": {"event": {"spread": [{"side": "home", "value": -7.5, "odds": -102}, {"side": "away", "value": 7.5, "odds": -118}]}},
+        },
+    }
+
+    parsed = OddsFetcherService()._parse_game(sample_game)
+    assert parsed is not None
+    assert parsed["home_spread"] == -6.5
+    assert parsed["open_lines"]["home_spread"] == -4.5
+    assert set(parsed["book_lines"].keys()) == {"consensus", "DraftKings", "FanDuel", "action_book_75"}
+
+    adapter = OddsAdapter()
+    monkeypatch.setattr(adapter, "_upsert_action_network_event", lambda league, ev, st: "action:ncaam:999001")
+    snaps = adapter._from_action_network(parsed, "NCAAM", "2026-11-16T20:00:00Z")
+    books_emitted = {s["book"] for s in snaps}
+    assert {"consensus", "DraftKings", "FanDuel", "action_book_75", "action_open"}.issubset(books_emitted)
+
+    selector = OddsSelectionService()
+    best_home = selector.get_best_price_for_side(snaps, "SPREAD", "HOME", target_line=-6.5)
+    assert best_home is not None
+    # Never leaks action_open or unnamed action_book_75 into bettable UI selection; picks FanDuel -6.0 (-110)
+    assert best_home["book"] == "FanDuel"
+    assert best_home["line_value"] == -6.0
+
+    model = NCAAMMarketFirstModelV2()
+    mc = model._derive_market_consensus_from_snaps(
+        snaps,
+        consensus_spread={"line_value": -6.5, "price": -110},
+        consensus_total={"line_value": 152.5, "price": -110},
+        base_mc={"open_spread_home": -6.5, "current_spread_home": -6.5, "books_count": 1},
+    )
+    assert mc["books_count"] == 4
+    assert mc["spread_disagreement"] == pytest.approx(1.5, abs=0.01)
+    assert mc["open_spread_home"] == -4.5
+    assert mc["spread_move_home"] == pytest.approx(-2.0, abs=0.01)
+
+
+def test_espn_neutral_venue_game_logs_and_altitude(monkeypatch):
+    from src.parsers.espn_client import EspnClient
+    from src.services.espn_ncaa_client import ESPNNCAAClient
+    from src.services.geo_service import GeoService
+    import src.database as db_mod
+
+    geo = GeoService()
+    assert geo.get_altitude_adjustment("Wyoming Cowboys", neutral_site=False, away_team="Duke Blue Devils") == 1.0
+    assert geo.get_altitude_adjustment("Wyoming Cowboys", neutral_site=True, away_team="Duke Blue Devils") == 0.0
+    assert geo.get_altitude_adjustment("Wyoming Cowboys", neutral_site=False, away_team="Colorado State Rams") == 0.0
+
+    espn_client = EspnClient()
+    espn_client.identity = type("StubId", (), {"get_or_create_team": lambda *a, **kw: "tid"})()
+    norm = espn_client._normalize_events(
+        [
+            {
+                "id": "401999",
+                "date": "2026-11-16T23:30Z",
+                "season": {"year": 2027},
+                "status": {"type": {"name": "STATUS_SCHEDULED"}},
+                "competitions": [
+                    {
+                        "neutralSite": True,
+                        "venue": {"fullName": "Sanford Pentagon", "address": {"city": "Sioux Falls", "state": "SD"}},
+                        "competitors": [
+                            {"homeAway": "home", "team": {"id": "10", "displayName": "Nebraska Cornhuskers", "abbreviation": "NEB"}},
+                            {"homeAway": "away", "team": {"id": "11", "displayName": "Boise State Broncos", "abbreviation": "BOIS"}},
+                        ],
+                    }
+                ],
+            }
+        ],
+        "NCAAM",
+    )
+    assert len(norm) == 1
+    assert norm[0]["neutral_site"] is True
+    assert norm[0]["venue"] == "Sanford Pentagon"
+    assert norm[0]["venue_city"] == "Sioux Falls"
+    assert norm[0]["venue_state"] == "SD"
+
+    ncaa = ESPNNCAAClient()
+    captured_logs = []
+    monkeypatch.setattr(
+        ncaa,
+        "get_scoreboard",
+        lambda date=None: {
+            "events": [
+                {
+                    "id": "5001",
+                    "date": "2026-11-15T20:00Z",
+                    "status": {"type": {"completed": True}},
+                    "competitions": [
+                        {
+                            "neutralSite": False,
+                            "competitors": [
+                                {
+                                    "homeAway": "home",
+                                    "score": "82",
+                                    "curatedRank": {"current": 5},
+                                    "team": {"shortDisplayName": "Duke", "displayName": "Duke Blue Devils"},
+                                    "statistics": [
+                                        {"name": "threePointFieldGoalsMade", "displayValue": "10"},
+                                        {"name": "threePointFieldGoalsAttempted", "displayValue": "25"},
+                                        {"name": "threePointFieldGoalPct", "displayValue": "40.0"},
+                                    ],
+                                },
+                                {
+                                    "homeAway": "away",
+                                    "score": "74",
+                                    "curatedRank": {"current": 99},
+                                    "team": {"shortDisplayName": "Temple", "displayName": "Temple Owls"},
+                                    "statistics": [
+                                        {"name": "threePointFieldGoalsMade", "displayValue": "7"},
+                                        {"name": "threePointFieldGoalsAttempted", "displayValue": "22"},
+                                        {"name": "threePointFieldGoalPct", "displayValue": "31.8"},
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(db_mod, "upsert_team_game_logs", lambda rows: captured_logs.extend(rows) or len(rows))
+    saved = ncaa.sync_completed_game_logs(days_back=1)
+    assert saved == 2
+    temple_row = next(r for r in captured_logs if r["team_text"] == "Temple")
+    assert temple_row["opponent"] == "Duke"
+    assert temple_row["opponent_rank"] == 5
+    assert temple_row["three_p_pct"] == pytest.approx(0.318, abs=0.001)
+    assert temple_row["margin"] == -8
+
+
+def test_barttorvik_adj_tempo_index44_and_kenpom_continuity_priority(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+    from src.services.barttorvik import BartTorvikClient
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+    sample_row = [None] * 45
+    sample_row[0] = 5
+    sample_row[1] = "Duke"
+    sample_row[2] = "ACC"
+    sample_row[3] = "4-0"
+    sample_row[4] = 120.44
+    sample_row[6] = 90.96
+    sample_row[33] = -0.1361
+    sample_row[43] = 303
+    sample_row[44] = 70.8956  # Live BartTorvik AdjTempo slot
+
+    client = BartTorvikClient()
+    captured_payload = []
+    monkeypatch.setattr("requests.get", lambda *a, **kw: type("Resp", (), {"status_code": 200, "json": staticmethod(lambda: [sample_row])})())
+    monkeypatch.setattr("src.services.barttorvik.upsert_bt_team_metrics_daily", lambda p: captured_payload.extend(p))
+    monkeypatch.setattr("src.services.barttorvik.upsert_team_metrics", lambda p: None)
+
+    ratings = client.get_efficiency_ratings(year=2027)
+    assert ratings["Duke"]["tempo"] == pytest.approx(70.8956, abs=0.001)
+    assert len(captured_payload) == 1
+    assert captured_payload[0]["adj_tempo"] == pytest.approx(70.8956, abs=0.001)
+    assert captured_payload[0]["continuity"] is None
+
+    # Verify model ignores stale AdjT-equal Torvik continuity when KenPom reports low continuity
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.kenpom_client = MagicMock()
+    model.haslametrics_client = MagicMock()
+    model.news_service = MagicMock()
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 0.0
+    model._calculate_shooting_regression = MagicMock(return_value=0.0)
+    model._calculate_situational_spots = MagicMock(return_value=0.0)
+    model._calculate_fatigue_penalty = MagicMock(return_value=0.0)
+    model._get_action_splits = MagicMock(return_value=None)
+    model._get_injuries_context = MagicMock(return_value=None)
+    model._get_referee_crews_context = MagicMock(return_value=None)
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.kenpom_client.get_team_player_agg.return_value = None
+
+    model.torvik_service.get_projection.return_value = {"margin": 4.0, "official_margin": 4.0, "total": 144.0, "lean": "Home"}
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {
+        "spread_adj": 4.0,
+        "fair_margin": 4.0,
+        "fair_total": 144.0,
+        "total_adj": 0.0,
+        "home_continuity": 0.25,
+        "away_continuity": 0.25,
+        "summary": "KP",
+    }
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 4.0, "total": 144.0}
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 70.9,
+        "home": {"luck": 0.0, "tempo": 70.9, "continuity": 70.9, "record": "3-0"},
+        "away": {"luck": 0.0, "tempo": 70.9, "continuity": 70.9, "record": "3-0"},
+    }
+    res_low_cont = model.analyze(
+        "evt_cont_low",
+        event_context={"id": "evt_cont_low", "home_team": "Home", "away_team": "Away", "start_time": datetime(2026, 11, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -4.0, "total": 144.0},
+        persist=False,
+    )
+    model.kenpom_client.calculate_kenpom_adjustment.return_value["home_continuity"] = 0.78
+    model.kenpom_client.calculate_kenpom_adjustment.return_value["away_continuity"] = 0.78
+    res_high_cont = model.analyze(
+        "evt_cont_high",
+        event_context={"id": "evt_cont_high", "home_team": "Home", "away_team": "Away", "start_time": datetime(2026, 11, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -4.0, "total": 144.0},
+        persist=False,
+    )
+    assert res_low_cont["debug"]["sigma_spread"] > res_high_cont["debug"]["sigma_spread"]
+
+
+
 
 
 

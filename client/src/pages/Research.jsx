@@ -44,7 +44,7 @@ import '../styles/todayDashboard.css';
 
 const LEAGUES = ['NCAAM', 'MLB', 'NFL', 'EPL'];
 
-const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
+const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true }) => {
   const [edges, setEdges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1232,6 +1232,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
                   game={item.game}
                   rec={item.rec}
                   context={item.context}
+                  bankroll={bankroll}
                   onOpenDetails={handleOpenGameDetails}
                   onAddBet={onAddBet}
                 />
@@ -1390,6 +1391,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             leagueFilter={leagueFilter}
             rowTopPicks={rowTopPicks}
             rowTopPicksByKey={rowTopPicksByKey}
+            bankroll={bankroll}
             onOpenDetails={handleOpenGameDetails}
             onAddBet={onAddBet}
           />
@@ -1398,7 +1400,12 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
 
       {activeSubTab === 'parlays' && leagueFilter === 'NCAAM' && (
         <section role="tabpanel" aria-labelledby="today-tab-parlays">
-          <ParlayRecommendations date={selectedDate} onSelectDate={setSelectedDate} />
+          <ParlayRecommendations
+            date={selectedDate}
+            onSelectDate={setSelectedDate}
+            bankroll={bankroll}
+            onAddBet={onAddBet}
+          />
         </section>
       )}
 
@@ -1409,6 +1416,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
         correlationResult={correlationResult}
         matchupProfile={selectedGame ? matchupProfiles[selectedGame.id] : null}
         cachedMeta={activeSelectedGame ? lookupTopPickForGame(activeSelectedGame, rowTopPicks, rowTopPicksByKey) : null}
+        bankroll={bankroll}
         isAnalyzing={isAnalyzing}
         onClose={() => {
           setSelectedGame(null);

@@ -23,6 +23,7 @@ import {
   buildVisualModelData,
   getLiveGameStatus,
   getModelSignalData,
+  getRecommendedBetSize,
 } from './todayHelpers';
 
 const TONE_BADGES = {
@@ -39,6 +40,7 @@ const TodayPlayCard = ({
   game,
   rec,
   context = null,
+  bankroll = null,
   onOpenDetails,
   onAddBet,
 }) => {
@@ -56,7 +58,8 @@ const TodayPlayCard = ({
   const confTitle =
     conf.tier === 'HIGH' ? 'High Confidence' : conf.tier === 'MEDIUM' ? 'Medium Confidence' : 'Low Confidence';
   const winProb = rec?.calibrated_win_prob ?? rec?.win_prob;
-  const sizeText = conf.tier === 'HIGH' ? '1.5u suggested' : 'Standard 1u';
+  const sizeInfo = getRecommendedBetSize(rec, bankroll);
+  const sizeText = sizeInfo ? sizeInfo.detailedLabel : conf.tier === 'HIGH' ? '1.5u · 1.5%' : '1u · 1%';
   const tags = Array.isArray(rec?.movement_tags) ? rec.movement_tags.slice(0, 2) : [];
   const reasons = buildWhyPickReasons(rec, game).filter(
     (r) => r.label !== 'Model vs Market' && r.label !== 'Independent Ratings'
@@ -251,8 +254,9 @@ const TodayPlayCard = ({
           <div className="mt-0.5 text-sm font-mono font-bold text-emerald-300 truncate">
             {winProb != null ? `${fmtPct(winProb, 1)} to win` : evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% edge` : '—'}
           </div>
-          <div className="text-[11px] text-indigo-200 truncate">
-            {evDecimal !== null ? `+${(evDecimal * 100).toFixed(1)}% profit edge` : 'Positive edge'} · {sizeText}
+          <div className="text-[11px] text-indigo-200 truncate" title={sizeInfo?.tierLabel || 'Suggested stake'}>
+            Bet {sizeText}
+            {evDecimal !== null ? ` · +${(evDecimal * 100).toFixed(1)}% edge` : ''}
           </div>
         </div>
 
@@ -362,6 +366,8 @@ const TodayPlayCard = ({
               line: rec?.market_line,
               odds: rec?.price,
               book: rec?.book || 'Consensus',
+              units: sizeInfo?.units,
+              stake: sizeInfo?.dollarStake,
             })
           }
           aria-label={`Add Bet ${pickLabel}`}

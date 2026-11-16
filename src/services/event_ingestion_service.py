@@ -82,12 +82,12 @@ class EventIngestionService:
             id, league, start_time, 
             home_team, away_team, 
             home_team_id, away_team_id,
-            status, created_at
+            status, neutral_site, venue, venue_city, venue_state, created_at
         ) VALUES (
             :id, :league, :start_time,
             :home_name, :away_name,
             :home_uuid, :away_uuid,
-            :status, CURRENT_TIMESTAMP
+            :status, :neutral_site, :venue, :venue_city, :venue_state, CURRENT_TIMESTAMP
         )
         """
         _exec(conn, query, {
@@ -98,15 +98,36 @@ class EventIngestionService:
             "away_name": data['away_team'],
             "home_uuid": data['home_team_uuid'],
             "away_uuid": data['away_team_uuid'],
-            "status": data['status']
+            "status": data['status'],
+            "neutral_site": bool(data.get('neutral_site', False)),
+            "venue": data.get('venue'),
+            "venue_city": data.get('venue_city'),
+            "venue_state": data.get('venue_state'),
         })
 
     def _update_event_status(self, conn, event_id: str, data: Dict):
-        query = "UPDATE events SET status = :s, start_time = :st WHERE id = :id"
+        query = """
+        UPDATE events
+        SET status = :s,
+            start_time = :st,
+            neutral_site = COALESCE(:ns, neutral_site),
+            venue = COALESCE(:v, venue),
+            venue_city = COALESCE(:vc, venue_city),
+            venue_state = COALESCE(:vs, venue_state)
+        WHERE id = :id
+        """
         try:
-            _exec(conn, query, {"s": data['status'], "st": data['start_time'], "id": event_id})
+            _exec(conn, query, {
+                "s": data['status'],
+                "st": data['start_time'],
+                "ns": data.get('neutral_site'),
+                "v": data.get('venue'),
+                "vc": data.get('venue_city'),
+                "vs": data.get('venue_state'),
+                "id": event_id,
+            })
         except Exception as e:
-            # Fallback if the DB doesn't like the start_time format or something else fails
+            # Fallback if legacy schema lacks venue/neutral columns
             print(f"Failed to update status and start_time for {event_id}: {e}")
             query = "UPDATE events SET status = :s WHERE id = :id"
             _exec(conn, query, {"s": data['status'], "id": event_id})

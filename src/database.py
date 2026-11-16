@@ -421,6 +421,10 @@ def init_events_db():
         -- Store in UTC with timezone so ET conversions are reliable.
         start_time TIMESTAMPTZ,
         status TEXT,
+        neutral_site BOOLEAN DEFAULT FALSE,
+        venue TEXT,
+        venue_city TEXT,
+        venue_state TEXT,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
@@ -437,6 +441,10 @@ def init_events_db():
         "ALTER TABLE events ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC';",
         "ALTER TABLE events ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at AT TIME ZONE 'UTC';",
         "ALTER TABLE events ADD COLUMN IF NOT EXISTS sport_key TEXT;",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS neutral_site BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT;",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS venue_city TEXT;",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS venue_state TEXT;",
     ]
 
     with get_admin_db_connection() as conn:
@@ -3139,6 +3147,73 @@ def init_team_game_logs_table():
             cur.execute(schema)
         conn.commit()
     print("team_game_logs table initialized.")
+
+
+def upsert_team_game_logs(logs: list) -> int:
+    """Persist D1 game logs (3PT%, margin, opponent_rank, home/away) into team_game_logs."""
+    if not logs:
+        return 0
+    ddl = """
+    CREATE TABLE IF NOT EXISTS team_game_logs (
+        id SERIAL PRIMARY KEY,
+        team_text TEXT NOT NULL,
+        game_date DATE NOT NULL,
+        opponent TEXT,
+        points INTEGER,
+        three_p_made INTEGER,
+        three_p_attempted INTEGER,
+        three_p_pct REAL,
+        fouls INTEGER,
+        opponent_rank INTEGER,
+        is_home BOOLEAN,
+        margin INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(team_text, game_date, opponent)
+    );
+    """
+    upsert_sql = """
+    INSERT INTO team_game_logs
+        (team_text, game_date, opponent, points, three_p_made, three_p_attempted,
+         three_p_pct, fouls, opponent_rank, is_home, margin)
+    VALUES
+        (:team_text, :game_date, :opponent, :points, :three_p_made, :three_p_attempted,
+         :three_p_pct, :fouls, :opponent_rank, :is_home, :margin)
+    ON CONFLICT (team_text, game_date, opponent) DO UPDATE SET
+        points = COALESCE(EXCLUDED.points, team_game_logs.points),
+        three_p_made = COALESCE(EXCLUDED.three_p_made, team_game_logs.three_p_made),
+        three_p_attempted = COALESCE(EXCLUDED.three_p_attempted, team_game_logs.three_p_attempted),
+        three_p_pct = COALESCE(EXCLUDED.three_p_pct, team_game_logs.three_p_pct),
+        fouls = COALESCE(EXCLUDED.fouls, team_game_logs.fouls),
+        opponent_rank = COALESCE(EXCLUDED.opponent_rank, team_game_logs.opponent_rank),
+        is_home = COALESCE(EXCLUDED.is_home, team_game_logs.is_home),
+        margin = COALESCE(EXCLUDED.margin, team_game_logs.margin)
+    """
+    count = 0
+    with get_db_connection() as conn:
+        try:
+            _exec(conn, ddl)
+        except Exception:
+            pass
+        for g in logs:
+            if not isinstance(g, dict) or not g.get("team_text") or not g.get("game_date"):
+                continue
+            row = {
+                "team_text": str(g.get("team_text")),
+                "game_date": str(g.get("game_date"))[:10],
+                "opponent": g.get("opponent"),
+                "points": g.get("points"),
+                "three_p_made": g.get("three_p_made"),
+                "three_p_attempted": g.get("three_p_attempted"),
+                "three_p_pct": g.get("three_p_pct"),
+                "fouls": g.get("fouls"),
+                "opponent_rank": g.get("opponent_rank"),
+                "is_home": bool(g.get("is_home")) if g.get("is_home") is not None else None,
+                "margin": g.get("margin"),
+            }
+            _exec(conn, upsert_sql, row)
+            count += 1
+        conn.commit()
+    return count
 
 
 def init_referee_assignments_table():
