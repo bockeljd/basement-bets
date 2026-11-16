@@ -1,10 +1,10 @@
 {
   "sport": "ncaam",
   "days": 365,
-  "n_spread": 563,
-  "n_total": 427,
-  "tau_spread": 2.6120112508714874,
-  "tau_total": 2.5987638059294933,
+  "n_spread": 644,
+  "n_total": 494,
+  "tau_spread": 2.547156964194147,
+  "tau_total": 2.777052337086063,
   "method": "std(close_line - mu_final)",
   "notes": "tau represents uncertainty in mu; used for win_prob lower-bound confidence"
 }
