@@ -20,6 +20,7 @@ from src.services.grading_backfill import (
     grade_score_prediction,
     infer_market_type_and_line,
     ingest_mlb_finals_for_dates,
+    is_valid_final_score,
     match_mlb_schedule_game,
     match_team_names,
     parse_nrfi_yrfi_pick,
@@ -105,7 +106,12 @@ class GradingService:
                 include_all_ev=include_all_ev,
             )
 
-        # 3) Grade outcomes for finals
+        # 3) Clean up invalid 0-0 placeholder scores and grade outcomes for finals
+        try:
+            self._repair_invalid_zero_zero_results()
+        except Exception as e:
+            print(f"[GRADING] Invalid 0-0 score cleanup warning: {e}")
+
         graded_count, graded_results = self._evaluate_db_predictions(
             max_rows=max_grade_rows,
             include_all_ev=include_all_ev,
@@ -147,12 +153,14 @@ class GradingService:
         live_snapshots_graded = 0
         try:
             from src.services.live_calibration_service import (
+                get_active_live_calibration,
                 grade_pending_live_snapshots,
                 rebuild_live_calibration,
             )
 
             live_snapshots_graded = grade_pending_live_snapshots()
-            if live_snapshots_graded > 0:
+            active_cal = get_active_live_calibration()
+            if live_snapshots_graded > 0 or not bool((active_cal or {}).get("active")):
                 rebuild_live_calibration(persist=True)
         except Exception as e:
             print(f"[GRADING] Live snapshot calibration warning: {e}")
@@ -280,7 +288,7 @@ class GradingService:
                             box = g.get('boxscore') or {}
                             home_score = box.get('total_home_points')
                             away_score = box.get('total_away_points')
-                            if home_score is None or away_score is None:
+                            if not is_valid_final_score(home_score, away_score, league=lg):
                                 continue
                             event_id = f"action:ncaam:{gid}"
                             if known_event_ids and event_id not in known_event_ids:
@@ -467,6 +475,43 @@ class GradingService:
             cur = _exec(conn, upd_q, {"d": int(lookback_days), "lim": int(max_rows), "min_ev": float(min_ev)})
             conn.commit()
             return int(cur.rowcount or 0)
+
+    def _repair_invalid_zero_zero_results(self) -> int:
+        """Reset any placeholder 0-0 non-soccer game_results and false-graded predictions."""
+        with get_db_connection() as conn:
+            bad_rows = _exec(
+                conn,
+                """
+                SELECT gr.event_id, e.league, e.start_time
+                FROM game_results gr
+                JOIN events e ON e.id = gr.event_id
+                WHERE gr.home_score = 0
+                  AND gr.away_score = 0
+                  AND UPPER(COALESCE(e.league, 'NCAAM')) NOT IN ('EPL', 'SOCCER', 'SOCCER_EPL', 'ENG.1')
+                """,
+            ).fetchall()
+            if not bad_rows:
+                return 0
+            bad_eids = [dict(r)["event_id"] for r in bad_rows]
+            _exec(
+                conn,
+                """
+                UPDATE model_predictions m
+                SET outcome = CASE
+                    WHEN e.start_time < NOW() - INTERVAL '3 days' THEN 'VOID'
+                    ELSE 'PENDING'
+                END
+                FROM events e
+                WHERE m.event_id = e.id
+                  AND m.event_id = ANY(%s)
+                  AND UPPER(COALESCE(m.outcome, '')) IN ('WON', 'LOST', 'PUSH')
+                """,
+                (bad_eids,),
+            )
+            _exec(conn, "DELETE FROM game_results WHERE event_id = ANY(%s) AND home_score = 0 AND away_score = 0", (bad_eids,))
+            conn.commit()
+            print(f"[GRADING] Repaired {len(bad_eids)} invalid 0-0 game_results row(s)")
+            return len(bad_eids)
 
     def _evaluate_db_predictions(self, *, max_rows: int = 500, include_all_ev: bool = True):
         """Grade outcomes for pending predictions where the game is FINAL."""

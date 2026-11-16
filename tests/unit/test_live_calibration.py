@@ -149,3 +149,73 @@ def test_api_live_calibration_endpoint(monkeypatch):
     assert body["status"] in ("collecting", "calibrated")
     assert "params" in body
     assert "bins" in body
+
+
+def test_live_calibration_summary_auto_rebuilds_when_threshold_reached(monkeypatch):
+    from contextlib import contextmanager
+
+    monkeypatch.setenv("REQUIRE_DATABASE", "1")
+    monkeypatch.setattr(
+        lcs,
+        "get_active_live_calibration",
+        lambda force_refresh=False: {
+            "status": "collecting",
+            "active": False,
+            "season_start": "2026-11-01",
+            "min_obs_required": 25,
+            "n_obs": 0,
+            "params": lcs.default_live_calibration_params(),
+            "points": [],
+            "bins": [],
+        },
+    )
+
+    class _FakeAggCursor:
+        def fetchone(self):
+            return {
+                "total_snapshots": 270,
+                "pending_snapshots": 8,
+                "decided_snapshots": 262,
+                "win_count": 120,
+                "loss_count": 142,
+                "push_count": 0,
+            }
+
+    class _FakeConn:
+        pass
+
+    @contextmanager
+    def _fake_conn():
+        yield _FakeConn()
+
+    import src.database as db_mod
+    monkeypatch.setattr(db_mod, "get_db_connection", _fake_conn)
+    monkeypatch.setattr(db_mod, "_exec", lambda conn, sql, params=None: _FakeAggCursor())
+    monkeypatch.setattr(lcs, "_ensure_table", lambda conn: None)
+
+    rebuilt_calls = []
+
+    def _fake_rebuild(*, persist=True, season_start=None):
+        rebuilt_calls.append((persist, season_start))
+        return {
+            "status": "calibrated",
+            "active": True,
+            "season_start": season_start or "2026-11-01",
+            "min_obs_required": 25,
+            "n_obs": 262,
+            "params": {"live_weight_scale": 0.95, "sigma_spread_rem": 11.5, "sigma_total_rem": 15.0},
+            "points": [{"p": 0.2, "p_cal": 0.18, "n": 20}, {"p": 0.8, "p_cal": 0.72, "n": 20}],
+            "bins": [{"label": "0–20%", "count": 119, "avg_predicted_pct": 7.8, "actual_win_pct": 9.2}],
+            "brier_raw": 0.169,
+            "brier_calibrated": 0.148,
+            "updated_at": "2026-11-16T12:00:00Z",
+        }
+
+    monkeypatch.setattr(lcs, "rebuild_live_calibration", _fake_rebuild)
+
+    summary = lcs.get_live_calibration_summary()
+    assert len(rebuilt_calls) == 1
+    assert summary["status"] == "calibrated"
+    assert summary["active"] is True
+    assert summary["n_obs"] == 262
+    assert summary["brier_calibrated"] == 0.148

@@ -567,3 +567,188 @@ def test_yesterday_total_line_inference_and_non_matching_ml_isolation():
     assert item["outcome"] == "WON"
 
 
+def test_fetch_recommended_history_canonical_fills_from_daily_top_picks_and_dedupes(monkeypatch):
+    import src.database as db
+
+    ts = datetime(2026, 11, 15, 22, 0, tzinfo=timezone.utc)
+    slate_rows = [
+        {
+            "day_et": "2026-03-15",
+            "rank": 1,
+            "prediction_id": "legacy_p1",
+            "event_id": "action:ncaam:legacy1",
+            "market_type": "SPREAD",
+            "selection": "Duke",
+            "bet_line": -4.5,
+            "bet_price": -110,
+            "price": -110,
+            "sport": "NCAAM",
+            "home_team": "UNC",
+            "away_team": "Duke",
+            "start_time": datetime(2026, 3, 15, 22, 0, tzinfo=timezone.utc),
+            "score": "80-72",
+            "final": True,
+            "id": "legacy_p1",
+            "analyzed_at": datetime(2026, 3, 15, 18, 0, tzinfo=timezone.utc),
+            "ev_per_unit": 0.08,
+            "confidence_0_100": 82,
+            "outcome": "WON",
+            "source": "cached",
+        }
+    ]
+    dtp_rows = [
+        {
+            "day_et": "2026-11-15",
+            "event_id": "action:ncaam:pfw",
+            "computed_at": ts,
+            "rec_json": {
+                "bet_type": "SPREAD",
+                "selection": "Purdue Fort Wayne Mastodons -3.5",
+                "market_line": -3.5,
+                "price": -104,
+                "edge": "+13.7%",
+                "confidence": 80,
+            },
+            "sport": "NCAAM",
+            "home_team": "Eastern Illinois Panthers",
+            "away_team": "Purdue Fort Wayne Mastodons",
+            "start_time": ts,
+            "score": "86-74",
+            "final": True,
+            "id": "pfw_spread",
+            "prediction_id": "pfw_spread",
+            "analyzed_at": ts,
+            "pred_ev": 0.137,
+            "pred_conf": 80,
+            "pred_outcome": "WON",
+            "pred_market": "SPREAD",
+        },
+        {
+            "day_et": "2026-11-15",
+            "event_id": "action:ncaam:chi",
+            "computed_at": ts,
+            "rec_json": {
+                "bet_type": "SPREAD",
+                "selection": "Chicago State Cougars +17.5",
+                "market_line": 17.5,
+                "price": -114,
+                "edge": "+9.6%",
+                "confidence": 81,
+            },
+            "sport": "NCAAM",
+            "home_team": "Loyola Marymount Lions",
+            "away_team": "Chicago State Cougars",
+            "start_time": ts,
+            "score": "49-86",
+            "final": True,
+            "id": "chi_spread",
+            "prediction_id": "chi_spread",
+            "analyzed_at": ts,
+            "pred_ev": 0.096,
+            "pred_conf": 81,
+            "pred_outcome": "LOST",
+            "pred_market": "SPREAD",
+        },
+    ]
+
+    def fake_exec(_conn, sql, params=None):
+        s = " ".join(sql.split()).lower()
+        if "from winner_slates" in s:
+            return _FakeCursor(slate_rows)
+        if "from daily_top_picks" in s:
+            return _FakeCursor(dtp_rows)
+        return _FakeCursor([])
+
+    monkeypatch.setattr(db, "get_db_connection", lambda: _FakeConn())
+    monkeypatch.setattr(db, "_exec", fake_exec)
+
+    canonical = db.fetch_recommended_history_canonical(limit=100, league="NCAAM", lookback_days=400)
+    assert len(canonical) == 3
+    dtp_canon = [r for r in canonical if r.get("canonical_source") == "daily_top_picks"]
+    assert len(dtp_canon) == 2
+    assert dtp_canon[0]["event_id"] == "action:ncaam:pfw"
+    assert dtp_canon[0]["rank"] == 1
+    assert dtp_canon[1]["event_id"] == "action:ncaam:chi"
+    assert dtp_canon[1]["rank"] == 2
+
+    # Fallback row for same event (old Moneyline rerun) must be suppressed cleanly
+    fallback_old_ml = [
+        normalize_history_row({
+            "id": "old_pfw_ml",
+            "event_id": "action:ncaam:pfw",
+            "market_type": "MONEYLINE",
+            "away_team": "Purdue Fort Wayne Mastodons",
+            "home_team": "Eastern Illinois Panthers",
+            "selection": "Purdue Fort Wayne Mastodons",
+            "bet_price": -158,
+            "ev_per_unit": 0.277,
+            "outcome": "WON",
+        }),
+        normalize_history_row({
+            "id": "other_game",
+            "event_id": "action:ncaam:other",
+            "market_type": "TOTAL",
+            "selection": "OVER 141.5",
+            "bet_price": -110,
+            "outcome": "LOST",
+        }),
+    ]
+    merged = dedupe_and_merge_history(canonical, fallback_old_ml)
+    merged_ids = [r["id"] for r in merged]
+    assert "pfw_spread" in merged_ids
+    assert "old_pfw_ml" not in merged_ids
+    assert "other_game" in merged_ids
+
+
+def test_zero_zero_score_sanitized_in_history_and_grade_endpoint(monkeypatch):
+    bad_basketball = normalize_history_row({
+        "id": "af_00",
+        "event_id": "action:ncaam:af1",
+        "sport": "NCAAM",
+        "market_type": "TOTAL",
+        "selection": "UNDER 163.5",
+        "bet_line": 163.5,
+        "bet_price": -107,
+        "score": "0-0",
+        "final": True,
+        "outcome": "WON",
+    })
+    assert bad_basketball["score"] is None
+    assert bad_basketball["outcome"] == "VOID"
+
+    epl_00 = normalize_history_row({
+        "id": "epl_00",
+        "event_id": "action:epl:1",
+        "sport": "EPL",
+        "market_type": "TOTAL",
+        "selection": "UNDER 2.5",
+        "bet_line": 2.5,
+        "bet_price": -110,
+        "score": "0-0",
+        "final": True,
+        "outcome": "WON",
+    })
+    assert epl_00["score"] == "0-0"
+    assert epl_00["outcome"] == "WON"
+
+    captured_calls = []
+
+    class _FakeGradingService:
+        def grade_predictions(self, **kwargs):
+            captured_calls.append(kwargs)
+            return {"status": "Success", "graded": 2, "scores_ingested": 5}
+
+    import src.services.grading_service as gs_mod
+    monkeypatch.setattr(gs_mod, "GradingService", _FakeGradingService)
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/research/grade?backfill_pending=true&backfill_days=30&max_grade_rows=5000",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["graded"] == 2
+    assert captured_calls[-1] == {"backfill_days": 30, "backfill_pending": True, "max_grade_rows": 5000}
+
+

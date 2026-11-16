@@ -305,6 +305,11 @@ def normalize_history_row(row: dict) -> dict:
     if season_val:
         out["season"] = season_val
 
+    if out["sport"] != "EPL" and str(out.get("score") or "").strip() == "0-0":
+        out["score"] = None
+        if out["outcome"] in ("WON", "LOST", "PUSH"):
+            out["outcome"] = "VOID"
+
     if out["outcome"] == "PENDING":
         from datetime import datetime, timedelta, timezone
         from src.services.grading_backfill import _parse_dt_utc
@@ -320,24 +325,25 @@ def normalize_history_row(row: dict) -> dict:
                     parts = str(out["score"]).split("-", 1)
                     a_sc = int(float(parts[0].strip()))
                     h_sc = int(float(parts[1].strip()))
-                    from src.services.grading_backfill import grade_score_prediction
+                    from src.services.grading_backfill import grade_score_prediction, is_valid_final_score
 
-                    mkt = out["market_type"]
-                    if mkt in ("SPREAD", "TOTAL", "MONEYLINE"):
-                        is_mlb = str(out.get("sport") or "").upper() == "MLB" or str(out.get("event_id") or "").startswith(("mlb:", "action:mlb:"))
-                        graded = grade_score_prediction(
-                            market_type=mkt,
-                            pick=out.get("pick"),
-                            selection=out.get("selection"),
-                            bet_line=out.get("bet_line"),
-                            home_team=out.get("home_team"),
-                            away_team=out.get("away_team"),
-                            home_score=h_sc,
-                            away_score=a_sc,
-                            is_mlb=is_mlb,
-                        )
-                        if graded in ("WON", "LOST", "PUSH", "VOID"):
-                            out["outcome"] = graded
+                    if is_valid_final_score(h_sc, a_sc, league=out.get("sport")):
+                        mkt = out["market_type"]
+                        if mkt in ("SPREAD", "TOTAL", "MONEYLINE"):
+                            is_mlb = str(out.get("sport") or "").upper() == "MLB" or str(out.get("event_id") or "").startswith(("mlb:", "action:mlb:"))
+                            graded = grade_score_prediction(
+                                market_type=mkt,
+                                pick=out.get("pick"),
+                                selection=out.get("selection"),
+                                bet_line=out.get("bet_line"),
+                                home_team=out.get("home_team"),
+                                away_team=out.get("away_team"),
+                                home_score=h_sc,
+                                away_score=a_sc,
+                                is_mlb=is_mlb,
+                            )
+                            if graded in ("WON", "LOST", "PUSH", "VOID"):
+                                out["outcome"] = graded
                 except Exception:
                     pass
         elif out.get("final") is not True and ref_dt is not None and ref_dt < now_utc - timedelta(days=14):
@@ -363,11 +369,13 @@ def dedupe_and_merge_history(canonical_rows: list, fallback_rows: list) -> list:
     merged = []
     seen_ids = set()
     seen_sem = set()
+    daily_pick_eids = set()
 
     for raw in canonical_rows or []:
         row = normalize_history_row(raw)
         row["source_type"] = "canonical_slate"
         rid = row.get("id")
+        eid = str(row.get("event_id") or "").strip()
         sem = _semantic_row_key(row)
         if rid and rid in seen_ids:
             continue
@@ -377,13 +385,19 @@ def dedupe_and_merge_history(canonical_rows: list, fallback_rows: list) -> list:
             seen_ids.add(rid)
         if sem:
             seen_sem.add(sem)
+        if row.get("canonical_source") == "daily_top_picks" and eid:
+            daily_pick_eids.add(eid)
         merged.append(row)
 
     for raw in fallback_rows or []:
         row = normalize_history_row(raw)
         row["source_type"] = raw.get("source_type") or "fallback_prediction"
         rid = row.get("id")
+        eid = str(row.get("event_id") or "").strip()
         sem = _semantic_row_key(row)
+        if eid and eid in daily_pick_eids:
+            # Canonical daily_top_picks already holds this game's single official pick.
+            continue
         if rid and rid in seen_ids:
             continue
         if sem and sem in seen_sem:

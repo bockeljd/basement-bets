@@ -371,3 +371,25 @@ def test_void_stale_postponed_predictions_marks_void():
 
     assert voided == 1
     assert any("UPDATE model_predictions SET outcome = 'VOID'" in str(call.args[1]) for call in mock_exec.call_args_list if len(call.args) > 1)
+
+
+def test_zero_zero_score_never_graded_as_final_win():
+    from src.services.grading_backfill import grade_score_prediction, is_valid_final_score
+
+    assert is_valid_final_score(0, 0, league="NCAAM") is False
+    assert is_valid_final_score(0, 0, league="MLB") is False
+    assert is_valid_final_score(0, 0, league="EPL") is True
+    assert (
+        grade_score_prediction(
+            market_type="TOTAL",
+            pick="UNDER 163.5",
+            selection="UNDER 163.5",
+            bet_line=163.5,
+            home_team="Air Force Falcons",
+            away_team="Pacific Tigers",
+            home_score=0,
+            away_score=0,
+            is_mlb=False,
+        )
+        == "PENDING"
+    )

@@ -1789,7 +1789,178 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
     
     with get_db_connection() as conn:
         cursor = _exec(conn, query, tuple(params))
-        return [normalize_history_row(dict(r)) for r in cursor.fetchall()]
+        out_rows = [normalize_history_row(dict(r)) for r in cursor.fetchall()]
+
+        # Fill NCAAM dates not yet covered by recommended_slates using canonical daily_top_picks
+        # so Model Performance matches Today's Best Bets & Yesterday's Top Recommended Slate 1:1.
+        from src.utils.model_performance import normalize_market_type, normalize_sport
+
+        if league is None or normalize_sport(league) == "NCAAM":
+            covered_ncaam_days = {
+                str(r.get("day_et") or "")[:10]
+                for r in out_rows
+                if normalize_sport(r.get("sport"), event_id=r.get("event_id")) == "NCAAM" and r.get("day_et")
+            }
+            dtp_params = []
+            dtp_date_filter = ""
+            if lookback_days and int(lookback_days) > 0:
+                dtp_date_filter = "AND d.date_et >= (NOW() AT TIME ZONE 'America/New_York' - (%s || ' days')::interval)::date"
+                dtp_params.append(int(lookback_days))
+
+            dtp_query = f"""
+            SELECT
+                d.date_et::text AS day_et,
+                d.event_id,
+                d.computed_at,
+                d.rec_json,
+                e.league AS sport,
+                e.home_team,
+                e.away_team,
+                e.start_time,
+                (CASE WHEN COALESCE(gr.away_score, e.away_score) IS NOT NULL AND COALESCE(gr.home_score, e.home_score) IS NOT NULL
+                      THEN (COALESCE(gr.away_score, e.away_score) || '-' || COALESCE(gr.home_score, e.home_score))
+                      ELSE NULL END) AS score,
+                COALESCE(gr.final, FALSE) AS final,
+                m.id AS id,
+                m.id AS prediction_id,
+                m.analyzed_at,
+                m.mu_final,
+                m.win_prob,
+                m.ev_per_unit AS pred_ev,
+                m.confidence_0_100 AS pred_conf,
+                m.outcome AS pred_outcome,
+                m.clv_points,
+                m.edge_points,
+                m.bet_line AS pred_line,
+                COALESCE(m.bet_price, m.price) AS pred_price,
+                m.selection AS pred_selection,
+                m.market_type AS pred_market,
+                m.pick AS pred_pick
+            FROM daily_top_picks d
+            JOIN events e ON d.event_id = e.id
+            LEFT JOIN game_results gr ON gr.event_id = d.event_id
+            LEFT JOIN LATERAL (
+                SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100,
+                       outcome, clv_points, edge_points, bet_line, bet_price, price,
+                       selection, market_type, pick
+                FROM model_predictions mp
+                WHERE mp.event_id = d.event_id
+                ORDER BY
+                    CASE
+                        WHEN UPPER(COALESCE(mp.market_type, '')) = UPPER(COALESCE(d.rec_json->>'bet_type', d.rec_json->>'market_type', ''))
+                          AND (COALESCE(d.rec_json->>'selection', d.rec_json->>'side', '') = ''
+                               OR UPPER(COALESCE(mp.selection, '')) = UPPER(COALESCE(d.rec_json->>'selection', d.rec_json->>'side', '')))
+                        THEN 0
+                        WHEN UPPER(COALESCE(mp.market_type, '')) = UPPER(COALESCE(d.rec_json->>'bet_type', d.rec_json->>'market_type', ''))
+                        THEN 1
+                        ELSE 2
+                    END ASC,
+                    mp.analyzed_at DESC
+                LIMIT 1
+            ) m ON TRUE
+            WHERE d.league = 'NCAAM'
+              AND d.is_actionable = TRUE
+              AND d.rec_json IS NOT NULL
+              AND e.start_time <= (NOW() + INTERVAL '10 minutes')
+              {dtp_date_filter}
+            ORDER BY d.date_et DESC, d.computed_at ASC
+            LIMIT %s
+            """
+            dtp_params.append(limit)
+            try:
+                dtp_rows = _exec(conn, dtp_query, tuple(dtp_params)).fetchall()
+            except Exception:
+                dtp_rows = []
+
+            by_day = {}
+            for raw_r in dtp_rows:
+                rd = dict(raw_r)
+                day_key = str(rd.get("day_et") or "")[:10]
+                if not day_key or day_key in covered_ncaam_days:
+                    continue
+                rec = rd.get("rec_json") or {}
+                if isinstance(rec, str):
+                    try:
+                        import json as _json
+                        rec = _json.loads(rec)
+                    except Exception:
+                        rec = {}
+                if not isinstance(rec, dict):
+                    rec = {}
+
+                rec_mkt = normalize_market_type(rec.get("bet_type") or rec.get("market_type"))
+                pred_mkt = normalize_market_type(rd.get("pred_market"))
+                mkt_matches = (rec_mkt in ("", "OTHER")) or (pred_mkt == rec_mkt)
+
+                ev_val = rec.get("ev_per_unit") if rec.get("ev_per_unit") is not None else rec.get("ev")
+                if ev_val is None and rec.get("edge") is not None:
+                    try:
+                        ev_val = float(str(rec.get("edge")).replace("%", "").replace("+", "").strip()) / 100.0
+                    except Exception:
+                        ev_val = None
+                if ev_val is None and mkt_matches:
+                    ev_val = rd.get("pred_ev")
+                try:
+                    ev_num = float(ev_val) if ev_val is not None else 0.0
+                except Exception:
+                    ev_num = 0.0
+
+                conf_val = rec.get("confidence_0_100") if rec.get("confidence_0_100") is not None else rec.get("confidence")
+                if isinstance(conf_val, str) and not conf_val.replace(".", "", 1).replace("-", "", 1).isdigit():
+                    conf_u = conf_val.strip().upper()
+                    conf_val = rd.get("pred_conf") if (mkt_matches and rd.get("pred_conf") is not None) else (
+                        82 if conf_u == "HIGH" else (64 if conf_u in ("MEDIUM", "MED") else (42 if conf_u == "LOW" else None))
+                    )
+                if conf_val is None and mkt_matches:
+                    conf_val = rd.get("pred_conf")
+
+                price_val = rec.get("price") if rec.get("price") is not None else (
+                    rec.get("odds") if rec.get("odds") is not None else (rd.get("pred_price") if mkt_matches else None)
+                )
+                line_val = rec.get("market_line") if rec.get("market_line") is not None else (
+                    rec.get("line") if rec.get("line") is not None else (
+                        rec.get("bet_line") if rec.get("bet_line") is not None else (rd.get("pred_line") if mkt_matches else None)
+                    )
+                )
+                sel_val = rec.get("selection") or rec.get("side") or (rd.get("pred_selection") if mkt_matches else None) or (rd.get("pred_pick") if mkt_matches else None)
+
+                item = normalize_history_row({
+                    "day_et": day_key,
+                    "event_id": rd.get("event_id"),
+                    "id": (rd.get("id") if mkt_matches and rd.get("id") else f"dtp:{day_key}:{rd.get('event_id')}"),
+                    "prediction_id": rd.get("prediction_id") if mkt_matches else None,
+                    "sport": rd.get("sport") or "NCAAM",
+                    "market_type": rec.get("bet_type") or rec.get("market_type") or rd.get("pred_market"),
+                    "selection": sel_val,
+                    "pick": rd.get("pred_pick") if mkt_matches else sel_val,
+                    "bet_line": line_val,
+                    "bet_price": price_val,
+                    "price": price_val,
+                    "ev_per_unit": ev_num,
+                    "confidence_0_100": conf_val,
+                    "clv_points": rd.get("clv_points") if mkt_matches else None,
+                    "edge_points": rd.get("edge_points") if mkt_matches else None,
+                    "outcome": rd.get("pred_outcome") if mkt_matches else "PENDING",
+                    "away_team": rd.get("away_team"),
+                    "home_team": rd.get("home_team"),
+                    "start_time": rd.get("start_time"),
+                    "analyzed_at": rd.get("analyzed_at") or rd.get("computed_at"),
+                    "created_at": rd.get("computed_at"),
+                    "score": rd.get("score"),
+                    "final": rd.get("final"),
+                    "source": "daily_top_picks",
+                    "canonical_source": "daily_top_picks",
+                })
+                by_day.setdefault(day_key, []).append(item)
+
+            for day_key in sorted(by_day.keys(), reverse=True):
+                day_items = by_day[day_key]
+                day_items.sort(key=lambda x: float(x.get("ev_per_unit") or 0.0), reverse=True)
+                for idx, it in enumerate(day_items, start=1):
+                    it["rank"] = idx
+                    out_rows.append(it)
+
+        return out_rows[:limit]
 
 
 def fetch_bet_detail(bet_id: int, user_id: str = None):

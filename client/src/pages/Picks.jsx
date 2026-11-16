@@ -29,13 +29,17 @@ import {
   getPerformanceDay,
   getNumericConfidence,
   getConfidenceBucket,
+  getConfidenceTierWeightUnits,
   getRawOutcome,
+  getEffectivePrice,
+  roiPerUnit,
   normalizeMarketType,
   formatMarketLabel,
   formatMatchup,
   formatPickLabel,
   formatLineAndOdds,
   getNumericEdge,
+  dedupeDayRowsByEvent,
   selectTopPicksPerDay,
   computeRecordStats,
   normalizeSport,
@@ -98,6 +102,7 @@ export default function Picks() {
   const [selectedSeason, setSelectedSeason] = useState(() => getCurrentNcaamSeasonShort());
   const [windowFilter, setWindowFilter] = useState('ALL');
   const [marketFilter, setMarketFilter] = useState('ALL');
+  const [confFilter, setConfFilter] = useState('ALL');
   const [historyScope, setHistoryScope] = useState('all');
   const [outcomeFilter, setOutcomeFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -174,13 +179,16 @@ export default function Picks() {
       setIsGrading(true);
       setGradeMessage(null);
       setErr(null);
-      const res = await api.post('/api/research/grade', {
-        backfill_pending: true,
-        max_grade_rows: 5000,
+      const res = await api.post('/api/research/grade', null, {
+        params: {
+          backfill_pending: true,
+          backfill_days: 30,
+          max_grade_rows: 5000,
+        },
       });
       const data = res?.data || {};
-      const gradedCount = Number(data.graded_predictions ?? data.predictions_graded ?? 0);
-      const checkedGames = Number(data.ingested_games ?? data.games_checked ?? 0);
+      const gradedCount = Number(data.graded ?? data.graded_predictions ?? data.predictions_graded ?? 0);
+      const checkedGames = Number(data.scores_ingested ?? data.ingested_games ?? data.games_checked ?? 0);
       setGradeMessage(
         `Checked ${checkedGames.toLocaleString()} final game scores and updated ${gradedCount.toLocaleString()} pending pick(s).`
       );
@@ -310,58 +318,113 @@ export default function Picks() {
     });
   }, [windowMarketHistory, selectedSport, selectedSeason]);
 
-  // Apply Scope (All Recommended Picks vs Top 6 Daily Best)
+  const matchesConfFilter = (row, filterKey) => {
+    if (!filterKey || filterKey === 'ALL') return true;
+    const tier = String(getConfidenceBucket(row) || '').toUpperCase();
+    if (filterKey === 'MED_PLUS') return tier === 'HIGH' || tier === 'MEDIUM';
+    return tier === filterKey;
+  };
+
+  // Apply Confidence Filter cleanly on top of Sport + Season + Window + Market
+  const confFilteredHistory = useMemo(() => {
+    if (confFilter === 'ALL') return sportWindowMarketHistory;
+    return sportWindowMarketHistory.filter((h) => matchesConfFilter(h, confFilter));
+  }, [sportWindowMarketHistory, confFilter]);
+
+  // Apply Scope (All Recommended Picks vs Top 6 Daily Best — strictly 1 pick per game per day)
   const scopedHistory = useMemo(() => {
     if (historyScope === 'top6') {
-      return selectTopPicksPerDay(sportWindowMarketHistory, 6);
+      return selectTopPicksPerDay(confFilteredHistory, 6);
     }
-    return sportWindowMarketHistory;
-  }, [historyScope, sportWindowMarketHistory]);
+    return confFilteredHistory;
+  }, [historyScope, confFilteredHistory]);
 
-  // Precompute rank map (#1-#6 per day in active sport) for table badges & Rank chart
+  // Precompute rank map (#1-#6 per day, 1 pick per game) for table badges & Rank chart
   const rankByRowKey = useMemo(() => {
     const byDay = {};
-    for (const h of sportWindowMarketHistory) {
+    for (const h of confFilteredHistory) {
       const day = getPerformanceDay(h) || 'unknown';
       if (!byDay[day]) byDay[day] = [];
       byDay[day].push(h);
     }
     const map = new WeakMap();
     for (const day of Object.keys(byDay)) {
-      const sorted = byDay[day].slice().sort((a, b) => {
-        const evA = getNumericEdge(a) ?? -999;
-        const evB = getNumericEdge(b) ?? -999;
-        if (evB !== evA) return evB - evA;
-        const rkA = Number(a?.rank) || 999;
-        const rkB = Number(b?.rank) || 999;
-        return rkA - rkB;
-      });
-      sorted.forEach((row, idx) => {
+      const uniqueDay = dedupeDayRowsByEvent(byDay[day]);
+      uniqueDay.forEach((row, idx) => {
         map.set(row, idx + 1);
       });
     }
     return map;
-  }, [sportWindowMarketHistory]);
+  }, [confFilteredHistory]);
 
   const rankBreakdown = useMemo(
-    () => computeRankBreakdown(sportWindowMarketHistory, 6),
-    [sportWindowMarketHistory]
+    () => computeRankBreakdown(confFilteredHistory, 6),
+    [confFilteredHistory]
   );
 
   // Overall KPI stats (settled + pending + void + profit)
   const scopedStats = useMemo(() => computeRecordStats(scopedHistory), [scopedHistory]);
 
+  // Confidence-weighted staking comparison & quick takeaway metrics
+  const weightedProfitUnits = useMemo(() => {
+    let sum = 0;
+    for (const h of scopedHistory) {
+      const out = getRawOutcome(h);
+      if (!isGradedOutcome(out)) continue;
+      sum += roiPerUnit(out, getEffectivePrice(h)) * getConfidenceTierWeightUnits(h);
+    }
+    return sum;
+  }, [scopedHistory]);
+
+  const scopeComparison = useMemo(() => {
+    const top6Rows = selectTopPicksPerDay(confFilteredHistory, 6);
+    return {
+      allStats: computeRecordStats(confFilteredHistory),
+      top6Stats: computeRecordStats(top6Rows),
+    };
+  }, [confFilteredHistory]);
+
+  const bestMarketTakeaway = useMemo(() => {
+    const map = {};
+    for (const h of scopedHistory) {
+      const out = getRawOutcome(h);
+      if (!isGradedOutcome(out)) continue;
+      const mKey = normalizeMarketType(h);
+      if (!map[mKey]) map[mKey] = [];
+      map[mKey].push(h);
+    }
+    const entries = Object.entries(map)
+      .map(([marketKey, rows]) => ({ marketKey, label: formatMarketLabel(marketKey), ...computeRecordStats(rows) }))
+      .filter((m) => m.settled > 0);
+    if (entries.length === 0) return null;
+    const sorted = entries.slice().sort((a, b) => b.roiPct - a.roiPct);
+    const best = sorted[0];
+    const worst = sorted.length > 1 ? sorted[sorted.length - 1] : null;
+    return { best, worst };
+  }, [scopedHistory]);
+
+  const confTakeaway = useMemo(() => {
+    const medPlusRows = sportWindowMarketHistory.filter((h) => matchesConfFilter(h, 'MED_PLUS'));
+    const lowRows = sportWindowMarketHistory.filter((h) => matchesConfFilter(h, 'LOW'));
+    return {
+      medPlus: computeRecordStats(medPlusRows),
+      low: computeRecordStats(lowRows),
+    };
+  }, [sportWindowMarketHistory]);
+
   const clvStats = useMemo(() => {
     let sum = 0;
     let count = 0;
+    let beatCount = 0;
     for (const h of scopedHistory) {
       const v = parseFloat(h?.clv_points);
       if (Number.isFinite(v)) {
         sum += v;
         count += 1;
+        if (v > 0) beatCount += 1;
       }
     }
-    return { count, avg: count > 0 ? sum / count : null };
+    return { count, beatCount, avg: count > 0 ? sum / count : null };
   }, [scopedHistory]);
 
   const pastPendingCount = useMemo(() => {
@@ -393,28 +456,50 @@ export default function Picks() {
       recoStraight.length + recoMlParlay.length > 0;
 
     if (ncaamYesterdayActive) {
-      const combined = [...recoStraight, ...recoMlParlay];
-      const normalized = combined.map((p) => ({
-        id: p.prediction_id || p.event_id,
-        matchup: p.matchup || formatMatchup(p),
-        sport: 'NCAAM',
-        market: formatMarketLabel(p.market_type),
-        pick: p.selection || p.side || formatPickLabel(p),
-        lineOdds: formatLineAndOdds({ bet_line: p.bet_line ?? p.line, bet_price: p.bet_price ?? p.price ?? p.odds }),
-        outcome: p.outcome,
-        score: p.score || null,
-        evPct: p.ev_per_unit != null ? Number(p.ev_per_unit) * 100 : null,
-      }));
+      const combined = [...recoStraight, ...recoMlParlay].slice().sort((a, b) => {
+        const rkA = Number(a?.rank) > 0 ? Number(a.rank) : 999;
+        const rkB = Number(b?.rank) > 0 ? Number(b.rank) : 999;
+        if (rkA !== rkB) return rkA - rkB;
+        return (getNumericEdge(b) ?? -999) - (getNumericEdge(a) ?? -999);
+      });
+      const normalized = combined
+        .map((p, idx) => ({
+          id: p.prediction_id || p.event_id || `${idx}`,
+          rank: Number(p.rank) > 0 ? Number(p.rank) : idx + 1,
+          matchup: p.matchup || formatMatchup(p),
+          sport: 'NCAAM',
+          marketKey: normalizeMarketType(p),
+          market: formatMarketLabel(p.market_type),
+          pick: p.selection || p.side || formatPickLabel(p),
+          lineOdds: formatLineAndOdds({ bet_line: p.bet_line ?? p.line, bet_price: p.bet_price ?? p.price ?? p.odds }),
+          outcome: p.outcome,
+          score: p.score && String(p.score).trim() !== '0-0' ? p.score : null,
+          evPct: getNumericEdge(p) != null ? getNumericEdge(p) * 100 : null,
+          confidence_0_100: p.confidence_0_100 ?? p.confidence,
+          confidence_label: p.confidence_label,
+          bet_price: p.bet_price ?? p.price ?? p.odds,
+          profitUnits: computeRowProfitUnits(p),
+        }))
+        .filter((item) => {
+          if (marketFilter !== 'ALL' && item.marketKey !== marketFilter) return false;
+          if (confFilter !== 'ALL' && !matchesConfFilter(item, confFilter)) return false;
+          return true;
+        });
+      const stats = computeRecordStats(normalized);
       return {
         title: `Yesterday's Top Recommended Slate (${yesterdayReco?.date_et || yesterdayEt})`,
-        subtitle: `${recoStraight.length} straight • ${recoMlParlay.length} ML/parlay picks`,
+        subtitle:
+          marketFilter === 'ALL' && confFilter === 'ALL'
+            ? `${recoStraight.length} straight • ${recoMlParlay.length} ML/parlay picks • Matches Top 6 / Day`
+            : `Filtered view showing ${normalized.length} of ${combined.length} slate picks`,
         rows: normalized,
+        stats,
       };
     }
 
-    // Fallback to latest active day for the chosen sport/filters
+    // Fallback to latest active day for the chosen sport/filters (deduped 1 pick per game)
     const dayRowsMap = {};
-    for (const h of sportWindowMarketHistory) {
+    for (const h of confFilteredHistory) {
       const d = getPerformanceDay(h);
       if (!d) continue;
       if (!dayRowsMap[d]) dayRowsMap[d] = [];
@@ -422,32 +507,40 @@ export default function Picks() {
     }
     const sortedDays = Object.keys(dayRowsMap).sort((a, b) => b.localeCompare(a));
     const latestDay = sortedDays.find((d) => dayRowsMap[d].some((r) => isGradedOutcome(getRawOutcome(r)))) || sortedDays[0];
-    const picks = (latestDay ? dayRowsMap[latestDay] : []).slice().sort((a, b) => (getNumericEdge(b) ?? -1) - (getNumericEdge(a) ?? -1));
+    const picks = latestDay ? dedupeDayRowsByEvent(dayRowsMap[latestDay]).slice(0, 6) : [];
     const isActuallyYesterday = latestDay === yesterdayEt;
+    const normalized = picks.map((h, i) => ({
+      id: h.id || h.prediction_id || `${h.event_id}-${i}`,
+      rank: i + 1,
+      matchup: formatMatchup(h),
+      sport: normalizeSport(h),
+      marketKey: normalizeMarketType(h),
+      market: formatMarketLabel(h),
+      pick: formatPickLabel(h),
+      lineOdds: formatLineAndOdds(h),
+      outcome: getRawOutcome(h),
+      score: h.score && (normalizeSport(h) === 'EPL' || String(h.score).trim() !== '0-0') ? h.score : null,
+      evPct: getNumericEdge(h) != null ? getNumericEdge(h) * 100 : null,
+      confidence_0_100: h.confidence_0_100 ?? h.confidence,
+      confidence_label: h.confidence_label,
+      bet_price: getEffectivePrice(h),
+      profitUnits: computeRowProfitUnits(h),
+    }));
 
     return {
       title: latestDay
         ? isActuallyYesterday
-          ? `Yesterday's Graded Picks (${latestDay})`
+          ? `Yesterday's Top 6 Picks (${latestDay})`
           : `Most Recent Graded Day (${latestDay})`
         : 'Recent Slate Recap',
       subtitle:
         picks.length > 0
-          ? `${selectedSport === 'ALL' ? 'All sports' : selectedSport} • Top ${Math.min(picks.length, 6)} picks by projected edge`
+          ? `${selectedSport === 'ALL' ? 'All sports' : selectedSport} • Top ${picks.length} canonical picks (1 per game)`
           : `No recent picks recorded for ${selectedSport === 'ALL' ? 'selected filters' : selectedSport}.`,
-      rows: picks.slice(0, 6).map((h, i) => ({
-        id: h.id || h.prediction_id || `${h.event_id}-${i}`,
-        matchup: formatMatchup(h),
-        sport: normalizeSport(h),
-        market: formatMarketLabel(h),
-        pick: formatPickLabel(h),
-        lineOdds: formatLineAndOdds(h),
-        outcome: getRawOutcome(h),
-        score: h.score || null,
-        evPct: getNumericEdge(h) != null ? getNumericEdge(h) * 100 : null,
-      })),
+      rows: normalized,
+      stats: computeRecordStats(normalized),
     };
-  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportWindowMarketHistory]);
+  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, confFilteredHistory, marketFilter, confFilter]);
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
@@ -545,6 +638,7 @@ export default function Picks() {
     selectedSeason !== defaultNcaamSeason ||
     windowFilter !== 'ALL' ||
     marketFilter !== 'ALL' ||
+    confFilter !== 'ALL' ||
     historyScope !== 'all' ||
     outcomeFilter !== 'ALL' ||
     searchQuery.trim() !== '';
@@ -554,6 +648,7 @@ export default function Picks() {
     setSelectedSeason(defaultNcaamSeason);
     setWindowFilter('ALL');
     setMarketFilter('ALL');
+    setConfFilter('ALL');
     setHistoryScope('all');
     setOutcomeFilter('ALL');
     setSearchQuery('');
@@ -563,7 +658,13 @@ export default function Picks() {
     windowFilter === 'ALL' ? 'All Time' : `Last ${windowFilter} Days`;
   const sportLabel = selectedSport === 'ALL' ? 'All Sports' : selectedSport;
   const seasonLabel = formatSeasonLabel(selectedSeason);
-  const filterSummaryText = `${sportLabel} • ${seasonLabel} • ${windowLabel}${marketFilter !== 'ALL' ? ` • ${formatMarketLabel(marketFilter)}` : ''}`;
+  const confLabelMap = {
+    HIGH: 'High Conf (80+)',
+    MED_PLUS: 'Med+ Conf (50+)',
+    MEDIUM: 'Medium Conf (50–79)',
+    LOW: 'Low Conf (<50)',
+  };
+  const filterSummaryText = `${sportLabel} • ${seasonLabel} • ${windowLabel}${marketFilter !== 'ALL' ? ` • ${formatMarketLabel(marketFilter)}` : ''}${confFilter !== 'ALL' ? ` • ${confLabelMap[confFilter] || confFilter}` : ''}`;
 
   const renderSortIcon = (colKey) => {
     if (sortConfig.key !== colKey) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45" aria-hidden="true" />;
@@ -701,7 +802,7 @@ export default function Picks() {
 
       {/* Unified Filter Toolbar */}
       <search aria-label="Filter model performance" className="ui-card p-4 sm:p-5 space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5 items-end">
           {/* Sport Dropdown */}
           <div className="space-y-1.5">
             <label htmlFor="perf-sport-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -762,6 +863,26 @@ export default function Picks() {
                   {formatMarketLabel(m)}
                 </option>
               ))}
+            </select>
+          </div>
+
+          {/* Confidence Dropdown */}
+          <div className="space-y-1.5">
+            <label htmlFor="perf-conf-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Confidence
+            </label>
+            <select
+              id="perf-conf-select"
+              name="confidence"
+              value={confFilter}
+              onChange={(e) => setConfFilter(e.target.value)}
+              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
+            >
+              <option value="ALL">All Confidence</option>
+              <option value="HIGH">High (80+)</option>
+              <option value="MED_PLUS">Medium+ (50+)</option>
+              <option value="MEDIUM">Medium (50–79)</option>
+              <option value="LOW">Low (&lt;50)</option>
             </select>
           </div>
 
@@ -835,12 +956,13 @@ export default function Picks() {
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Filter className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
             <span>
               Viewing <strong className="text-slate-200">{filterSummaryText}</strong> •{' '}
               <span className="font-mono text-slate-200">{scopedStats.settled.toLocaleString()}</span> settled out of{' '}
               <span className="font-mono text-slate-200">{scopedStats.total.toLocaleString()}</span> picks
+              {historyScope === 'top6' && ' • 1 best pick per game'}
             </span>
           </div>
           {hasNonDefaultFilters && (
@@ -856,7 +978,7 @@ export default function Picks() {
         </div>
       </search>
 
-      {/* Top KPI Summary Cards */}
+      {/* Top KPI Summary Cards + Actionable Key Takeaways */}
       <section aria-labelledby="kpi-summary-heading" className="space-y-3">
         <h2 id="kpi-summary-heading" className="sr-only">
           Key Performance Summary
@@ -895,7 +1017,7 @@ export default function Picks() {
           </article>
 
           <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Unit Profit &amp; Return</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Unit Profit &amp; Staking</div>
             <div
               className={`text-2xl font-extrabold font-mono ${
                 scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
@@ -904,9 +1026,17 @@ export default function Picks() {
               {formatUnits(scopedStats.profitUnits)}
             </div>
             <div className="text-xs text-slate-400">
-              {scopedStats.settled > 0
-                ? `${formatSignedPct(scopedStats.roiPct)} return on flat 1-unit bets`
-                : 'Awaiting settled bets'}
+              {scopedStats.settled > 0 ? (
+                <>
+                  <span>{formatSignedPct(scopedStats.roiPct)} flat 1u</span>
+                  <span> • Tier-weighted: </span>
+                  <span className={`font-mono font-semibold ${weightedProfitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {formatUnits(weightedProfitUnits)}
+                  </span>
+                </>
+              ) : (
+                'Awaiting settled bets'
+              )}
             </div>
           </article>
 
@@ -925,152 +1055,264 @@ export default function Picks() {
             </div>
             <div className="text-xs text-slate-400">
               {clvStats.count > 0
-                ? `Tracked on ${clvStats.count.toLocaleString()} picks with a closing line`
+                ? `Beat close ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% across ${clvStats.count.toLocaleString()} picks`
                 : 'No closing-line comparisons recorded yet'}
             </div>
           </article>
         </div>
+
+        {/* Concise Key Insights Strip */}
+        {scopedStats.settled > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => bestMarketTakeaway?.best && setMarketFilter(bestMarketTakeaway.best.marketKey === marketFilter ? 'ALL' : bestMarketTakeaway.best.marketKey)}
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 transition-colors cursor-pointer"
+            >
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Strongest Bet Type</div>
+              {bestMarketTakeaway?.best ? (
+                <div className="mt-0.5 text-slate-200">
+                  <strong className="text-emerald-300">{bestMarketTakeaway.best.label}</strong> leads at{' '}
+                  <span className="font-mono font-semibold">{bestMarketTakeaway.best.winRate.toFixed(1)}%</span> (
+                  <span className={`font-mono font-semibold ${bestMarketTakeaway.best.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {formatUnits(bestMarketTakeaway.best.profitUnits)}
+                  </span>
+                  ){bestMarketTakeaway.worst ? ` • Drag: ${bestMarketTakeaway.worst.label} (${formatUnits(bestMarketTakeaway.worst.profitUnits)})` : ''}
+                </div>
+              ) : (
+                <div className="mt-0.5 text-slate-400">Settled picks needed for market comparison</div>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setConfFilter(confFilter === 'MED_PLUS' ? 'ALL' : 'MED_PLUS')}
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 transition-colors cursor-pointer"
+            >
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Confidence Signal</div>
+              <div className="mt-0.5 text-slate-200">
+                <strong className="text-indigo-300">Score 50+</strong>:{' '}
+                <span className="font-mono font-semibold">
+                  {confTakeaway.medPlus.decided > 0 ? `${confTakeaway.medPlus.winRate.toFixed(1)}%` : '—'}
+                </span>{' '}
+                ({formatUnits(confTakeaway.medPlus.profitUnits)}) vs Low:{' '}
+                <span className="font-mono">
+                  {confTakeaway.low.decided > 0 ? `${confTakeaway.low.winRate.toFixed(1)}%` : '—'}
+                </span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setHistoryScope(historyScope === 'top6' ? 'all' : 'top6')}
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 transition-colors cursor-pointer"
+            >
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Daily Selectivity</div>
+              <div className="mt-0.5 text-slate-200">
+                <strong className="text-sky-300">Top 6 / Day</strong>:{' '}
+                <span className="font-mono font-semibold">
+                  {scopeComparison.top6Stats.decided > 0 ? `${scopeComparison.top6Stats.winRate.toFixed(1)}%` : '—'}
+                </span>{' '}
+                (<span className={`font-mono font-semibold ${scopeComparison.top6Stats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatUnits(scopeComparison.top6Stats.profitUnits)}
+                </span>) vs All Picks{' '}
+                <span className="font-mono">{formatUnits(scopeComparison.allStats.profitUnits)}</span>
+              </div>
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Main Recharts Visualizations & Breakdowns */}
       <h2 className="sr-only">Model Performance Charts and Breakdowns</h2>
       <ModelPerformanceAnalytics
         history={scopedHistory}
-        allHistory={windowMarketHistory}
+        preConfHistory={historyScope === 'top6' ? selectTopPicksPerDay(sportWindowMarketHistory, 6) : sportWindowMarketHistory}
+        allHistory={confFilter === 'ALL' ? windowMarketHistory : windowMarketHistory.filter((h) => matchesConfFilter(h, confFilter))}
         selectedSport={selectedSport}
         onSelectSport={handleSportChange}
+        selectedMarket={marketFilter}
+        onSelectMarket={(nextMkt) => setMarketFilter(nextMkt)}
+        selectedConf={confFilter}
+        onSelectConf={(nextConf) => setConfFilter(nextConf)}
         scopeLabel={historyScope === 'top6' ? 'Top 6 daily picks' : 'all recommended picks'}
         filterSummary={filterSummaryText}
         liveCalibration={liveCalibration}
-      />
-
-      {/* Top 6 Rank Breakdown + Yesterday / Latest Slate Recap */}
-      <section aria-label="Daily Rank Performance and Recent Slate Recap" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily Rank #1 - #6 */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="rank-breakdown-heading">
-          <div>
-            <h2 id="rank-breakdown-heading" className="text-base font-bold text-slate-100">
-              Daily Best Picks by Rank (#1 to #6)
-            </h2>
-            <p className="text-xs text-slate-400">
-              Ranks each day&apos;s picks by strongest edge (#1 = top pick of the day) for {sportLabel}.
-            </p>
-          </div>
-
-          {rankBreakdown.every((r) => r.settled === 0) ? (
-            <div className="h-[220px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
-              No ranked settled picks match this filter.
-            </div>
-          ) : (
-            <>
-              <div className="h-[210px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={rankBreakdown.map((r) => ({ ...r, winRateRounded: Number(r.winRate.toFixed(1)) }))}
-                    margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis dataKey="label" stroke="#cbd5e1" fontSize={12} tickLine={false} />
-                    <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
-                    <ReferenceLine
-                      y={52.4}
-                      stroke="#f59e0b"
-                      strokeDasharray="4 4"
-                      label={{ value: '52.4% Break-Even', fill: '#f59e0b', fontSize: 10, position: 'insideTopRight' }}
-                    />
-                    <Tooltip
-                      contentStyle={TOOLTIP_STYLE}
-                      formatter={(val) => [`${val}%`, 'Win Rate']}
-                      labelFormatter={(_, payload) => {
-                        const p = payload?.[0]?.payload;
-                        return p ? `Rank ${p.label} • ${p.wins}-${p.losses}${p.pushes > 0 ? `-${p.pushes}` : ''} • ${formatUnits(p.profitUnits)} (${formatSignedPct(p.roiPct)})` : '';
-                      }}
-                    />
-                    <Bar dataKey="winRateRounded" radius={[5, 5, 0, 0]} maxBarSize={38}>
-                      {rankBreakdown.map((r) => (
-                        <Cell
-                          key={r.rank}
-                          fill={r.settled === 0 ? '#334155' : r.winRate >= 52.4 ? '#10b981' : '#f43f5e'}
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                {rankBreakdown.map((r) => (
-                  <div key={r.rank} className="rounded-xl border border-slate-800 bg-slate-950/60 p-2 text-center">
-                    <div className="text-[11px] font-bold text-indigo-300">{r.label}</div>
-                    <div className={`text-xs font-mono font-bold mt-0.5 ${r.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-200'}`}>
-                      {r.decided > 0 ? `${r.winRate.toFixed(0)}%` : '—'}
-                    </div>
-                    <div className="text-[10px] font-mono text-slate-400">
-                      {r.wins}-{r.losses}
-                    </div>
-                    <div className={`text-[10px] font-mono ${r.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {r.settled > 0 ? formatSignedPct(r.roiPct) : '—'}
-                    </div>
+        slateAndRankSlot={(
+          <section aria-label="Yesterday Slate Recap and Daily Rank Performance" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Yesterday / Most Recent Active Slate Recap */}
+            <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="recent-slate-heading">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h2 id="recent-slate-heading" className="text-base font-bold text-slate-100">
+                    {recentSlateDisplay.title}
+                  </h2>
+                  <p className="text-xs text-slate-400">{recentSlateDisplay.subtitle}</p>
+                </div>
+                {recentSlateDisplay.rows.length > 0 && recentSlateDisplay.stats?.settled > 0 && (
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-slate-700 bg-slate-950 text-xs font-mono shrink-0">
+                    <span className="font-bold text-slate-100">
+                      {recentSlateDisplay.stats.wins}-{recentSlateDisplay.stats.losses}
+                      {recentSlateDisplay.stats.pushes > 0 ? `-${recentSlateDisplay.stats.pushes}` : ''}
+                    </span>
+                    <span className="text-slate-600">•</span>
+                    <span className={`font-bold ${recentSlateDisplay.stats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {formatUnits(recentSlateDisplay.stats.profitUnits)}
+                    </span>
+                    <span className="text-slate-600">•</span>
+                    <span className="text-slate-300">
+                      {recentSlateDisplay.stats.decided > 0 ? `${recentSlateDisplay.stats.winRate.toFixed(1)}%` : '—'}
+                    </span>
                   </div>
-                ))}
+                )}
               </div>
-            </>
-          )}
-        </article>
 
-        {/* Yesterday / Most Recent Active Slate Recap */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="recent-slate-heading">
-          <div>
-            <h2 id="recent-slate-heading" className="text-base font-bold text-slate-100">
-              {recentSlateDisplay.title}
-            </h2>
-            <p className="text-xs text-slate-400">{recentSlateDisplay.subtitle}</p>
-          </div>
-
-          {recentSlateDisplay.rows.length === 0 ? (
-            <div className="h-[220px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
-              No recent graded picks to show for this sport yet.
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1 scrollbar-refined">
-              {recentSlateDisplay.rows.map((item) => {
-                const badge = formatOutcomeBadge(item.outcome);
-                return (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/90 bg-slate-950/60 px-3.5 py-2.5"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
-                          {item.sport}
-                        </span>
-                        <span className="text-xs font-semibold text-slate-100 truncate">{item.matchup}</span>
-                      </div>
-                      <div className="text-xs text-slate-300 mt-0.5 truncate">
-                        <span className="font-semibold text-indigo-300">{item.pick}</span>{' '}
-                        <span className="text-slate-400">{item.lineOdds}</span>{' '}
-                        <span className="text-slate-500">• {item.market}</span>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0 space-y-0.5">
-                      <span className={`inline-block px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge.cls}`}>
-                        {badge.label}
-                      </span>
-                      {(item.score || item.evPct != null) && (
-                        <div className="text-[11px] font-mono text-slate-400">
-                          {item.score ? item.score : `${item.evPct >= 0 ? '+' : ''}${item.evPct.toFixed(1)}% Edge`}
+              {recentSlateDisplay.rows.length === 0 ? (
+                <div className="h-[220px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
+                  No recent graded picks match the active filters.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {recentSlateDisplay.rows.map((item) => {
+                    const badge = formatOutcomeBadge(item.outcome);
+                    const rowPl = item.profitUnits ?? computeRowProfitUnits(item);
+                    const confTier = getConfidenceBucket(item);
+                    const confScore = Math.round(getNumericConfidence(item));
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/90 bg-slate-950/60 px-3.5 py-2.5"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            {item.rank && (
+                              <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-[10px] font-mono font-bold text-indigo-300 shrink-0">
+                                #{item.rank}
+                              </span>
+                            )}
+                            <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300 shrink-0">
+                              {item.sport}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-100 truncate">{item.matchup}</span>
+                          </div>
+                          <div className="text-xs text-slate-300 mt-0.5 truncate">
+                            <span className="font-semibold text-indigo-300">{item.pick}</span>{' '}
+                            <span className="text-slate-400">{item.lineOdds}</span>{' '}
+                            <span className="text-slate-500">• {item.market}</span>
+                            {item.evPct != null && (
+                              <span className="text-slate-400 font-mono">
+                                {' '}• {item.evPct >= 0 ? '+' : ''}{item.evPct.toFixed(1)}% Edge
+                              </span>
+                            )}
+                            {confScore > 0 && (
+                              <span className="text-slate-500"> • {confTier} ({confScore})</span>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </div>
+
+                        <div className="text-right shrink-0 space-y-0.5">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {item.score && <span className="text-[11px] font-mono text-slate-400">{item.score}</span>}
+                            <span className={`inline-block px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge.cls}`}>
+                              {badge.label}
+                            </span>
+                          </div>
+                          <div
+                            className={`text-[11px] font-mono font-bold ${
+                              badge.key === 'PENDING'
+                                ? 'text-slate-500'
+                                : badge.key === 'WON'
+                                  ? 'text-emerald-400'
+                                  : badge.key === 'LOST'
+                                    ? 'text-rose-400'
+                                    : 'text-slate-400'
+                            }`}
+                          >
+                            {badge.key === 'PENDING' ? 'Pending' : formatUnits(rowPl)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </article>
+
+            {/* Daily Rank #1 - #6 */}
+            <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="rank-breakdown-heading">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h2 id="rank-breakdown-heading" className="text-base font-bold text-slate-100">
+                    Daily Best Picks by Rank (#1 to #6)
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    1 canonical pick per game per day, ranked by strongest daily edge (#1 = top pick) for {sportLabel}.
+                  </p>
+                </div>
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2.5 py-0.5 shrink-0">
+                  <span className="w-2.5 border-t border-dashed border-amber-400 inline-block" />
+                  52.4% Break-Even
+                </span>
+              </div>
+
+              {rankBreakdown.every((r) => r.settled === 0) ? (
+                <div className="h-[220px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
+                  No ranked settled picks match this filter.
+                </div>
+              ) : (
+                <>
+                  <div className="h-[220px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={rankBreakdown.map((r) => ({ ...r, winRateRounded: Number(r.winRate.toFixed(1)) }))}
+                        margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                        <XAxis dataKey="label" stroke="#cbd5e1" fontSize={12} tickLine={false} />
+                        <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
+                        <ReferenceLine y={52.4} stroke="#f59e0b" strokeDasharray="4 4" />
+                        <Tooltip
+                          contentStyle={TOOLTIP_STYLE}
+                          formatter={(val) => [`${val}%`, 'Win Rate']}
+                          labelFormatter={(_, payload) => {
+                            const p = payload?.[0]?.payload;
+                            return p ? `Rank ${p.label} • ${p.wins}-${p.losses}${p.pushes > 0 ? `-${p.pushes}` : ''} • ${formatUnits(p.profitUnits)} (${formatSignedPct(p.roiPct)})` : '';
+                          }}
+                        />
+                        <Bar dataKey="winRateRounded" radius={[5, 5, 0, 0]} maxBarSize={38}>
+                          {rankBreakdown.map((r) => (
+                            <Cell
+                              key={r.rank}
+                              fill={r.settled === 0 ? '#334155' : r.winRate >= 52.4 ? '#10b981' : '#f43f5e'}
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </article>
-      </section>
+
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    {rankBreakdown.map((r) => (
+                      <div key={r.rank} className="rounded-xl border border-slate-800 bg-slate-950/60 p-2 text-center">
+                        <div className="text-[11px] font-bold text-indigo-300">{r.label}</div>
+                        <div className={`text-xs font-mono font-bold mt-0.5 ${r.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {r.decided > 0 ? `${r.winRate.toFixed(0)}%` : '—'}
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-400">
+                          {r.wins}-{r.losses}
+                        </div>
+                        <div className={`text-[10px] font-mono ${r.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {r.settled > 0 ? formatUnits(r.profitUnits) : '—'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </article>
+          </section>
+        )}
+      />
 
       {/* Bottom Pick History & Grading Explorer Table */}
       <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="pick-history-heading">
@@ -1243,7 +1485,9 @@ export default function Picks() {
                           <span className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${badge.cls}`}>
                             {badge.label}
                           </span>
-                          {h.score && <span className="font-mono text-xs text-slate-400">{h.score}</span>}
+                          {h.score && (sp === 'EPL' || String(h.score).trim() !== '0-0') && (
+                            <span className="font-mono text-xs text-slate-400">{h.score}</span>
+                          )}
                         </div>
                       </td>
                       <td

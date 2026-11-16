@@ -280,6 +280,21 @@ def match_mlb_schedule_game(
     return None
 
 
+def is_valid_final_score(home_score: Any, away_score: Any, league: Optional[str] = None) -> bool:
+    """Reject placeholder 0-0 scores in sports where a 0-0 final cannot happen."""
+    if home_score is None or away_score is None:
+        return False
+    try:
+        h_sc = int(float(home_score))
+        a_sc = int(float(away_score))
+    except Exception:
+        return False
+    lg = str(league or "").strip().upper()
+    if h_sc == 0 and a_sc == 0 and lg not in ("EPL", "SOCCER", "SOCCER_EPL", "ENG.1"):
+        return False
+    return True
+
+
 def fetch_espn_scoreboard_finals(
     league: str,
     yyyymmdd: str,
@@ -332,7 +347,7 @@ def fetch_espn_scoreboard_finals(
                 away_team = team_name
                 away_score = score_val
 
-        if home_team and away_team and home_score is not None and away_score is not None:
+        if home_team and away_team and is_valid_final_score(home_score, away_score, league=lg):
             finals.append({
                 "id": f"espn:{ev.get('id')}",
                 "home_team": home_team,
@@ -681,6 +696,8 @@ def grade_score_prediction(
     if home_score is None or away_score is None:
         return "PENDING"
     h_sc, a_sc = float(home_score), float(away_score)
+    if h_sc == 0.0 and a_sc == 0.0:
+        return "PENDING"
 
     if market == "SPREAD":
         side = resolve_team_side(pick, home_team, away_team, is_mlb=is_mlb)

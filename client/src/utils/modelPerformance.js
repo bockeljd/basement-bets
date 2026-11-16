@@ -333,6 +333,69 @@ export const computeRecordStats = (rows) => {
   };
 };
 
+export const getConfidenceTierWeightUnits = (row) => {
+  const rawKelly = parseFloat(row?.kelly ?? row?.kelly_fraction);
+  if (Number.isFinite(rawKelly) && rawKelly > 0) {
+    return Math.max(0.25, Math.min(2.0, rawKelly <= 1 ? rawKelly * 25 : rawKelly / 4));
+  }
+  const tier = getConfidenceBucket(row);
+  if (tier === 'High') return 1.5;
+  if (tier === 'Medium') return 1.0;
+  return 0.5;
+};
+
+export const getEventDedupeKey = (row) => {
+  if (!row) return null;
+  const eid = String(row.event_id || '').trim();
+  if (eid) return eid;
+  const day = getPerformanceDay(row) || '';
+  const matchup = formatMatchup(row).trim().toLowerCase();
+  return matchup && matchup !== '—' ? `${day}|${matchup}` : null;
+};
+
+const isCanonicalSlateRow = (row) => {
+  if (!row) return false;
+  if (row.canonical_source === 'daily_top_picks' || row.source_type === 'canonical_slate') return true;
+  const rk = Number(row.rank);
+  return Number.isFinite(rk) && rk > 0;
+};
+
+const compareDailySlateRows = (a, b) => {
+  const canonA = isCanonicalSlateRow(a) ? 0 : 1;
+  const canonB = isCanonicalSlateRow(b) ? 0 : 1;
+  if (canonA !== canonB) return canonA - canonB;
+
+  const rkA = Number(a?.rank);
+  const rkB = Number(b?.rank);
+  const hasRkA = Number.isFinite(rkA) && rkA > 0;
+  const hasRkB = Number.isFinite(rkB) && rkB > 0;
+  if (canonA === 0 && hasRkA && hasRkB && rkA !== rkB) {
+    return rkA - rkB;
+  }
+
+  const evA = getNumericEdge(a) ?? -999;
+  const evB = getNumericEdge(b) ?? -999;
+  if (evB !== evA) return evB - evA;
+
+  if (hasRkA || hasRkB) {
+    return (hasRkA ? rkA : 999) - (hasRkB ? rkB : 999);
+  }
+  return 0;
+};
+
+export const dedupeDayRowsByEvent = (dayRows) => {
+  const sorted = dayRows.slice().sort(compareDailySlateRows);
+  const seenEvents = new Set();
+  const unique = [];
+  for (const row of sorted) {
+    const key = getEventDedupeKey(row);
+    if (key && seenEvents.has(key)) continue;
+    if (key) seenEvents.add(key);
+    unique.push(row);
+  }
+  return unique;
+};
+
 export const selectTopPicksPerDay = (rows, topN = 6) => {
   const list = Array.isArray(rows) ? rows : [];
   const groups = {};
@@ -344,15 +407,8 @@ export const selectTopPicksPerDay = (rows, topN = 6) => {
   const out = [];
   const sortedDays = Object.keys(groups).sort((a, b) => b.localeCompare(a));
   for (const day of sortedDays) {
-    const sorted = groups[day].slice().sort((a, b) => {
-      const evA = getNumericEdge(a) ?? -999;
-      const evB = getNumericEdge(b) ?? -999;
-      if (evB !== evA) return evB - evA;
-      const rkA = Number(a?.rank) || 999;
-      const rkB = Number(b?.rank) || 999;
-      return rkA - rkB;
-    });
-    out.push(...sorted.slice(0, topN));
+    const uniqueDay = dedupeDayRowsByEvent(groups[day]);
+    out.push(...uniqueDay.slice(0, topN));
   }
   return out;
 };
@@ -377,15 +433,8 @@ export const computeRankBreakdown = (rows, maxRank = 6) => {
   }));
 
   for (const day of Object.keys(groups)) {
-    const sorted = groups[day].slice().sort((a, b) => {
-      const evA = getNumericEdge(a) ?? -999;
-      const evB = getNumericEdge(b) ?? -999;
-      if (evB !== evA) return evB - evA;
-      const rkA = Number(a?.rank) || 999;
-      const rkB = Number(b?.rank) || 999;
-      return rkA - rkB;
-    });
-    sorted.slice(0, maxRank).forEach((row, idx) => {
+    const uniqueDay = dedupeDayRowsByEvent(groups[day]);
+    uniqueDay.slice(0, maxRank).forEach((row, idx) => {
       const bucket = buckets[idx];
       const out = getRawOutcome(row);
       const norm = normalizeOutcome(out);

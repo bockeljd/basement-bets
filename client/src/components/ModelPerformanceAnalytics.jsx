@@ -20,9 +20,11 @@ import {
   roiPerUnit,
   getConfidenceBucket,
   getNumericConfidence,
+  getConfidenceTierWeightUnits,
   getRawOutcome,
   getEffectivePrice,
   normalizeOutcome,
+  normalizeMarketType,
   formatMarketLabel,
   getNumericEdge,
   normalizeSport,
@@ -103,11 +105,17 @@ const finalizeBucket = (b) => {
 const ModelPerformanceAnalytics = ({
   history = [],
   allHistory = null,
+  preConfHistory = null,
   selectedSport = 'ALL',
   onSelectSport = null,
+  selectedMarket = 'ALL',
+  onSelectMarket = null,
+  selectedConf = 'ALL',
+  onSelectConf = null,
   scopeLabel = 'all recommended picks',
   filterSummary = 'All Sports • All Time',
   liveCalibration = null,
+  slateAndRankSlot = null,
 }) => {
   const [trendTab, setTrendTab] = useState('cumulative');
   const [edgeTab, setEdgeTab] = useState('chart');
@@ -204,7 +212,35 @@ const ModelPerformanceAnalytics = ({
       if (day >= cutoff7 && day <= nowEtStr) accumulateRowInto(rollAcc['Last 7 Days'], h);
       if (day >= cutoff30 && day <= nowEtStr) accumulateRowInto(rollAcc['Last 30 Days'], h);
     }
-    const recentWindows = Object.values(rollAcc).map(finalizeBucket);
+    const calendarWindows = Object.values(rollAcc).map(finalizeBucket);
+    const hasRecentCalendarData = calendarWindows.some((w) => w.settled > 0);
+    let recentWindows = calendarWindows;
+    if (!hasRecentCalendarData && settledDays.length > 0) {
+      const latestDay = settledDays[settledDays.length - 1].day;
+      const latestDt = new Date(`${latestDay}T12:00:00Z`);
+      const latestMinus = (d) => {
+        const dt = new Date(latestDt);
+        dt.setUTCDate(dt.getUTCDate() - d);
+        return dt.toISOString().slice(0, 10);
+      };
+      const histAcc = {
+        [`Latest Day (${shortDayLabel(latestDay)})`]: createBucketAccumulator(`Latest Day (${shortDayLabel(latestDay)})`),
+        'Final 7 Active Days': createBucketAccumulator('Final 7 Active Days'),
+        'Final 30 Active Days': createBucketAccumulator('Final 30 Active Days'),
+        'Selected Total': createBucketAccumulator('Selected Total'),
+      };
+      const c7 = latestMinus(7);
+      const c30 = latestMinus(30);
+      for (const h of graded) {
+        const day = getPerformanceDay(h);
+        if (!day) continue;
+        if (day === latestDay) accumulateRowInto(histAcc[`Latest Day (${shortDayLabel(latestDay)})`], h);
+        if (day >= c7 && day <= latestDay) accumulateRowInto(histAcc['Final 7 Active Days'], h);
+        if (day >= c30 && day <= latestDay) accumulateRowInto(histAcc['Final 30 Active Days'], h);
+        accumulateRowInto(histAcc['Selected Total'], h);
+      }
+      recentWindows = Object.values(histAcc).map(finalizeBucket);
+    }
 
     // 3. Edge Calibration Buckets
     const edgeDefs = [
@@ -227,9 +263,16 @@ const ModelPerformanceAnalytics = ({
       .filter((b) => b.label !== '< 2%' || b.settled > 0);
 
     // 4. Confidence Tiers (High >= 80, Medium 50-79, Low < 50)
+    // Compute from preConfHistory when provided so clicking a tier leaves sibling tier totals visible.
+    const confSource = Array.isArray(preConfHistory)
+      ? preConfHistory.filter((h) => {
+          const n = normalizeOutcome(getRawOutcome(h));
+          return n === 'WON' || n === 'LOST' || n === 'PUSH';
+        })
+      : graded;
     const confDefs = ['High', 'Medium', 'Low'];
     const confMap = Object.fromEntries(confDefs.map((k) => [k, createBucketAccumulator(k)]));
-    for (const h of graded) {
+    for (const h of confSource) {
       const tier = getConfidenceBucket(h);
       if (!confMap[tier]) confMap[tier] = createBucketAccumulator(tier);
       accumulateRowInto(confMap[tier], h);
@@ -242,9 +285,15 @@ const ModelPerformanceAnalytics = ({
     // 5. Bet Type Breakdown
     const marketMap = {};
     for (const h of graded) {
-      const label = formatMarketLabel(h);
-      if (!marketMap[label]) marketMap[label] = createBucketAccumulator(label);
-      accumulateRowInto(marketMap[label], h);
+      const marketKey = normalizeMarketType(h);
+      const label = formatMarketLabel(marketKey);
+      if (!marketMap[marketKey]) {
+        marketMap[marketKey] = {
+          ...createBucketAccumulator(label),
+          marketKey,
+        };
+      }
+      accumulateRowInto(marketMap[marketKey], h);
     }
     const betTypes = Object.values(marketMap)
       .map(finalizeBucket)
@@ -277,22 +326,18 @@ const ModelPerformanceAnalytics = ({
       .map(finalizeBucket)
       .sort((a, b) => (b.settled + b.pending) - (a.settled + a.pending));
 
-    // 7. Flat 1u vs Quarter-Kelly Sizing Comparison & Closing Line Value (CLV)
+    // 7. Flat 1u vs Confidence-Weighted Staking Comparison & Closing Line Value (CLV)
     let flatUnitsTotal = 0;
     let kellyUnitsTotal = 0;
-    let kellyTaggedCount = 0;
+    let sizedPlaysCount = 0;
     let clvTotalSum = 0;
     let clvTotalCount = 0;
     let clvPositiveCount = 0;
     for (const h of graded) {
       const unitPl = roiPerUnit(getRawOutcome(h), getEffectivePrice(h));
       flatUnitsTotal += unitPl;
-      const rawKelly = parseFloat(h?.kelly ?? h?.kelly_fraction);
-      const stakeU =
-        Number.isFinite(rawKelly) && rawKelly > 0
-          ? Math.max(0.25, Math.min(2.0, rawKelly <= 1 ? rawKelly * 25 : rawKelly / 4))
-          : 1.0;
-      if (Number.isFinite(rawKelly) && rawKelly > 0) kellyTaggedCount += 1;
+      const stakeU = getConfidenceTierWeightUnits(h);
+      sizedPlaysCount += 1;
       kellyUnitsTotal += unitPl * stakeU;
 
       const clv = parseFloat(h?.clv_points);
@@ -317,13 +362,13 @@ const ModelPerformanceAnalytics = ({
       stakingComparison: {
         flatUnits: Number(flatUnitsTotal.toFixed(2)),
         kellyUnits: Number(kellyUnitsTotal.toFixed(2)),
-        kellyTaggedCount,
+        kellyTaggedCount: sizedPlaysCount,
         avgClv: clvTotalCount > 0 ? clvTotalSum / clvTotalCount : null,
         clvCount: clvTotalCount,
         clvBeatRate: clvTotalCount > 0 ? (clvPositiveCount / clvTotalCount) * 100 : null,
       },
     };
-  }, [history, allHistory]);
+  }, [history, allHistory, preConfHistory]);
 
   return (
     <section className="space-y-6" aria-label="Model Performance Charts and Breakdowns">
@@ -458,69 +503,80 @@ const ModelPerformanceAnalytics = ({
                 No daily settled results match the current filters.
               </div>
             ) : (
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={analytics.recentDailyBars} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis dataKey="shortDay" stroke="#64748b" fontSize={11} tickLine={false} minTickGap={20} />
-                    <YAxis
-                      yAxisId="left"
-                      stroke="#64748b"
-                      fontSize={11}
-                      tickLine={false}
-                      tickFormatter={(v) => `${v > 0 ? '+' : ''}${v}u`}
-                      width={48}
-                    />
-                    <YAxis
-                      yAxisId="right"
-                      orientation="right"
-                      domain={[0, 100]}
-                      stroke="#64748b"
-                      fontSize={11}
-                      tickLine={false}
-                      tickFormatter={(v) => `${v}%`}
-                      width={40}
-                    />
-                    <ReferenceLine yAxisId="left" y={0} stroke="#475569" strokeDasharray="3 3" />
-                    <ReferenceLine
-                      yAxisId="right"
-                      y={52.4}
-                      stroke="#f59e0b"
-                      strokeDasharray="4 4"
-                      label={{ value: '52.4% Break-Even', fill: '#f59e0b', fontSize: 10, position: 'insideTopRight' }}
-                    />
-                    <Tooltip
-                      contentStyle={TOOLTIP_STYLE}
-                      formatter={(value, name) => {
-                        if (name === 'profitUnits') return [formatUnits(value), 'Day Profit'];
-                        if (name === 'winRate') return [`${value}%`, 'Daily Win Rate'];
-                        return [value, name];
-                      }}
-                      labelFormatter={(_, payload) => {
-                        const p = payload?.[0]?.payload;
-                        return p ? `${p.day} • ${p.recordText} (${p.settled} settled)` : '';
-                      }}
-                    />
-                    <Bar yAxisId="left" dataKey="profitUnits" radius={[4, 4, 0, 0]} maxBarSize={24}>
-                      {analytics.recentDailyBars.map((d) => (
-                        <Cell key={d.day} fill={d.profitUnits >= 0 ? '#10b981' : '#f43f5e'} fillOpacity={0.85} />
-                      ))}
-                    </Bar>
-                    <Line
-                      yAxisId="right"
-                      type="monotone"
-                      dataKey="winRate"
-                      stroke="#818cf8"
-                      strokeWidth={2}
-                      dot={{ r: 2.5, fill: '#818cf8' }}
-                      connectNulls
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />
+                    <span className="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block -ml-1" />
+                    Daily Profit (u)
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-3 h-0.5 bg-indigo-400 inline-block" />
+                    Daily Win %
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-amber-300">
+                    <span className="w-3 border-t border-dashed border-amber-400 inline-block" />
+                    52.4% Break-Even
+                  </span>
+                </div>
+                <div className="h-[270px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={analytics.recentDailyBars} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                      <XAxis dataKey="shortDay" stroke="#64748b" fontSize={11} tickLine={false} minTickGap={20} />
+                      <YAxis
+                        yAxisId="left"
+                        stroke="#64748b"
+                        fontSize={11}
+                        tickLine={false}
+                        tickFormatter={(v) => `${v > 0 ? '+' : ''}${v}u`}
+                        width={48}
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        domain={[0, 100]}
+                        stroke="#64748b"
+                        fontSize={11}
+                        tickLine={false}
+                        tickFormatter={(v) => `${v}%`}
+                        width={40}
+                      />
+                      <ReferenceLine yAxisId="left" y={0} stroke="#475569" strokeDasharray="3 3" />
+                      <ReferenceLine yAxisId="right" y={52.4} stroke="#f59e0b" strokeDasharray="4 4" />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(value, name) => {
+                          if (name === 'profitUnits') return [formatUnits(value), 'Day Profit'];
+                          if (name === 'winRate') return [`${value}%`, 'Daily Win Rate'];
+                          return [value, name];
+                        }}
+                        labelFormatter={(_, payload) => {
+                          const p = payload?.[0]?.payload;
+                          return p ? `${p.day} • ${p.recordText} (${p.settled} settled)` : '';
+                        }}
+                      />
+                      <Bar yAxisId="left" dataKey="profitUnits" radius={[4, 4, 0, 0]} maxBarSize={24}>
+                        {analytics.recentDailyBars.map((d) => (
+                          <Cell key={d.day} fill={d.profitUnits >= 0 ? '#10b981' : '#f43f5e'} fillOpacity={0.85} />
+                        ))}
+                      </Bar>
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="winRate"
+                        stroke="#818cf8"
+                        strokeWidth={2}
+                        dot={{ r: 2.5, fill: '#818cf8' }}
+                        connectNulls
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
             )}
             <p className="text-[11px] text-slate-400">
-              Showing up to the last 45 active game days. Green/red bars show daily unit P/L; the purple line tracks daily win rate vs the dashed 52.4% break-even line.
+              Showing up to the last 45 active game days. Bars show daily unit P/L; the line tracks daily win rate vs. the 52.4% break-even line.
             </p>
           </div>
         )}
@@ -538,284 +594,77 @@ const ModelPerformanceAnalytics = ({
                 No confidence scores available for this selection.
               </div>
             ) : (
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={analytics.confidenceDays} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis dataKey="shortDay" stroke="#64748b" fontSize={11} tickLine={false} minTickGap={26} />
-                    <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} width={42} />
-                    <ReferenceLine y={80} stroke="#10b981" strokeDasharray="4 4" label={{ value: 'High (80+)', fill: '#10b981', fontSize: 10, position: 'insideTopRight' }} />
-                    <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: 'Medium (50+)', fill: '#f59e0b', fontSize: 10, position: 'insideTopRight' }} />
-                    <Tooltip
-                      contentStyle={TOOLTIP_STYLE}
-                      formatter={(value) => [`${value}`, 'Avg Confidence']}
-                      labelFormatter={(_, payload) => {
-                        const p = payload?.[0]?.payload;
-                        return p ? `${p.day} • ${p.totalPicks} picks (${p.recordText})` : '';
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="avgConf"
-                      stroke="#38bdf8"
-                      strokeWidth={2.5}
-                      dot={{ r: 3, fill: '#38bdf8' }}
-                      activeDot={{ r: 5 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
+                  <span className="inline-flex items-center gap-1.5 text-emerald-300">
+                    <span className="w-3 border-t border-dashed border-emerald-400 inline-block" />
+                    High Tier (80+)
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-amber-300">
+                    <span className="w-3 border-t border-dashed border-amber-400 inline-block" />
+                    Medium Tier (50+)
+                  </span>
+                </div>
+                <div className="h-[270px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={analytics.confidenceDays} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                      <XAxis dataKey="shortDay" stroke="#64748b" fontSize={11} tickLine={false} minTickGap={26} />
+                      <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}`} width={36} />
+                      <ReferenceLine y={80} stroke="#10b981" strokeDasharray="4 4" />
+                      <ReferenceLine y={50} stroke="#f59e0b" strokeDasharray="4 4" />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(value) => [`${value}`, 'Avg Confidence']}
+                        labelFormatter={(_, payload) => {
+                          const p = payload?.[0]?.payload;
+                          return p ? `${p.day} • ${p.totalPicks} picks (${p.recordText})` : '';
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="avgConf"
+                        stroke="#38bdf8"
+                        strokeWidth={2.5}
+                        dot={{ r: 3, fill: '#38bdf8' }}
+                        activeDot={{ r: 5 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
             )}
             <p className="text-[11px] text-slate-400">
-              Average model conviction score (0–100) per slate day. Threshold lines mark Medium (50+) and High (80+) confidence tiers.
+              Average model conviction score (0–100) per slate day across settled and pending picks.
             </p>
           </div>
         )}
       </article>
 
-      {/* Row 2: Edge Calibration & Confidence / Recent Form */}
+      {slateAndRankSlot}
+
+      {/* Row 2: Bet Type Performance & Edge Calibration */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Card 2: Edge Calibration */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="edge-cal-heading">
-          <div className="flex flex-wrap items-start justify-between gap-2">
+        {/* Card 2: Bet Type Performance */}
+        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="bet-type-heading">
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <h3 id="edge-cal-heading" className="text-base font-bold text-slate-100">
-                Win Rate & Return by Projected Edge
+              <h3 id="bet-type-heading" className="text-base font-bold text-slate-100">
+                Performance by Bet Type
               </h3>
               <p className="text-xs text-slate-400">
-                Tests if bigger model edges actually win more often than the 52.4% break-even line (-110 odds).
+                Return on bets (%) across Spreads, Over/Under Totals, Moneylines, and Parlays. Click a row to filter.
               </p>
             </div>
-            <div role="tablist" aria-label="Edge view mode" className="flex items-center gap-1 border-b border-slate-800">
-              {[
-                { id: 'chart', label: 'Chart' },
-                { id: 'table', label: 'Table' },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  id={`edge-tab-${t.id}`}
-                  role="tab"
-                  type="button"
-                  aria-selected={edgeTab === t.id}
-                  aria-controls={`edge-panel-${t.id}`}
-                  onClick={() => setEdgeTab(t.id)}
-                  className={`px-2.5 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
-                    edgeTab === t.id
-                      ? 'border-indigo-400 text-indigo-300'
-                      : 'border-transparent text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {edgeTab === 'chart' ? (
-            <div id="edge-panel-chart" role="tabpanel" aria-labelledby="edge-tab-chart" className="h-[245px] w-full">
-              {analytics.edgeBuckets.every((b) => b.settled === 0) ? (
-                <div className="h-full flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
-                  No settled picks to bucket by edge.
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={analytics.edgeBuckets} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} />
-                    <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
-                    <ReferenceLine
-                      y={52.4}
-                      stroke="#f59e0b"
-                      strokeDasharray="4 4"
-                      label={{ value: '52.4% Break-Even', fill: '#f59e0b', fontSize: 10, position: 'insideTopRight' }}
-                    />
-                    <Tooltip
-                      contentStyle={TOOLTIP_STYLE}
-                      formatter={(val, name) => {
-                        if (name === 'winRate') return [`${Number(val).toFixed(1)}%`, 'Win Rate'];
-                        return [val, name];
-                      }}
-                      labelFormatter={(_, payload) => {
-                        const p = payload?.[0]?.payload;
-                        if (!p) return '';
-                        return `${p.label} Edge • ${p.recordText} • ${formatUnits(p.profitUnits)} (${formatSignedPct(p.roiPct)} return)`;
-                      }}
-                    />
-                    <Bar dataKey="winRate" radius={[4, 4, 0, 0]} maxBarSize={38}>
-                      {analytics.edgeBuckets.map((b) => (
-                        <Cell
-                          key={b.label}
-                          fill={b.settled === 0 ? '#334155' : b.winRate >= 52.4 ? '#10b981' : b.winRate >= 48 ? '#f59e0b' : '#f43f5e'}
-                        />
-                      ))}
-                    </Bar>
-                  </ComposedChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          ) : (
-            <div id="edge-panel-table" role="tabpanel" aria-labelledby="edge-tab-table" className="table-wrapper overflow-x-auto" tabIndex={0}>
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th scope="col" className="py-2 pr-3 font-medium">Projected Edge</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Settled</th>
-                    <th scope="col" className="py-2 px-3 font-medium">Record</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Units</th>
-                    <th scope="col" className="py-2 pl-3 font-medium text-right">Return %</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/70">
-                  {analytics.edgeBuckets.map((b) => (
-                    <tr key={b.label} className="hover:bg-slate-900/50">
-                      <td className="py-2 pr-3 font-medium text-slate-200">{b.label}</td>
-                      <td className="py-2 px-3 text-right text-slate-400">{b.settled}</td>
-                      <td className="py-2 px-3 font-mono text-slate-300">{b.recordText}</td>
-                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                        {b.decided > 0 ? formatPct(b.winRate) : '—'}
-                      </td>
-                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {formatUnits(b.profitUnits)}
-                      </td>
-                      <td className={`py-2 pl-3 text-right font-mono font-semibold ${b.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {b.settled > 0 ? formatSignedPct(b.roiPct) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </article>
-
-        {/* Card 3: Confidence Tiers & Recent Form */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="conf-form-heading">
-          <div>
-            <h3 id="conf-form-heading" className="text-base font-bold text-slate-100">
-              Confidence Tiers &amp; Recent Form
-            </h3>
-            <p className="text-xs text-slate-400">
-              Every recommended pick (+2% expected edge or higher) is tracked here across High, Medium, and Low confidence.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2.5">
-            {analytics.confidenceTiers.map((t) => {
-              const badgeColor =
-                t.label === 'High'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                  : t.label === 'Medium'
-                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                    : 'border-slate-700 bg-slate-900/80 text-slate-300';
-              return (
-                <div key={t.label} className={`rounded-xl border p-3 ${badgeColor}`}>
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs font-bold">{t.label}</span>
-                    <span className="text-[10px] opacity-80">{t.desc}</span>
-                  </div>
-                  <div className="mt-1.5 text-lg font-extrabold font-mono text-slate-100">
-                    {t.decided > 0 ? formatPct(t.winRate) : '—'}
-                  </div>
-                  <div className="mt-0.5 text-[11px] font-mono text-slate-300">{t.recordText}</div>
-                  <div className={`mt-1 text-[11px] font-mono font-semibold ${t.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {formatUnits(t.profitUnits)} ({t.settled > 0 ? formatSignedPct(t.roiPct) : '—'})
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent Form Windows</h4>
-            <div className="table-wrapper overflow-x-auto" tabIndex={0}>
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th scope="col" className="py-1.5 pr-3 font-medium">Window</th>
-                    <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
-                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
-                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Units</th>
-                    <th scope="col" className="py-1.5 pl-3 font-medium text-right">Return %</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/70">
-                  {analytics.recentWindows.map((w) => (
-                    <tr key={w.label} className="hover:bg-slate-900/50">
-                      <td className="py-1.5 pr-3 font-medium text-slate-200">{w.label}</td>
-                      <td className="py-1.5 px-3 font-mono text-slate-300">{w.recordText}</td>
-                      <td className={`py-1.5 px-3 text-right font-mono font-semibold ${w.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                        {w.decided > 0 ? formatPct(w.winRate) : '—'}
-                      </td>
-                      <td className={`py-1.5 px-3 text-right font-mono font-semibold ${w.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {w.settled > 0 ? formatUnits(w.profitUnits) : '—'}
-                      </td>
-                      <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${w.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {w.settled > 0 ? formatSignedPct(w.roiPct) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </article>
-      </div>
-
-      {/* Staking & CLV Summary Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Flat 1-Unit Profit</h3>
-          <div className={`text-xl font-mono font-bold ${analytics.stakingComparison.flatUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {formatUnits(analytics.stakingComparison.flatUnits)}
-          </div>
-          <p className="text-[11px] text-slate-400">Uniform 1 unit risked per settled play</p>
-        </article>
-
-        <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Confidence-Sized Bets</h3>
-          <div className={`text-xl font-mono font-bold ${analytics.stakingComparison.kellyUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {formatUnits(analytics.stakingComparison.kellyUnits)}
-          </div>
-          <p className="text-[11px] text-slate-400">
-            Sizes each bet by confidence &amp; edge ({analytics.stakingComparison.kellyTaggedCount} sized plays)
-          </p>
-        </article>
-
-        <article className="ui-card p-4 space-y-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Beating the Closing Line</h3>
-          <div
-            className={`text-xl font-mono font-bold ${
-              analytics.stakingComparison.avgClv === null
-                ? 'text-slate-400'
-                : analytics.stakingComparison.avgClv >= 0
-                  ? 'text-emerald-400'
-                  : 'text-rose-400'
-            }`}
-          >
-            {analytics.stakingComparison.avgClv !== null
-              ? `${analytics.stakingComparison.avgClv > 0 ? '+' : ''}${analytics.stakingComparison.avgClv.toFixed(2)}`
-              : '—'}
-          </div>
-          <p className="text-[11px] text-slate-400">
-            {analytics.stakingComparison.clvCount > 0
-              ? `Beat the final closing odds ${formatPct(analytics.stakingComparison.clvBeatRate)} across ${analytics.stakingComparison.clvCount} graded picks`
-              : 'No closing-line comparisons recorded yet'}
-          </p>
-        </article>
-      </div>
-
-      {/* Row 3: Bet Type Chart + By Sport Comparison */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Card 4: Bet Type Performance */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="bet-type-heading">
-          <div>
-            <h3 id="bet-type-heading" className="text-base font-bold text-slate-100">
-              Performance by Bet Type
-            </h3>
-            <p className="text-xs text-slate-400">
-              Compares return on bets (%) across Spreads, Totals (Over/Under), Moneylines, and Parlays.
-            </p>
+            {selectedMarket !== 'ALL' && onSelectMarket && (
+              <button
+                type="button"
+                onClick={() => onSelectMarket('ALL')}
+                className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer shrink-0"
+              >
+                All Types
+              </button>
+            )}
           </div>
 
           {analytics.betTypes.length === 0 ? (
@@ -824,7 +673,7 @@ const ModelPerformanceAnalytics = ({
             </div>
           ) : (
             <>
-              <div className="h-[190px] w-full">
+              <div className="h-[185px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={analytics.betTypes.map((b) => ({ ...b, roiRounded: Number(b.roiPct.toFixed(1)) }))}
@@ -865,29 +714,264 @@ const ModelPerformanceAnalytics = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {analytics.betTypes.map((m) => (
-                      <tr key={m.label} className="hover:bg-slate-900/50">
-                        <td className="py-1.5 pr-3 font-semibold text-slate-200">{m.label}</td>
-                        <td className="py-1.5 px-3 font-mono text-slate-300">{m.recordText}</td>
-                        <td className={`py-1.5 px-3 text-right font-mono ${m.winRate >= 52.4 ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>
-                          {formatPct(m.winRate)}
-                        </td>
-                        <td className={`py-1.5 px-3 text-right font-mono font-semibold ${m.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {formatUnits(m.profitUnits)}
-                        </td>
-                        <td className={`py-1.5 px-3 text-right font-mono font-semibold ${m.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {formatSignedPct(m.roiPct)}
-                        </td>
-                        <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${m.avgClv === null ? 'text-slate-500' : m.avgClv >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {m.avgClv !== null ? `${m.avgClv > 0 ? '+' : ''}${m.avgClv.toFixed(2)}` : '—'}
-                        </td>
-                      </tr>
-                    ))}
+                    {analytics.betTypes.map((m) => {
+                      const activeMkt = selectedMarket === m.marketKey;
+                      return (
+                        <tr
+                          key={m.label}
+                          onClick={() => onSelectMarket && onSelectMarket(activeMkt ? 'ALL' : m.marketKey)}
+                          className={`transition-colors ${onSelectMarket ? 'cursor-pointer' : ''} ${
+                            activeMkt ? 'bg-indigo-500/15' : 'hover:bg-slate-900/50'
+                          }`}
+                        >
+                          <td className="py-1.5 pr-3 font-semibold text-slate-200">{m.label}</td>
+                          <td className="py-1.5 px-3 font-mono text-slate-300">{m.recordText}</td>
+                          <td className={`py-1.5 px-3 text-right font-mono ${m.winRate >= 52.4 ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>
+                            {formatPct(m.winRate)}
+                          </td>
+                          <td className={`py-1.5 px-3 text-right font-mono font-semibold ${m.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {formatUnits(m.profitUnits)}
+                          </td>
+                          <td className={`py-1.5 px-3 text-right font-mono font-semibold ${m.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {formatSignedPct(m.roiPct)}
+                          </td>
+                          <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${m.avgClv === null ? 'text-slate-500' : m.avgClv >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {m.avgClv !== null ? `${m.avgClv > 0 ? '+' : ''}${m.avgClv.toFixed(2)}` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </>
           )}
+        </article>
+
+        {/* Card 3: Edge Calibration */}
+        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="edge-cal-heading">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 id="edge-cal-heading" className="text-base font-bold text-slate-100">
+                Win Rate &amp; Return by Projected Edge
+              </h3>
+              <p className="text-xs text-slate-400">
+                Tests whether larger projected edges beat the 52.4% (-110) break-even line.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2.5 py-0.5">
+                <span className="w-2.5 border-t border-dashed border-amber-400 inline-block" />
+                52.4% Break-Even
+              </span>
+              <div role="tablist" aria-label="Edge view mode" className="flex items-center gap-1 border-b border-slate-800">
+                {[
+                  { id: 'chart', label: 'Chart' },
+                  { id: 'table', label: 'Table' },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    id={`edge-tab-${t.id}`}
+                    role="tab"
+                    type="button"
+                    aria-selected={edgeTab === t.id}
+                    aria-controls={`edge-panel-${t.id}`}
+                    onClick={() => setEdgeTab(t.id)}
+                    className={`px-2.5 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+                      edgeTab === t.id
+                        ? 'border-indigo-400 text-indigo-300'
+                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {edgeTab === 'chart' ? (
+            <div id="edge-panel-chart" role="tabpanel" aria-labelledby="edge-tab-chart" className="space-y-2">
+              <div className="h-[245px] w-full">
+                {analytics.edgeBuckets.every((b) => b.settled === 0) ? (
+                  <div className="h-full flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
+                    No settled picks to bucket by edge.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart
+                      data={analytics.edgeBuckets.map((b) => ({
+                        ...b,
+                        axisLabel: b.settled > 0 ? `${b.label} (${b.settled})` : b.label,
+                      }))}
+                      margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                      <XAxis dataKey="axisLabel" stroke="#64748b" fontSize={10} tickLine={false} interval={0} />
+                      <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
+                      <ReferenceLine y={52.4} stroke="#f59e0b" strokeDasharray="4 4" />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(val, name) => {
+                          if (name === 'winRate') return [`${Number(val).toFixed(1)}%`, 'Win Rate'];
+                          return [val, name];
+                        }}
+                        labelFormatter={(_, payload) => {
+                          const p = payload?.[0]?.payload;
+                          if (!p) return '';
+                          return `${p.label} Edge • ${p.recordText} (${p.settled} settled) • ${formatUnits(p.profitUnits)} (${formatSignedPct(p.roiPct)})`;
+                        }}
+                      />
+                      <Bar dataKey="winRate" radius={[4, 4, 0, 0]} maxBarSize={38}>
+                        {analytics.edgeBuckets.map((b) => (
+                          <Cell
+                            key={b.label}
+                            fill={b.settled === 0 ? '#334155' : b.winRate >= 52.4 ? '#10b981' : b.winRate >= 48 ? '#f59e0b' : '#f43f5e'}
+                          />
+                        ))}
+                      </Bar>
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Sample size shown in parentheses. Small buckets (e.g. &lt;10 picks) reflect high short-term variance.
+              </p>
+            </div>
+          ) : (
+            <div id="edge-panel-table" role="tabpanel" aria-labelledby="edge-tab-table" className="table-wrapper overflow-x-auto" tabIndex={0}>
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400">
+                    <th scope="col" className="py-2 pr-3 font-medium">Projected Edge</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Settled</th>
+                    <th scope="col" className="py-2 px-3 font-medium">Record</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Units</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Return %</th>
+                    <th scope="col" className="py-2 pl-3 font-medium text-right">Line Beat</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {analytics.edgeBuckets.map((b) => (
+                    <tr key={b.label} className="hover:bg-slate-900/50">
+                      <td className="py-2 pr-3 font-medium text-slate-200">{b.label}</td>
+                      <td className="py-2 px-3 text-right text-slate-400">{b.settled}</td>
+                      <td className="py-2 px-3 font-mono text-slate-300">{b.recordText}</td>
+                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                        {b.decided > 0 ? formatPct(b.winRate) : '—'}
+                      </td>
+                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {formatUnits(b.profitUnits)}
+                      </td>
+                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {b.settled > 0 ? formatSignedPct(b.roiPct) : '—'}
+                      </td>
+                      <td className={`py-2 pl-3 text-right font-mono font-semibold ${b.avgClv === null ? 'text-slate-500' : b.avgClv >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {b.avgClv !== null ? `${b.avgClv > 0 ? '+' : ''}${b.avgClv.toFixed(2)}` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </article>
+      </div>
+
+      {/* Row 3: Confidence Tiers & Recent Form + By Sport Comparison */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Card 4: Confidence Tiers & Recent Form */}
+        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="conf-form-heading">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 id="conf-form-heading" className="text-base font-bold text-slate-100">
+                Confidence Tiers &amp; Recent Form
+              </h3>
+              <p className="text-xs text-slate-400">
+                High (80+), Medium (50–79), and Low (&lt;50) conviction bands. Click a tier to filter.
+              </p>
+            </div>
+            {selectedConf !== 'ALL' && onSelectConf && (
+              <button
+                type="button"
+                onClick={() => onSelectConf('ALL')}
+                className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer shrink-0"
+              >
+                All Tiers
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5">
+            {analytics.confidenceTiers.map((t) => {
+              const tierKey = t.label.toUpperCase();
+              const isSelected = selectedConf === tierKey;
+              const badgeColor =
+                t.label === 'High'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                  : t.label === 'Medium'
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                    : 'border-slate-700 bg-slate-900/80 text-slate-300';
+              return (
+                <button
+                  key={t.label}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => onSelectConf && onSelectConf(isSelected ? 'ALL' : tierKey)}
+                  className={`text-left rounded-xl border p-3 transition-all ${onSelectConf ? 'cursor-pointer hover:brightness-110' : ''} ${badgeColor} ${
+                    isSelected ? 'ring-2 ring-indigo-400/70' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs font-bold">{t.label}</span>
+                    <span className="text-[10px] opacity-80">{t.desc}</span>
+                  </div>
+                  <div className="mt-1.5 text-lg font-extrabold font-mono text-slate-100">
+                    {t.decided > 0 ? formatPct(t.winRate) : '—'}
+                  </div>
+                  <div className="mt-0.5 text-[11px] font-mono text-slate-300">{t.recordText}</div>
+                  <div className={`mt-1 text-[11px] font-mono font-semibold ${t.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {formatUnits(t.profitUnits)} ({t.settled > 0 ? formatSignedPct(t.roiPct) : '—'})
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent Form Windows</h4>
+            <div className="table-wrapper overflow-x-auto" tabIndex={0}>
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400">
+                    <th scope="col" className="py-1.5 pr-3 font-medium">Window</th>
+                    <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
+                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
+                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Units</th>
+                    <th scope="col" className="py-1.5 pl-3 font-medium text-right">Return %</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {analytics.recentWindows.map((w) => (
+                    <tr key={w.label} className="hover:bg-slate-900/50">
+                      <td className="py-1.5 pr-3 font-medium text-slate-200">{w.label}</td>
+                      <td className="py-1.5 px-3 font-mono text-slate-300">{w.recordText}</td>
+                      <td className={`py-1.5 px-3 text-right font-mono font-semibold ${w.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                        {w.decided > 0 ? formatPct(w.winRate) : '—'}
+                      </td>
+                      <td className={`py-1.5 px-3 text-right font-mono font-semibold ${w.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {w.settled > 0 ? formatUnits(w.profitUnits) : '—'}
+                      </td>
+                      <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${w.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {w.settled > 0 ? formatSignedPct(w.roiPct) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </article>
 
         {/* Card 5: Performance by Sport (Click to Filter) */}
@@ -898,7 +982,7 @@ const ModelPerformanceAnalytics = ({
                 Performance by Sport
               </h3>
               <p className="text-xs text-slate-400">
-                Click any sport row to focus all charts and pick history on that sport.
+                All-season totals across tracked sports. Click any sport row to focus the dashboard.
               </p>
             </div>
             {selectedSport !== 'ALL' && onSelectSport && (
@@ -965,9 +1049,9 @@ const ModelPerformanceAnalytics = ({
       {/* Row 4: Live In-Game Win-Chance Calibration */}
       {(() => {
         const cal = liveCalibration && typeof liveCalibration === 'object' ? liveCalibration : {};
-        const isCalibrated = Boolean(cal.active);
         const minReq = Number(cal.min_obs_required || 25);
         const decidedObs = Number(cal.decided_snapshots ?? cal.n_obs ?? 0);
+        const isCalibrated = Boolean(cal.active) || decidedObs >= minReq;
         const pendingObs = Number(cal.pending_snapshots || 0);
         const params = cal.params || {};
         const liveWtPct = Math.round((Number(params.live_weight_scale ?? 0.85)) * 100);
@@ -983,19 +1067,23 @@ const ModelPerformanceAnalytics = ({
                   Live In-Game Win-Chance Calibration
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Saves live score snapshots during active games and measures how often live win chances turn into real final wins.
+                  Compares predicted live win probability during active NCAAM games against final outcomes.
                 </p>
               </div>
               <span
                 className={`px-2.5 py-1 rounded-full border text-xs font-semibold ${
-                  isCalibrated
+                  cal.active
                     ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
-                    : 'bg-amber-500/15 border-amber-500/35 text-amber-300'
+                    : isCalibrated
+                      ? 'bg-indigo-500/15 border-indigo-500/35 text-indigo-300'
+                      : 'bg-amber-500/15 border-amber-500/35 text-amber-300'
                 }`}
               >
-                {isCalibrated
+                {cal.active
                   ? `Active · ${decidedObs.toLocaleString()} settled snapshots`
-                  : `Collecting Data (${decidedObs} / ${minReq} settled)`}
+                  : isCalibrated
+                    ? `Ready · ${decidedObs.toLocaleString()} settled (tuning next sync)`
+                    : `Collecting Data (${decidedObs} / ${minReq} settled)`}
               </span>
             </div>
 
@@ -1011,7 +1099,7 @@ const ModelPerformanceAnalytics = ({
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Live Prediction Error</div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Live Prediction Error (Brier)</div>
                 <div className="text-lg font-mono font-bold text-slate-100">
                   {cal.brier_calibrated != null
                     ? `${Number(cal.brier_calibrated).toFixed(3)}`
@@ -1032,7 +1120,7 @@ const ModelPerformanceAnalytics = ({
                   {liveWtPct}% live weight · ±{sigmaSpread} spread · ±{sigmaTotal} total
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  {isCalibrated ? 'Auto-tuned from settled live results' : 'Using baseline pregame-blend defaults'}
+                  {cal.active ? 'Auto-tuned from settled live results' : 'Using baseline pregame-blend defaults'}
                 </div>
               </div>
             </div>
@@ -1045,22 +1133,59 @@ const ModelPerformanceAnalytics = ({
                       <th scope="col" className="py-1.5 pr-3 font-medium">Live Win-Chance Bucket</th>
                       <th scope="col" className="py-1.5 px-3 font-medium text-right">Snapshots</th>
                       <th scope="col" className="py-1.5 px-3 font-medium text-right">Predicted Avg</th>
-                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Actual Win %</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Actual Win %</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium min-w-[140px]">Calibration Fit</th>
+                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Gap</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {bins.map((b) => (
-                      <tr key={b.label} className="hover:bg-slate-900/50">
-                        <td className="py-1.5 pr-3 font-medium text-slate-200">{b.label}</td>
-                        <td className="py-1.5 px-3 text-right font-mono text-slate-400">{b.count || 0}</td>
-                        <td className="py-1.5 px-3 text-right font-mono text-slate-300">
-                          {b.avg_predicted_pct != null ? `${Number(b.avg_predicted_pct).toFixed(1)}%` : '—'}
-                        </td>
-                        <td className="py-1.5 pl-3 text-right font-mono font-semibold text-emerald-300">
-                          {b.actual_win_pct != null ? `${Number(b.actual_win_pct).toFixed(1)}%` : '—'}
-                        </td>
-                      </tr>
-                    ))}
+                    {bins.map((b) => {
+                      const pred = b.avg_predicted_pct != null ? Number(b.avg_predicted_pct) : null;
+                      const actual = b.actual_win_pct != null ? Number(b.actual_win_pct) : null;
+                      const gap = pred != null && actual != null ? actual - pred : null;
+                      const gapColor =
+                        gap === null
+                          ? 'text-slate-500'
+                          : Math.abs(gap) <= 6
+                            ? 'text-emerald-400'
+                            : Math.abs(gap) <= 15
+                              ? 'text-amber-300'
+                              : 'text-rose-400';
+                      return (
+                        <tr key={b.label} className="hover:bg-slate-900/50">
+                          <td className="py-2 pr-3 font-medium text-slate-200">{b.label}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-400">{b.count || 0}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-300">
+                            {pred != null ? `${pred.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-semibold text-emerald-300">
+                            {actual != null ? `${actual.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className="py-2 px-3">
+                            {pred != null && actual != null ? (
+                              <div
+                                className="relative h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
+                                title={`Predicted ${pred.toFixed(1)}% (marker) vs Actual ${actual.toFixed(1)}% (bar)`}
+                              >
+                                <div
+                                  className="h-full rounded-full bg-emerald-500/75"
+                                  style={{ width: `${Math.max(0, Math.min(100, actual))}%` }}
+                                />
+                                <div
+                                  className="absolute top-0 bottom-0 w-0.5 bg-amber-300"
+                                  style={{ left: `${Math.max(0, Math.min(99, pred))}%` }}
+                                />
+                              </div>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className={`py-2 pl-3 text-right font-mono font-semibold ${gapColor}`}>
+                            {gap !== null ? `${gap > 0 ? '+' : ''}${gap.toFixed(1)}%` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

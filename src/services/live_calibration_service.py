@@ -806,6 +806,7 @@ def get_live_calibration_summary() -> Dict[str, Any]:
     """Return full status + snapshot counts + reliability bins for the UI dashboard."""
     cal = get_active_live_calibration()
     eff_season = str(cal.get("season_start") or season_start_date_for_game())
+    min_req = int(cal.get("min_obs_required") or MIN_LIVE_CAL_OBS)
 
     counts = {
         "total_snapshots": 0,
@@ -842,8 +843,26 @@ def get_live_calibration_summary() -> Dict[str, Any]:
                 if agg:
                     for k in counts:
                         counts[k] = int(dict(agg).get(k) or 0)
+        except Exception as exc:
+            print(f"[LIVE_CAL] Summary query warning: {exc}")
 
-                if counts["decided_snapshots"] > 0 and not cal.get("bins"):
+        # Auto-fit and persist PAVA live calibration once enough settled snapshots exist.
+        if counts["decided_snapshots"] >= min_req and (
+            not cal.get("active") or counts["decided_snapshots"] >= int(cal.get("n_obs") or 0) + 15
+        ):
+            try:
+                rebuilt = rebuild_live_calibration(persist=True, season_start=eff_season)
+                if isinstance(rebuilt, dict) and rebuilt.get("active"):
+                    cal = rebuilt
+                    eff_season = str(cal.get("season_start") or eff_season)
+            except Exception as exc:
+                print(f"[LIVE_CAL] Auto-rebuild warning: {exc}")
+
+        if counts["decided_snapshots"] > 0 and not cal.get("bins"):
+            try:
+                from src.database import get_db_connection, _exec
+
+                with get_db_connection() as conn:
                     obs_rows = _exec(
                         conn,
                         """
@@ -860,8 +879,8 @@ def get_live_calibration_summary() -> Dict[str, Any]:
                         p = d.get("calibrated_live_win_prob") if d.get("calibrated_live_win_prob") is not None else d.get("raw_live_win_prob")
                         if p is not None:
                             raw_pairs.append((float(p), 1.0 if d.get("outcome") == "WON" else 0.0))
-        except Exception as exc:
-            print(f"[LIVE_CAL] Summary query warning: {exc}")
+            except Exception as exc:
+                print(f"[LIVE_CAL] Summary bins fallback warning: {exc}")
 
     bins = cal.get("bins") or build_reliability_bins(raw_pairs)
     brier_raw = cal.get("brier_raw") if cal.get("brier_raw") is not None else compute_brier_score(raw_pairs)
@@ -870,7 +889,7 @@ def get_live_calibration_summary() -> Dict[str, Any]:
         "status": "calibrated" if cal.get("active") else "collecting",
         "active": bool(cal.get("active")),
         "season_start": eff_season,
-        "min_obs_required": int(cal.get("min_obs_required") or MIN_LIVE_CAL_OBS),
+        "min_obs_required": min_req,
         "n_obs": max(int(cal.get("n_obs") or 0), counts["decided_snapshots"]),
         **counts,
         "brier_raw": brier_raw,

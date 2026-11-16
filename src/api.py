@@ -1709,18 +1709,36 @@ async def backfill_event_text(
 
 @app.post("/api/research/grade")
 async def grade_research_history(
+    request: Request,
     backfill_days: int = 7,
     backfill_pending: bool = False,
+    max_grade_rows: int = 1000,
 ):
     """
     Triggers the auto-grading process for pending model predictions.
+    Supports both query params and JSON body overrides cleanly.
     """
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            if body.get("backfill_days") is not None:
+                backfill_days = int(body["backfill_days"])
+            if body.get("backfill_pending") is not None:
+                backfill_pending = bool(body["backfill_pending"])
+            if body.get("max_grade_rows") is not None:
+                max_grade_rows = int(body["max_grade_rows"])
+    except Exception:
+        pass
+
+    backfill_days = max(1, min(int(backfill_days), 365))
+    max_grade_rows = max(50, min(int(max_grade_rows), 5000))
+
     from src.services.grading_service import GradingService
     service = GradingService()
     return service.grade_predictions(
         backfill_days=backfill_days,
         backfill_pending=backfill_pending,
-        max_grade_rows=1000,
+        max_grade_rows=max_grade_rows,
     )
 
 
