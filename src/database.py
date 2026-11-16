@@ -841,19 +841,23 @@ def init_enrichment_db():
     migrate_uuid_sql = """
     DO $$
     DECLARE t text;
+    DECLARE c text;
     BEGIN
         FOREACH t IN ARRAY ARRAY['action_game_enrichment','action_injuries','action_splits','action_props','action_news']
         LOOP
-            IF EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = t
-                  AND column_name = 'event_id'
-                  AND data_type <> 'text'
-            ) THEN
-                EXECUTE format('ALTER TABLE %I ALTER COLUMN event_id TYPE TEXT USING event_id::text', t);
-            END IF;
+            FOREACH c IN ARRAY ARRAY['event_id','team_id','player_id']
+            LOOP
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = t
+                      AND column_name = c
+                      AND data_type <> 'text'
+                ) THEN
+                    EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE TEXT USING %I::text', t, c, c);
+                END IF;
+            END LOOP;
         END LOOP;
     END $$;
     CREATE INDEX IF NOT EXISTS idx_splits_event ON action_splits(event_id, as_of_ts DESC);
@@ -1015,10 +1019,14 @@ def store_odds_snapshots(snaps: list) -> int:
         with get_db_connection() as conn:
             from psycopg2.extras import execute_values
             cur = conn.cursor()
-            execute_values(cur, sql, rows, page_size=200)
-            count = cur.rowcount
+            total_inserted = 0
+            for i in range(0, len(rows), 200):
+                batch = rows[i:i + 200]
+                execute_values(cur, sql, batch, page_size=200)
+                if cur.rowcount and cur.rowcount > 0:
+                    total_inserted += cur.rowcount
             conn.commit()
-            return count
+            return total_inserted
     except Exception as e:
         print(f"[DB] store_odds_snapshots bulk error: {e}")
         return 0
