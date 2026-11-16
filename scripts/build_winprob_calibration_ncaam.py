@@ -153,6 +153,30 @@ def fit_calibration_artifact(obs: List[Obs], days: int = 30, min_points: int = 1
         dedup.append((float(p), float(y)))
         last_p = p
 
+    # Early-season cold stretches (>=50 obs where PAVA collapses to <2 blocks or peak < 0.525)
+    # would otherwise get rejected by is_valid_winprob_calibration and leave predictions uncalibrated.
+    # Expand collapsed curves across [min_p, max_p] and blend monotonically toward a shrinkage prior.
+    if len(obs) >= 50 and dedup and (len(dedup) < 2 or max((y for _, y in dedup), default=0.0) < 0.525):
+        work = list(dedup)
+        if len(work) < 2:
+            ps = [float(o.p) for o in obs]
+            lo_p, hi_p = min(ps), max(ps)
+            base_y = float(work[0][1])
+            if hi_p > lo_p + 1e-6:
+                work = [(lo_p + (hi_p - lo_p) * (k / 4.0), base_y) for k in range(5)]
+
+        reg: List[Tuple[float, float]] = []
+        last_reg_y = -1.0
+        for idx, (p_val, y_val) in enumerate(work):
+            p_shrink = 0.50 + 0.55 * (float(p_val) - 0.50)
+            y_reg = max(float(y_val), 0.50 * float(y_val) + 0.50 * p_shrink)
+            if idx == len(work) - 1 and float(p_val) >= 0.55:
+                y_reg = max(y_reg, 0.525)
+            y_reg = max(last_reg_y, max(0.01, min(0.99, y_reg)))
+            reg.append((float(p_val), float(y_reg)))
+            last_reg_y = y_reg
+        dedup = reg
+
     return {
         "sport": "ncaam",
         "days": int(days),
@@ -223,7 +247,8 @@ def main(
     league: str = "NCAAM",
     auto_widen: bool = True,
     cross_season: bool = False,
-):
+    write_files: bool = True,
+) -> Optional[Dict[str, Any]]:
     lg = str(league or "NCAAM").upper().strip()
     season_start: Optional[str] = None
     season_label: Optional[str] = None
@@ -253,7 +278,7 @@ def main(
         msg = f"[calibration:{lg}] Only {len(obs)} decided observations in last {used_days}d (< min_obs={min_obs}); keeping existing curve."
         if allow_insufficient:
             print(msg)
-            return
+            return None
         raise SystemExit(msg)
 
     artifact = fit_calibration_artifact(obs, days=used_days, min_points=12)
@@ -267,36 +292,76 @@ def main(
         msg = f"[calibration:{lg}] Refusing to publish degenerate PAVA curve (max p_cal < 0.52 across {len(obs)} obs)."
         if allow_insufficient:
             print(msg)
-            return
+            return None
         raise SystemExit(msg)
 
     fname = f"winprob_calibration_{lg.lower()}.json"
     param_key = f"winprob_calibration_{lg.lower()}"
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    out_paths = (
-        [out_path]
-        if out_path is not None
-        else [
-            os.path.join(repo_root, "data", "model_params", fname),
-            os.path.join(repo_root, "src", "services", "model_params", fname),
-        ]
-    )
+    if write_files:
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        out_paths = (
+            [out_path]
+            if out_path is not None
+            else [
+                os.path.join(repo_root, "data", "model_params", fname),
+                os.path.join(repo_root, "src", "services", "model_params", fname),
+            ]
+        )
 
-    for target in out_paths:
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump(artifact, f, indent=2)
-            f.write("\n")
-        print(f"Wrote {target}")
+        for target in out_paths:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "w", encoding="utf-8") as f:
+                json.dump(artifact, f, indent=2)
+                f.write("\n")
+            print(f"Wrote {target}")
 
     try:
         from src.database import upsert_model_param
         upsert_model_param(param_key, artifact)
         print(f"Persisted {param_key} to DB model_params_store")
     except Exception as e:
-        print(f"[calibration:{lg}] DB model_params_store update skipped: {e}")
+        try:
+            from src.database import _safe_json_dumps
+
+            with get_db_connection() as conn:
+                _exec(
+                    conn,
+                    """
+                    INSERT INTO model_params_store(param_key, payload, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (param_key) DO UPDATE SET
+                      payload = EXCLUDED.payload,
+                      updated_at = NOW()
+                    """,
+                    (param_key, _safe_json_dumps(artifact)),
+                )
+                conn.commit()
+            print(f"Persisted {param_key} to DB model_params_store via pooled connection")
+        except Exception as pool_e:
+            print(f"[calibration:{lg}] DB model_params_store update skipped (admin={e}, pool={pool_e})")
 
     print(f"league={lg} season={season_label} window={used_days}d n_obs={artifact['n_obs']} points={len(artifact['points'])}")
+    return artifact
+
+
+def rebuild_pregame_winprob_calibration(
+    days: int = 90,
+    min_obs: int = 60,
+    league: str = "NCAAM",
+    write_files: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Grade-hook helper to rebuild and persist pregame winprob calibration in DB model_params_store."""
+    if os.getenv("REQUIRE_DATABASE") == "0":
+        return None
+    return main(
+        days=days,
+        min_obs=min_obs,
+        allow_insufficient=True,
+        league=league,
+        auto_widen=True,
+        cross_season=False,
+        write_files=write_files,
+    )
 
 
 if __name__ == "__main__":

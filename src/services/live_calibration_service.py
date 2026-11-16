@@ -32,7 +32,7 @@ DEFAULT_LIVE_WEIGHT_SCALE = 0.85
 DEFAULT_SIGMA_TOTAL_REM = 13.5
 DEFAULT_SIGMA_SPREAD_REM = 10.5
 MIN_LIVE_CAL_OBS = 25
-CALIBRATION_BLEND_WEIGHT = 0.50
+CALIBRATION_BLEND_WEIGHT = 0.75
 
 _CAL_CACHE_TTL_SECONDS = 300.0
 _cal_cache_payload: Optional[Dict[str, Any]] = None
@@ -427,7 +427,7 @@ def fit_live_calibration_artifact(
 
     best_params = dict(default_params)
     best_weight_brier = brier_raw if brier_raw is not None else 1.0
-    for lw in (0.70, 0.80, 0.85, 0.95, 1.05):
+    for lw in (0.55, 0.65, 0.70, 0.80, 0.85, 0.95, 1.05):
         cand = dict(best_params, live_weight_scale=lw)
         b = compute_brier_score(_eval_rows(decided, cand))
         if b is not None and b < best_weight_brier:
@@ -437,7 +437,7 @@ def fit_live_calibration_artifact(
     total_rows = [r for r in decided if str(r.get("market_type") or "").upper() == "TOTAL"]
     if len(total_rows) >= 10:
         best_tb = compute_brier_score(_eval_rows(total_rows, best_params)) or 1.0
-        for st in (11.5, 12.5, 13.5, 15.0, 16.5):
+        for st in (11.5, 12.5, 13.5, 15.0, 16.5, 18.0, 19.5):
             cand = dict(best_params, sigma_total_rem=st)
             b = compute_brier_score(_eval_rows(total_rows, cand))
             if b is not None and b < best_tb:
@@ -447,7 +447,7 @@ def fit_live_calibration_artifact(
     spread_rows = [r for r in decided if str(r.get("market_type") or "").upper() != "TOTAL"]
     if len(spread_rows) >= 10:
         best_sb = compute_brier_score(_eval_rows(spread_rows, best_params)) or 1.0
-        for ss in (8.5, 9.5, 10.5, 11.5, 13.0):
+        for ss in (8.5, 9.5, 10.5, 11.5, 13.0, 14.5, 16.0):
             cand = dict(best_params, sigma_spread_rem=ss)
             b = compute_brier_score(_eval_rows(spread_rows, cand))
             if b is not None and b < best_sb:

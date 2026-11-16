@@ -255,8 +255,8 @@ def parse_haslametrics_xml(xml_text: str, fallback_date: Optional[str] = None) -
                 "sos": _to_float(attr.get("sos")),
                 "mom": _to_float(attr.get("mom")),
                 "inc": _to_float(attr.get("inc")),
-                "av_eff": av_eff or 109.7,
-                "av_pace": av_pace or 69.5,
+                "av_eff": av_eff or 106.5,
+                "av_pace": av_pace or 68.0,
                 "hca_eff": hca_eff or 4.27,
                 "hca_pace": hca_pace or 0.08,
                 "raw": dict(attr),
@@ -267,8 +267,8 @@ def parse_haslametrics_xml(xml_text: str, fallback_date: Optional[str] = None) -
         "asof_date": asof_date,
         "meta": {
             "md": md_str,
-            "av_eff": av_eff or 109.7,
-            "av_pace": av_pace or 69.5,
+            "av_eff": av_eff or 106.5,
+            "av_pace": av_pace or 68.0,
             "hca_eff": hca_eff or 4.27,
             "hca_pace": hca_pace or 0.08,
         },
@@ -341,7 +341,7 @@ def compute_matchup_projection(
 
     h_tempo = _to_float(home.get("tempo")) or av_pace
     a_tempo = _to_float(away.get("tempo")) or av_pace
-    expected_pace = (h_tempo + a_tempo - av_pace) + (0.0 if neutral_site else hca_pace)
+    expected_pace = (av_pace + 0.65 * ((h_tempo - av_pace) + (a_tempo - av_pace))) + (0.0 if neutral_site else hca_pace)
     expected_pace = max(55.0, min(85.0, expected_pace))
 
     h_eff = (h_oe * a_de) / av_eff + (0.0 if neutral_site else hca_eff * 0.5)

@@ -488,7 +488,13 @@ class KenPomClient:
         a_tempo = float(away_rating.get('adj_t') or baseline_tempo)
         avg_tempo = (h_tempo + a_tempo) / 2.0
         expected_tempo = (
-            max(55.0, min(85.0, h_tempo + a_tempo - baseline_tempo))
+            max(
+                55.0,
+                min(
+                    85.0,
+                    baseline_tempo + 0.65 * ((h_tempo - baseline_tempo) + (a_tempo - baseline_tempo)),
+                ),
+            )
             if (h_tempo > 40.0 and a_tempo > 40.0)
             else avg_tempo
         )

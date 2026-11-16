@@ -739,7 +739,7 @@ def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monk
     )
     ctx = res["context"]
     assert ctx["conviction_sources"] == 3
-    assert ctx["efficiency_weight"] >= 0.40
+    assert ctx["efficiency_weight"] == pytest.approx(0.35, abs=0.01)
     assert ctx["fair_spread_home"] < -5.8
     assert ctx["fair_total"] > 138.0
     assert ctx["closest_lean"] is not None
@@ -1710,6 +1710,157 @@ def test_model_v2_six_edge_and_calibration_improvements(monkeypatch):
     assert res_tv["datasets_synced"]["torvik_game_logs"] == 1
     assert "adj_de" in captured_tv["live"][0]
     assert captured_tv["health"]["torvik"] == ("ok", 1)
+
+
+def test_audit_accuracy_fixes_pace_splits_reverse_steam_and_calibration(monkeypatch):
+    from datetime import datetime, timezone
+    from scripts.build_winprob_calibration_ncaam import Obs, fit_calibration_artifact
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.services.haslametrics_client import compute_matchup_projection, parse_haslametrics_xml
+    from src.services.kenpom_client import KenPomClient
+    from src.utils.model_calibration import is_valid_winprob_calibration
+
+    # 1. KenPom & Haslametrics 0.65x damped pace + 106.5/68.0 XML meta fallbacks
+    kp = KenPomClient()
+    ratings_map = {
+        "Team A": {"team": "Team A", "rank": 20, "adj_em": 18.0, "adj_o": 115.0, "adj_d": 97.0, "adj_t": 74.0},
+        "Team B": {"team": "Team B", "rank": 35, "adj_em": 12.0, "adj_o": 112.0, "adj_d": 100.0, "adj_t": 72.0},
+    }
+    monkeypatch.setattr(kp, "get_team_rating", lambda name, conn=None: ratings_map.get(name))
+    monkeypatch.setattr(kp, "get_fanmatch_prediction", lambda h, a, conn=None: None)
+    kp_adj = kp.calculate_kenpom_adjustment("Team A", "Team B")
+    assert kp_adj["expected_tempo"] == pytest.approx(74.5, abs=0.1)
+
+    parsed_no_av = parse_haslametrics_xml(
+        '<ratings><dt md="2026-11-16" /><mr rk="1" t="Team A" c="ACC" w="3" l="0" oe="115" de="97" ou="74" du="74" /></ratings>'
+    )
+    assert parsed_no_av["meta"]["av_eff"] == pytest.approx(106.5, abs=1e-6)
+    assert parsed_no_av["meta"]["av_pace"] == pytest.approx(68.0, abs=1e-6)
+
+    hasla_proj = compute_matchup_projection(
+        {"oe": 115.0, "de": 97.0, "tempo": 74.0},
+        {"oe": 112.0, "de": 100.0, "tempo": 72.0},
+        neutral_site=False,
+    )
+    assert hasla_proj is not None
+    assert hasla_proj["game_tempo"] == pytest.approx(74.6, abs=0.1)
+
+    # 2. Mid-blowout (-16.5 spread) receives blowout_sigma_add > 0.4
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.torvik_service.get_projection.return_value = {"margin": 14.5, "official_margin": 14.5, "total": 144.0, "lean": "Home"}
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "continuity": 0.72, "record": "3-0", "adj_off": 114.0, "adj_def": 99.0},
+        "away": {"luck": 0.0, "continuity": 0.72, "record": "3-0", "adj_off": 102.0, "adj_def": 106.0},
+    }
+    model.kenpom_client = MagicMock()
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = None
+    model.kenpom_client.get_team_player_agg.return_value = None
+    model.kenpom_client.get_team_rating.return_value = None
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.haslametrics_client = MagicMock()
+    model.haslametrics_client.calculate_projection.return_value = {"available": False}
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 100.0
+    model.injury_service = MagicMock()
+    model.injury_service.get_matchup_injuries.return_value = {"has_injuries": False, "injuries": []}
+    model.news_service = MagicMock()
+    model.news_service.fetch_game_context.return_value = {}
+    model.news_service.summarize_impact.return_value = ""
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.02, "sd": 0.90})
+
+    res_mid_blowout = model.analyze(
+        "evt_mid_blowout",
+        event_context={
+            "id": "evt_mid_blowout",
+            "home_team": "Favorite",
+            "away_team": "Dog",
+            "start_time": datetime(2026, 11, 16, 20, 0, tzinfo=timezone.utc),
+        },
+        market_snapshot={"spread_home": -16.5, "total": 144.0},
+        persist=False,
+    )
+    assert res_mid_blowout["context"]["blowout_sigma_add"] > 0.4
+
+    # 3. Strengthened contra_sharp_money drops win_prob & caps High confidence
+    contra_out = model._apply_split_and_injury_signals(
+        [
+            {
+                "market": "TOTAL",
+                "side": "OVER",
+                "win_prob": 0.565,
+                "win_prob_lb10": 0.555,
+                "price": -110,
+                "ev": 0.078,
+                "confidence": "High",
+                "confidence_tier": "HIGH",
+                "confidence_0_100": 82,
+                "movement_tags": [],
+            }
+        ],
+        action_splits={
+            "TOTAL": {"OVER": {"bet_pct": 72, "handle_pct": 25}, "UNDER": {"bet_pct": 28, "handle_pct": 75}}
+        },
+        injury_context={"has_injuries": False},
+        relax_gates=True,
+    )
+    assert len(contra_out) == 1
+    assert contra_out[0]["win_prob"] <= 0.553
+    assert contra_out[0]["win_prob_lb10"] <= 0.548
+    assert contra_out[0]["confidence"] == "Medium"
+    assert contra_out[0]["confidence_tier"] == "MEDIUM"
+    assert contra_out[0]["confidence_0_100"] <= 74
+
+    # 4. Reverse steam inflates sigma_mult and recomputes win_prob & ev at sigma * sigma_mult
+    raw_over_wp = round(1.0 - model._normal_cdf(141.0, 145.5, 15.0), 3)
+    recs_rev = model._generate_recommendations(
+        mu_s=-3.5,
+        sig_s=11.0,
+        mu_t=145.5,
+        sig_t=15.0,
+        snap={
+            "spread_home": -3.5,
+            "total": 141.0,
+            "total_over_price": -110,
+            "_market_consensus": {
+                "open_total": 143.5,
+                "current_total": 141.0,
+                "total_move": -2.5,
+            },
+        },
+        event={"id": "evt_rev", "home_team": "Home", "away_team": "Away"},
+        torvik_view={"lean": "Home"},
+        relax_gates=True,
+    )
+    tot_rec = next(r for r in recs_rev if r["market"] == "TOTAL")
+    assert "reverse_steam=-2.5" in (tot_rec.get("movement_tags") or [])
+    assert tot_rec["sigma_mult"] > 1.0
+    assert tot_rec["win_prob"] < raw_over_wp
+    assert tot_rec["ev"] < tot_rec["ev_raw"]
+
+    # 5. Canonical team name matching avoids school-name collisions
+    assert model._event_team_matches("Indiana State Sycamores", "Indiana") is False
+    assert model._event_team_matches("Southern Indiana Screaming Eagles", "Indiana") is False
+    assert model._event_team_matches("Indiana Hoosiers", "Indiana") is True
+
+    # 6. Cold-streak PAVA regularization keeps pregame curve valid (>= 0.525 peak)
+    cold_obs = [
+        Obs(p=0.45 + (i % 6) * 0.034, y=(1.0 if (i % 9 < 4) else 0.0), w=1.0)
+        for i in range(60)
+    ]
+    cold_art = fit_calibration_artifact(cold_obs, days=30, min_points=10)
+    assert is_valid_winprob_calibration(cold_art, min_obs=50, min_max_pcal=0.52) is True
+    assert max(pt["p_cal"] for pt in cold_art["points"]) >= 0.525
+
 
 
 

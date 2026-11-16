@@ -165,6 +165,15 @@ class GradingService:
         except Exception as e:
             print(f"[GRADING] Live snapshot calibration warning: {e}")
 
+        try:
+            from scripts.build_winprob_calibration_ncaam import rebuild_pregame_winprob_calibration
+            from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+            rebuild_pregame_winprob_calibration(write_files=False)
+            NCAAMMarketFirstModelV2._winprob_calibration = None
+        except Exception as e:
+            print(f"[GRADING] Pregame winprob calibration warning: {e}")
+
         return {
             "status": "Success",
             "graded": graded_count,

@@ -3145,6 +3145,19 @@ def init_referee_assignments_table():
     print("referee_assignments table initialized.")
 
 
+def _resolve_team_game_log_filter(team_name: str) -> tuple[str, str]:
+    """Resolve canonical team_text in team_game_logs to avoid substring collisions."""
+    try:
+        from src.utils.team_matcher import TeamMatcher
+
+        matched = TeamMatcher().find_source_name(team_name, "team_game_logs", "team_text")
+        if matched:
+            return "LOWER(team_text) = LOWER(%s)", matched
+    except Exception:
+        pass
+    return "team_text ILIKE %s", f"%{team_name}%"
+
+
 def get_team_recent_shooting(team_name: str, num_games: int = 3, as_of_date: str = None) -> dict:
     """
     Get a team's recent 3PT shooting vs their current-season average.
@@ -3153,13 +3166,14 @@ def get_team_recent_shooting(team_name: str, num_games: int = 3, as_of_date: str
     from src.utils.ncaam_season import normalize_iso_date, season_start_date_for_game
     season_start = season_start_date_for_game(as_of_date)
     date_upper = normalize_iso_date(as_of_date)
+    team_clause, team_param = _resolve_team_game_log_filter(team_name)
 
-    query = """
+    query = f"""
     WITH recent AS (
         SELECT AVG(three_p_pct) as recent_avg
         FROM (
             SELECT three_p_pct FROM team_game_logs
-            WHERE team_text ILIKE %s
+            WHERE {team_clause}
               AND game_date >= %s
               AND game_date <= %s
             ORDER BY game_date DESC LIMIT %s
@@ -3168,7 +3182,7 @@ def get_team_recent_shooting(team_name: str, num_games: int = 3, as_of_date: str
     season AS (
         SELECT AVG(three_p_pct) as season_avg, COUNT(*) as games_played
         FROM team_game_logs
-        WHERE team_text ILIKE %s
+        WHERE {team_clause}
           AND game_date >= %s
           AND game_date <= %s
     )
@@ -3180,11 +3194,11 @@ def get_team_recent_shooting(team_name: str, num_games: int = 3, as_of_date: str
             conn,
             query,
             (
-                f"%{team_name}%",
+                team_param,
                 season_start,
                 date_upper,
                 num_games,
-                f"%{team_name}%",
+                team_param,
                 season_start,
                 date_upper,
             ),
@@ -3204,17 +3218,18 @@ def get_team_last_game(team_name: str, as_of_date: str = None) -> dict:
     from src.utils.ncaam_season import normalize_iso_date, season_start_date_for_game
     season_start = season_start_date_for_game(as_of_date)
     date_upper = normalize_iso_date(as_of_date)
+    team_clause, team_param = _resolve_team_game_log_filter(team_name)
 
-    query = """
+    query = f"""
     SELECT game_date, opponent, margin, is_home, opponent_rank
     FROM team_game_logs
-    WHERE team_text ILIKE %s
+    WHERE {team_clause}
       AND game_date >= %s
       AND game_date <= %s
     ORDER BY game_date DESC LIMIT 1
     """
     with get_db_connection() as conn:
-        result = _exec(conn, query, (f"%{team_name}%", season_start, date_upper)).fetchone()
+        result = _exec(conn, query, (team_param, season_start, date_upper)).fetchone()
         if result:
             return dict(result)
     return {}
