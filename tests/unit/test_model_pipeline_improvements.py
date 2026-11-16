@@ -1862,6 +1862,146 @@ def test_audit_accuracy_fixes_pace_splits_reverse_steam_and_calibration(monkeypa
     assert max(pt["p_cal"] for pt in cold_art["points"]) >= 0.525
 
 
+def test_backtest_stress_improvements_one_to_three(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.utils.model_performance import (
+        compute_top6_quality_score,
+        has_top6_risk_flag,
+        rank_top6_items,
+    )
+
+    # 1 & 2. Contra / reverse-steam blocking & quality-weighted Top 6 ranking
+    rows = [
+        {
+            "event_id": "e1",
+            "market_type": "TOTAL",
+            "selection": "OVER 152.5",
+            "ev_per_unit": 0.16,
+            "win_prob_lb10": 0.53,
+            "movement_tags": ["contra_sharp_money"],
+        },
+        {
+            "event_id": "e2",
+            "market_type": "SPREAD",
+            "selection": "Team B +3.5",
+            "bet_line": 3.5,
+            "ev_per_unit": 0.15,
+            "win_prob_lb10": 0.525,
+            "movement_tags": ["reverse_steam=-2.5"],
+        },
+        {
+            "event_id": "e3",
+            "market_type": "TOTAL",
+            "selection": "OVER 148.5",
+            "ev_per_unit": 0.155,
+            "win_prob_lb10": 0.535,
+            "movement_tags": [],
+        },
+        {
+            "event_id": "e4",
+            "market_type": "SPREAD",
+            "selection": "Team D -3.5",
+            "bet_line": -3.5,
+            "ev_per_unit": 0.075,
+            "win_prob_lb10": 0.555,
+            "movement_tags": ["sharp_backing", "rlm_confirmed"],
+        },
+    ]
+    assert has_top6_risk_flag(rows[0]) is True
+    assert has_top6_risk_flag(rows[1]) is True
+    assert has_top6_risk_flag(rows[2]) is False
+    ranked = rank_top6_items(rows, limit=6)
+    # Contra & reverse-steam rows are blocked from Top 6; sharp-backed SPREAD outranks extreme-edge TOTAL OVER
+    assert [r["event_id"] for r in ranked] == ["e4", "e3"]
+    assert ranked[0]["rank"] == 1
+    assert compute_top6_quality_score(rows[3]) > compute_top6_quality_score(rows[2])
+
+    # 3. Fast-tempo OVER asymmetric dampening + extreme divergence shrinkage in analyze()
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.kenpom_client = MagicMock()
+    model.kenpom_client.get_team_player_agg.return_value = None
+    model.kenpom_client.get_team_rating.return_value = None
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.haslametrics_client = MagicMock()
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 100.0
+    model.injury_service = MagicMock()
+    model.injury_service.get_matchup_injuries.return_value = {"has_injuries": False, "injuries": []}
+    model.news_service = MagicMock()
+    model.news_service.fetch_game_context.return_value = {}
+    model.news_service.summarize_impact.return_value = ""
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.03, "sd": 0.90})
+
+    # Fast-tempo +6.5 OVER projection gets damped asymmetrically vs symmetric -6.5 UNDER projection
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 75.5,
+        "home": {"luck": 0.0, "continuity": 0.72, "record": "14-4"},
+        "away": {"luck": 0.0, "continuity": 0.72, "record": "12-6"},
+    }
+    model.torvik_service.get_projection.return_value = {"margin": 4.0, "official_margin": 4.0, "total": 162.5, "lean": "Home"}
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 4.0, "fair_margin": 4.0, "fair_total": 162.5, "total_adj": 0.0, "summary": "KP"}
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 4.0, "total": 162.5}
+    res_over = model.analyze(
+        "evt_fast_over",
+        event_context={"id": "evt_fast_over", "home_team": "Home", "away_team": "Away", "start_time": datetime(2027, 1, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -4.0, "total": 156.0},
+        persist=False,
+    )
+
+    model.torvik_service.get_projection.return_value = {"margin": 4.0, "official_margin": 4.0, "total": 149.5, "lean": "Home"}
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 4.0, "fair_margin": 4.0, "fair_total": 149.5, "total_adj": 0.0, "summary": "KP"}
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 4.0, "total": 149.5}
+    res_under = model.analyze(
+        "evt_fast_under",
+        event_context={"id": "evt_fast_under", "home_team": "Home", "away_team": "Away", "start_time": datetime(2027, 1, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -4.0, "total": 156.0},
+        persist=False,
+    )
+    over_dev = res_over["context"]["fair_total"] - 156.0
+    under_dev = 156.0 - res_under["context"]["fair_total"]
+    assert 0.0 < over_dev < under_dev
+    assert res_over["debug"]["sigma_total"] > res_under["debug"]["sigma_total"]
+
+    # Extreme 9-pt spread divergence shrinks post-cap edge and widens sigma vs normal 5.0-pt divergence
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "continuity": 0.72, "record": "14-4"},
+        "away": {"luck": 0.0, "continuity": 0.72, "record": "12-6"},
+    }
+    model.torvik_service.get_projection.return_value = {"margin": 8.5, "official_margin": 8.5, "total": 144.0, "lean": "Home"}
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 8.5, "fair_margin": 8.5, "fair_total": 144.0, "total_adj": 0.0, "summary": "KP"}
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 8.5, "total": 144.0}
+    res_normal_sp = model.analyze(
+        "evt_norm_sp",
+        event_context={"id": "evt_norm_sp", "home_team": "Home", "away_team": "Away", "start_time": datetime(2027, 1, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -3.5, "total": 144.0},
+        persist=False,
+    )
+    model.torvik_service.get_projection.return_value = {"margin": 12.5, "official_margin": 12.5, "total": 144.0, "lean": "Home"}
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 12.5, "fair_margin": 12.5, "fair_total": 144.0, "total_adj": 0.0, "summary": "KP"}
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 12.5, "total": 144.0}
+    res_extreme_sp = model.analyze(
+        "evt_ext_sp",
+        event_context={"id": "evt_ext_sp", "home_team": "Home", "away_team": "Away", "start_time": datetime(2027, 1, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -3.5, "total": 144.0},
+        persist=False,
+    )
+    assert abs(res_extreme_sp["context"]["fair_spread_home"] - (-3.5)) < abs(res_normal_sp["context"]["fair_spread_home"] - (-3.5))
+    assert res_extreme_sp["debug"]["sigma_spread"] > res_normal_sp["debug"]["sigma_spread"]
+
+
+
 
 
 

@@ -154,6 +154,16 @@ def _normalize_rec_for_storage(rec: dict | None) -> dict | None:
     if conf_tier in ("HIGH", "MEDIUM", "LOW"):
         norm["confidence_tier"] = conf_tier
 
+    try:
+        from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
+
+        if "top6_eligible" not in norm:
+            norm["top6_eligible"] = not has_top6_risk_flag(norm)
+        if norm.get("quality_score") is None:
+            norm["quality_score"] = compute_top6_quality_score(norm)
+    except Exception:
+        pass
+
     return norm
 
 

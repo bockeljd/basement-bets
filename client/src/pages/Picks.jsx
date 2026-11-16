@@ -40,6 +40,7 @@ import {
   formatLineAndOdds,
   getNumericEdge,
   dedupeDayRowsByEvent,
+  hasTop6RiskFlag,
   selectTopPicksPerDay,
   computeRecordStats,
   normalizeSport,
@@ -511,7 +512,7 @@ export default function Picks() {
     }
     const sortedDays = Object.keys(dayRowsMap).sort((a, b) => b.localeCompare(a));
     const latestDay = sortedDays.find((d) => dayRowsMap[d].some((r) => isGradedOutcome(getRawOutcome(r)))) || sortedDays[0];
-    const picks = latestDay ? dedupeDayRowsByEvent(dayRowsMap[latestDay]).slice(0, 6) : [];
+    const picks = latestDay ? dedupeDayRowsByEvent(dayRowsMap[latestDay]).filter((r) => !hasTop6RiskFlag(r)).slice(0, 6) : [];
     const isActuallyYesterday = latestDay === yesterdayEt;
     const normalized = picks.map((h, i) => ({
       id: h.id || h.prediction_id || `${h.event_id}-${i}`,

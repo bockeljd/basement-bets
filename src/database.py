@@ -1937,6 +1937,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                     "bet_price": price_val,
                     "price": price_val,
                     "ev_per_unit": ev_num,
+                    "win_prob_lb10": rec.get("win_prob_lb10"),
                     "confidence_0_100": conf_val,
                     "clv_points": rd.get("clv_points") if mkt_matches else None,
                     "edge_points": rd.get("edge_points") if mkt_matches else None,
@@ -1948,14 +1949,26 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                     "created_at": rd.get("computed_at"),
                     "score": rd.get("score"),
                     "final": rd.get("final"),
+                    "movement_tags": rec.get("movement_tags"),
+                    "top6_eligible": rec.get("top6_eligible"),
+                    "quality_score": rec.get("quality_score"),
                     "source": "daily_top_picks",
                     "canonical_source": "daily_top_picks",
                 })
                 by_day.setdefault(day_key, []).append(item)
 
+            from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
+
             for day_key in sorted(by_day.keys(), reverse=True):
                 day_items = by_day[day_key]
-                day_items.sort(key=lambda x: float(x.get("ev_per_unit") or 0.0), reverse=True)
+                day_items.sort(
+                    key=lambda x: (
+                        1 if not has_top6_risk_flag(x) else 0,
+                        float(x.get("quality_score") if x.get("quality_score") is not None else compute_top6_quality_score(x)),
+                        float(x.get("ev_per_unit") or 0.0),
+                    ),
+                    reverse=True,
+                )
                 for idx, it in enumerate(day_items, start=1):
                     it["rank"] = idx
                     out_rows.append(it)

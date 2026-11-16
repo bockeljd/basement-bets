@@ -353,6 +353,76 @@ export const getEventDedupeKey = (row) => {
   return matchup && matchup !== '—' ? `${day}|${matchup}` : null;
 };
 
+const isLockedRecommendedSlateRow = (row) => {
+  if (!row) return false;
+  if (row.canonical_source === 'daily_top_picks') return false;
+  if (row.source_type === 'canonical_slate') return true;
+  const rk = Number(row.rank);
+  return Number.isFinite(rk) && rk > 0 && row.top6_eligible === undefined && !row.movement_tags;
+};
+
+export const hasTop6RiskFlag = (row) => {
+  if (!row) return false;
+  if (row.top6_eligible === false) return true;
+  const rawTags = row.movement_tags || row.sanity_reasons;
+  const tags = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === 'string'
+      ? rawTags.split(',')
+      : [];
+  return tags.some((t) => {
+    const low = String(t || '').trim().toLowerCase();
+    return low === 'contra_sharp_money' || low.startsWith('reverse_steam=');
+  });
+};
+
+export const getQualityRankScore = (row) => {
+  if (!row) return -999;
+  const explicit = Number(row.quality_score);
+  if (Number.isFinite(explicit)) return explicit;
+
+  const evRaw = getNumericEdge(row);
+  const ev = evRaw !== null && Number.isFinite(evRaw) ? evRaw : 0;
+  const effEv =
+    ev <= 0.085
+      ? ev
+      : ev <= 0.14
+        ? 0.085 + (ev - 0.085) * 0.25
+        : 0.085 + 0.055 * 0.25 - (ev - 0.14) * 0.15;
+  let score = effEv;
+
+  const lb10 = Number(row.win_prob_lb10);
+  if (Number.isFinite(lb10)) {
+    score += Math.max(0, lb10 - 0.52) * 0.35;
+  } else {
+    const conf = getNumericConfidence(row);
+    if (conf > 0) score += Math.max(0, conf - 55) * 0.0004;
+  }
+
+  const mkt = normalizeMarketType(row);
+  const sideText = `${row.side || ''} ${row.selection || ''} ${row.pick || ''}`.toUpperCase();
+  if (mkt === 'TOTAL') {
+    if (sideText.includes('OVER')) score -= 0.015;
+    else if (sideText.includes('UNDER')) score += 0.008;
+  } else if (mkt === 'SPREAD') {
+    const lineVal = Number(row.market_line ?? row.bet_line ?? row.line);
+    if (Number.isFinite(lineVal)) {
+      const absLine = Math.abs(lineVal);
+      if (absLine >= 14 && absLine < 22) score -= 0.012;
+      else if (absLine >= 6 && absLine < 14) score -= 0.006;
+    }
+  }
+
+  const rawTags = row.movement_tags || row.sanity_reasons;
+  const tags = (Array.isArray(rawTags) ? rawTags : []).map((t) => String(t || '').trim().toLowerCase());
+  if (tags.includes('sharp_backing')) score += 0.012;
+  if (tags.includes('rlm_confirmed')) score += 0.006;
+  if (tags.includes('contra_sharp_money')) score -= 0.03;
+  if (tags.some((t) => t.startsWith('reverse_steam='))) score -= 0.02;
+
+  return score;
+};
+
 const isCanonicalSlateRow = (row) => {
   if (!row) return false;
   if (row.canonical_source === 'daily_top_picks' || row.source_type === 'canonical_slate') return true;
@@ -361,22 +431,38 @@ const isCanonicalSlateRow = (row) => {
 };
 
 const compareDailySlateRows = (a, b) => {
+  const lockedA = isLockedRecommendedSlateRow(a);
+  const lockedB = isLockedRecommendedSlateRow(b);
+  if (lockedA !== lockedB) return lockedA ? -1 : 1;
+
+  if (lockedA && lockedB) {
+    const rkA = Number(a?.rank);
+    const rkB = Number(b?.rank);
+    const hasRkA = Number.isFinite(rkA) && rkA > 0;
+    const hasRkB = Number.isFinite(rkB) && rkB > 0;
+    if (hasRkA && hasRkB && rkA !== rkB) return rkA - rkB;
+  }
+
   const canonA = isCanonicalSlateRow(a) ? 0 : 1;
   const canonB = isCanonicalSlateRow(b) ? 0 : 1;
   if (canonA !== canonB) return canonA - canonB;
 
-  const rkA = Number(a?.rank);
-  const rkB = Number(b?.rank);
-  const hasRkA = Number.isFinite(rkA) && rkA > 0;
-  const hasRkB = Number.isFinite(rkB) && rkB > 0;
-  if (canonA === 0 && hasRkA && hasRkB && rkA !== rkB) {
-    return rkA - rkB;
-  }
+  const riskA = hasTop6RiskFlag(a) ? 1 : 0;
+  const riskB = hasTop6RiskFlag(b) ? 1 : 0;
+  if (riskA !== riskB) return riskA - riskB;
+
+  const qA = getQualityRankScore(a);
+  const qB = getQualityRankScore(b);
+  if (qB !== qA) return qB - qA;
 
   const evA = getNumericEdge(a) ?? -999;
   const evB = getNumericEdge(b) ?? -999;
   if (evB !== evA) return evB - evA;
 
+  const rkA = Number(a?.rank);
+  const rkB = Number(b?.rank);
+  const hasRkA = Number.isFinite(rkA) && rkA > 0;
+  const hasRkB = Number.isFinite(rkB) && rkB > 0;
   if (hasRkA || hasRkB) {
     return (hasRkA ? rkA : 999) - (hasRkB ? rkB : 999);
   }
@@ -407,7 +493,7 @@ export const selectTopPicksPerDay = (rows, topN = 6) => {
   const out = [];
   const sortedDays = Object.keys(groups).sort((a, b) => b.localeCompare(a));
   for (const day of sortedDays) {
-    const uniqueDay = dedupeDayRowsByEvent(groups[day]);
+    const uniqueDay = dedupeDayRowsByEvent(groups[day]).filter((r) => isLockedRecommendedSlateRow(r) || !hasTop6RiskFlag(r));
     out.push(...uniqueDay.slice(0, topN));
   }
   return out;
@@ -433,7 +519,7 @@ export const computeRankBreakdown = (rows, maxRank = 6) => {
   }));
 
   for (const day of Object.keys(groups)) {
-    const uniqueDay = dedupeDayRowsByEvent(groups[day]);
+    const uniqueDay = dedupeDayRowsByEvent(groups[day]).filter((r) => isLockedRecommendedSlateRow(r) || !hasTop6RiskFlag(r));
     uniqueDay.slice(0, maxRank).forEach((row, idx) => {
       const bucket = buckets[idx];
       const out = getRawOutcome(row);

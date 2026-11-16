@@ -964,6 +964,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if os.environ.get("REQUIRE_DATABASE") != "0":
                 from src.database import get_latest_action_splits
                 action_splits = get_latest_action_splits(event['id'])
+            elif isinstance(event, dict) and isinstance(event.get("action_splits"), dict):
+                action_splits = event.get("action_splits") or {}
         except Exception:
             action_splits = {}
 
@@ -1207,6 +1209,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if council_adjustment_spread != 0.0:
                 print(f"[MODEL] Council spread adj {council_adjustment_spread:+.2f} computed but GATED (Phase 1 mode).")
         
+        # Compute average model-vs-market divergence across available feeds.
+        sp_diffs_avail = [d for d, ok in ((diff_torvik, True), (diff_kenpom, kp_available), (diff_hasla, hasla_available)) if ok]
+        mean_sp_gap = (sum(abs(float(d)) for d in sp_diffs_avail) / len(sp_diffs_avail)) if sp_diffs_avail else 0.0
+
         # Apply Caps (widen raw cap modestly when 2+ independent sources agree,
         # but keep Nov/Dec early-season spread cap tighter so unpriced roster variance doesn't overshoot market;
         # damp blowout spread cap on 25+ pt mismatches so walk-on garbage time doesn't inflate edges)
@@ -1225,6 +1231,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 effective_cap_spread = min(effective_cap_spread, 2.0 if is_early_season else 2.6)
         if abs(mu_spread_final - mu_market_spread) > effective_cap_spread:
              mu_spread_final = mu_market_spread + (effective_cap_spread * math.copysign(1, mu_spread_final - mu_market_spread))
+        # Post-cap shrinkage on extreme 6+ pt rating-vs-market clashes (curbs unpriced-lineup edge traps)
+        if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_sp_gap >= 6.0 and mu_market_spread is not None:
+            sp_div_shrink = max(0.55, 1.0 - (mean_sp_gap - 6.0) * 0.11)
+            mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * sp_div_shrink)
 
         # Total - None-safe handling without synthetic 145.0 fallbacks
         torvik_total_ok = bool(torvik_view and torvik_view.get('lean') != 'No Data')
@@ -1279,9 +1289,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         if os.getenv('NCAAM_W_BASE') is None and agree_count_total >= 2:
             tot_sum = w_total_torvik + w_total_kp + w_total_hasla
-            max_tot_sum = 0.35 if game_month == 11 else (0.45 if game_month == 12 else 0.55)
+            max_tot_sum = 0.32 if game_month == 11 else (0.43 if game_month == 12 else 0.55)
             mult_tot_agree = (
-                (1.20 if agree_count_total >= 3 else 1.12)
+                (1.18 if agree_count_total >= 3 else 1.11)
                 if is_early_season
                 else (1.35 if agree_count_total >= 3 else 1.25)
             )
@@ -1295,9 +1305,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
         effective_cap_total = self.CAP_TOTAL
         if os.getenv('NCAAM_CAP_TOTAL') is None:
             if is_early_season and self.CAP_TOTAL <= self.DEFAULT_CAP_TOTAL:
-                effective_cap_total = min(self.CAP_TOTAL, 2.5 if game_month == 11 else 2.8)
+                effective_cap_total = min(self.CAP_TOTAL, 2.2 if game_month == 11 else 2.7)
             elif agree_count_total >= 2 and not is_early_season:
                 effective_cap_total = max(self.CAP_TOTAL, 4.5 if agree_count_total >= 3 else 3.8)
+
+        game_tempo_val = float((torvik_team_stats or {}).get('game_tempo', 68.0) or 68.0)
+        tot_diffs_avail = [
+            d for d, ok in (
+                (diff_tv_tot, torvik_total_ok and mu_torvik_total is not None),
+                (diff_kp_tot, kp_available and mu_kenpom_total is not None),
+                (diff_hs_tot, hasla_available and mu_hasla_total is not None),
+            ) if ok
+        ]
+        mean_tot_gap = (sum(abs(float(d)) for d in tot_diffs_avail) / len(tot_diffs_avail)) if tot_diffs_avail else 0.0
 
         if has_total and mu_market_total is not None:
             mu_total_final = (
@@ -1313,8 +1333,25 @@ class NCAAMMarketFirstModelV2(BaseModel):
             else:
                 if council_adjustment_total != 0.0:
                     print(f"[MODEL] Council total adj {council_adjustment_total:+.2f} computed but GATED (Phase 1 mode).")
-            if abs(mu_total_final - mu_market_total) > effective_cap_total:
-                mu_total_final = mu_market_total + (effective_cap_total * math.copysign(1, mu_total_final - mu_market_total))
+
+            # Asymmetric TOTAL OVER calibration: efficiency ensembles systematically run hot
+            # above sharp market totals in early season and fast-tempo matchups.
+            if os.getenv('NCAAM_DISABLE_OVER_DAMP') is None and mu_total_final > mu_market_total:
+                over_damp = 0.80 if is_early_season else 0.85
+                if game_tempo_val >= 72.0:
+                    over_damp *= 0.72
+                mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * over_damp)
+                eff_cap_tot_use = min(
+                    effective_cap_total,
+                    2.2 if game_month == 11 else (2.4 if game_tempo_val >= 72.0 else 3.2),
+                )
+            else:
+                eff_cap_tot_use = effective_cap_total
+            if abs(mu_total_final - mu_market_total) > eff_cap_tot_use:
+                mu_total_final = mu_market_total + (eff_cap_tot_use * math.copysign(1, mu_total_final - mu_market_total))
+            if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_tot_gap >= 6.5:
+                tot_div_shrink = max(0.58, 1.0 - (mean_tot_gap - 6.5) * 0.10)
+                mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * tot_div_shrink)
         else:
             # Market total absent: compute display-only total from available real projections (never synthetic 145.0).
             weighted_tots = [
@@ -1340,13 +1377,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # 6. Pace-Adjusted & Season-Calibrated Sigma (Refined)
         # Higher tempo = more possessions = higher variance = wider sigma
         # Early season (Nov/Dec) & low-continuity transfer rosters have higher residual variance.
-        game_tempo = (torvik_team_stats or {}).get('game_tempo', 68.0) or 68.0
+        game_tempo = game_tempo_val
         tempo_factor = math.sqrt(game_tempo / 68.0)
         
         base_sigma_spread = 10.5
         base_sigma_total = 15.0  # Restored D1 total scoring sigma to curb marginal O/U false positives
 
-        early_season_sigma_mult = 1.08 if game_month == 11 else (1.04 if game_month == 12 else 1.0)
+        early_season_sigma_mult = 1.11 if game_month == 11 else (1.045 if game_month == 12 else 1.0)
         if avg_continuity < 0.5:
             early_season_sigma_mult *= 1.05
 
@@ -1356,10 +1393,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         sigma_spread = (((base_sigma_spread + blowout_sigma_add) * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
         sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * (abs(mu_torvik_total - mu_market_total) if (mu_torvik_total is not None and mu_market_total is not None) else 0.0)) * early_season_sigma_mult
-        if is_early_season and abs(diff_torvik) >= 4.5:
+        if game_month == 11 and abs(diff_torvik) >= 4.0 and agree_count >= 2:
+            sigma_spread *= 1.05
+        elif is_early_season and abs(diff_torvik) >= 4.5:
             sigma_spread *= 1.06
-        if is_early_season and abs(diff_tv_tot) >= 6.0:
+        if game_month == 11 and abs(diff_tv_tot) >= 4.5:
+            sigma_total *= 1.05
+        elif is_early_season and abs(diff_tv_tot) >= 6.0:
             sigma_total *= 1.06
+
+        # Extreme model-vs-market divergence reflects likely unpriced roster/situational info;
+        # widen sigma smoothly so 12%+ edge outliers do not overstate predicted cover probability.
+        if mean_sp_gap >= 6.0:
+            sigma_spread *= (1.0 + min(0.16, (mean_sp_gap - 6.0) * 0.035))
+        if mean_tot_gap >= 6.5:
+            sigma_total *= (1.0 + min(0.16, (mean_tot_gap - 6.5) * 0.03))
+        if has_total and mu_market_total is not None and mu_total_final is not None and mu_total_final > mu_market_total and game_tempo >= 72.0:
+            sigma_total *= 1.08
 
         # --- Feature: Dynamic Sigma Inflation ---
         # If the Council identifies roster instability or significant red flags, 
@@ -1545,7 +1595,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # -- Referee Signal (Totals) --
         if mu_total_final is not None:
             mu_total_final = self._apply_referee_signal(event['id'], mu_total_final) or mu_total_final
-            max_auto_total_dev = effective_cap_total + (0.5 if is_early_season else 1.5)
+            base_tot_cap = effective_cap_total
+            if mu_market_total is not None and mu_total_final > mu_market_total and os.getenv('NCAAM_DISABLE_OVER_DAMP') is None:
+                base_tot_cap = min(
+                    effective_cap_total,
+                    2.2 if game_month == 11 else (2.4 if game_tempo >= 72.0 else 3.2),
+                )
+            max_auto_total_dev = base_tot_cap + (0.4 if is_early_season else 1.0)
             if mu_market_total is not None and abs(mu_total_final - mu_market_total) > max_auto_total_dev:
                 mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
         
@@ -1673,6 +1729,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "mu_spread_final": mu_spread_final,
             "mu_total_final": mu_total_final,
             "sigma_spread": sigma_spread,
+            "sigma_total": sigma_total,
             "tempo_factor": tempo_factor,
             "luck_adj": luck_adjustment,
             "geo_adj": altitude_adj if 'altitude_adj' in locals() else 0.0,
@@ -1862,6 +1919,25 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 ev_per_unit=r.get('ev'),
             )
 
+            from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
+
+            quality_input = {
+                "market_type": r['market'],
+                "side": r.get('side'),
+                "selection": sel,
+                "bet_line": r.get('line'),
+                "market_line": market_line_side,
+                "ev_per_unit": float(r['ev']),
+                "win_prob_lb10": lb10,
+                "confidence_0_100": conf_score,
+                "movement_tags": r.get('movement_tags') or [],
+                "sanity_reasons": r.get('sanity_reasons') or [],
+            }
+            top6_eligible = not has_top6_risk_flag(quality_input)
+            quality_score = compute_top6_quality_score(quality_input)
+            r['top6_eligible'] = top6_eligible
+            r['quality_score'] = quality_score
+
             ui_rec = {
                 "bet_type": r['market'],
                 "selection": sel,
@@ -1889,13 +1965,32 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev_raw": r.get('ev_raw'),
                 "ev_penalty": r.get('ev_penalty'),
                 "movement_tags": r.get('movement_tags'),
+                "top6_eligible": top6_eligible,
+                "quality_score": quality_score,
                 "prediction_id": r.get('prediction_id'),
                 "signals": matchup_signals,
             }
             ui_recs.append(ui_rec)
             r['_ui_rec'] = ui_rec
-            if not best_rec or r['ev'] > best_rec['ev']:
-                best_rec = r
+
+        if ui_recs:
+            ui_recs.sort(
+                key=lambda x: (
+                    1 if x.get('top6_eligible', True) else 0,
+                    float(x.get('quality_score') if x.get('quality_score') is not None else -999.0),
+                    float(x.get('ev') if x.get('ev') is not None else -999.0),
+                ),
+                reverse=True,
+            )
+            recs.sort(
+                key=lambda x: (
+                    1 if x.get('top6_eligible', True) else 0,
+                    float(x.get('quality_score') if x.get('quality_score') is not None else -999.0),
+                    float(x.get('ev') if x.get('ev') is not None else -999.0),
+                ),
+                reverse=True,
+            )
+            best_rec = recs[0]
 
         inputs_payload = {
             "market": market_snapshot,

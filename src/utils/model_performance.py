@@ -101,9 +101,6 @@ def normalize_sport(sport, *, event_id=None) -> str:
     return "NCAAM"
 
 
-    return out_sport
-
-
 def get_row_season(row: dict) -> str | None:
     """Derive canonical season label ('2026-27' for NCAAM, '2026' for calendar sports like MLB)."""
     if not isinstance(row, dict):
@@ -232,6 +229,127 @@ def _meaningful_pick_text(val) -> str:
     return s
 
 
+def _extract_movement_tags(row: dict) -> list[str]:
+    """Extract normalized movement/risk tags from row or nested rec_json."""
+    if not isinstance(row, dict):
+        return []
+    raw_tags = row.get("movement_tags") or row.get("sanity_reasons")
+    if not raw_tags and isinstance(row.get("rec_json"), dict):
+        raw_tags = row["rec_json"].get("movement_tags") or row["rec_json"].get("sanity_reasons")
+    if isinstance(raw_tags, str):
+        return [t.strip() for t in raw_tags.split(",") if t.strip()]
+    if isinstance(raw_tags, (list, tuple, set)):
+        return [str(t).strip() for t in raw_tags if t is not None and str(t).strip()]
+    return []
+
+
+def has_top6_risk_flag(row: dict) -> bool:
+    """Return True if a play carries contra sharp-money or reverse-steam risk flags."""
+    if not isinstance(row, dict):
+        return False
+    if row.get("top6_eligible") is False:
+        return True
+    if isinstance(row.get("rec_json"), dict) and row["rec_json"].get("top6_eligible") is False:
+        return True
+    for tag in _extract_movement_tags(row):
+        low = tag.lower()
+        if low == "contra_sharp_money" or low.startswith("reverse_steam="):
+            return True
+    return False
+
+
+def compute_top6_quality_score(row: dict) -> float:
+    """Compute quality-weighted ranking score (curbs extreme-edge outliers, OVER bias, and 14-22 spreads)."""
+    if not isinstance(row, dict):
+        return -999.0
+
+    raw_ev = _first_present(row.get("ev_per_unit"), row.get("ev"))
+    try:
+        ev = float(raw_ev or 0.0)
+        if abs(ev) > 1.5:
+            ev /= 100.0
+    except Exception:
+        ev = 0.0
+
+    # Diminishing returns above +8.5% EV and damper above +14% so extreme outliers don't steal #1
+    if ev <= 0.085:
+        eff_ev = ev
+    elif ev <= 0.14:
+        eff_ev = 0.085 + (ev - 0.085) * 0.25
+    else:
+        eff_ev = 0.085 + (0.055 * 0.25) - (ev - 0.14) * 0.15
+    score = eff_ev
+
+    lb10 = row.get("win_prob_lb10")
+    try:
+        if lb10 is not None:
+            score += max(0.0, float(lb10) - 0.52) * 0.35
+        else:
+            c0 = normalize_confidence_pct(
+                row.get("confidence_0_100") if row.get("confidence_0_100") is not None else row.get("confidence")
+            )
+            if c0 is not None:
+                score += max(0.0, float(c0) - 55.0) * 0.0004
+    except Exception:
+        pass
+
+    mkt = normalize_market_type(
+        _first_present(row.get("market_type"), row.get("market"), row.get("bet_type"))
+    )
+    side_text = str(_first_present(row.get("side"), row.get("selection"), row.get("pick")) or "").upper()
+    if mkt == "TOTAL":
+        if "OVER" in side_text:
+            score -= 0.015
+        elif "UNDER" in side_text:
+            score += 0.008
+    elif mkt == "SPREAD":
+        try:
+            line_val = _first_present(row.get("market_line"), row.get("bet_line"), row.get("line"))
+            if line_val is not None:
+                abs_line = abs(float(line_val))
+                if 14.0 <= abs_line < 22.0:
+                    score -= 0.012
+                elif 6.0 <= abs_line < 14.0:
+                    score -= 0.006
+        except Exception:
+            pass
+
+    tags = [t.lower() for t in _extract_movement_tags(row)]
+    if "sharp_backing" in tags:
+        score += 0.012
+    if "rlm_confirmed" in tags:
+        score += 0.006
+    if "contra_sharp_money" in tags:
+        score -= 0.030
+    if any(t.startswith("reverse_steam=") for t in tags):
+        score -= 0.020
+
+    return round(score, 6)
+
+
+def rank_top6_items(rows: list, limit: int | None = 6) -> list:
+    """Filter out contra/reverse-steam traps and rank remaining picks by quality score (1 per event)."""
+    eligible = [r for r in (rows or []) if not has_top6_risk_flag(r)]
+    eligible.sort(
+        key=lambda x: (compute_top6_quality_score(x), float(_first_present(x.get("ev_per_unit"), x.get("ev")) or 0.0)),
+        reverse=True,
+    )
+    picked = []
+    seen_events = set()
+    for row in eligible:
+        eid = str(row.get("event_id") or "").strip()
+        if eid and eid in seen_events:
+            continue
+        if eid:
+            seen_events.add(eid)
+        item = dict(row)
+        item["rank"] = len(picked) + 1
+        picked.append(item)
+        if limit is not None and len(picked) >= int(limit):
+            break
+    return picked
+
+
 def normalize_history_row(row: dict) -> dict:
     """Normalize a single history/slate pick row for consistent analytics and UI rendering."""
     out = dict(row or {})
@@ -304,6 +422,16 @@ def normalize_history_row(row: dict) -> dict:
     season_val = get_row_season(out)
     if season_val:
         out["season"] = season_val
+
+    tags = _extract_movement_tags(out)
+    if tags:
+        out["movement_tags"] = tags
+    if "top6_eligible" not in out:
+        out["top6_eligible"] = not has_top6_risk_flag(out)
+    elif out.get("top6_eligible") is not False and has_top6_risk_flag(out):
+        out["top6_eligible"] = False
+    if out.get("quality_score") is None:
+        out["quality_score"] = compute_top6_quality_score(out)
 
     if out["sport"] != "EPL" and str(out.get("score") or "").strip() == "0-0":
         out["score"] = None

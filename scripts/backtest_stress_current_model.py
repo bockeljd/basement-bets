@@ -312,6 +312,7 @@ def run_model_on_games(
                 "away_team": g["away_team"],
                 "start_time": g["start_time"],
                 "neutral_site": False,
+                "action_splits": g.get("splits") or {},
             }
 
             res = model.analyze(
@@ -377,6 +378,8 @@ def run_model_on_games(
                         "conf_score": int(rec.get("confidence_0_100") or 0),
                         "conf_tier": str(rec.get("confidence") or "Low"),
                         "tags": list(rec.get("movement_tags") or []),
+                        "top6_eligible": bool(rec.get("top6_eligible", True)),
+                        "quality_score": float(rec.get("quality_score") if rec.get("quality_score") is not None else rec.get("ev") or 0.0),
                         "sigma_mult": float(rec.get("sigma_mult") or 1.0),
                         "outcome": outcome,
                         "pl": pl,
@@ -498,10 +501,16 @@ def main() -> None:
     season_games = simulate_season_slate(teams, seed=20261116, games_per_day=16)
     all_recs = run_model_on_games(model, season_games)
     top6_recs = select_top_n_per_day(all_recs, 6)
+    top6_new_recs = select_top_n_per_day(
+        [r for r in all_recs if r.get("top6_eligible", True)],
+        6,
+        score_fn=lambda r: float(r.get("quality_score", r["ev"])),
+    )
 
     print("\n=== 1. CURRENT MODEL WALK-FORWARD BACKTEST (1,600 GAMES / 100 SLATES) ===")
     print_row("All Actionable Picks", summarize(all_recs))
     print_row("Top 6 / Day (by Raw EV)", summarize(top6_recs))
+    print_row("Top 6 / Day (Quality + Clean)", summarize(top6_new_recs))
 
     print("\n--- By Month (All vs Top 6) ---")
     for label, months in (("Nov (Early Preseason)", (11,)), ("Dec (Transition)", (12,)), ("Jan-Feb (In-Season)", (1, 2))):
@@ -647,7 +656,10 @@ def main() -> None:
     ):
         s_games = make_stress_games(mode)
         s_recs = run_model_on_games(model, s_games)
-        print_row(mode, summarize(s_recs))
+        print_row(f"{mode} (All)", summarize(s_recs))
+        if mode in ("S4_sharp_contra_money", "S5_reverse_steam_trap"):
+            s_top6 = [r for r in s_recs if r.get("top6_eligible", True)]
+            print_row(f"  -> {mode[:16]} Top 6", summarize(s_top6))
 
     # 3. Candidate Rule Ablations (tested directly against our 1,600-game walk-forward recs)
     print("\n=== 3. CANDIDATE ACCURACY & SELECTIVITY IMPROVEMENTS (ABLATIONS ON 1,600 GAMES) ===")

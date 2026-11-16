@@ -3287,10 +3287,17 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             'confidence': conf,
             'book': rec.get('book')
         }
+        if rec.get('ev') is not None:
+            out['ev'] = rec.get('ev')
+        if rec.get('win_prob_lb10') is not None:
+            out['win_prob_lb10'] = rec.get('win_prob_lb10')
         if rec.get('signals') is not None:
             out['signals'] = rec.get('signals')
         if rec.get('movement_tags') is not None:
             out['movement_tags'] = rec.get('movement_tags')
+        from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
+        out['top6_eligible'] = bool(rec.get('top6_eligible', not has_top6_risk_flag(rec)))
+        out['quality_score'] = rec.get('quality_score') if rec.get('quality_score') is not None else compute_top6_quality_score(rec)
         return out
 
     def _load_latest_stored_pick(conn, eid: str):
@@ -3316,10 +3323,20 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         r = dict(row)
         rec = None
         try:
+            from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
             out = json.loads(r.get('outputs_json') or '{}')
-            top = (out.get('recommendations') or [None])[0]
-            if top:
-                rec = top
+            cands = out.get('recommendations') or []
+            if cands:
+                cands_sorted = sorted(
+                    cands,
+                    key=lambda x: (
+                        1 if not has_top6_risk_flag(x) else 0,
+                        float(x.get('quality_score') if x.get('quality_score') is not None else compute_top6_quality_score(x)),
+                        float(x.get('ev') or 0.0),
+                    ),
+                    reverse=True,
+                )
+                rec = cands_sorted[0]
         except Exception:
             rec = None
 
@@ -4495,7 +4512,7 @@ async def ncaam_top6_rank_performance(days: int = 365):
 def _yesterday_items_from_daily_top_picks(conn, yday: str):
     """Fallback yesterday slate builder from daily_top_picks + events + game_results."""
     from src.database import _exec
-    from src.utils.model_performance import normalize_history_row, normalize_market_type
+    from src.utils.model_performance import normalize_history_row, normalize_market_type, rank_top6_items
 
     picks_rows = _exec(conn, """
         SELECT d.event_id, d.computed_at, d.rec_json,
@@ -4587,6 +4604,7 @@ def _yesterday_items_from_daily_top_picks(conn, yday: str):
             'price': price_val,
             'bet_price': price_val,
             'ev_per_unit': ev_num,
+            'win_prob_lb10': rec.get('win_prob_lb10'),
             'confidence_0_100': conf_val,
             'clv_points': r.get('clv_points') if mkt_matches else None,
             'outcome': row_outcome or 'PENDING',
@@ -4595,12 +4613,12 @@ def _yesterday_items_from_daily_top_picks(conn, yday: str):
             'start_time': r.get('start_time'),
             'score': score,
             'day_et': yday,
+            'movement_tags': rec.get('movement_tags'),
+            'top6_eligible': rec.get('top6_eligible'),
+            'quality_score': rec.get('quality_score'),
         }))
 
-    items.sort(key=lambda x: float(x.get('ev_per_unit') or 0.0), reverse=True)
-    items = items[:6]
-    for idx, it in enumerate(items, start=1):
-        it['rank'] = idx
+    items = rank_top6_items(items, limit=6)
     if not items:
         return None, []
     return {'id': f'daily_top_picks:{yday}', 'source': 'daily_top_picks', 'created_at': latest_ts}, items
@@ -4609,7 +4627,7 @@ def _yesterday_items_from_daily_top_picks(conn, yday: str):
 def _yesterday_items_from_predictions(conn, yday: str):
     """Last-resort yesterday slate builder from actionable model_predictions."""
     from src.database import _exec
-    from src.utils.model_performance import normalize_history_row
+    from src.utils.model_performance import normalize_history_row, rank_top6_items
 
     pred_rows = _exec(conn, """
         SELECT m.id AS prediction_id, m.event_id, m.market_type, m.selection, m.pick,
@@ -4653,10 +4671,7 @@ def _yesterday_items_from_predictions(conn, yday: str):
         norm['day_et'] = yday
         items.append(norm)
 
-    items.sort(key=lambda x: float(x.get('ev_per_unit') or 0.0), reverse=True)
-    items = items[:6]
-    for idx, it in enumerate(items, start=1):
-        it['rank'] = idx
+    items = rank_top6_items(items, limit=6)
     if not items:
         return None, []
     return {'id': f'model_predictions:{yday}', 'source': 'model_predictions', 'created_at': latest_ts}, items

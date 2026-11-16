@@ -102,6 +102,7 @@ export const normalizeMovementTag = (tag) => {
   if (t === 'sharp_backing') return { label: 'Big Money Backing', tone: 'emerald' };
   if (t === 'injury_line_adjusted') return { label: 'Injury Priced In', tone: 'amber' };
   if (t === 'contra_sharp_money') return { label: 'Against Big Money', tone: 'rose' };
+  if (t.startsWith('reverse_steam=')) return { label: 'Market Steamed Opposite', tone: 'rose' };
   if (t === 'steam_warning') return { label: 'Line Moving Fast', tone: 'amber' };
   return { label: String(tag || '').replace(/_/g, ' '), tone: 'slate' };
 };
@@ -118,6 +119,71 @@ export const getRecEv = (rec) => {
     if (Number.isFinite(parsed)) return parsed / 100;
   }
   return null;
+};
+
+export const hasTop6RiskFlag = (rec) => {
+  if (!rec) return false;
+  if (rec.top6_eligible === false) return true;
+  const rawTags = rec.movement_tags || rec.sanity_reasons;
+  const tags = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === 'string'
+      ? rawTags.split(',')
+      : [];
+  return tags.some((t) => {
+    const low = String(t || '').trim().toLowerCase();
+    return low === 'contra_sharp_money' || low.startsWith('reverse_steam=');
+  });
+};
+
+export const getRecQualityScore = (rec) => {
+  if (!rec) return -999;
+  const explicit = Number(rec.quality_score);
+  if (Number.isFinite(explicit)) return explicit;
+
+  const evRaw = getRecEv(rec);
+  const ev = evRaw !== null && Number.isFinite(evRaw) ? evRaw : 0;
+  const effEv =
+    ev <= 0.085
+      ? ev
+      : ev <= 0.14
+        ? 0.085 + (ev - 0.085) * 0.25
+        : 0.085 + 0.055 * 0.25 - (ev - 0.14) * 0.15;
+  let score = effEv;
+
+  const lb10 = Number(rec.win_prob_lb10);
+  if (Number.isFinite(lb10)) {
+    score += Math.max(0, lb10 - 0.52) * 0.35;
+  } else {
+    const confNum = Number(rec.confidence_0_100 ?? (typeof rec.confidence === 'number' ? rec.confidence : NaN));
+    if (Number.isFinite(confNum)) {
+      const scaled = confNum <= 1 ? confNum * 100 : confNum;
+      score += Math.max(0, scaled - 55) * 0.0004;
+    }
+  }
+
+  const mkt = String(rec.bet_type || rec.market_type || rec.market || '').toUpperCase();
+  const sel = String(rec.selection || rec.side || '').toUpperCase();
+  if (mkt.includes('TOTAL')) {
+    if (sel.includes('OVER')) score -= 0.015;
+    else if (sel.includes('UNDER')) score += 0.008;
+  } else if (mkt.includes('SPREAD')) {
+    const lineVal = Number(rec.market_line ?? rec.bet_line ?? rec.line);
+    if (Number.isFinite(lineVal)) {
+      const absLine = Math.abs(lineVal);
+      if (absLine >= 14 && absLine < 22) score -= 0.012;
+      else if (absLine >= 6 && absLine < 14) score -= 0.006;
+    }
+  }
+
+  const rawTags = rec.movement_tags || rec.sanity_reasons;
+  const tags = (Array.isArray(rawTags) ? rawTags : []).map((t) => String(t || '').trim().toLowerCase());
+  if (tags.includes('sharp_backing')) score += 0.012;
+  if (tags.includes('rlm_confirmed')) score += 0.006;
+  if (tags.includes('contra_sharp_money')) score -= 0.03;
+  if (tags.some((t) => t.startsWith('reverse_steam='))) score -= 0.02;
+
+  return score;
 };
 
 export const getConfidenceMeta = (rec) => {

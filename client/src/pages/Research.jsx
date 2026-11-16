@@ -33,6 +33,8 @@ import {
   lookupTopPickForGame,
   getConfidenceMeta,
   getRecEv,
+  getRecQualityScore,
+  hasTop6RiskFlag,
   decodeKenpomHashImport,
   getProjectedScore,
   explainPickPlainly,
@@ -571,7 +573,14 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       plays.push({ id: eid, game: synthGame, rec: meta.rec, context: meta.context || null, conf: getConfidenceMeta(meta.rec) });
     });
 
-    plays.sort((a, b) => (getRecEv(b.rec) ?? -999) - (getRecEv(a.rec) ?? -999));
+    plays.sort((a, b) => {
+      const riskA = hasTop6RiskFlag(a.rec) ? 1 : 0;
+      const riskB = hasTop6RiskFlag(b.rec) ? 1 : 0;
+      if (riskA !== riskB) return riskA - riskB;
+      const qDiff = getRecQualityScore(b.rec) - getRecQualityScore(a.rec);
+      if (Math.abs(qDiff) > 1e-6) return qDiff;
+      return (getRecEv(b.rec) ?? -999) - (getRecEv(a.rec) ?? -999);
+    });
 
     const highConf = plays.filter((p) => p.conf.tier === 'HIGH').length;
     const liveGamesList = gamesForLeague.filter((g) => getLiveGameStatus(g).isLive);
@@ -614,7 +623,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       }
       return true;
     });
-    return pickViewMode === 'top6' ? list.slice(0, 6) : list;
+    if (pickViewMode === 'top6') {
+      return list.filter(({ rec }) => !hasTop6RiskFlag(rec)).slice(0, 6);
+    }
+    return list;
   }, [actionablePlays, pickTypeFilter, pickViewMode]);
 
   const pickFilterCounts = useMemo(() => {
