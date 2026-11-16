@@ -219,3 +219,48 @@ def test_live_calibration_summary_auto_rebuilds_when_threshold_reached(monkeypat
     assert summary["active"] is True
     assert summary["n_obs"] == 262
     assert summary["brier_calibrated"] == 0.148
+
+
+def test_rebuild_live_calibration_returns_active_even_if_persist_fails(monkeypatch):
+    from contextlib import contextmanager
+    import src.database as db_mod
+
+    sample_rows = [
+        {
+            "elapsed_fraction": 0.65,
+            "home_score": 54 if i % 3 != 0 else 38,
+            "away_score": 52 if i % 3 != 0 else 44,
+            "pregame_total": 144.0,
+            "pregame_home_margin": 3.0,
+            "market_type": "TOTAL" if i % 2 == 0 else "SPREAD",
+            "side": "OVER" if i % 2 == 0 else "HOME",
+            "bet_line": 143.5 if i % 2 == 0 else -2.5,
+            "outcome": "WON" if i % 3 != 0 else "LOST",
+        }
+        for i in range(30)
+    ]
+
+    class _FakeCursor:
+        def fetchall(self):
+            return sample_rows
+
+    class _FakeConn:
+        def commit(self):
+            pass
+
+    @contextmanager
+    def _fake_conn():
+        yield _FakeConn()
+
+    monkeypatch.setenv("REQUIRE_DATABASE", "1")
+    monkeypatch.setattr(db_mod, "get_db_connection", _fake_conn)
+    monkeypatch.setattr(db_mod, "_exec", lambda conn, sql, params=None: _FakeCursor())
+    monkeypatch.setattr(db_mod, "upsert_model_param", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("readonly")))
+    monkeypatch.setattr(lcs, "_ensure_table", lambda conn: None)
+    monkeypatch.setattr(lcs, "grade_pending_live_snapshots", lambda conn=None: 0)
+
+    res = lcs.rebuild_live_calibration(persist=True, season_start="2026-11-01")
+    assert res["status"] == "calibrated"
+    assert res["active"] is True
+    assert res["n_obs"] == 30
+    assert res["brier_calibrated"] is not None

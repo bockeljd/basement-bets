@@ -790,7 +790,29 @@ def rebuild_live_calibration(*, persist: bool = True, season_start: Optional[str
     artifact["newly_graded"] = graded_now
 
     if persist and artifact.get("active"):
-        upsert_model_param(LIVE_CAL_PARAM_KEY, artifact)
+        try:
+            upsert_model_param(LIVE_CAL_PARAM_KEY, artifact)
+        except Exception as admin_err:
+            # Fallback to pooled connection if admin/DDL connection is unavailable in serverless
+            try:
+                from src.database import _safe_json_dumps
+
+                with get_db_connection() as conn:
+                    _exec(
+                        conn,
+                        """
+                        INSERT INTO model_params_store(param_key, payload, updated_at)
+                        VALUES (%s, %s::jsonb, NOW())
+                        ON CONFLICT (param_key) DO UPDATE SET
+                          payload = EXCLUDED.payload,
+                          updated_at = NOW()
+                        """,
+                        (LIVE_CAL_PARAM_KEY, _safe_json_dumps(artifact)),
+                    )
+                    conn.commit()
+            except Exception as pool_err:
+                print(f"[LIVE_CAL] Persist warning (admin={admin_err}, pool={pool_err})")
+
         out_path = resolve_model_param_path(LIVE_CAL_FILENAME)
         try:
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -798,6 +820,12 @@ def rebuild_live_calibration(*, persist: bool = True, season_start: Optional[str
                 json.dump(artifact, f, indent=2)
         except Exception:
             pass
+
+    if artifact.get("active"):
+        global _cal_cache_payload, _cal_cache_ts
+        _cal_cache_payload = artifact
+        _cal_cache_ts = time.time()
+    else:
         invalidate_live_calibration_cache()
     return artifact
 
@@ -850,13 +878,18 @@ def get_live_calibration_summary() -> Dict[str, Any]:
         if counts["decided_snapshots"] >= min_req and (
             not cal.get("active") or counts["decided_snapshots"] >= int(cal.get("n_obs") or 0) + 15
         ):
+            rebuilt = None
             try:
                 rebuilt = rebuild_live_calibration(persist=True, season_start=eff_season)
-                if isinstance(rebuilt, dict) and rebuilt.get("active"):
-                    cal = rebuilt
-                    eff_season = str(cal.get("season_start") or eff_season)
             except Exception as exc:
-                print(f"[LIVE_CAL] Auto-rebuild warning: {exc}")
+                print(f"[LIVE_CAL] Auto-rebuild persist warning: {exc}")
+                try:
+                    rebuilt = rebuild_live_calibration(persist=False, season_start=eff_season)
+                except Exception as exc2:
+                    print(f"[LIVE_CAL] Auto-rebuild fallback warning: {exc2}")
+            if isinstance(rebuilt, dict) and rebuilt.get("active"):
+                cal = rebuilt
+                eff_season = str(cal.get("season_start") or eff_season)
 
         if counts["decided_snapshots"] > 0 and not cal.get("bins"):
             try:
