@@ -610,9 +610,21 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
     };
   }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey, selectedDate]);
 
+  const top6SlatePlays = useMemo(
+    () => actionablePlays.filter(({ rec }) => !hasTop6RiskFlag(rec)).slice(0, 6),
+    [actionablePlays]
+  );
+
+  // Apply Pick Scope (Top 6 vs All Picks) BEFORE sub-filtering by Spread/Total/High Conf/Soon,
+  // matching Model Performance so sub-filters inspect the Top 6 slate rather than promoting #7+.
+  const scopedTopPlays = useMemo(() => {
+    const base = pickViewMode === 'top6' ? top6SlatePlays : actionablePlays;
+    return base.map((item, idx) => ({ ...item, slateRank: idx + 1 }));
+  }, [pickViewMode, top6SlatePlays, actionablePlays]);
+
   const filteredTopPlays = useMemo(() => {
     const nowMs = Date.now();
-    const list = actionablePlays.filter(({ game, rec, conf }) => {
+    return scopedTopPlays.filter(({ game, rec, conf }) => {
       const mkt = String(rec?.bet_type || rec?.market_type || '').toUpperCase();
       if (pickTypeFilter === 'spread') return mkt === 'SPREAD';
       if (pickTypeFilter === 'total') return mkt === 'TOTAL';
@@ -623,32 +635,30 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
       }
       return true;
     });
-    if (pickViewMode === 'top6') {
-      return list.filter(({ rec }) => !hasTop6RiskFlag(rec)).slice(0, 6);
-    }
-    return list;
-  }, [actionablePlays, pickTypeFilter, pickViewMode]);
+  }, [scopedTopPlays, pickTypeFilter]);
 
   const pickFilterCounts = useMemo(() => {
     const nowMs = Date.now();
     let spread = 0;
     let total = 0;
+    let high_conf = 0;
     let soon = 0;
-    actionablePlays.forEach(({ game, rec }) => {
+    scopedTopPlays.forEach(({ game, rec, conf }) => {
       const mkt = String(rec?.bet_type || rec?.market_type || '').toUpperCase();
       if (mkt === 'SPREAD') spread += 1;
       else if (mkt === 'TOTAL') total += 1;
+      if (conf.tier === 'HIGH') high_conf += 1;
       const st = game?.start_time ? new Date(game.start_time).getTime() : 0;
       if (st > nowMs - 30 * 60000 && st <= nowMs + 3 * 3600 * 1000) soon += 1;
     });
     return {
-      all: actionablePlays.length,
-      high_conf: slateSummary.highConfCount,
+      all: scopedTopPlays.length,
+      high_conf,
       spread,
       total,
       soon,
     };
-  }, [actionablePlays, slateSummary.highConfCount]);
+  }, [scopedTopPlays]);
 
   const closestLeans = useMemo(() => {
     const gamesForLeague = (edges || []).filter((e) => !leagueFilter || e.sport === leagueFilter);
@@ -997,7 +1007,7 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
               })}
             </div>
 
-            {actionablePlays.length > 6 && (
+            {actionablePlays.length > top6SlatePlays.length && (
               <button
                 type="button"
                 onClick={() => setPickViewMode((m) => (m === 'top6' ? 'all' : 'top6'))}
@@ -1049,10 +1059,10 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredTopPlays.map((item, idx) => (
+              {filteredTopPlays.map((item) => (
                 <TodayPlayCard
                   key={item.id}
-                  rank={idx + 1}
+                  rank={item.slateRank}
                   game={item.game}
                   rec={item.rec}
                   context={item.context}

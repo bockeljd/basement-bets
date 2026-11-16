@@ -81,15 +81,16 @@ const TodayPlayCard = ({
   const pickLabel = rec?.selection || rec?.pick || game?.home_team || 'Pick';
   const matchupLabel = `${game?.away_team || 'Away'} at ${game?.home_team || 'Home'}`;
 
+  const isMoneyline = betType === 'ML' || betType === 'MONEYLINE' || betType === 'H2H';
   const marketDisplay =
-    betType === 'ML'
+    isMoneyline
       ? fmtOdds(rec?.price)
       : rec?.market_line !== null && rec?.market_line !== undefined
         ? `${betType === 'SPREAD' ? fmtSigned(rec.market_line, 1) : rec.market_line}`
         : '—';
 
   const fairDisplay =
-    betType === 'ML'
+    isMoneyline
       ? fmtPct(winProb, 1)
       : rec?.fair_line !== null && rec?.fair_line !== undefined
         ? `${betType === 'SPREAD' ? fmtSigned(rec.fair_line, 1) : Number(rec.fair_line).toFixed(1)}`

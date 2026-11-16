@@ -106,6 +106,8 @@ const ModelPerformanceAnalytics = ({
   history = [],
   allHistory = null,
   preConfHistory = null,
+  preMarketHistory = null,
+  isTop6Scope = false,
   selectedSport = 'ALL',
   onSelectSport = null,
   selectedMarket = 'ALL',
@@ -175,7 +177,10 @@ const ModelPerformanceAnalytics = ({
           ...d,
           decided,
           settled,
-          recordText: `${d.wins}-${d.losses}${d.pushes > 0 ? `-${d.pushes}` : ''}`,
+          recordText:
+            settled > 0
+              ? `${d.wins}-${d.losses}${d.pushes > 0 ? `-${d.pushes}` : ''}`
+              : `${d.totalPicks} open`,
           winRate: decided > 0 ? Number(((d.wins / decided) * 100).toFixed(1)) : null,
           profitUnits: Number(d.profitUnits.toFixed(2)),
           cumulativeUnits: Number(runningUnits.toFixed(2)),
@@ -282,9 +287,15 @@ const ModelPerformanceAnalytics = ({
       desc: k === 'High' ? 'Score 80+' : k === 'Medium' ? 'Score 50–79' : 'Score < 50',
     }));
 
-    // 5. Bet Type Breakdown
+    // 5. Bet Type Breakdown (computed from preMarketHistory when provided so sibling bet types stay visible)
+    const marketSource = Array.isArray(preMarketHistory)
+      ? preMarketHistory.filter((h) => {
+          const n = normalizeOutcome(getRawOutcome(h));
+          return n === 'WON' || n === 'LOST' || n === 'PUSH';
+        })
+      : graded;
     const marketMap = {};
-    for (const h of graded) {
+    for (const h of marketSource) {
       const marketKey = normalizeMarketType(h);
       const label = formatMarketLabel(marketKey);
       if (!marketMap[marketKey]) {
@@ -368,7 +379,7 @@ const ModelPerformanceAnalytics = ({
         clvBeatRate: clvTotalCount > 0 ? (clvPositiveCount / clvTotalCount) * 100 : null,
       },
     };
-  }, [history, allHistory, preConfHistory]);
+  }, [history, allHistory, preConfHistory, preMarketHistory]);
 
   return (
     <section className="space-y-6" aria-label="Model Performance Charts and Breakdowns">
@@ -992,7 +1003,7 @@ const ModelPerformanceAnalytics = ({
                 Performance by Sport
               </h3>
               <p className="text-xs text-slate-400">
-                All-season totals by sport. Click any sport row to filter the whole page.
+                {isTop6Scope ? 'All-season Top 6 / Day totals by sport.' : 'All-season totals by sport.'} Click any sport row to filter the whole page.
               </p>
             </div>
             {selectedSport !== 'ALL' && onSelectSport && (

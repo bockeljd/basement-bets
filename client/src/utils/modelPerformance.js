@@ -225,6 +225,13 @@ export const formatLineAndOdds = (row) => {
 export const getNumericEdge = (row) => {
   const raw = row?.ev_per_unit ?? row?.ev ?? row?.edge ?? row?.edge_points;
   if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.endsWith('%')) {
+      const pct = parseFloat(trimmed.slice(0, -1).trim());
+      return Number.isFinite(pct) ? pct / 100 : null;
+    }
+  }
   let n = Number(raw);
   if (!Number.isFinite(n)) return null;
   let safety = 0;
@@ -421,7 +428,12 @@ export const getQualityRankScore = (row) => {
   }
 
   const rawTags = row.movement_tags || row.sanity_reasons;
-  const tags = (Array.isArray(rawTags) ? rawTags : []).map((t) => String(t || '').trim().toLowerCase());
+  const tagList = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === 'string'
+      ? rawTags.split(',')
+      : [];
+  const tags = tagList.map((t) => String(t || '').trim().toLowerCase()).filter(Boolean);
   if (tags.includes('sharp_backing')) score += 0.012;
   if (tags.includes('rlm_confirmed')) score += 0.006;
   if (tags.includes('contra_sharp_money')) score -= 0.03;

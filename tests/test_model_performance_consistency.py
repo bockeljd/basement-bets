@@ -112,10 +112,10 @@ def test_source_audit_rank_6_enforcement():
 def test_source_audit_picks_jsx_sorting():
     """Verify Picks.jsx sorting and hasReco logic markers."""
     content = read_file('client/src/pages/Picks.jsx')
-    # Edge sorting fix
-    assert 'ev_per_unit' in content
+    # Edge sorting fix (either shared getNumericEdge helper or inline ev_per_unit)
+    assert ('getNumericEdge' in content) or ('ev_per_unit' in content)
     # Ensure sorting 'edge' is not simply using created_at
-    edge_sort_match = re.search(r"key\s*===\s*'edge'.*?ev_per_unit", content, re.DOTALL)
+    edge_sort_match = re.search(r"key\s*===\s*'edge'.*?(?:getNumericEdge|ev_per_unit)", content, re.DOTALL)
     assert edge_sort_match is not None
     # Explicitly check that created_at is NOT in the immediate edge sort branch
     edge_sort_block = edge_sort_match.group(0)
@@ -125,6 +125,20 @@ def test_source_audit_picks_jsx_sorting():
     assert 'hasReco' in content
     assert 'recoStraight' in content
     assert 'recoMlParlay' in content
+
+
+def test_source_audit_picks_top6_before_subfilters():
+    """Verify Top 6 / Day scope is applied before Bet Type & Confidence subfilters."""
+    content = read_file('client/src/pages/Picks.jsx')
+    assert 'scopeBaseAllMarketsHistory' in content
+    assert 'scopePreMarketHistory' in content
+    assert 'preMarketHistory={scopePreMarketHistory}' in content
+    assert content.index('scopeBaseAllMarketsHistory') < content.index('const scopedHistory = useMemo')
+
+    research = read_file('client/src/pages/Research.jsx')
+    assert 'top6SlatePlays' in research
+    assert 'scopedTopPlays' in research
+    assert research.index('top6SlatePlays') < research.index('const filteredTopPlays')
 
 def test_source_audit_analytics_component_helpers():
     """Verify Analytics component uses shared helpers and avoids hardcoded ROI."""

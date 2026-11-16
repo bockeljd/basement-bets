@@ -287,8 +287,8 @@ export default function Picks() {
     }
   }, [availableMarkets, marketFilter]);
 
-  // Filter by Window & Bet Type (kept cross-sport so "By Sport" comparison stays live)
-  const windowMarketHistory = useMemo(() => {
+  // 1. Filter by Time Window across all sports first (keeps "By Sport" comparison aligned)
+  const windowAllHistory = useMemo(() => {
     const cutoff =
       windowFilter === '90'
         ? etDaysAgoIso(90)
@@ -298,26 +298,21 @@ export default function Picks() {
             ? etDaysAgoIso(7)
             : null;
 
+    if (!cutoff) return recommendedHistory;
     return recommendedHistory.filter((h) => {
-      if (cutoff) {
-        const day = getPerformanceDay(h);
-        if (!day || day < cutoff) return false;
-      }
-      if (marketFilter !== 'ALL' && normalizeMarketType(h) !== marketFilter) {
-        return false;
-      }
-      return true;
+      const day = getPerformanceDay(h);
+      return Boolean(day && day >= cutoff);
     });
-  }, [recommendedHistory, windowFilter, marketFilter]);
+  }, [recommendedHistory, windowFilter]);
 
-  // Filter by selected Sport + Season
-  const sportWindowMarketHistory = useMemo(() => {
-    return windowMarketHistory.filter((h) => {
+  // 2. Filter by selected Sport + Season (still before Top 6, Bet Type, and Confidence)
+  const sportSeasonWindowHistory = useMemo(() => {
+    return windowAllHistory.filter((h) => {
       if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) return false;
       if (selectedSeason !== 'ALL' && getRowSeason(h) !== selectedSeason) return false;
       return true;
     });
-  }, [windowMarketHistory, selectedSport, selectedSeason]);
+  }, [windowAllHistory, selectedSport, selectedSeason]);
 
   const matchesConfFilter = (row, filterKey) => {
     if (!filterKey || filterKey === 'ALL') return true;
@@ -325,24 +320,56 @@ export default function Picks() {
     return tier === filterKey;
   };
 
-  // 1. Apply Pick Scope (All Recommended Picks vs Top 6 / Day) FIRST
-  const scopeBaseHistory = useMemo(() => {
+  const matchesMarketFilter = (row, mktKey) => {
+    if (!mktKey || mktKey === 'ALL') return true;
+    return normalizeMarketType(row) === mktKey;
+  };
+
+  // 3. Apply Pick Scope (All Recommended vs Top 6 / Day) BEFORE Bet Type & Confidence
+  // so Spread + Over / Under + ML === All and High + Medium + Low === All under Top 6 / Day.
+  const scopeBaseAllMarketsHistory = useMemo(() => {
     if (historyScope === 'top6') {
-      return selectTopPicksPerDay(sportWindowMarketHistory, 6);
+      return selectTopPicksPerDay(sportSeasonWindowHistory, 6);
     }
-    return sportWindowMarketHistory;
-  }, [historyScope, sportWindowMarketHistory]);
+    return sportSeasonWindowHistory;
+  }, [historyScope, sportSeasonWindowHistory]);
 
-  // 2. Apply Confidence Filter AFTER Pick Scope so High + Medium + Low === All in both scopes
+  const scopePreConfHistory = useMemo(() => {
+    if (marketFilter === 'ALL') return scopeBaseAllMarketsHistory;
+    return scopeBaseAllMarketsHistory.filter((h) => matchesMarketFilter(h, marketFilter));
+  }, [scopeBaseAllMarketsHistory, marketFilter]);
+
+  const scopePreMarketHistory = useMemo(() => {
+    if (confFilter === 'ALL') return scopeBaseAllMarketsHistory;
+    return scopeBaseAllMarketsHistory.filter((h) => matchesConfFilter(h, confFilter));
+  }, [scopeBaseAllMarketsHistory, confFilter]);
+
   const scopedHistory = useMemo(() => {
-    if (confFilter === 'ALL') return scopeBaseHistory;
-    return scopeBaseHistory.filter((h) => matchesConfFilter(h, confFilter));
-  }, [scopeBaseHistory, confFilter]);
+    if (confFilter === 'ALL') return scopePreConfHistory;
+    return scopePreConfHistory.filter((h) => matchesConfFilter(h, confFilter));
+  }, [scopePreConfHistory, confFilter]);
 
-  // Precompute true daily rank (#1-#6 per day before Confidence filtering) for table badges & Rank chart
+  // Cross-sport history for Performance by Sport (respects Pick Scope, Time Window, Bet Type, Confidence)
+  const allSportsScopedHistory = useMemo(() => {
+    let base = windowAllHistory;
+    if (historyScope === 'top6') {
+      const bySport = {};
+      for (const h of windowAllHistory) {
+        const sp = normalizeSport(h);
+        if (!bySport[sp]) bySport[sp] = [];
+        bySport[sp].push(h);
+      }
+      base = Object.values(bySport).flatMap((rows) => selectTopPicksPerDay(rows, 6));
+    }
+    return base.filter(
+      (h) => matchesMarketFilter(h, marketFilter) && matchesConfFilter(h, confFilter)
+    );
+  }, [windowAllHistory, historyScope, marketFilter, confFilter]);
+
+  // Precompute true daily rank (#1-#6 per day across all bet types & confidence levels)
   const rankByRowKey = useMemo(() => {
     const byDay = {};
-    for (const h of sportWindowMarketHistory) {
+    for (const h of sportSeasonWindowHistory) {
       const day = getPerformanceDay(h) || 'unknown';
       if (!byDay[day]) byDay[day] = [];
       byDay[day].push(h);
@@ -355,16 +382,18 @@ export default function Picks() {
       });
     }
     return map;
-  }, [sportWindowMarketHistory]);
+  }, [sportSeasonWindowHistory]);
 
   const rankBreakdown = useMemo(
     () =>
       computeRankBreakdown(
-        sportWindowMarketHistory,
+        sportSeasonWindowHistory,
         6,
-        confFilter === 'ALL' ? null : (row) => matchesConfFilter(row, confFilter)
+        marketFilter === 'ALL' && confFilter === 'ALL'
+          ? null
+          : (row) => matchesMarketFilter(row, marketFilter) && matchesConfFilter(row, confFilter)
       ),
-    [sportWindowMarketHistory, confFilter]
+    [sportSeasonWindowHistory, marketFilter, confFilter]
   );
 
   // Overall KPI stats (settled + pending + void + profit)
@@ -382,22 +411,18 @@ export default function Picks() {
   }, [scopedHistory]);
 
   const scopeComparison = useMemo(() => {
-    const top6Base = selectTopPicksPerDay(sportWindowMarketHistory, 6);
-    const allFiltered =
-      confFilter === 'ALL'
-        ? sportWindowMarketHistory
-        : sportWindowMarketHistory.filter((h) => matchesConfFilter(h, confFilter));
-    const top6Filtered =
-      confFilter === 'ALL' ? top6Base : top6Base.filter((h) => matchesConfFilter(h, confFilter));
+    const top6AllMarkets = selectTopPicksPerDay(sportSeasonWindowHistory, 6);
+    const applySubFilters = (rows) =>
+      rows.filter((h) => matchesMarketFilter(h, marketFilter) && matchesConfFilter(h, confFilter));
     return {
-      allStats: computeRecordStats(allFiltered),
-      top6Stats: computeRecordStats(top6Filtered),
+      allStats: computeRecordStats(applySubFilters(sportSeasonWindowHistory)),
+      top6Stats: computeRecordStats(applySubFilters(top6AllMarkets)),
     };
-  }, [sportWindowMarketHistory, confFilter]);
+  }, [sportSeasonWindowHistory, marketFilter, confFilter]);
 
   const bestMarketTakeaway = useMemo(() => {
     const map = {};
-    for (const h of scopedHistory) {
+    for (const h of scopePreMarketHistory) {
       const out = getRawOutcome(h);
       if (!isGradedOutcome(out)) continue;
       const mKey = normalizeMarketType(h);
@@ -412,12 +437,12 @@ export default function Picks() {
     const best = sorted[0];
     const worst = sorted.length > 1 ? sorted[sorted.length - 1] : null;
     return { best, worst };
-  }, [scopedHistory]);
+  }, [scopePreMarketHistory]);
 
   const confTakeaway = useMemo(() => {
-    const highRows = scopeBaseHistory.filter((h) => matchesConfFilter(h, 'HIGH'));
-    const medRows = scopeBaseHistory.filter((h) => matchesConfFilter(h, 'MEDIUM'));
-    const lowRows = scopeBaseHistory.filter((h) => matchesConfFilter(h, 'LOW'));
+    const highRows = scopePreConfHistory.filter((h) => matchesConfFilter(h, 'HIGH'));
+    const medRows = scopePreConfHistory.filter((h) => matchesConfFilter(h, 'MEDIUM'));
+    const lowRows = scopePreConfHistory.filter((h) => matchesConfFilter(h, 'LOW'));
     const candidates = [
       { key: 'HIGH', label: 'High (80+)', ...computeRecordStats(highRows) },
       { key: 'MEDIUM', label: 'Medium (50–79)', ...computeRecordStats(medRows) },
@@ -430,7 +455,7 @@ export default function Picks() {
       low: candidates[2],
       best: withSettled[0] || candidates[0],
     };
-  }, [scopeBaseHistory]);
+  }, [scopePreConfHistory]);
 
   const clvStats = useMemo(() => {
     let sum = 0;
@@ -483,23 +508,26 @@ export default function Picks() {
         return (getNumericEdge(b) ?? -999) - (getNumericEdge(a) ?? -999);
       });
       const normalized = combined
-        .map((p, idx) => ({
-          id: p.prediction_id || p.event_id || `${idx}`,
-          rank: Number(p.rank) > 0 ? Number(p.rank) : idx + 1,
-          matchup: p.matchup || formatMatchup(p),
-          sport: 'NCAAM',
-          marketKey: normalizeMarketType(p),
-          market: formatMarketLabel(p.market_type),
-          pick: p.selection || p.side || formatPickLabel(p),
-          lineOdds: formatLineAndOdds({ bet_line: p.bet_line ?? p.line, bet_price: p.bet_price ?? p.price ?? p.odds }),
-          outcome: p.outcome,
-          score: p.score && String(p.score).trim() !== '0-0' ? p.score : null,
-          evPct: getNumericEdge(p) != null ? getNumericEdge(p) * 100 : null,
-          confidence_0_100: p.confidence_0_100 ?? p.confidence,
-          confidence_label: p.confidence_label,
-          bet_price: p.bet_price ?? p.price ?? p.odds,
-          profitUnits: computeRowProfitUnits(p),
-        }))
+        .map((p, idx) => {
+          const marketKey = normalizeMarketType(p);
+          return {
+            id: p.prediction_id || p.event_id || `${idx}`,
+            rank: Number(p.rank) > 0 ? Number(p.rank) : idx + 1,
+            matchup: p.matchup || formatMatchup(p),
+            sport: 'NCAAM',
+            marketKey,
+            market: formatMarketLabel(marketKey),
+            pick: p.selection || p.side || formatPickLabel(p),
+            lineOdds: formatLineAndOdds({ bet_line: p.bet_line ?? p.line, bet_price: p.bet_price ?? p.price ?? p.odds }),
+            outcome: p.outcome,
+            score: p.score && String(p.score).trim() !== '0-0' ? p.score : null,
+            evPct: getNumericEdge(p) != null ? getNumericEdge(p) * 100 : null,
+            confidence_0_100: p.confidence_0_100 ?? p.confidence,
+            confidence_label: p.confidence_label,
+            bet_price: p.bet_price ?? p.price ?? p.odds,
+            profitUnits: computeRowProfitUnits(p),
+          };
+        })
         .filter((item) => {
           if (marketFilter !== 'ALL' && item.marketKey !== marketFilter) return false;
           if (confFilter !== 'ALL' && !matchesConfFilter(item, confFilter)) return false;
@@ -510,16 +538,16 @@ export default function Picks() {
         title: `Yesterday's Top Recommended Slate (${yesterdayReco?.date_et || yesterdayEt})`,
         subtitle:
           marketFilter === 'ALL' && confFilter === 'ALL'
-            ? `${recoStraight.length} straight • ${recoMlParlay.length} ML/parlay picks • Matches Top 6 / Day`
+            ? `${recoStraight.length} straight • ${recoMlParlay.length} ML/parlay picks • ${historyScope === 'top6' ? 'Matches Top 6 / Day' : 'Recommended Top 6 slate'}`
             : `Filtered view showing ${normalized.length} of ${combined.length} slate picks`,
         rows: normalized,
         stats,
       };
     }
 
-    // Fallback to latest active day for the chosen sport/filters (deduped 1 pick per game)
+    // Fallback to latest active day across all markets first, then apply Bet Type & Confidence
     const dayRowsMap = {};
-    for (const h of sportWindowMarketHistory) {
+    for (const h of sportSeasonWindowHistory) {
       const d = getPerformanceDay(h);
       if (!d) continue;
       if (!dayRowsMap[d]) dayRowsMap[d] = [];
@@ -528,7 +556,9 @@ export default function Picks() {
     const sortedDays = Object.keys(dayRowsMap).sort((a, b) => b.localeCompare(a));
     const latestDay = sortedDays.find((d) => dayRowsMap[d].some((r) => isGradedOutcome(getRawOutcome(r)))) || sortedDays[0];
     const dayTopPicks = latestDay ? dedupeDayRowsByEvent(dayRowsMap[latestDay]).filter((r) => !hasTop6RiskFlag(r)).slice(0, 6) : [];
-    const picks = confFilter === 'ALL' ? dayTopPicks : dayTopPicks.filter((r) => matchesConfFilter(r, confFilter));
+    const picks = dayTopPicks.filter(
+      (r) => matchesMarketFilter(r, marketFilter) && matchesConfFilter(r, confFilter)
+    );
     const isActuallyYesterday = latestDay === yesterdayEt;
     const normalized = picks.map((h, i) => ({
       id: h.id || h.prediction_id || `${h.event_id}-${i}`,
@@ -561,7 +591,7 @@ export default function Picks() {
       rows: normalized,
       stats: computeRecordStats(normalized),
     };
-  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportWindowMarketHistory, marketFilter, confFilter, rankByRowKey]);
+  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportSeasonWindowHistory, marketFilter, confFilter, historyScope, rankByRowKey]);
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
@@ -613,6 +643,9 @@ export default function Picks() {
       if (key === 'created_at') {
         valA = getPerformanceDay(a) || String(a.analyzed_at || a.start_time || '');
         valB = getPerformanceDay(b) || String(b.analyzed_at || b.start_time || '');
+        const cmpDay = direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        if (cmpDay !== 0) return cmpDay;
+        return (rankByRowKey.get(a) ?? 999) - (rankByRowKey.get(b) ?? 999);
       } else if (key === 'sport') {
         valA = normalizeSport(a);
         valB = normalizeSport(b);
@@ -623,14 +656,8 @@ export default function Picks() {
         valA = formatPickLabel(a);
         valB = formatPickLabel(b);
       } else if (key === 'edge') {
-        const getVal = (item) => {
-          const e = getNumericEdge(item);
-          if (e !== null) return e;
-          const raw = item?.ev_per_unit ?? item?.ev ?? item?.edge;
-          return raw !== undefined && raw !== null ? parseFloat(raw) : -999;
-        };
-        valA = getVal(a);
-        valB = getVal(b);
+        valA = getNumericEdge(a) ?? -999;
+        valB = getNumericEdge(b) ?? -999;
       } else if (key === 'result') {
         const order = { WON: 4, PUSH: 3, VOID: 2, PENDING: 1, LOST: 0 };
         valA = order[normalizeOutcome(getRawOutcome(a)) || 'PENDING'] ?? 1;
@@ -647,7 +674,7 @@ export default function Picks() {
       const numB = Number(valB ?? 0);
       return direction === 'asc' ? numA - numB : numB - numA;
     });
-  }, [scopedHistory, outcomeFilter, searchQuery, sortConfig]);
+  }, [scopedHistory, outcomeFilter, searchQuery, sortConfig, rankByRowKey]);
 
   const visibleTableRows = useMemo(() => {
     if (historyRowLimit === 'ALL') return filteredAndSortedTableRows;
@@ -1090,10 +1117,13 @@ export default function Picks() {
               onClick={() => bestMarketTakeaway?.best && setMarketFilter(bestMarketTakeaway.best.marketKey === marketFilter ? 'ALL' : bestMarketTakeaway.best.marketKey)}
               className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
             >
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Best Bet Type</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Best Bet Type ({historyScope === 'top6' ? 'Top 6' : 'All'})</div>
               {bestMarketTakeaway?.best ? (
                 <div className="mt-0.5 text-slate-200">
-                  <strong className="text-emerald-300">{bestMarketTakeaway.best.label}</strong> leads at{' '}
+                  <strong className={bestMarketTakeaway.best.profitUnits >= 0 ? 'text-emerald-300' : 'text-amber-300'}>
+                    {bestMarketTakeaway.best.label}
+                  </strong>{' '}
+                  {bestMarketTakeaway.best.profitUnits >= 0 ? 'leads at' : 'ranks #1 at'}{' '}
                   <span className="font-mono font-semibold">{bestMarketTakeaway.best.winRate.toFixed(1)}%</span> (
                   <span className={`font-mono font-semibold ${bestMarketTakeaway.best.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {formatUnits(bestMarketTakeaway.best.profitUnits)}
@@ -1152,8 +1182,10 @@ export default function Picks() {
       <h2 className="sr-only">Model Performance Charts and Breakdowns</h2>
       <ModelPerformanceAnalytics
         history={scopedHistory}
-        preConfHistory={scopeBaseHistory}
-        allHistory={confFilter === 'ALL' ? windowMarketHistory : windowMarketHistory.filter((h) => matchesConfFilter(h, confFilter))}
+        preConfHistory={scopePreConfHistory}
+        preMarketHistory={scopePreMarketHistory}
+        allHistory={allSportsScopedHistory}
+        isTop6Scope={historyScope === 'top6'}
         selectedSport={selectedSport}
         onSelectSport={handleSportChange}
         selectedMarket={marketFilter}
@@ -1271,7 +1303,7 @@ export default function Picks() {
                     Daily Best Picks by Rank (#1 to #6)
                   </h2>
                   <p className="text-xs text-slate-400">
-                    1 best pick per game each day for {sportLabel}, ordered from #1 (strongest edge) to #6.
+                    1 best pick per game each day for {sportLabel}, ordered from #1 (highest-rated pick) to #6.
                   </p>
                 </div>
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2.5 py-0.5 shrink-0">
@@ -1324,7 +1356,7 @@ export default function Picks() {
                           {r.decided > 0 ? `${r.winRate.toFixed(0)}%` : '—'}
                         </div>
                         <div className="text-[10px] font-mono text-slate-400">
-                          {r.wins}-{r.losses}
+                          {r.wins}-{r.losses}{r.pushes > 0 ? `-${r.pushes}` : ''}
                         </div>
                         <div className={`text-[10px] font-mono ${r.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {r.settled > 0 ? formatUnits(r.profitUnits) : '—'}
