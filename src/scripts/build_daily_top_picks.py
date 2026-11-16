@@ -204,6 +204,12 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
       reason = EXCLUDED.reason,
       rec_json = EXCLUDED.rec_json,
       context_json = EXCLUDED.context_json
+    WHERE NOT EXISTS (
+      SELECT 1 FROM events e
+      WHERE e.id = daily_top_picks.event_id
+        AND e.start_time IS NOT NULL
+        AND e.start_time <= (NOW() + INTERVAL '10 minutes')
+    )
     """
     payload = {
         "d": date_et,

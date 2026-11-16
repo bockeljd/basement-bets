@@ -2000,6 +2000,18 @@ def test_backtest_stress_improvements_one_to_three(monkeypatch):
     assert abs(res_extreme_sp["context"]["fair_spread_home"] - (-3.5)) < abs(res_normal_sp["context"]["fair_spread_home"] - (-3.5))
     assert res_extreme_sp["debug"]["sigma_spread"] > res_normal_sp["debug"]["sigma_spread"]
 
+    # 4. Tightened High confidence cutoff (lb10 >= 0.565) & tip-off lock guard on daily_top_picks upsert
+    assert model._confidence_label_from_winprob(0.555) == "Medium"
+    assert model._confidence_score_0_100(0.555, ev_per_unit=0.06) < 80
+    assert model._confidence_label_from_winprob(0.568) == "High"
+    assert model._confidence_score_0_100(0.568, ev_per_unit=0.08) >= 80
+
+    import src.scripts.build_daily_top_picks as bdtp
+    captured_sql = []
+    monkeypatch.setattr(bdtp, "_exec", lambda c, sql, p: captured_sql.append(sql))
+    bdtp.upsert_pick("2026-11-16", "action:ncaam:lock_test", {"recommendations": []}, conn=MagicMock())
+    assert captured_sql and "e.start_time <= (NOW() + INTERVAL '10 minutes')" in captured_sql[0]
+
 
 
 

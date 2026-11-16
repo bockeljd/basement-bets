@@ -322,28 +322,27 @@ export default function Picks() {
   const matchesConfFilter = (row, filterKey) => {
     if (!filterKey || filterKey === 'ALL') return true;
     const tier = String(getConfidenceBucket(row) || '').toUpperCase();
-    if (filterKey === 'MED_PLUS') return tier === 'HIGH' || tier === 'MEDIUM';
     return tier === filterKey;
   };
 
-  // Apply Confidence Filter cleanly on top of Sport + Season + Window + Market
-  const confFilteredHistory = useMemo(() => {
-    if (confFilter === 'ALL') return sportWindowMarketHistory;
-    return sportWindowMarketHistory.filter((h) => matchesConfFilter(h, confFilter));
-  }, [sportWindowMarketHistory, confFilter]);
-
-  // Apply Scope (All Recommended Picks vs Top 6 Daily Best — strictly 1 pick per game per day)
-  const scopedHistory = useMemo(() => {
+  // 1. Apply Pick Scope (All Recommended Picks vs Top 6 / Day) FIRST
+  const scopeBaseHistory = useMemo(() => {
     if (historyScope === 'top6') {
-      return selectTopPicksPerDay(confFilteredHistory, 6);
+      return selectTopPicksPerDay(sportWindowMarketHistory, 6);
     }
-    return confFilteredHistory;
-  }, [historyScope, confFilteredHistory]);
+    return sportWindowMarketHistory;
+  }, [historyScope, sportWindowMarketHistory]);
 
-  // Precompute rank map (#1-#6 per day, 1 pick per game) for table badges & Rank chart
+  // 2. Apply Confidence Filter AFTER Pick Scope so High + Medium + Low === All in both scopes
+  const scopedHistory = useMemo(() => {
+    if (confFilter === 'ALL') return scopeBaseHistory;
+    return scopeBaseHistory.filter((h) => matchesConfFilter(h, confFilter));
+  }, [scopeBaseHistory, confFilter]);
+
+  // Precompute true daily rank (#1-#6 per day before Confidence filtering) for table badges & Rank chart
   const rankByRowKey = useMemo(() => {
     const byDay = {};
-    for (const h of confFilteredHistory) {
+    for (const h of sportWindowMarketHistory) {
       const day = getPerformanceDay(h) || 'unknown';
       if (!byDay[day]) byDay[day] = [];
       byDay[day].push(h);
@@ -356,11 +355,16 @@ export default function Picks() {
       });
     }
     return map;
-  }, [confFilteredHistory]);
+  }, [sportWindowMarketHistory]);
 
   const rankBreakdown = useMemo(
-    () => computeRankBreakdown(confFilteredHistory, 6),
-    [confFilteredHistory]
+    () =>
+      computeRankBreakdown(
+        sportWindowMarketHistory,
+        6,
+        confFilter === 'ALL' ? null : (row) => matchesConfFilter(row, confFilter)
+      ),
+    [sportWindowMarketHistory, confFilter]
   );
 
   // Overall KPI stats (settled + pending + void + profit)
@@ -378,12 +382,18 @@ export default function Picks() {
   }, [scopedHistory]);
 
   const scopeComparison = useMemo(() => {
-    const top6Rows = selectTopPicksPerDay(confFilteredHistory, 6);
+    const top6Base = selectTopPicksPerDay(sportWindowMarketHistory, 6);
+    const allFiltered =
+      confFilter === 'ALL'
+        ? sportWindowMarketHistory
+        : sportWindowMarketHistory.filter((h) => matchesConfFilter(h, confFilter));
+    const top6Filtered =
+      confFilter === 'ALL' ? top6Base : top6Base.filter((h) => matchesConfFilter(h, confFilter));
     return {
-      allStats: computeRecordStats(confFilteredHistory),
-      top6Stats: computeRecordStats(top6Rows),
+      allStats: computeRecordStats(allFiltered),
+      top6Stats: computeRecordStats(top6Filtered),
     };
-  }, [confFilteredHistory]);
+  }, [sportWindowMarketHistory, confFilter]);
 
   const bestMarketTakeaway = useMemo(() => {
     const map = {};
@@ -405,17 +415,22 @@ export default function Picks() {
   }, [scopedHistory]);
 
   const confTakeaway = useMemo(() => {
-    const preConfScoped =
-      historyScope === 'top6'
-        ? selectTopPicksPerDay(sportWindowMarketHistory, 6)
-        : sportWindowMarketHistory;
-    const medPlusRows = preConfScoped.filter((h) => matchesConfFilter(h, 'MED_PLUS'));
-    const lowRows = preConfScoped.filter((h) => matchesConfFilter(h, 'LOW'));
+    const highRows = scopeBaseHistory.filter((h) => matchesConfFilter(h, 'HIGH'));
+    const medRows = scopeBaseHistory.filter((h) => matchesConfFilter(h, 'MEDIUM'));
+    const lowRows = scopeBaseHistory.filter((h) => matchesConfFilter(h, 'LOW'));
+    const candidates = [
+      { key: 'HIGH', label: 'High (80+)', ...computeRecordStats(highRows) },
+      { key: 'MEDIUM', label: 'Medium (50–79)', ...computeRecordStats(medRows) },
+      { key: 'LOW', label: 'Low (<50)', ...computeRecordStats(lowRows) },
+    ];
+    const withSettled = candidates.filter((c) => c.settled > 0).sort((a, b) => b.roiPct - a.roiPct);
     return {
-      medPlus: computeRecordStats(medPlusRows),
-      low: computeRecordStats(lowRows),
+      high: candidates[0],
+      med: candidates[1],
+      low: candidates[2],
+      best: withSettled[0] || candidates[0],
     };
-  }, [sportWindowMarketHistory, historyScope]);
+  }, [scopeBaseHistory]);
 
   const clvStats = useMemo(() => {
     let sum = 0;
@@ -504,7 +519,7 @@ export default function Picks() {
 
     // Fallback to latest active day for the chosen sport/filters (deduped 1 pick per game)
     const dayRowsMap = {};
-    for (const h of confFilteredHistory) {
+    for (const h of sportWindowMarketHistory) {
       const d = getPerformanceDay(h);
       if (!d) continue;
       if (!dayRowsMap[d]) dayRowsMap[d] = [];
@@ -512,11 +527,12 @@ export default function Picks() {
     }
     const sortedDays = Object.keys(dayRowsMap).sort((a, b) => b.localeCompare(a));
     const latestDay = sortedDays.find((d) => dayRowsMap[d].some((r) => isGradedOutcome(getRawOutcome(r)))) || sortedDays[0];
-    const picks = latestDay ? dedupeDayRowsByEvent(dayRowsMap[latestDay]).filter((r) => !hasTop6RiskFlag(r)).slice(0, 6) : [];
+    const dayTopPicks = latestDay ? dedupeDayRowsByEvent(dayRowsMap[latestDay]).filter((r) => !hasTop6RiskFlag(r)).slice(0, 6) : [];
+    const picks = confFilter === 'ALL' ? dayTopPicks : dayTopPicks.filter((r) => matchesConfFilter(r, confFilter));
     const isActuallyYesterday = latestDay === yesterdayEt;
     const normalized = picks.map((h, i) => ({
       id: h.id || h.prediction_id || `${h.event_id}-${i}`,
-      rank: i + 1,
+      rank: rankByRowKey.get(h) || i + 1,
       matchup: formatMatchup(h),
       sport: normalizeSport(h),
       marketKey: normalizeMarketType(h),
@@ -545,7 +561,7 @@ export default function Picks() {
       rows: normalized,
       stats: computeRecordStats(normalized),
     };
-  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, confFilteredHistory, marketFilter, confFilter]);
+  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportWindowMarketHistory, marketFilter, confFilter, rankByRowKey]);
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
@@ -665,7 +681,6 @@ export default function Picks() {
   const seasonLabel = formatSeasonLabel(selectedSeason);
   const confLabelMap = {
     HIGH: 'High Conf (80+)',
-    MED_PLUS: 'Med+ Conf (50+)',
     MEDIUM: 'Medium Conf (50–79)',
     LOW: 'Low Conf (<50)',
   };
@@ -885,7 +900,6 @@ export default function Picks() {
             >
               <option value="ALL">All Confidence</option>
               <option value="HIGH">High (80+)</option>
-              <option value="MED_PLUS">Medium+ (50+)</option>
               <option value="MEDIUM">Medium (50–79)</option>
               <option value="LOW">Low (&lt;50)</option>
             </select>
@@ -1093,20 +1107,20 @@ export default function Picks() {
 
             <button
               type="button"
-              onClick={() => setConfFilter(confFilter === 'MED_PLUS' ? 'ALL' : 'MED_PLUS')}
+              onClick={() => setConfFilter(confFilter === confTakeaway.best.key ? 'ALL' : confTakeaway.best.key)}
               className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
             >
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Confidence Check ({historyScope === 'top6' ? 'Top 6' : 'All'})</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Best Confidence Level ({historyScope === 'top6' ? 'Top 6' : 'All'})</div>
               <div className="mt-0.5 text-slate-200">
-                <strong className="text-indigo-300">Score 50+</strong>:{' '}
+                <strong className="text-indigo-300">{confTakeaway.best.label}</strong>:{' '}
                 <span className="font-mono font-semibold">
-                  {confTakeaway.medPlus.decided > 0 ? `${confTakeaway.medPlus.winRate.toFixed(1)}%` : '—'}
+                  {confTakeaway.best.decided > 0 ? `${confTakeaway.best.winRate.toFixed(1)}%` : '—'}
                 </span>{' '}
-                (<span className={`font-mono font-semibold ${confTakeaway.medPlus.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {formatUnits(confTakeaway.medPlus.profitUnits)}
-                </span>) vs Low (&lt;50):{' '}
+                (<span className={`font-mono font-semibold ${confTakeaway.best.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatUnits(confTakeaway.best.profitUnits)}
+                </span>) • High:{' '}
                 <span className="font-mono">
-                  {confTakeaway.low.decided > 0 ? `${confTakeaway.low.winRate.toFixed(1)}%` : 'None'}
+                  {confTakeaway.high.decided > 0 ? `${confTakeaway.high.winRate.toFixed(1)}%` : '—'}
                 </span>
               </div>
             </button>
@@ -1138,7 +1152,7 @@ export default function Picks() {
       <h2 className="sr-only">Model Performance Charts and Breakdowns</h2>
       <ModelPerformanceAnalytics
         history={scopedHistory}
-        preConfHistory={historyScope === 'top6' ? selectTopPicksPerDay(sportWindowMarketHistory, 6) : sportWindowMarketHistory}
+        preConfHistory={scopeBaseHistory}
         allHistory={confFilter === 'ALL' ? windowMarketHistory : windowMarketHistory.filter((h) => matchesConfFilter(h, confFilter))}
         selectedSport={selectedSport}
         onSelectSport={handleSportChange}

@@ -2893,7 +2893,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         except Exception:
             return 'Low'
 
-        if p >= 0.55:
+        if p >= 0.565:
             return 'High'
         if p >= 0.52:
             return 'Medium'
@@ -2907,8 +2907,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
     ) -> int:
         """Compute calibrated 0-100 confidence score aligned with conf_bucket tiers.
 
-        Prevents high-EV longshots with low win probability from being scored >= 80
-        and misclassified into the High Confidence bucket.
+        Prevents high-EV longshots or narrow-margin early-season edges from being
+        scored >= 80 and misclassified into the High Confidence bucket.
         """
         p_raw = lb10 if lb10 is not None else fallback_win_prob
         try:
@@ -2924,10 +2924,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if ev_val is not None and ev_val <= 0.0:
             return max(15, min(49, int(round(p * 90))))
 
-        if p >= 0.55:
-            return min(95, 80 + int(round((p - 0.55) * 150)))
+        if p >= 0.565:
+            return min(95, 80 + int(round((p - 0.565) * 150)))
         if p >= 0.52:
-            return 55 + int(round(((p - 0.52) / 0.03) * 23))
+            return 55 + int(round(((p - 0.52) / 0.045) * 24))
         return max(15, min(49, int(round(p * 90))))
 
     def _apply_split_and_injury_signals(

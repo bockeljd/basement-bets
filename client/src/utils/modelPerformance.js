@@ -106,8 +106,10 @@ export const getNumericConfidence = (row) => {
  * Buckets numeric confidence into display categories.
  */
 export const getConfidenceBucket = (row) => {
-  // Legacy support for explicit string fields
-  if (row.confidence_label) return row.confidence_label;
+  const rawLbl = String(row?.confidence_label || '').trim().toUpperCase();
+  if (rawLbl === 'HIGH') return 'High';
+  if (rawLbl === 'MEDIUM' || rawLbl === 'MED') return 'Medium';
+  if (rawLbl === 'LOW') return 'Low';
 
   const n = getNumericConfidence(row);
   if (n >= 80) return 'High';
@@ -355,10 +357,15 @@ export const getEventDedupeKey = (row) => {
 
 const isLockedRecommendedSlateRow = (row) => {
   if (!row) return false;
-  if (row.canonical_source === 'daily_top_picks') return false;
-  if (row.source_type === 'canonical_slate') return true;
   const rk = Number(row.rank);
-  return Number.isFinite(rk) && rk > 0 && row.top6_eligible === undefined && !row.movement_tags;
+  const hasRank = Number.isFinite(rk) && rk > 0;
+  if (row.canonical_source === 'daily_top_picks') {
+    const day = getPerformanceDay(row);
+    // Pre-2026-11-16 daily_top_picks dates keep their historical tip-off EV rank locked.
+    return Boolean(day && day < '2026-11-16' && hasRank);
+  }
+  if (row.source_type === 'canonical_slate') return true;
+  return hasRank && row.top6_eligible === undefined && !row.movement_tags;
 };
 
 export const hasTop6RiskFlag = (row) => {
@@ -499,7 +506,7 @@ export const selectTopPicksPerDay = (rows, topN = 6) => {
   return out;
 };
 
-export const computeRankBreakdown = (rows, maxRank = 6) => {
+export const computeRankBreakdown = (rows, maxRank = 6, rowFilter = null) => {
   const list = Array.isArray(rows) ? rows : [];
   const groups = {};
   for (const h of list) {
@@ -521,6 +528,7 @@ export const computeRankBreakdown = (rows, maxRank = 6) => {
   for (const day of Object.keys(groups)) {
     const uniqueDay = dedupeDayRowsByEvent(groups[day]).filter((r) => isLockedRecommendedSlateRow(r) || !hasTop6RiskFlag(r));
     uniqueDay.slice(0, maxRank).forEach((row, idx) => {
+      if (typeof rowFilter === 'function' && !rowFilter(row)) return;
       const bucket = buckets[idx];
       const out = getRawOutcome(row);
       const norm = normalizeOutcome(out);
