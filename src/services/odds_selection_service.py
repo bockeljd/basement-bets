@@ -17,6 +17,8 @@ class OddsSelectionService:
         "FanDuel": 11,
         "BetMGM": 12,
         "Caesars": 13,
+        "bet365": 14,
+        "BetRivers": 15,
         "Bovada": 20,
         "BetOnline": 21
     }

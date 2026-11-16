@@ -611,10 +611,10 @@ function App() {
                                             : (prefill.units != null && Number(prefill.units) > 0 && br > 0
                                                 ? String(Math.max(1, Math.round((Number(prefill.units) * 0.01) * br)))
                                                 : null);
-                                    const matchedBook =
-                                        prefill.book === 'DraftKings' || prefill.book === 'FanDuel'
-                                            ? prefill.book
-                                            : null;
+                                    const SUPPORTED_BOOKS = ['DraftKings', 'FanDuel', 'BetMGM', 'Caesars', 'bet365', 'BetRivers'];
+                                    const matchedBook = SUPPORTED_BOOKS.includes(prefill.book)
+                                        ? prefill.book
+                                        : null;
                                     setManualBet(prev => ({
                                         ...prev,
                                         sport: prefill.sport || prev.sport,

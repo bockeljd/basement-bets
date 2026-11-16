@@ -311,10 +311,20 @@ const TodayFullBoardTable = ({
                           </div>
                           <div className="flex items-center justify-between gap-2 min-w-0 text-slate-300">
                             <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-[10px] uppercase tracking-wide text-slate-500">@</span>
+                              <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                                {game?.neutral_site ? 'vs' : '@'}
+                              </span>
                               <span className="font-semibold text-slate-200 group-hover:text-indigo-300 transition-colors truncate">
                                 {game.home_team}
                               </span>
+                              {Boolean(game?.neutral_site) && (
+                                <span
+                                  className="shrink-0 px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-400/35 text-sky-200 text-[9px] font-bold uppercase"
+                                  title={[game?.venue, game?.venue_city, game?.venue_state].filter(Boolean).join(', ') || 'Neutral Court'}
+                                >
+                                  Neutral
+                                </span>
+                              )}
                             </div>
                             {game.home_score != null && (
                               <span className={`font-mono font-bold ${liveInfo.isLive ? 'text-amber-300' : 'text-white'}`}>

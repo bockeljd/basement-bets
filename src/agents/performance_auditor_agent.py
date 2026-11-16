@@ -123,7 +123,8 @@ class PerformanceAuditorAgent(BaseAgent):
             row = _exec(conn, """
                 SELECT price FROM odds_snapshots
                 WHERE event_id = %s AND market_type = %s AND side = %s
-                ORDER BY captured_at DESC
+                  AND COALESCE(book, '') NOT IN ('action_open', 'open')
+                ORDER BY captured_at DESC, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END) ASC
                 LIMIT 1
             """, (event_id, market_type, side)).fetchone()
 

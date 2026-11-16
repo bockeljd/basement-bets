@@ -52,9 +52,9 @@ class BacktestEngine:
                 # Close: Latest snapshot before start
                 
                 q_lines = """
-                (SELECT 'OPEN' as type, line_value, captured_at FROM odds_snapshots WHERE event_id = %s AND market_type = 'SPREAD' ORDER BY captured_at ASC LIMIT 1)
+                (SELECT 'OPEN' as type, line_value, captured_at FROM odds_snapshots WHERE event_id = %s AND market_type = 'SPREAD' ORDER BY (CASE WHEN book = 'action_open' THEN 0 ELSE 1 END) ASC, captured_at ASC LIMIT 1)
                 UNION ALL
-                (SELECT 'CLOSE' as type, line_value, captured_at FROM odds_snapshots WHERE event_id = %s AND market_type = 'SPREAD' ORDER BY captured_at DESC LIMIT 1)
+                (SELECT 'CLOSE' as type, line_value, captured_at FROM odds_snapshots WHERE event_id = %s AND market_type = 'SPREAD' AND COALESCE(book, '') NOT IN ('action_open', 'open') ORDER BY captured_at DESC, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END) ASC LIMIT 1)
                 """
                 lines_rows = _exec(conn, q_lines, (eid, eid)).fetchall()
                 

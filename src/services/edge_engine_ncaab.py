@@ -383,7 +383,8 @@ def recommend_for_date(date_et: str, season_end_year: Optional[int] = None) -> D
                 SELECT line_value, price
                 FROM odds_snapshots
                 WHERE event_id=%s AND market_type=%s AND side=%s
-                ORDER BY captured_at DESC
+                  AND COALESCE(book, '') NOT IN ('action_open', 'open')
+                ORDER BY captured_at DESC, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END) ASC
                 LIMIT 1
                 """,
                 (eid, market_type, side),

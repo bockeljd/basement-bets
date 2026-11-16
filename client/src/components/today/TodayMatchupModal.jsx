@@ -194,8 +194,28 @@ const TodayMatchupModal = ({
                 )}
               </div>
               <h2 id="matchup-dialog-title" className="mt-1 text-lg sm:text-xl font-bold text-white truncate">
-                {game.away_team} @ {game.home_team}
+                {game.away_team} {Boolean(game?.neutral_site || analysisResult?.neutral_site) ? 'vs' : '@'} {game.home_team}
               </h2>
+              {Boolean(game?.neutral_site || analysisResult?.neutral_site || game?.venue || analysisResult?.venue) && (
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  {Boolean(game?.neutral_site || analysisResult?.neutral_site) && (
+                    <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/35 text-sky-200 font-semibold text-[11px]">
+                      Neutral Court (No Home-Court Edge)
+                    </span>
+                  )}
+                  {(game?.venue || analysisResult?.venue) && (
+                    <span>
+                      {[
+                        game?.venue || analysisResult?.venue,
+                        game?.venue_city || analysisResult?.venue_city,
+                        game?.venue_state || analysisResult?.venue_state,
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             <form method="dialog">

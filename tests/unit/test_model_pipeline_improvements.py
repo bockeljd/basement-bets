@@ -2213,18 +2213,31 @@ def test_action_network_multibook_and_open_line_pipeline(monkeypatch):
     assert parsed is not None
     assert parsed["home_spread"] == -6.5
     assert parsed["open_lines"]["home_spread"] == -4.5
-    assert set(parsed["book_lines"].keys()) == {"consensus", "DraftKings", "FanDuel", "action_book_75"}
+    assert set(parsed["book_lines"].keys()) == {"consensus", "DraftKings", "FanDuel", "BetMGM"}
+
+    # Verify full verified Action Network book map
+    full_mk = dict(sample_game)
+    full_mk["markets"] = {
+        **sample_game["markets"],
+        "71": {"event": {"spread": [{"side": "home", "value": -6.5, "odds": -110}]}},
+        "79": {"event": {"spread": [{"side": "home", "value": -6.5, "odds": -110}]}},
+        "123": {"event": {"spread": [{"side": "home", "value": -6.5, "odds": -110}]}},
+    }
+    parsed_full = OddsFetcherService()._parse_game(full_mk)
+    assert {"consensus", "DraftKings", "FanDuel", "BetRivers", "BetMGM", "bet365", "Caesars"}.issubset(
+        set(parsed_full["book_lines"].keys())
+    )
 
     adapter = OddsAdapter()
     monkeypatch.setattr(adapter, "_upsert_action_network_event", lambda league, ev, st: "action:ncaam:999001")
     snaps = adapter._from_action_network(parsed, "NCAAM", "2026-11-16T20:00:00Z")
     books_emitted = {s["book"] for s in snaps}
-    assert {"consensus", "DraftKings", "FanDuel", "action_book_75", "action_open"}.issubset(books_emitted)
+    assert {"consensus", "DraftKings", "FanDuel", "BetMGM", "action_open"}.issubset(books_emitted)
 
     selector = OddsSelectionService()
     best_home = selector.get_best_price_for_side(snaps, "SPREAD", "HOME", target_line=-6.5)
     assert best_home is not None
-    # Never leaks action_open or unnamed action_book_75 into bettable UI selection; picks FanDuel -6.0 (-110)
+    # Excludes action_open and picks FanDuel -6.0 (-110) within 0.5 pt anchor (ignoring -7.5 outlier)
     assert best_home["book"] == "FanDuel"
     assert best_home["line_value"] == -6.0
 
@@ -2409,11 +2422,20 @@ def test_barttorvik_adj_tempo_index44_and_kenpom_continuity_priority(monkeypatch
     model.kenpom_client.calculate_kenpom_adjustment.return_value["away_continuity"] = 0.78
     res_high_cont = model.analyze(
         "evt_cont_high",
-        event_context={"id": "evt_cont_high", "home_team": "Home", "away_team": "Away", "start_time": datetime(2026, 11, 20, 20, 0, tzinfo=timezone.utc)},
+        event_context={
+            "id": "evt_cont_high",
+            "home_team": "Home",
+            "away_team": "Away",
+            "neutral_site": True,
+            "venue": "T-Mobile Arena",
+            "start_time": datetime(2026, 11, 20, 20, 0, tzinfo=timezone.utc),
+        },
         market_snapshot={"spread_home": -4.0, "total": 144.0},
         persist=False,
     )
     assert res_low_cont["debug"]["sigma_spread"] > res_high_cont["debug"]["sigma_spread"]
+    assert res_high_cont["neutral_site"] is True
+    assert res_high_cont["venue"] == "T-Mobile Arena"
 
 
 

@@ -76,6 +76,7 @@ class NCAAMCorrelationEngine:
                     WHERE os.event_id = e.id
                       AND os.market_type = 'SPREAD'
                       AND os.side = 'HOME'
+                      AND COALESCE(os.book, '') NOT IN ('action_open', 'open')
                       AND os.captured_at <= (e.start_time AT TIME ZONE 'UTC')
                     ORDER BY os.captured_at DESC LIMIT 1
                 ) as close_spread,
@@ -85,6 +86,7 @@ class NCAAMCorrelationEngine:
                     WHERE os.event_id = e.id
                       AND os.market_type = 'TOTAL'
                       AND os.side = 'OVER'
+                      AND COALESCE(os.book, '') NOT IN ('action_open', 'open')
                       AND os.captured_at <= (e.start_time AT TIME ZONE 'UTC')
                     ORDER BY os.captured_at DESC LIMIT 1
                 ) as close_total,

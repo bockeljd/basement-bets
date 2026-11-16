@@ -31,6 +31,10 @@ export default function ManualAddBetModal({
             >
               <option>DraftKings</option>
               <option>FanDuel</option>
+              <option>BetMGM</option>
+              <option>Caesars</option>
+              <option>bet365</option>
+              <option>BetRivers</option>
             </select>
           </div>
           <div>

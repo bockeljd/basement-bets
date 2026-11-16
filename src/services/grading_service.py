@@ -434,12 +434,13 @@ class GradingService:
             WHERE event_id=c.event_id
               AND market_type=c.market_type
               AND side=c.side
+              AND COALESCE(book, '') NOT IN ('action_open', 'open')
               AND captured_at <= c.start_time
               AND (
                 (c.market_type IN ('SPREAD','TOTAL') AND line_value IS NOT NULL)
                 OR (c.market_type='MONEYLINE' AND price IS NOT NULL AND price != 0)
               )
-            ORDER BY captured_at DESC
+            ORDER BY captured_at DESC, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END) ASC
             LIMIT 1
           ) s ON TRUE
           WHERE c.side IS NOT NULL

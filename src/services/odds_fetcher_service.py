@@ -87,10 +87,10 @@ class OddsFetcherService:
         "30": "action_open",
         "68": "DraftKings",
         "69": "FanDuel",
-        "71": "action_book_71",
-        "75": "action_book_75",
-        "79": "action_book_79",
-        "123": "action_book_123",
+        "71": "BetRivers",
+        "75": "BetMGM",
+        "79": "bet365",
+        "123": "Caesars",
         "2988": "action_book_2988",
     }
 

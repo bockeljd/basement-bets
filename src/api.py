@@ -2827,6 +2827,33 @@ def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date
         pass
 
 
+_EVENTS_VENUE_COLS_ENSURED = False
+
+
+def _ensure_events_venue_columns() -> None:
+    """Idempotently add neutral_site & venue metadata columns to events once per worker."""
+    global _EVENTS_VENUE_COLS_ENSURED
+    if _EVENTS_VENUE_COLS_ENSURED:
+        return
+    try:
+        from src.database import get_admin_db_connection, _exec
+        with get_admin_db_connection() as conn:
+            for stmt in (
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS neutral_site BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT;",
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS venue_city TEXT;",
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS venue_state TEXT;",
+            ):
+                try:
+                    _exec(conn, stmt)
+                except Exception:
+                    pass
+            conn.commit()
+    except Exception:
+        pass
+    _EVENTS_VENUE_COLS_ENSURED = True
+
+
 @app.get("/api/board")
 async def get_board(request: Request, league: str, date: Optional[str] = None, days: int = 1, live: bool = True):
     """
@@ -2863,6 +2890,7 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
 
     start_date = datetime.strptime(date, "%Y-%m-%d").date()
     end_date = (start_date + timedelta(days=days - 1))
+    _ensure_events_venue_columns()
 
     query = """
     WITH base_events AS (
@@ -2905,6 +2933,7 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
       WHERE rn = 1
     )
     SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status,
+           e.neutral_site, e.venue, e.venue_city, e.venue_state,
            e.day_et as day_et,
            -- SPREAD (HOME/AWAY)
            s_home.line_value as home_spread,
@@ -2928,43 +2957,50 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
         SELECT DISTINCT ON (event_id) event_id, line_value, price
         FROM odds_snapshots
         WHERE market_type = 'SPREAD' AND side = 'HOME'
-        ORDER BY event_id, captured_at DESC
+          AND COALESCE(book, '') NOT IN ('action_open', 'open')
+        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     ) s_home ON e.id = s_home.event_id
     LEFT JOIN (
         SELECT DISTINCT ON (event_id) event_id, line_value, price
         FROM odds_snapshots
         WHERE market_type = 'SPREAD' AND side = 'AWAY'
-        ORDER BY event_id, captured_at DESC
+          AND COALESCE(book, '') NOT IN ('action_open', 'open')
+        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     ) s_away ON e.id = s_away.event_id
     LEFT JOIN (
         SELECT DISTINCT ON (event_id) event_id, line_value, price
         FROM odds_snapshots
         WHERE market_type = 'TOTAL' AND side = 'OVER'
-        ORDER BY event_id, captured_at DESC
+          AND COALESCE(book, '') NOT IN ('action_open', 'open')
+        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     ) t_over ON e.id = t_over.event_id
     LEFT JOIN (
         SELECT DISTINCT ON (event_id) event_id, line_value, price
         FROM odds_snapshots
         WHERE market_type = 'TOTAL' AND side = 'UNDER'
-        ORDER BY event_id, captured_at DESC
+          AND COALESCE(book, '') NOT IN ('action_open', 'open')
+        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     ) t_under ON e.id = t_under.event_id
     LEFT JOIN (
         SELECT DISTINCT ON (event_id) event_id, price
         FROM odds_snapshots
         WHERE market_type = 'MONEYLINE' AND side = 'HOME'
-        ORDER BY event_id, captured_at DESC
+          AND COALESCE(book, '') NOT IN ('action_open', 'open')
+        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     ) ml_home ON e.id = ml_home.event_id
     LEFT JOIN (
         SELECT DISTINCT ON (event_id) event_id, price
         FROM odds_snapshots
         WHERE market_type = 'MONEYLINE' AND side = 'AWAY'
-        ORDER BY event_id, captured_at DESC
+          AND COALESCE(book, '') NOT IN ('action_open', 'open')
+        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     ) ml_away ON e.id = ml_away.event_id
     LEFT JOIN (
         SELECT DISTINCT ON (event_id) event_id, price
         FROM odds_snapshots
         WHERE market_type = 'MONEYLINE' AND side = 'DRAW'
-        ORDER BY event_id, captured_at DESC
+          AND COALESCE(book, '') NOT IN ('action_open', 'open')
+        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     ) ml_draw ON e.id = ml_draw.event_id
     LEFT JOIN game_results gr ON e.id = gr.event_id
     ORDER BY e.start_time ASC
@@ -3010,6 +3046,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
     """
     from src.database import get_db_connection, _exec
     from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    _ensure_events_venue_columns()
 
     if not date:
         with get_db_connection() as conn:
@@ -3092,7 +3129,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
               ) t
               WHERE rn = 1
             )
-            SELECT id, home_team, away_team, start_time, day_et
+            SELECT id, home_team, away_team, start_time, day_et, neutral_site, venue, venue_city, venue_state
             FROM dedup_events
             ORDER BY start_time ASC
             LIMIT %(lim)s
@@ -3146,7 +3183,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                       ) t
                       WHERE rn = 1
                     )
-                    SELECT id, home_team, away_team, start_time, day_et
+                    SELECT id, home_team, away_team, start_time, day_et, neutral_site, venue, venue_city, venue_state
                     FROM dedup_events
                     ORDER BY start_time ASC
                     LIMIT %(lim)s
@@ -3184,6 +3221,10 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             'away_team': d.get('away_team'),
             'start_time': st,
             'day_et': d.get('day_et'),
+            'neutral_site': bool(d.get('neutral_site', False)),
+            'venue': d.get('venue'),
+            'venue_city': d.get('venue_city'),
+            'venue_state': d.get('venue_state'),
         }
 
     import json
@@ -6896,7 +6937,8 @@ def get_game_correlation(event_id: str):
         (
             SELECT line_value FROM odds_snapshots os 
             WHERE os.event_id = e.id AND os.market_type = 'SPREAD' AND os.side = 'HOME' AND os.captured_at <= NOW()
-            ORDER BY os.captured_at DESC LIMIT 1
+              AND COALESCE(os.book, '') NOT IN ('action_open', 'open')
+            ORDER BY os.captured_at DESC, (CASE WHEN os.book = 'consensus' THEN 0 ELSE 1 END) ASC LIMIT 1
         ) as close_spread,
         mh.adj_tempo as home_pace,
         (mh.adj_off - mh.adj_def) as home_net_eff,

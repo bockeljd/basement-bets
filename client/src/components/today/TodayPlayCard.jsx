@@ -127,6 +127,14 @@ const TodayPlayCard = ({
             ) : (
               <time dateTime={game?.start_time || ''}>{fmtTimeEt(game?.start_time)} ET</time>
             )}
+            {Boolean(game?.neutral_site) && (
+              <span
+                className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/35 text-sky-200 font-semibold text-[11px]"
+                title={[game?.venue, game?.venue_city, game?.venue_state].filter(Boolean).join(', ') || 'Neutral Court'}
+              >
+                Neutral Court
+              </span>
+            )}
           </div>
           <h3 className="mt-1 text-base font-bold text-white leading-snug truncate">
             {pickLabel}{' '}
@@ -135,7 +143,7 @@ const TodayPlayCard = ({
             )}
           </h3>
           <p className="text-xs text-slate-400 truncate">
-            {game?.away_team} @ {game?.home_team}
+            {game?.away_team} {game?.neutral_site ? 'vs' : '@'} {game?.home_team}
             {plain?.shortRule ? ` · ${plain.shortRule}` : ''}
           </p>
         </div>
