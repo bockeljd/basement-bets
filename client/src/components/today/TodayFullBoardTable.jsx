@@ -289,36 +289,47 @@ const TodayFullBoardTable = ({
                     </td>
 
                     <th scope="row" data-primary="true" className="py-2.5 px-2 min-w-0 max-w-[230px] font-normal text-left">
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <div className="flex items-center justify-between gap-2 min-w-0">
-                          <span className="font-semibold text-slate-100 truncate">{game.away_team}</span>
-                          {game.away_score != null && (
-                            <span className={`font-mono font-bold ${liveInfo.isLive ? 'text-amber-300' : 'text-slate-200'}`}>
-                              {game.away_score}
+                      <button
+                        type="button"
+                        onClick={() => onOpenDetails(game)}
+                        aria-label={`Details for ${matchupLabel}`}
+                        className="w-full text-left cursor-pointer group rounded-lg p-1 -m-1 hover:bg-slate-800/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 transition-colors"
+                      >
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <span className="font-semibold text-slate-100 group-hover:text-indigo-300 transition-colors truncate">
+                              {game.away_team}
                             </span>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between gap-2 min-w-0 text-slate-300">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-[10px] uppercase tracking-wide text-slate-500">@</span>
-                            <span className="font-semibold text-slate-200 truncate">{game.home_team}</span>
+                            {game.away_score != null && (
+                              <span className={`font-mono font-bold ${liveInfo.isLive ? 'text-amber-300' : 'text-slate-200'}`}>
+                                {game.away_score}
+                              </span>
+                            )}
                           </div>
-                          {game.home_score != null && (
-                            <span className={`font-mono font-bold ${liveInfo.isLive ? 'text-amber-300' : 'text-white'}`}>
-                              {game.home_score}
+                          <div className="flex items-center justify-between gap-2 min-w-0 text-slate-300">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-[10px] uppercase tracking-wide text-slate-500">@</span>
+                              <span className="font-semibold text-slate-200 group-hover:text-indigo-300 transition-colors truncate">
+                                {game.home_team}
+                              </span>
+                            </div>
+                            {game.home_score != null && (
+                              <span className={`font-mono font-bold ${liveInfo.isLive ? 'text-amber-300' : 'text-white'}`}>
+                                {game.home_score}
+                              </span>
+                            )}
+                          </div>
+                          {liveInfo.isLive && liveInfo.liveProjTotal != null ? (
+                            <span className="text-[10px] text-amber-300/95 font-medium truncate">
+                              Live Pace: {game.away_team} {liveInfo.liveProjAwayScore} – {game.home_team} {liveInfo.liveProjHomeScore} (~{Math.round(liveInfo.liveProjTotal)} pts)
                             </span>
-                          )}
+                          ) : projScore ? (
+                            <span className="text-[10px] text-sky-300/90 truncate">
+                              Proj Score: {projScore.text}
+                            </span>
+                          ) : null}
                         </div>
-                        {liveInfo.isLive && liveInfo.liveProjTotal != null ? (
-                          <span className="text-[10px] text-amber-300/95 font-medium truncate">
-                            Live Pace: {game.away_team} {liveInfo.liveProjAwayScore} – {game.home_team} {liveInfo.liveProjHomeScore} (~{Math.round(liveInfo.liveProjTotal)} pts)
-                          </span>
-                        ) : projScore ? (
-                          <span className="text-[10px] text-sky-300/90 truncate">
-                            Proj Score: {projScore.text}
-                          </span>
-                        ) : null}
-                      </div>
+                      </button>
                     </th>
 
                     <td data-label="Lines" className="py-2.5 px-2 font-mono text-slate-300">
@@ -434,21 +445,35 @@ const TodayFullBoardTable = ({
                       )}
                     </td>
 
-                    <td data-label="EV / Conf" className="py-2.5 px-2 text-right whitespace-nowrap w-20">
+                    <td data-label="EV / Conf" className="py-2.5 px-2 text-right whitespace-nowrap w-24">
                       {isActionable && rec ? (
                         <div className="flex flex-col items-end gap-1">
                           <span className="font-mono font-bold text-emerald-300">
                             {recEv !== null ? `+${(recEv * 100).toFixed(1)}%` : '—'}
                           </span>
+                          {recEv !== null && (
+                            <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden" aria-hidden="true">
+                              <div
+                                className="h-full rounded-full bg-emerald-400"
+                                style={{ width: `${Math.min(100, Math.max(10, Math.abs(recEv * 100) * 10))}%` }}
+                              />
+                            </div>
+                          )}
                           <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${conf.badgeCls}`}>
                             {conf.tier}
                           </span>
                         </div>
                       ) : lean?.ev_pct != null ? (
-                        <div className="flex flex-col items-end gap-0.5">
+                        <div className="flex flex-col items-end gap-1">
                           <span className="font-mono text-[11px] text-slate-300">
                             {fmtSigned(lean.ev_pct, 1)}%
                           </span>
+                          <div className="w-16 h-1 rounded-full bg-slate-800 overflow-hidden" aria-hidden="true">
+                            <div
+                              className={`h-full rounded-full ${Number(lean.ev_pct) > 0 ? 'bg-indigo-400/80' : 'bg-slate-600'}`}
+                              style={{ width: `${Math.min(100, Math.max(8, Math.abs(Number(lean.ev_pct) || 0) * 10))}%` }}
+                            />
+                          </div>
                           <span className="text-[10px] uppercase tracking-wide text-slate-500">Lean</span>
                         </div>
                       ) : (

@@ -549,13 +549,18 @@ class KenPomClient:
         h_def_efg = _opt_float(home_rating.get('def_efg'))
         a_off_efg = _opt_float(away_rating.get('off_efg'))
         a_def_efg = _opt_float(away_rating.get('def_efg'))
+        h_off_to = _opt_float(home_rating.get('off_to'))
+        h_def_to = _opt_float(home_rating.get('def_to'))
+        a_off_to = _opt_float(away_rating.get('off_to'))
+        a_def_to = _opt_float(away_rating.get('def_to'))
+        h_off_ftr = _opt_float(home_rating.get('off_ftr'))
+        h_def_ftr = _opt_float(home_rating.get('def_ftr'))
+        a_off_ftr = _opt_float(away_rating.get('off_ftr'))
+        a_def_ftr = _opt_float(away_rating.get('def_ftr'))
+
         four_factors_adj = 0.0
         if None not in (h_off_efg, h_def_efg, a_off_efg, a_def_efg):
             efg_diff = ((h_off_efg - a_def_efg) - (a_off_efg - h_def_efg)) * 0.5
-            h_off_to = _opt_float(home_rating.get('off_to'))
-            h_def_to = _opt_float(home_rating.get('def_to'))
-            a_off_to = _opt_float(away_rating.get('off_to'))
-            a_def_to = _opt_float(away_rating.get('def_to'))
             to_diff = 0.0
             if None not in (h_off_to, h_def_to, a_off_to, a_def_to):
                 to_diff = ((a_off_to + h_def_to) - (h_off_to + a_def_to)) * 0.5
@@ -566,15 +571,24 @@ class KenPomClient:
             or_diff = 0.0
             if None not in (h_off_or, h_def_or, a_off_or, a_def_or):
                 or_diff = ((h_off_or + a_def_or) - (a_off_or + h_def_or)) * 0.5
-            h_off_ftr = _opt_float(home_rating.get('off_ftr'))
-            h_def_ftr = _opt_float(home_rating.get('def_ftr'))
-            a_off_ftr = _opt_float(away_rating.get('off_ftr'))
-            a_def_ftr = _opt_float(away_rating.get('def_ftr'))
             ftr_diff = 0.0
             if None not in (h_off_ftr, h_def_ftr, a_off_ftr, a_def_ftr):
                 ftr_diff = ((h_off_ftr + a_def_ftr) - (a_off_ftr + h_def_ftr)) * 0.5
             raw_ff = (efg_diff * 0.12) + (to_diff * 0.08) + (or_diff * 0.06) + (ftr_diff * 0.04)
             four_factors_adj = round(max(-1.2, min(1.2, raw_ff)), 2)
+
+        # Four Factors total scoring adjustment (FT rate, eFG%, turnover rate vs D1 averages)
+        tot_ff_terms = []
+        if None not in (h_off_ftr, a_def_ftr, a_off_ftr, h_def_ftr):
+            avg_ftr = (h_off_ftr + a_def_ftr + a_off_ftr + h_def_ftr) / 4.0
+            tot_ff_terms.append((avg_ftr - 33.0) * 0.08)
+        if None not in (h_off_efg, a_def_efg, a_off_efg, h_def_efg):
+            avg_efg = (h_off_efg + a_def_efg + a_off_efg + h_def_efg) / 4.0
+            tot_ff_terms.append((avg_efg - 50.5) * 0.14)
+        if None not in (h_off_to, a_def_to, a_off_to, h_def_to):
+            avg_to = (h_off_to + a_def_to + a_off_to + h_def_to) / 4.0
+            tot_ff_terms.append(-((avg_to - 17.5) * 0.10))
+        total_four_factors_adj = round(max(-1.5, min(1.5, sum(tot_ff_terms))), 2) if tot_ff_terms else 0.0
 
         # Experience & Effective Height matchup edge
         h_exp = _opt_float(home_rating.get('experience'))
@@ -593,6 +607,14 @@ class KenPomClient:
         h_cont = _opt_float(home_rating.get('continuity'))
         a_cont = _opt_float(away_rating.get('continuity'))
         fanmatch = self.get_fanmatch_prediction(home_team, away_team, conn=conn) if hasattr(self, "get_fanmatch_prediction") else None
+        if isinstance(fanmatch, dict):
+            fm_margin = _opt_float(fanmatch.get("fair_margin"))
+            fm_total = _opt_float(fanmatch.get("fair_total"))
+            if fm_margin is not None and not neutral_site:
+                fair_margin = round(0.55 * fair_margin + 0.45 * fm_margin, 2)
+                spread_adj = fair_margin
+            if fm_total is not None:
+                fair_total = round(0.55 * fair_total + 0.45 * fm_total, 1) if fair_total is not None else round(fm_total, 1)
 
         summary = f"KenPom: {home_rating['team']} (#{home_rating['rank']}) vs {away_rating['team']} (#{away_rating['rank']})"
 
@@ -610,6 +632,7 @@ class KenPomClient:
             'ncsos_diff': ncsos_diff,
             'sos_spread_adj': sos_spread_adj,
             'four_factors_adj': four_factors_adj,
+            'total_four_factors_adj': total_four_factors_adj,
             'exp_height_adj': exp_height_adj,
             'home_continuity': h_cont,
             'away_continuity': a_cont,

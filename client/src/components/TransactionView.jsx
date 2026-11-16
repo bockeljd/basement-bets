@@ -4,7 +4,6 @@ import { Trash, DollarSign, Activity, Pencil, CheckCircle2 } from 'lucide-react'
 import EditBetModal from './EditBetModal';
 import SportAuditorModal from './SportAuditorModal';
 import ManualAddBetModal from './ManualAddBetModal';
-// SevenDayTrendSparkline removed per request.
 
 // Extracted from App.jsx. Keep behavior identical; dependencies are passed as props when needed.
 

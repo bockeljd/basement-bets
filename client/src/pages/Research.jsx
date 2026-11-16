@@ -823,50 +823,78 @@ const Research = ({ onAddBet, showModelPerformanceTab = true }) => {
           <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
             Today&apos;s Picks
           </h2>
-          <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            <span>
-              <strong className="text-slate-200 font-semibold">{slateSummary.totalGames}</strong> {leagueFilter}{' '}
-              {slateSummary.totalGames === 1 ? 'game' : 'games'}
-            </span>
-            <span> • </span>
-            <span className={actionablePlays.length > 0 ? 'text-emerald-300 font-semibold' : 'text-slate-300'}>
-              {actionablePlays.length} best {actionablePlays.length === 1 ? 'bet' : 'bets'}
-            </span>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm text-slate-400 mt-1">
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('board')}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 font-medium cursor-pointer transition-colors"
+            >
+              <strong className="font-mono text-white">{slateSummary.totalGames}</strong>
+              <span>{leagueFilter} {slateSummary.totalGames === 1 ? 'game' : 'games'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('top_plays')}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border font-semibold cursor-pointer transition-colors ${
+                actionablePlays.length > 0
+                  ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-300'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300'
+              }`}
+            >
+              <strong className="font-mono">{actionablePlays.length}</strong>
+              <span>best {actionablePlays.length === 1 ? 'bet' : 'bets'}</span>
+            </button>
             {actionablePlays.length < 4 && closestLeans.length > 0 && (
-              <>
-                <span> • </span>
-                <span>{closestLeans.length} close calls</span>
-              </>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveSubTab('top_plays');
+                  setTimeout(() => {
+                    document.getElementById('close-calls-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }, 40);
+                }}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-indigo-200 font-medium cursor-pointer transition-colors"
+              >
+                <strong className="font-mono">{closestLeans.length}</strong>
+                <span>close calls</span>
+              </button>
             )}
             {slateSummary.liveCount > 0 && (
-              <>
-                <span> • </span>
-                <span className="text-rose-300 font-semibold">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/35 text-rose-300 font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
+                <span>
                   {slateSummary.liveCount} live now
                   {slateSummary.liveTrendingWinCount > 0 ? ` (${slateSummary.liveTrendingWinCount} winning pace)` : ''}
                 </span>
-              </>
+              </span>
             )}
-          </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div>
-            <label htmlFor="today-league-select" className="sr-only">
-              Sport
-            </label>
-            <select
-              id="today-league-select"
-              value={leagueFilter}
-              onChange={(e) => setLeagueFilter(e.target.value)}
-              className="min-h-[36px] px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
-            >
-              {LEAGUES.map((lg) => (
-                <option key={lg} value={lg}>
+          <div
+            role="group"
+            aria-label="Select sport"
+            className="inline-flex items-center gap-1 rounded-xl bg-slate-900 border border-slate-700 p-0.5 min-h-[36px]"
+          >
+            {LEAGUES.map((lg) => {
+              const active = leagueFilter === lg;
+              return (
+                <button
+                  key={lg}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setLeagueFilter(lg)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70'
+                  }`}
+                >
                   {lg}
-                </option>
-              ))}
-            </select>
+                </button>
+              );
+            })}
           </div>
 
           <div className="flex items-center rounded-xl bg-slate-900 border border-slate-700 p-0.5 min-h-[36px]">

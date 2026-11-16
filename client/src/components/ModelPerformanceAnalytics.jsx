@@ -20,7 +20,6 @@ import {
   roiPerUnit,
   getConfidenceBucket,
   getNumericConfidence,
-  getConfidenceTierWeightUnits,
   getRawOutcome,
   getEffectivePrice,
   normalizeOutcome,
@@ -337,28 +336,6 @@ const ModelPerformanceAnalytics = ({
       .map(finalizeBucket)
       .sort((a, b) => (b.settled + b.pending) - (a.settled + a.pending));
 
-    // 7. Flat 1u vs Confidence-Weighted Staking Comparison & Closing Line Value (CLV)
-    let flatUnitsTotal = 0;
-    let kellyUnitsTotal = 0;
-    let sizedPlaysCount = 0;
-    let clvTotalSum = 0;
-    let clvTotalCount = 0;
-    let clvPositiveCount = 0;
-    for (const h of graded) {
-      const unitPl = roiPerUnit(getRawOutcome(h), getEffectivePrice(h));
-      flatUnitsTotal += unitPl;
-      const stakeU = getConfidenceTierWeightUnits(h);
-      sizedPlaysCount += 1;
-      kellyUnitsTotal += unitPl * stakeU;
-
-      const clv = parseFloat(h?.clv_points);
-      if (Number.isFinite(clv)) {
-        clvTotalSum += clv;
-        clvTotalCount += 1;
-        if (clv > 0) clvPositiveCount += 1;
-      }
-    }
-
     return {
       gradedCount: graded.length,
       settledDays,
@@ -370,14 +347,6 @@ const ModelPerformanceAnalytics = ({
       betTypes,
       sportBreakdown,
       latestCumulativeUnits: settledDays.length > 0 ? settledDays[settledDays.length - 1].cumulativeUnits : 0,
-      stakingComparison: {
-        flatUnits: Number(flatUnitsTotal.toFixed(2)),
-        kellyUnits: Number(kellyUnitsTotal.toFixed(2)),
-        kellyTaggedCount: sizedPlaysCount,
-        avgClv: clvTotalCount > 0 ? clvTotalSum / clvTotalCount : null,
-        clvCount: clvTotalCount,
-        clvBeatRate: clvTotalCount > 0 ? (clvPositiveCount / clvTotalCount) * 100 : null,
-      },
     };
   }, [history, allHistory, preConfHistory, preMarketHistory]);
 

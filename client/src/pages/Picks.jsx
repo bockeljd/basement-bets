@@ -847,89 +847,174 @@ export default function Picks() {
         </div>
       )}
 
-      {/* Unified Filter Toolbar */}
+      {/* Unified Visual Filter Toolbar (only 1 dropdown: Season) */}
       <search aria-label="Filter model performance" className="ui-card p-4 sm:p-5 space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5 items-end">
-          {/* Sport Dropdown */}
-          <div className="space-y-1.5">
-            <label htmlFor="perf-sport-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+          {/* Sport Pills */}
+          <div className="space-y-1.5 min-w-0">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               Sport
-            </label>
-            <select
-              id="perf-sport-select"
-              name="sport"
-              value={selectedSport}
-              onChange={(e) => handleSportChange(e.target.value)}
-              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
-            >
-              <option value="ALL">All Sports ({recommendedHistory.length.toLocaleString()})</option>
-              {availableSports.map((s) => (
-                <option key={s.sport} value={s.sport}>
-                  {s.sport} ({s.count.toLocaleString()})
-                </option>
-              ))}
-            </select>
+            </span>
+            <div role="group" aria-label="Filter by sport" className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                aria-pressed={selectedSport === 'ALL'}
+                onClick={() => handleSportChange('ALL')}
+                className={`min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+                  selectedSport === 'ALL'
+                    ? 'bg-indigo-500 border-indigo-400 text-white shadow-sm'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                }`}
+              >
+                All Sports ({recommendedHistory.length.toLocaleString()})
+              </button>
+              {availableSports.map((s) => {
+                const active = selectedSport === s.sport;
+                return (
+                  <button
+                    key={s.sport}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => handleSportChange(s.sport)}
+                    className={`min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-indigo-500 border-indigo-400 text-white shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                    }`}
+                  >
+                    {s.sport} ({s.count.toLocaleString()})
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Season Dropdown */}
-          <div className="space-y-1.5">
-            <label htmlFor="perf-season-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Season
-            </label>
-            <select
-              id="perf-season-select"
-              name="season"
-              value={selectedSeason}
-              onChange={(e) => setSelectedSeason(e.target.value)}
-              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
-            >
-              <option value="ALL">All Seasons</option>
-              {availableSeasons.map((s) => (
-                <option key={s.season} value={s.season}>
-                  {formatSeasonLabel(s.season)} ({s.count.toLocaleString()})
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Season Dropdown (only select) + Pick Scope */}
+          <div className="flex flex-wrap items-end gap-3 shrink-0">
+            <div className="space-y-1.5">
+              <label htmlFor="perf-season-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Season
+              </label>
+              <select
+                id="perf-season-select"
+                name="season"
+                value={selectedSeason}
+                onChange={(e) => setSelectedSeason(e.target.value)}
+                className="min-h-[36px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs font-semibold text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
+              >
+                <option value="ALL">All Seasons</option>
+                {availableSeasons.map((s) => (
+                  <option key={s.season} value={s.season}>
+                    {formatSeasonLabel(s.season)} ({s.count.toLocaleString()})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* Bet Type Dropdown */}
+            <fieldset className="space-y-1.5">
+              <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Pick Scope
+              </legend>
+              <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+                {[
+                  { val: 'top6', label: 'Top 6 / Day' },
+                  { val: 'all', label: 'All Picks' },
+                ].map((opt) => {
+                  const active = historyScope === opt.val;
+                  return (
+                    <label
+                      key={opt.val}
+                      className={`perf-radio-pill flex items-center justify-center min-h-[28px] px-2.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                        active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="perf-scope"
+                        value={opt.val}
+                        checked={active}
+                        onChange={() => setHistoryScope(opt.val)}
+                        className="sr-only"
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 items-end pt-1">
+          {/* Bet Type Pills */}
           <div className="space-y-1.5">
-            <label htmlFor="perf-market-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               Bet Type
-            </label>
-            <select
-              id="perf-market-select"
-              name="market"
-              value={marketFilter}
-              onChange={(e) => setMarketFilter(e.target.value)}
-              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
-            >
-              <option value="ALL">All Bet Types</option>
-              {availableMarkets.map((m) => (
-                <option key={m} value={m}>
-                  {formatMarketLabel(m)}
-                </option>
-              ))}
-            </select>
+            </span>
+            <div role="group" aria-label="Filter by bet type" className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                aria-pressed={marketFilter === 'ALL'}
+                onClick={() => setMarketFilter('ALL')}
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                  marketFilter === 'ALL'
+                    ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                }`}
+              >
+                All Types
+              </button>
+              {availableMarkets.map((m) => {
+                const active = marketFilter === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setMarketFilter(active ? 'ALL' : m)}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    {formatMarketLabel(m)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Confidence Dropdown */}
+          {/* Confidence Pills */}
           <div className="space-y-1.5">
-            <label htmlFor="perf-conf-select" className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               Confidence
-            </label>
-            <select
-              id="perf-conf-select"
-              name="confidence"
-              value={confFilter}
-              onChange={(e) => setConfFilter(e.target.value)}
-              className="w-full min-h-[40px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 cursor-pointer [color-scheme:dark]"
-            >
-              <option value="ALL">All Confidence</option>
-              <option value="HIGH">High (80+)</option>
-              <option value="MEDIUM">Medium (50–79)</option>
-              <option value="LOW">Low (&lt;50)</option>
-            </select>
+            </span>
+            <div role="group" aria-label="Filter by confidence level" className="flex flex-wrap items-center gap-1.5">
+              {[
+                { key: 'ALL', label: 'All Levels' },
+                { key: 'HIGH', label: 'High (80+)' },
+                { key: 'MEDIUM', label: 'Medium (50–79)' },
+                { key: 'LOW', label: 'Low (<50)' },
+              ].map((opt) => {
+                const active = confFilter === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setConfFilter(active && opt.key !== 'ALL' ? 'ALL' : opt.key)}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Time Window Radio Group */}
@@ -948,7 +1033,7 @@ export default function Picks() {
                 return (
                   <label
                     key={opt.val}
-                    className={`perf-radio-pill flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                    className={`perf-radio-pill flex items-center justify-center min-h-[28px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                       active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -958,39 +1043,6 @@ export default function Picks() {
                       value={opt.val}
                       checked={active}
                       onChange={() => setWindowFilter(opt.val)}
-                      className="sr-only"
-                    />
-                    <span>{opt.label}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
-
-          {/* Pick Scope Radio Group */}
-          <fieldset className="space-y-1.5">
-            <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Pick Scope
-            </legend>
-            <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
-              {[
-                { val: 'top6', label: 'Top 6 / Day' },
-                { val: 'all', label: 'All Picks' },
-              ].map((opt) => {
-                const active = historyScope === opt.val;
-                return (
-                  <label
-                    key={opt.val}
-                    className={`perf-radio-pill flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-                      active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="perf-scope"
-                      value={opt.val}
-                      checked={active}
-                      onChange={() => setHistoryScope(opt.val)}
                       className="sr-only"
                     />
                     <span>{opt.label}</span>
@@ -1030,81 +1082,137 @@ export default function Picks() {
           Key Performance Summary
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Settled Record</div>
-            <div className="text-2xl font-extrabold font-mono text-slate-100">
-              {scopedStats.wins}-{scopedStats.losses}-{scopedStats.pushes}
+          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
+            <div className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Settled Record</div>
+              <div className="text-2xl font-extrabold font-mono text-slate-100">
+                {scopedStats.wins}-{scopedStats.losses}-{scopedStats.pushes}
+              </div>
+              <div className="text-xs text-slate-400">
+                {scopedStats.settled.toLocaleString()} finished
+                {scopedStats.voids > 0 ? ` • ${scopedStats.voids} void` : ''}
+                {scopedStats.pending > 0 ? ` • ${scopedStats.pending} open` : ''}
+              </div>
             </div>
-            <div className="text-xs text-slate-400">
-              {scopedStats.settled.toLocaleString()} finished
-              {scopedStats.voids > 0 ? ` • ${scopedStats.voids} void` : ''}
-              {scopedStats.pending > 0 ? ` • ${scopedStats.pending} open` : ''}
+            {scopedStats.settled > 0 && (
+              <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden flex" aria-hidden="true">
+                <div
+                  className="h-full bg-emerald-500"
+                  style={{ width: `${(scopedStats.wins / scopedStats.settled) * 100}%` }}
+                />
+                <div
+                  className="h-full bg-rose-500"
+                  style={{ width: `${(scopedStats.losses / scopedStats.settled) * 100}%` }}
+                />
+                {scopedStats.pushes > 0 && (
+                  <div
+                    className="h-full bg-slate-500"
+                    style={{ width: `${(scopedStats.pushes / scopedStats.settled) * 100}%` }}
+                  />
+                )}
+              </div>
+            )}
+          </article>
+
+          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
+            <div className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Win Rate</div>
+              <div
+                className={`text-2xl font-extrabold font-mono ${
+                  scopedStats.decided === 0
+                    ? 'text-slate-300'
+                    : scopedStats.winRate >= 52.38
+                      ? 'text-emerald-400'
+                      : 'text-rose-400'
+                }`}
+              >
+                {scopedStats.decided > 0 ? `${scopedStats.winRate.toFixed(1)}%` : '—'}
+              </div>
+              <div className="text-xs text-slate-400">
+                {breakEvenDelta === null
+                  ? 'Break-even at -110 odds is 52.4%'
+                  : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% needed`}
+              </div>
+            </div>
+            <div className="relative h-2 w-full rounded-full bg-slate-800 overflow-hidden" aria-hidden="true">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  scopedStats.decided === 0
+                    ? 'bg-slate-600'
+                    : scopedStats.winRate >= 52.38
+                      ? 'bg-emerald-500'
+                      : 'bg-rose-500'
+                }`}
+                style={{ width: `${scopedStats.decided > 0 ? Math.max(0, Math.min(100, scopedStats.winRate)) : 0}%` }}
+              />
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-amber-400"
+                style={{ left: '52.4%' }}
+              />
             </div>
           </article>
 
-          <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Win Rate</div>
-            <div
-              className={`text-2xl font-extrabold font-mono ${
-                scopedStats.decided === 0
-                  ? 'text-slate-300'
-                  : scopedStats.winRate >= 52.38
-                    ? 'text-emerald-400'
-                    : 'text-rose-400'
-              }`}
-            >
-              {scopedStats.decided > 0 ? `${scopedStats.winRate.toFixed(1)}%` : '—'}
+          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
+            <div className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Profit</div>
+              <div
+                className={`text-2xl font-extrabold font-mono ${
+                  scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {formatUnits(scopedStats.profitUnits)}
+              </div>
+              <div className="text-xs text-slate-400">
+                {scopedStats.settled > 0 ? `${formatSignedPct(scopedStats.roiPct)} ROI (1u flat)` : 'Waiting on finished games'}
+              </div>
             </div>
-            <div className="text-xs text-slate-400">
-              {breakEvenDelta === null
-                ? 'Break-even at -110 odds is 52.4%'
-                : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% needed`}
-            </div>
+            {scopedStats.settled > 0 && (
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+                <div className={`rounded-lg border px-2 py-1 flex items-center justify-between ${scopedStats.profitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
+                  <span className="font-sans text-[10px] text-slate-300">1u Flat</span>
+                  <span className="font-bold">{formatUnits(scopedStats.profitUnits)}</span>
+                </div>
+                <div className={`rounded-lg border px-2 py-1 flex items-center justify-between ${weightedProfitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
+                  <span className="font-sans text-[10px] text-slate-300">Tier-Sized</span>
+                  <span className="font-bold">{formatUnits(weightedProfitUnits)}</span>
+                </div>
+              </div>
+            )}
           </article>
 
-          <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Profit</div>
-            <div
-              className={`text-2xl font-extrabold font-mono ${
-                scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
-              }`}
-            >
-              {formatUnits(scopedStats.profitUnits)}
+          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
+            <div className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Closing Line Edge</div>
+              <div
+                className={`text-2xl font-extrabold font-mono ${
+                  clvStats.avg === null
+                    ? 'text-slate-300'
+                    : clvStats.avg > 0
+                      ? 'text-emerald-400'
+                      : clvStats.avg === 0
+                        ? 'text-slate-200'
+                        : 'text-amber-300'
+                }`}
+              >
+                {clvStats.avg === null ? 'N/A' : `${clvStats.avg > 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
+              </div>
+              <div className="text-xs text-slate-400">
+                {clvStats.count > 0
+                  ? `Beat closing line ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% (${clvStats.count.toLocaleString()} picks)`
+                  : 'No closing-line checks saved yet'}
+              </div>
             </div>
-            <div className="text-xs text-slate-400">
-              {scopedStats.settled > 0 ? (
-                <>
-                  <span>{formatSignedPct(scopedStats.roiPct)} ROI (1u flat)</span>
-                  <span> • Tier-sized: </span>
-                  <span className={`font-mono font-semibold ${weightedProfitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {formatUnits(weightedProfitUnits)}
-                  </span>
-                </>
-              ) : (
-                'Waiting on finished games'
-              )}
-            </div>
-          </article>
-
-          <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Closing Line Edge</div>
-            <div
-              className={`text-2xl font-extrabold font-mono ${
-                clvStats.avg === null
-                  ? 'text-slate-300'
-                  : clvStats.avg > 0
-                    ? 'text-emerald-400'
-                    : clvStats.avg === 0
-                      ? 'text-slate-200'
-                      : 'text-amber-300'
-              }`}
-            >
-              {clvStats.avg === null ? 'N/A' : `${clvStats.avg > 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
-            </div>
-            <div className="text-xs text-slate-400">
-              {clvStats.count > 0
-                ? `Beat closing line ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% (${clvStats.count.toLocaleString()} picks)`
-                : 'No closing-line checks saved yet'}
+            <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden" aria-hidden="true">
+              <div
+                className={`h-full rounded-full ${
+                  clvStats.count === 0
+                    ? 'bg-slate-700'
+                    : (clvStats.beatCount / clvStats.count) >= 0.5
+                      ? 'bg-emerald-500'
+                      : 'bg-amber-400'
+                }`}
+                style={{ width: `${clvStats.count > 0 ? Math.max(4, Math.min(100, (clvStats.beatCount / clvStats.count) * 100)) : 0}%` }}
+              />
             </div>
           </article>
         </div>
@@ -1400,23 +1508,28 @@ export default function Picks() {
               />
             </search>
 
-            {/* Row Limit */}
-            <div className="flex items-center gap-1.5">
-              <label htmlFor="row-limit-select" className="text-xs text-slate-400">
-                Show
-              </label>
-              <select
-                id="row-limit-select"
-                value={historyRowLimit}
-                onChange={(e) => setHistoryRowLimit(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-                className="min-h-[38px] rounded-xl border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-              >
-                <option value={50}>50 rows</option>
-                <option value={100}>100 rows</option>
-                <option value={250}>250 rows</option>
-                <option value={500}>500 rows</option>
-                <option value="ALL">All ({filteredAndSortedTableRows.length})</option>
-              </select>
+            {/* Row Limit Pills */}
+            <div role="group" aria-label="Rows to display" className="inline-flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+              {[
+                { val: 50, label: '50' },
+                { val: 100, label: '100' },
+                { val: 'ALL', label: `All (${filteredAndSortedTableRows.length})` },
+              ].map((opt) => {
+                const active = historyRowLimit === opt.val;
+                return (
+                  <button
+                    key={String(opt.val)}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setHistoryRowLimit(opt.val)}
+                    className={`min-h-[30px] px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                      active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1571,6 +1684,22 @@ export default function Picks() {
             </tbody>
           </table>
         </div>
+
+        {historyRowLimit !== 'ALL' && visibleTableRows.length < filteredAndSortedTableRows.length && (
+          <div className="flex justify-center pt-1">
+            <button
+              type="button"
+              onClick={() =>
+                setHistoryRowLimit((prev) =>
+                  typeof prev === 'number' ? prev + 100 : 'ALL'
+                )
+              }
+              className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-indigo-200 cursor-pointer transition-colors"
+            >
+              Show More Rows ({(filteredAndSortedTableRows.length - visibleTableRows.length).toLocaleString()} remaining)
+            </button>
+          </div>
+        )}
       </article>
     </div>
   );

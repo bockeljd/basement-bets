@@ -630,28 +630,52 @@ const TodayMatchupModal = ({
                     )}
 
                     {splits && (
-                      <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2">
+                      <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
                         <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-300">
                           <Users size={13} aria-hidden="true" />
                           <span>Public Bets vs. Big Money</span>
                         </h3>
-                        <div className="space-y-2 text-xs">
+                        <div className="space-y-2.5 text-xs">
                           {['SPREAD', 'TOTAL'].map((mkt) => {
                             const row = splits[mkt];
                             if (!row) return null;
+                            const mktLabel = mkt === 'SPREAD' ? 'Point Spread' : 'Over / Under';
                             return (
-                              <div key={mkt} className="rounded-lg bg-slate-900/90 p-2 space-y-1">
-                                <div className="font-bold text-slate-400 text-[10px] uppercase">{mkt}</div>
-                                {Object.entries(row).map(([side, vals]) =>
-                                  vals && typeof vals === 'object' && vals.bet_pct != null ? (
-                                    <div key={side} className="flex items-center justify-between text-slate-200">
-                                      <span>{side}</span>
-                                      <span className="font-mono">
-                                        {vals.bet_pct}% bets / <strong>{vals.handle_pct ?? '—'}% money</strong>
-                                      </span>
+                              <div key={mkt} className="rounded-lg bg-slate-900/90 p-2.5 space-y-2">
+                                <div className="font-bold text-slate-400 text-[10px] uppercase tracking-wider">{mktLabel}</div>
+                                {Object.entries(row).map(([side, vals]) => {
+                                  if (!vals || typeof vals !== 'object' || vals.bet_pct == null) return null;
+                                  const betPct = Math.max(0, Math.min(100, Number(vals.bet_pct) || 0));
+                                  const handlePctRaw = vals.handle_pct != null ? Number(vals.handle_pct) : null;
+                                  const handlePct = handlePctRaw != null ? Math.max(0, Math.min(100, handlePctRaw)) : null;
+                                  const isSharp = handlePct != null && handlePct - betPct >= 10;
+                                  return (
+                                    <div key={side} className="space-y-1">
+                                      <div className="flex items-center justify-between gap-2 text-slate-200">
+                                        <span className="font-semibold">{side}</span>
+                                        <span className="font-mono text-[11px]">
+                                          {betPct}% bets /{' '}
+                                          <strong className={isSharp ? 'text-emerald-300' : 'text-slate-100'}>
+                                            {handlePct != null ? `${handlePct}% money` : '—'}
+                                          </strong>
+                                        </span>
+                                      </div>
+                                      <div className="space-y-1" aria-hidden="true">
+                                        <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                                          <div className="h-full rounded-full bg-indigo-400/75" style={{ width: `${betPct}%` }} />
+                                        </div>
+                                        {handlePct != null && (
+                                          <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                                            <div
+                                              className={`h-full rounded-full ${isSharp ? 'bg-emerald-400' : 'bg-amber-400/80'}`}
+                                              style={{ width: `${handlePct}%` }}
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
-                                  ) : null
-                                )}
+                                  );
+                                })}
                               </div>
                             );
                           })}
@@ -661,94 +685,99 @@ const TodayMatchupModal = ({
                   </div>
                 )}
 
-                {/* 4. Historical Correlations & Referees */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2">
-                    <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-purple-300">
-                      <ShieldCheck size={13} aria-hidden="true" />
-                      <span>Similar Matchup History</span>
-                    </h3>
-                    {correlationResult ? (() => {
-                      const archObj = correlationResult.archetype;
-                      const archLabel = typeof archObj === 'string'
-                        ? archObj
-                        : archObj?.key || [archObj?.pace_bin, archObj?.eff_bin, archObj?.spread_bucket].filter(Boolean).join(' · ') || 'Standard';
-                      const corrData = correlationResult.correlations || correlationResult;
-                      const overHome = corrData?.pairs?.over_home_cover;
-                      return (
-                        <div className="text-xs text-slate-300 space-y-1">
-                          <p>
-                            Matchup style: <strong className="text-white">{archLabel}</strong>
-                            {corrData?.n != null ? ` (based on ${corrData.n} past games)` : ''}
-                          </p>
-                          {corrData?.status === 'valid' && overHome ? (
-                            <p className="text-emerald-300">
-                              Over + Home Cover hit rate:{' '}
-                              <strong>{fmtPct(overHome.p_joint ?? overHome.p_ab, 1)}</strong>
-                              {overHome.lift != null ? ` (${Number(overHome.lift).toFixed(2)}x more likely than average)` : ''}
+                {/* 4. Collapsible Advanced History & Referee Override */}
+                <details className="today-card-details rounded-xl border border-slate-800 bg-slate-950/65 px-4 py-3">
+                  <summary className="text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white py-0.5">
+                    Advanced: Referee Crew Override &amp; Matchup History
+                  </summary>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3">
+                    <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-purple-300">
+                        <ShieldCheck size={13} aria-hidden="true" />
+                        <span>Similar Matchup History</span>
+                      </h3>
+                      {correlationResult ? (() => {
+                        const archObj = correlationResult.archetype;
+                        const archLabel = typeof archObj === 'string'
+                          ? archObj
+                          : archObj?.key || [archObj?.pace_bin, archObj?.eff_bin, archObj?.spread_bucket].filter(Boolean).join(' · ') || 'Standard';
+                        const corrData = correlationResult.correlations || correlationResult;
+                        const overHome = corrData?.pairs?.over_home_cover;
+                        return (
+                          <div className="text-xs text-slate-300 space-y-1">
+                            <p>
+                              Matchup style: <strong className="text-white">{archLabel}</strong>
+                              {corrData?.n != null ? ` (based on ${corrData.n} past games)` : ''}
                             </p>
-                          ) : (
-                            <p className="text-slate-400">
-                              {correlationResult.status === 'no_spread'
-                                ? 'Waiting on a live sportsbook spread to match similar past games.'
-                                : 'Building sample size — not enough similar past games yet for parlay trends.'}
-                            </p>
+                            {corrData?.status === 'valid' && overHome ? (
+                              <p className="text-emerald-300">
+                                Over + Home Cover hit rate:{' '}
+                                <strong>{fmtPct(overHome.p_joint ?? overHome.p_ab, 1)}</strong>
+                                {overHome.lift != null ? ` (${Number(overHome.lift).toFixed(2)}x more likely than average)` : ''}
+                              </p>
+                            ) : (
+                              <p className="text-slate-400">
+                                {correlationResult.status === 'no_spread'
+                                  ? 'Waiting on a live sportsbook spread to match similar past games.'
+                                  : 'Building sample size — not enough similar past games yet for parlay trends.'}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })() : (
+                        <p className="text-xs text-slate-400">
+                          Not enough past games with a similar style to show historical trends yet.
+                        </p>
+                      )}
+                    </section>
+
+                    <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2.5">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Referee Crew Override
+                      </h3>
+                      <form onSubmit={handleSaveRefs} className="space-y-2">
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: 'ref-input-1', label: 'Ref 1', value: ref1, setter: setRef1 },
+                            { id: 'ref-input-2', label: 'Ref 2', value: ref2, setter: setRef2 },
+                            { id: 'ref-input-3', label: 'Ref 3', value: ref3, setter: setRef3 },
+                          ].map((f) => (
+                            <div key={f.id}>
+                              <label htmlFor={f.id} className="block text-[10px] text-slate-400 mb-1">
+                                {f.label}
+                              </label>
+                              <input
+                                id={f.id}
+                                type="text"
+                                value={f.value}
+                                onChange={(e) => f.setter(e.target.value)}
+                                placeholder="Name"
+                                className="w-full px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-100"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="submit"
+                            disabled={refsSaving}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw size={12} className={refsSaving ? 'animate-spin' : ''} aria-hidden="true" />
+                            <span>{refsSaving ? 'Re-running...' : 'Save & Re-run'}</span>
+                          </button>
+                          {refsMessage && (
+                            <span
+                              className={`text-xs ${refsMessage.type === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
+                            >
+                              {refsMessage.text}
+                            </span>
                           )}
                         </div>
-                      );
-                    })() : (
-                      <p className="text-xs text-slate-400">
-                        Not enough past games with a similar style to show historical trends yet.
-                      </p>
-                    )}
-                  </section>
-
-                  <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                      Referee Crew Override
-                    </h3>
-                    <form onSubmit={handleSaveRefs} className="space-y-2">
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { id: 'ref-input-1', label: 'Ref 1', value: ref1, setter: setRef1 },
-                          { id: 'ref-input-2', label: 'Ref 2', value: ref2, setter: setRef2 },
-                          { id: 'ref-input-3', label: 'Ref 3', value: ref3, setter: setRef3 },
-                        ].map((f) => (
-                          <div key={f.id}>
-                            <label htmlFor={f.id} className="block text-[10px] text-slate-400 mb-1">
-                              {f.label}
-                            </label>
-                            <input
-                              id={f.id}
-                              type="text"
-                              value={f.value}
-                              onChange={(e) => f.setter(e.target.value)}
-                              placeholder="Name"
-                              className="w-full px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-100"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <button
-                          type="submit"
-                          disabled={refsSaving}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer disabled:opacity-50"
-                        >
-                          <RefreshCw size={12} className={refsSaving ? 'animate-spin' : ''} aria-hidden="true" />
-                          <span>{refsSaving ? 'Re-running...' : 'Save & Re-run'}</span>
-                        </button>
-                        {refsMessage && (
-                          <span
-                            className={`text-xs ${refsMessage.type === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
-                          >
-                            {refsMessage.text}
-                          </span>
-                        )}
-                      </div>
-                    </form>
-                  </section>
-                </div>
+                      </form>
+                    </section>
+                  </div>
+                </details>
               </>
             )}
           </div>

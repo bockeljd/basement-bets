@@ -1050,8 +1050,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if known_rec_games:
             min_rec_games = min(known_rec_games)
             luck_scale = 0.0 if min_rec_games < 3 else min(1.0, (min_rec_games - 2) / 10.0)
+            situational_scale = round(min(1.0, 0.35 + 0.65 * max(0, min_rec_games - 1) / 10.0), 3)
         else:
             luck_scale = 0.30 if game_month == 11 else (0.65 if game_month == 12 else 1.0)
+            situational_scale = 0.50 if game_month == 11 else (0.80 if game_month == 12 else 1.0)
 
         home_luck = (torvik_team_stats.get('home') or {}).get('luck', 0.0) or 0.0
         away_luck = (torvik_team_stats.get('away') or {}).get('luck', 0.0) or 0.0
@@ -1319,6 +1321,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         ]
         mean_tot_gap = (sum(abs(float(d)) for d in tot_diffs_avail) / len(tot_diffs_avail)) if tot_diffs_avail else 0.0
 
+        kp_total_ff_adj = (_safe_float(kenpom_adj.get('total_four_factors_adj')) if isinstance(kenpom_adj, dict) else None) or 0.0
+
         if has_total and mu_market_total is not None:
             mu_total_final = (
                 mu_market_total
@@ -1327,6 +1331,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 + (w_total_hasla * diff_hs_tot)
             )
             mu_total_final += kp_player_total_adj
+            mu_total_final += kp_total_ff_adj * situational_scale
             potential_adjustment_total = council_adjustment_total
             if COUNCIL_ADJUSTMENTS_ENABLED:
                 mu_total_final += council_adjustment_total
@@ -1369,7 +1374,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     mu_total_final = sum(val * w for val, w in weighted_tots) / w_sum_avail
                 else:
                     mu_total_final = sum(val for val, _ in weighted_tots) / len(weighted_tots)
-                mu_total_final += kp_player_total_adj
+                mu_total_final += kp_player_total_adj + (kp_total_ff_adj * situational_scale)
             else:
                 mu_total_final = None
             potential_adjustment_total = council_adjustment_total
@@ -1441,20 +1446,22 @@ class NCAAMMarketFirstModelV2(BaseModel):
             sigma_spread *= inj_sigma_mult
             sigma_total *= inj_sigma_mult
 
-        # Possessions validation: compare Torvik game_tempo vs KenPom team tempo (AdjT) average.
+        # Possessions validation: compare Torvik game_tempo vs KenPom AdjT and Haslametrics pace.
         kp_tempo = None
         kp_tempo_gap = None
+        hasla_tempo = _safe_float((haslametrics_view or {}).get('game_tempo')) if hasla_available and isinstance(haslametrics_view, dict) else None
         try:
             hr = self.kenpom_client.get_team_rating(event['home_team'])
             ar = self.kenpom_client.get_team_rating(event['away_team'])
             if hr and ar and hr.get('adj_t') is not None and ar.get('adj_t') is not None:
                 kp_tempo = (float(hr['adj_t']) + float(ar['adj_t'])) / 2.0
                 kp_tempo_gap = float(game_tempo) - float(kp_tempo)
-                # If tempo sources disagree materially, inflate sigma_total (uncertainty).
-                if abs(kp_tempo_gap) >= 3.0:
-                    sigma_total *= 1.10
         except Exception as e:
             print(f"[MODEL] tempo validation error: {e}")
+
+        sec_tempos = [float(t) for t in (kp_tempo, hasla_tempo) if t is not None and float(t) > 40.0]
+        if sec_tempos and max(abs(float(game_tempo) - t) for t in sec_tempos) >= 3.0:
+            sigma_total *= 1.10
 
         # NOTE: We avoid hard sigma clamps; data-quality guardrails are applied later via
         # sanity scoring (sigma inflation / higher EV thresholds) rather than forcing caps.
@@ -1500,12 +1507,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             raw_basement_line += self.manual_adjustments.get('home_injury', 0.0)
             raw_basement_line -= self.manual_adjustments.get('away_injury', 0.0)
         
-        # 6.5 Advanced Situational Signals (smoothly ramped by min games played & bounded by outer sniper guardrail)
-        if known_rec_games:
-            min_rec_games = min(known_rec_games)
-            situational_scale = round(min(1.0, 0.35 + 0.65 * max(0, min_rec_games - 1) / 10.0), 3)
-        else:
-            situational_scale = 0.50 if game_month == 11 else (0.80 if game_month == 12 else 1.0)
+        # 6.5 Advanced Situational Signals (uses precomputed situational_scale & bounded by outer sniper guardrail)
 
         # -- Shooting Regression (3PT Variance) --
         shooting_regr_home = self._calculate_shooting_regression(event['home_team'], as_of_date=game_date_obj) or 0.0
@@ -1681,6 +1683,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "fair_spread_home": round(-float(kp_margin), 1),
                 "fair_total": round(float(mu_kenpom_total), 1) if mu_kenpom_total is not None else None,
                 "four_factors_adj": round(float(kp_ff_adj), 2),
+                "total_four_factors_adj": round(float(kp_total_ff_adj), 2),
                 "exp_height_adj": round(float(kp_eh_adj), 2),
                 "fanmatch_projected_score": (kenpom_adj.get("fanmatch") or {}).get("projected_score") if isinstance(kenpom_adj, dict) and isinstance(kenpom_adj.get("fanmatch"), dict) else None,
                 "available": True,
@@ -1754,6 +1757,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "kenpom_players_home_n": len(kp_players_home or []),
             "kenpom_players_away_n": len(kp_players_away or []),
             "kenpom_player_total_adj": kp_player_total_adj if 'kp_player_total_adj' in locals() else 0.0,
+            "kenpom_total_four_factors_adj": round(float(kp_total_ff_adj), 2),
             "kenpom_team_player_home": kp_team_player_home,
             "kenpom_team_player_away": kp_team_player_away,
             "tempo_torvik": game_tempo,

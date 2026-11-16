@@ -2013,6 +2013,125 @@ def test_backtest_stress_improvements_one_to_three(monkeypatch):
     assert captured_sql and "e.start_time <= (NOW() + INTERVAL '10 minutes')" in captured_sql[0]
 
 
+def test_kenpom_fanmatch_total_ff_and_hasla_pace_sigma(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+    from src.services.kenpom_client import KenPomClient
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+    kp = KenPomClient()
+    ratings_map = {
+        "Duke": {
+            "team": "Duke",
+            "rank": 4,
+            "adj_em": 24.0,
+            "adj_o": 120.0,
+            "adj_d": 96.0,
+            "adj_t": 70.0,
+            "off_efg": 54.0,
+            "def_efg": 47.0,
+            "off_to": 15.0,
+            "def_to": 19.0,
+            "off_or": 32.0,
+            "def_or": 26.0,
+            "off_ftr": 37.0,
+            "def_ftr": 29.0,
+        },
+        "North Carolina": {
+            "team": "North Carolina",
+            "rank": 12,
+            "adj_em": 19.0,
+            "adj_o": 116.0,
+            "adj_d": 97.0,
+            "adj_t": 72.0,
+            "off_efg": 53.0,
+            "def_efg": 48.5,
+            "off_to": 15.5,
+            "def_to": 18.0,
+            "off_or": 30.0,
+            "def_or": 27.0,
+            "off_ftr": 36.0,
+            "def_ftr": 31.0,
+        },
+    }
+    monkeypatch.setattr(kp, "get_team_rating", lambda t, conn=None: ratings_map.get(t))
+    monkeypatch.setattr(kp, "get_fanmatch_prediction", lambda h, a, conn=None: None)
+    no_fm = kp.calculate_kenpom_adjustment("Duke", "North Carolina")
+    assert no_fm["total_four_factors_adj"] > 0.0
+
+    monkeypatch.setattr(
+        kp,
+        "get_fanmatch_prediction",
+        lambda h, a, conn=None: {"fair_margin": 11.0, "fair_total": 160.0},
+    )
+    with_fm = kp.calculate_kenpom_adjustment("Duke", "North Carolina")
+    assert with_fm["fair_margin"] > no_fm["fair_margin"]
+    assert with_fm["fair_total"] > no_fm["fair_total"]
+    assert with_fm["total_four_factors_adj"] == no_fm["total_four_factors_adj"]
+
+    # Verify NCAAMMarketFirstModelV2 consumes total_four_factors_adj and inflates sigma_total on Haslametrics pace mismatch
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.kenpom_client = MagicMock()
+    model.haslametrics_client = MagicMock()
+    model.odds_selector = MagicMock()
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 100.0
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.02, "sd": 0.90})
+    model.kenpom_client.get_team_rating.return_value = None
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.kenpom_client.get_team_player_agg.return_value = None
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "continuity": 0.72, "record": "14-4"},
+        "away": {"luck": 0.0, "continuity": 0.72, "record": "12-6"},
+    }
+    model.torvik_service.get_projection.return_value = {"margin": 4.0, "official_margin": 4.0, "total": 144.0, "lean": "Home"}
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {
+        "spread_adj": 4.0,
+        "fair_margin": 4.0,
+        "fair_total": 144.0,
+        "total_adj": 0.0,
+        "total_four_factors_adj": 1.2,
+        "summary": "KP",
+    }
+    model.haslametrics_client.calculate_projection.return_value = {
+        "available": True,
+        "margin": 4.0,
+        "total": 144.0,
+        "game_tempo": 68.5,
+    }
+    res_aligned = model.analyze(
+        "evt_pace_ok",
+        event_context={"id": "evt_pace_ok", "home_team": "Home", "away_team": "Away", "start_time": datetime(2027, 1, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -4.0, "total": 144.0},
+        persist=False,
+    )
+    assert res_aligned["debug"]["kenpom_total_four_factors_adj"] == pytest.approx(1.2, abs=0.01)
+
+    model.haslametrics_client.calculate_projection.return_value = {
+        "available": True,
+        "margin": 4.0,
+        "total": 144.0,
+        "game_tempo": 73.0,
+    }
+    res_mismatch = model.analyze(
+        "evt_pace_gap",
+        event_context={"id": "evt_pace_gap", "home_team": "Home", "away_team": "Away", "start_time": datetime(2027, 1, 20, 20, 0, tzinfo=timezone.utc)},
+        market_snapshot={"spread_home": -4.0, "total": 144.0},
+        persist=False,
+    )
+    assert res_mismatch["debug"]["sigma_total"] > res_aligned["debug"]["sigma_total"]
+
+
 
 
 

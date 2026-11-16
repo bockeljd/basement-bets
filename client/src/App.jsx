@@ -14,7 +14,6 @@ import MLB from './pages/MLB';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
 import TransactionView from './components/TransactionView';
 import ManualAddBetModal from './components/ManualAddBetModal';
-// import { StagingBanner } from './components/StagingBanner';
 
 console.log("Basement Bets Frontend v1.6.5 Loaded at " + new Date().toISOString());
 
@@ -452,7 +451,6 @@ function App() {
 
     return (
         <ErrorBoundary>
-            {/* <StagingBanner /> */}
             <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans selection:bg-brand-blue/30">
                 <div className="max-w-7xl mx-auto">
                     {/* Header */}
