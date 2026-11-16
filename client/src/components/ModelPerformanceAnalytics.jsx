@@ -377,21 +377,21 @@ const ModelPerformanceAnalytics = ({
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <h3 id="perf-trend-heading" className="text-lg font-bold text-slate-100">
-              Profit &amp; Performance Over Time
+              Profit &amp; Results Over Time
             </h3>
             <p className="text-xs text-slate-400">
-              {filterSummary} • Running 1-unit profit and loss across {analytics.settledDays.length} settled game days ({scopeLabel}).
+              {filterSummary} • Flat 1-unit profit across {analytics.settledDays.length} finished days ({scopeLabel}).
             </p>
           </div>
 
           <div
             role="tablist"
             aria-label="Performance trend view"
-            className="flex flex-wrap items-center gap-1 border-b border-slate-800 pb-0.5"
+            className="perf-tablist"
           >
             {[
-              { id: 'cumulative', label: 'Running Profit (units)' },
-              { id: 'daily', label: 'Daily Profit & Win %' },
+              { id: 'cumulative', label: 'Total Profit' },
+              { id: 'daily', label: 'Day by Day' },
               { id: 'confidence', label: 'Daily Confidence' },
             ].map((t) => {
               const active = trendTab === t.id;
@@ -402,13 +402,8 @@ const ModelPerformanceAnalytics = ({
                   role="tab"
                   type="button"
                   aria-selected={active}
-                  aria-controls={`trend-panel-${t.id}`}
                   onClick={() => setTrendTab(t.id)}
-                  className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
-                    active
-                      ? 'border-indigo-400 text-indigo-300 bg-indigo-500/10 rounded-t-md'
-                      : 'border-transparent text-slate-400 hover:text-slate-200'
-                  }`}
+                  className="perf-tab"
                 >
                   {t.label}
                 </button>
@@ -462,13 +457,13 @@ const ModelPerformanceAnalytics = ({
                     <Tooltip
                       contentStyle={TOOLTIP_STYLE}
                       formatter={(value, name) => {
-                        if (name === 'cumulativeUnits') return [formatUnits(value), 'Cumulative Profit'];
+                        if (name === 'cumulativeUnits') return [formatUnits(value), 'Running Total'];
                         return [value, name];
                       }}
                       labelFormatter={(_, payload) => {
                         const p = payload?.[0]?.payload;
                         if (!p) return '';
-                        return `${p.day} • Record ${p.recordText} • Day P/L ${formatUnits(p.profitUnits)}`;
+                        return `${p.day} • Record ${p.recordText} • Day Profit ${formatUnits(p.profitUnits)}`;
                       }}
                     />
                     <Area
@@ -485,7 +480,7 @@ const ModelPerformanceAnalytics = ({
               </div>
             )}
             <p className="text-[11px] text-slate-400">
-              Assumes flat 1-unit stake per graded pick using recorded odds. Above 0u means profitable; hover any date for that day&apos;s record.
+              Assumes the same 1-unit bet on every graded pick. Above 0u means ahead overall; hover a date to see that day&apos;s record.
             </p>
           </div>
         )}
@@ -548,7 +543,7 @@ const ModelPerformanceAnalytics = ({
                         contentStyle={TOOLTIP_STYLE}
                         formatter={(value, name) => {
                           if (name === 'profitUnits') return [formatUnits(value), 'Day Profit'];
-                          if (name === 'winRate') return [`${value}%`, 'Daily Win Rate'];
+                          if (name === 'winRate') return [`${value}%`, 'Daily Win %'];
                           return [value, name];
                         }}
                         labelFormatter={(_, payload) => {
@@ -576,7 +571,7 @@ const ModelPerformanceAnalytics = ({
               </>
             )}
             <p className="text-[11px] text-slate-400">
-              Showing up to the last 45 active game days. Bars show daily unit P/L; the line tracks daily win rate vs. the 52.4% break-even line.
+              Shows up to the last 45 active game days. Bars show daily profit or loss; the line tracks daily win % against 52.4% break-even.
             </p>
           </div>
         )}
@@ -598,11 +593,11 @@ const ModelPerformanceAnalytics = ({
                 <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
                   <span className="inline-flex items-center gap-1.5 text-emerald-300">
                     <span className="w-3 border-t border-dashed border-emerald-400 inline-block" />
-                    High Tier (80+)
+                    High Confidence (80+)
                   </span>
                   <span className="inline-flex items-center gap-1.5 text-amber-300">
                     <span className="w-3 border-t border-dashed border-amber-400 inline-block" />
-                    Medium Tier (50+)
+                    Medium Confidence (50+)
                   </span>
                 </div>
                 <div className="h-[270px] w-full">
@@ -635,7 +630,7 @@ const ModelPerformanceAnalytics = ({
               </>
             )}
             <p className="text-[11px] text-slate-400">
-              Average model conviction score (0–100) per slate day across settled and pending picks.
+              Average pick confidence score (0–100) per day across graded and pending picks.
             </p>
           </div>
         )}
@@ -653,7 +648,7 @@ const ModelPerformanceAnalytics = ({
                 Performance by Bet Type
               </h3>
               <p className="text-xs text-slate-400">
-                Return on bets (%) across Spreads, Over/Under Totals, Moneylines, and Parlays. Click a row to filter.
+                Return on 1-unit bets across Spreads, Over/Under Totals, Moneylines, and Parlays. Click a row to filter.
               </p>
             </div>
             {selectedMarket !== 'ALL' && onSelectMarket && (
@@ -686,7 +681,7 @@ const ModelPerformanceAnalytics = ({
                     <ReferenceLine x={0} stroke="#475569" strokeDasharray="3 3" />
                     <Tooltip
                       contentStyle={TOOLTIP_STYLE}
-                      formatter={(val) => [formatSignedPct(val), 'Return %']}
+                      formatter={(val) => [formatSignedPct(val), 'ROI']}
                       labelFormatter={(_, payload) => {
                         const p = payload?.[0]?.payload;
                         return p ? `${p.label} • ${p.recordText} • ${formatPct(p.winRate)} Win (${formatUnits(p.profitUnits)})` : '';
@@ -701,21 +696,29 @@ const ModelPerformanceAnalytics = ({
                 </ResponsiveContainer>
               </div>
 
-              <div className="table-wrapper overflow-x-auto" tabIndex={0}>
-                <table className="w-full text-left border-collapse text-xs">
+              <div role="region" aria-labelledby="bet-type-heading" tabIndex={0} className="perf-table-wrapper">
+                <table className="perf-sticky-table w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
                       <th scope="col" className="py-1.5 pr-3 font-medium">Bet Type</th>
                       <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
                       <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
-                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Units</th>
-                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Return %</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Profit</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">ROI</th>
                       <th scope="col" className="py-1.5 pl-3 font-medium text-right">Line Beat</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
                     {analytics.betTypes.map((m) => {
                       const activeMkt = selectedMarket === m.marketKey;
+                      const clvCls =
+                        m.avgClv === null
+                          ? 'text-slate-500'
+                          : m.avgClv > 0
+                            ? 'text-emerald-400'
+                            : m.avgClv === 0
+                              ? 'text-slate-300'
+                              : 'text-rose-400';
                       return (
                         <tr
                           key={m.label}
@@ -724,7 +727,7 @@ const ModelPerformanceAnalytics = ({
                             activeMkt ? 'bg-indigo-500/15' : 'hover:bg-slate-900/50'
                           }`}
                         >
-                          <td className="py-1.5 pr-3 font-semibold text-slate-200">{m.label}</td>
+                          <th scope="row" className="py-1.5 pr-3 font-semibold text-slate-200">{m.label}</th>
                           <td className="py-1.5 px-3 font-mono text-slate-300">{m.recordText}</td>
                           <td className={`py-1.5 px-3 text-right font-mono ${m.winRate >= 52.4 ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>
                             {formatPct(m.winRate)}
@@ -735,7 +738,7 @@ const ModelPerformanceAnalytics = ({
                           <td className={`py-1.5 px-3 text-right font-mono font-semibold ${m.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {formatSignedPct(m.roiPct)}
                           </td>
-                          <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${m.avgClv === null ? 'text-slate-500' : m.avgClv >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${clvCls}`}>
                             {m.avgClv !== null ? `${m.avgClv > 0 ? '+' : ''}${m.avgClv.toFixed(2)}` : '—'}
                           </td>
                         </tr>
@@ -753,10 +756,10 @@ const ModelPerformanceAnalytics = ({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h3 id="edge-cal-heading" className="text-base font-bold text-slate-100">
-                Win Rate &amp; Return by Projected Edge
+                Win % by Edge Size
               </h3>
               <p className="text-xs text-slate-400">
-                Tests whether larger projected edges beat the 52.4% (-110) break-even line.
+                Checks if larger projected edges win more often. At standard -110 odds, 52.4% breaks even.
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -764,7 +767,7 @@ const ModelPerformanceAnalytics = ({
                 <span className="w-2.5 border-t border-dashed border-amber-400 inline-block" />
                 52.4% Break-Even
               </span>
-              <div role="tablist" aria-label="Edge view mode" className="flex items-center gap-1 border-b border-slate-800">
+              <div role="tablist" aria-label="Edge view mode" className="perf-tablist">
                 {[
                   { id: 'chart', label: 'Chart' },
                   { id: 'table', label: 'Table' },
@@ -775,13 +778,8 @@ const ModelPerformanceAnalytics = ({
                     role="tab"
                     type="button"
                     aria-selected={edgeTab === t.id}
-                    aria-controls={`edge-panel-${t.id}`}
                     onClick={() => setEdgeTab(t.id)}
-                    className={`px-2.5 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
-                      edgeTab === t.id
-                        ? 'border-indigo-400 text-indigo-300'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
-                    }`}
+                    className="perf-tab"
                   >
                     {t.label}
                   </button>
@@ -795,7 +793,7 @@ const ModelPerformanceAnalytics = ({
               <div className="h-[245px] w-full">
                 {analytics.edgeBuckets.every((b) => b.settled === 0) ? (
                   <div className="h-full flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
-                    No settled picks to bucket by edge.
+                    No settled picks to group by edge.
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
@@ -813,7 +811,7 @@ const ModelPerformanceAnalytics = ({
                       <Tooltip
                         contentStyle={TOOLTIP_STYLE}
                         formatter={(val, name) => {
-                          if (name === 'winRate') return [`${Number(val).toFixed(1)}%`, 'Win Rate'];
+                          if (name === 'winRate') return [`${Number(val).toFixed(1)}%`, 'Win %'];
                           return [val, name];
                         }}
                         labelFormatter={(_, payload) => {
@@ -835,45 +833,57 @@ const ModelPerformanceAnalytics = ({
                 )}
               </div>
               <p className="text-[11px] text-slate-400">
-                Sample size shown in parentheses. Small buckets (e.g. &lt;10 picks) reflect high short-term variance.
+                Picks in parentheses. Small groups (under 10 picks) swing widely from game to game.
               </p>
             </div>
           ) : (
-            <div id="edge-panel-table" role="tabpanel" aria-labelledby="edge-tab-table" className="table-wrapper overflow-x-auto" tabIndex={0}>
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th scope="col" className="py-2 pr-3 font-medium">Projected Edge</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Settled</th>
-                    <th scope="col" className="py-2 px-3 font-medium">Record</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Units</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Return %</th>
-                    <th scope="col" className="py-2 pl-3 font-medium text-right">Line Beat</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/70">
-                  {analytics.edgeBuckets.map((b) => (
-                    <tr key={b.label} className="hover:bg-slate-900/50">
-                      <td className="py-2 pr-3 font-medium text-slate-200">{b.label}</td>
-                      <td className="py-2 px-3 text-right text-slate-400">{b.settled}</td>
-                      <td className="py-2 px-3 font-mono text-slate-300">{b.recordText}</td>
-                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                        {b.decided > 0 ? formatPct(b.winRate) : '—'}
-                      </td>
-                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {formatUnits(b.profitUnits)}
-                      </td>
-                      <td className={`py-2 px-3 text-right font-mono font-semibold ${b.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {b.settled > 0 ? formatSignedPct(b.roiPct) : '—'}
-                      </td>
-                      <td className={`py-2 pl-3 text-right font-mono font-semibold ${b.avgClv === null ? 'text-slate-500' : b.avgClv >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {b.avgClv !== null ? `${b.avgClv > 0 ? '+' : ''}${b.avgClv.toFixed(2)}` : '—'}
-                      </td>
+            <div id="edge-panel-table" role="tabpanel" aria-labelledby="edge-tab-table">
+              <div role="region" aria-labelledby="edge-cal-heading" tabIndex={0} className="perf-table-wrapper">
+                <table className="perf-sticky-table w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400">
+                      <th scope="col" className="py-2 pr-3 font-medium">Edge Size</th>
+                      <th scope="col" className="py-2 px-3 font-medium text-right">Settled</th>
+                      <th scope="col" className="py-2 px-3 font-medium">Record</th>
+                      <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
+                      <th scope="col" className="py-2 px-3 font-medium text-right">Profit</th>
+                      <th scope="col" className="py-2 px-3 font-medium text-right">ROI</th>
+                      <th scope="col" className="py-2 pl-3 font-medium text-right">Line Beat</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {analytics.edgeBuckets.map((b) => {
+                      const clvCls =
+                        b.avgClv === null
+                          ? 'text-slate-500'
+                          : b.avgClv > 0
+                            ? 'text-emerald-400'
+                            : b.avgClv === 0
+                              ? 'text-slate-300'
+                              : 'text-rose-400';
+                      return (
+                        <tr key={b.label} className="hover:bg-slate-900/50">
+                          <th scope="row" className="py-2 pr-3 font-medium text-slate-200">{b.label}</th>
+                          <td className="py-2 px-3 text-right text-slate-400">{b.settled}</td>
+                          <td className="py-2 px-3 font-mono text-slate-300">{b.recordText}</td>
+                          <td className={`py-2 px-3 text-right font-mono font-semibold ${b.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                            {b.decided > 0 ? formatPct(b.winRate) : '—'}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-mono font-semibold ${b.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {formatUnits(b.profitUnits)}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-mono font-semibold ${b.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {b.settled > 0 ? formatSignedPct(b.roiPct) : '—'}
+                          </td>
+                          <td className={`py-2 pl-3 text-right font-mono font-semibold ${clvCls}`}>
+                            {b.avgClv !== null ? `${b.avgClv > 0 ? '+' : ''}${b.avgClv.toFixed(2)}` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </article>
@@ -886,10 +896,10 @@ const ModelPerformanceAnalytics = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 id="conf-form-heading" className="text-base font-bold text-slate-100">
-                Confidence Tiers &amp; Recent Form
+                Confidence Levels &amp; Recent Form
               </h3>
               <p className="text-xs text-slate-400">
-                High (80+), Medium (50–79), and Low (&lt;50) conviction bands. Click a tier to filter.
+                High (80+), Medium (50–79), and Low (&lt;50) pick scores. Click a box to filter.
               </p>
             </div>
             {selectedConf !== 'ALL' && onSelectConf && (
@@ -898,7 +908,7 @@ const ModelPerformanceAnalytics = ({
                 onClick={() => onSelectConf('ALL')}
                 className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer shrink-0"
               >
-                All Tiers
+                All Levels
               </button>
             )}
           </div>
@@ -919,7 +929,7 @@ const ModelPerformanceAnalytics = ({
                   type="button"
                   aria-pressed={isSelected}
                   onClick={() => onSelectConf && onSelectConf(isSelected ? 'ALL' : tierKey)}
-                  className={`text-left rounded-xl border p-3 transition-all ${onSelectConf ? 'cursor-pointer hover:brightness-110' : ''} ${badgeColor} ${
+                  className={`text-left rounded-xl border p-3 transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 ${onSelectConf ? 'cursor-pointer hover:brightness-110' : ''} ${badgeColor} ${
                     isSelected ? 'ring-2 ring-indigo-400/70' : ''
                   }`}
                 >
@@ -940,22 +950,22 @@ const ModelPerformanceAnalytics = ({
           </div>
 
           <div className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent Form Windows</h4>
-            <div className="table-wrapper overflow-x-auto" tabIndex={0}>
-              <table className="w-full text-left border-collapse text-xs">
+            <h4 id="recent-form-heading" className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent Form</h4>
+            <div role="region" aria-labelledby="recent-form-heading" tabIndex={0} className="perf-table-wrapper">
+              <table className="perf-sticky-table w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
-                    <th scope="col" className="py-1.5 pr-3 font-medium">Window</th>
+                    <th scope="col" className="py-1.5 pr-3 font-medium">Timeframe</th>
                     <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
                     <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
-                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Units</th>
-                    <th scope="col" className="py-1.5 pl-3 font-medium text-right">Return %</th>
+                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Profit</th>
+                    <th scope="col" className="py-1.5 pl-3 font-medium text-right">ROI</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
                   {analytics.recentWindows.map((w) => (
                     <tr key={w.label} className="hover:bg-slate-900/50">
-                      <td className="py-1.5 pr-3 font-medium text-slate-200">{w.label}</td>
+                      <th scope="row" className="py-1.5 pr-3 font-medium text-slate-200">{w.label}</th>
                       <td className="py-1.5 px-3 font-mono text-slate-300">{w.recordText}</td>
                       <td className={`py-1.5 px-3 text-right font-mono font-semibold ${w.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
                         {w.decided > 0 ? formatPct(w.winRate) : '—'}
@@ -982,7 +992,7 @@ const ModelPerformanceAnalytics = ({
                 Performance by Sport
               </h3>
               <p className="text-xs text-slate-400">
-                All-season totals across tracked sports. Click any sport row to focus the dashboard.
+                All-season totals by sport. Click any sport row to filter the whole page.
               </p>
             </div>
             {selectedSport !== 'ALL' && onSelectSport && (
@@ -1010,7 +1020,7 @@ const ModelPerformanceAnalytics = ({
                     type="button"
                     aria-pressed={isSelected}
                     onClick={() => onSelectSport && onSelectSport(isSelected ? 'ALL' : s.sport)}
-                    className={`w-full text-left rounded-xl border p-3.5 transition-all cursor-pointer ${
+                    className={`w-full text-left rounded-xl border p-3.5 transition-all cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 ${
                       isSelected
                         ? 'border-indigo-400 bg-indigo-500/15 ring-1 ring-indigo-400/50'
                         : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 hover:bg-slate-900/70'
@@ -1046,7 +1056,7 @@ const ModelPerformanceAnalytics = ({
         </article>
       </div>
 
-      {/* Row 4: Live In-Game Win-Chance Calibration */}
+      {/* Row 4: Live In-Game Win-Chance Accuracy */}
       {(() => {
         const cal = liveCalibration && typeof liveCalibration === 'object' ? liveCalibration : {};
         const minReq = Number(cal.min_obs_required || 25);
@@ -1064,10 +1074,10 @@ const ModelPerformanceAnalytics = ({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 id="live-cal-heading" className="text-base font-bold text-slate-100">
-                  Live In-Game Win-Chance Calibration
+                  Live Win-Chance Accuracy
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Compares predicted live win probability during active NCAAM games against final outcomes.
+                  Checks whether our live in-game win % predictions match how games actually finish.
                 </p>
               </div>
               <span
@@ -1080,26 +1090,26 @@ const ModelPerformanceAnalytics = ({
                 }`}
               >
                 {cal.active
-                  ? `Active · ${decidedObs.toLocaleString()} settled snapshots`
+                  ? `Active · ${decidedObs.toLocaleString()} live checks`
                   : isCalibrated
-                    ? `Ready · ${decidedObs.toLocaleString()} settled (tuning next sync)`
-                    : `Collecting Data (${decidedObs} / ${minReq} settled)`}
+                    ? `Ready · ${decidedObs.toLocaleString()} graded (updates next sync)`
+                    : `Collecting Data (${decidedObs} / ${minReq} graded)`}
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Live Snapshots Tracked</div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Checks Logged</div>
                 <div className="text-lg font-mono font-bold text-slate-100">
-                  {decidedObs.toLocaleString()} settled
+                  {decidedObs.toLocaleString()} graded
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  {pendingObs > 0 ? `${pendingObs.toLocaleString()} waiting for final score` : 'Auto-captured during live games'}
+                  {pendingObs > 0 ? `${pendingObs.toLocaleString()} waiting for final score` : 'Saved automatically during live games'}
                 </div>
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Live Prediction Error (Brier)</div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Prediction Accuracy</div>
                 <div className="text-lg font-mono font-bold text-slate-100">
                   {cal.brier_calibrated != null
                     ? `${Number(cal.brier_calibrated).toFixed(3)}`
@@ -1109,33 +1119,33 @@ const ModelPerformanceAnalytics = ({
                 </div>
                 <div className="text-[11px] text-slate-400">
                   {cal.brier_raw != null && cal.brier_calibrated != null
-                    ? `Down from ${Number(cal.brier_raw).toFixed(3)} baseline (lower is sharper)`
-                    : `Auto-tunes once ${minReq} settled live trajectories are logged`}
+                    ? `Down from ${Number(cal.brier_raw).toFixed(3)} baseline (lower is better)`
+                    : `Brier error score (lower is better; tunes at ${minReq}+ graded)`}
                 </div>
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Active Pace &amp; Swing Settings</div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Live Game Formula</div>
                 <div className="text-sm font-mono font-bold text-indigo-300">
                   {liveWtPct}% live weight · ±{sigmaSpread} spread · ±{sigmaTotal} total
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  {cal.active ? 'Auto-tuned from settled live results' : 'Using baseline pregame-blend defaults'}
+                  {cal.active ? 'Auto-tuned from finished live games' : 'Using default pregame + live blend'}
                 </div>
               </div>
             </div>
 
             {bins.some((b) => Number(b.count || 0) > 0) ? (
-              <div className="table-wrapper overflow-x-auto" tabIndex={0}>
-                <table className="w-full text-left border-collapse text-xs">
+              <div role="region" aria-labelledby="live-cal-heading" tabIndex={0} className="perf-table-wrapper">
+                <table className="perf-sticky-table w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
-                      <th scope="col" className="py-1.5 pr-3 font-medium">Live Win-Chance Bucket</th>
-                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Snapshots</th>
-                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Predicted Avg</th>
-                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Actual Win %</th>
-                      <th scope="col" className="py-1.5 px-3 font-medium min-w-[140px]">Calibration Fit</th>
-                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Gap</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">Predicted Chance</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Checks</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Model Said</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium text-right">Actually Won</th>
+                      <th scope="col" className="py-1.5 px-3 font-medium min-w-[140px]">Visual Match</th>
+                      <th scope="col" className="py-1.5 pl-3 font-medium text-right">Difference</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
@@ -1153,7 +1163,7 @@ const ModelPerformanceAnalytics = ({
                               : 'text-rose-400';
                       return (
                         <tr key={b.label} className="hover:bg-slate-900/50">
-                          <td className="py-2 pr-3 font-medium text-slate-200">{b.label}</td>
+                          <th scope="row" className="py-2 pr-3 font-medium text-slate-200">{b.label}</th>
                           <td className="py-2 px-3 text-right font-mono text-slate-400">{b.count || 0}</td>
                           <td className="py-2 px-3 text-right font-mono text-slate-300">
                             {pred != null ? `${pred.toFixed(1)}%` : '—'}
@@ -1165,7 +1175,7 @@ const ModelPerformanceAnalytics = ({
                             {pred != null && actual != null ? (
                               <div
                                 className="relative h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden"
-                                title={`Predicted ${pred.toFixed(1)}% (marker) vs Actual ${actual.toFixed(1)}% (bar)`}
+                                title={`Model said ${pred.toFixed(1)}% (yellow line) vs Actually won ${actual.toFixed(1)}% (green bar)`}
                               >
                                 <div
                                   className="h-full rounded-full bg-emerald-500/75"
@@ -1191,7 +1201,7 @@ const ModelPerformanceAnalytics = ({
               </div>
             ) : (
               <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 px-4 py-3 text-xs text-slate-400">
-                Live snapshots are recorded automatically whenever tracked college basketball games are in progress. Once {minReq}+ snapshots finish and grade against final scores, this table will compare predicted live win % vs. actual outcomes.
+                Live checks are saved automatically whenever tracked college basketball games are in progress. Once {minReq}+ finish grading, this table will compare predicted live win % against final outcomes.
               </div>
             )}
           </article>

@@ -103,7 +103,7 @@ export default function Picks() {
   const [windowFilter, setWindowFilter] = useState('ALL');
   const [marketFilter, setMarketFilter] = useState('ALL');
   const [confFilter, setConfFilter] = useState('ALL');
-  const [historyScope, setHistoryScope] = useState('all');
+  const [historyScope, setHistoryScope] = useState('top6');
   const [outcomeFilter, setOutcomeFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [historyRowLimit, setHistoryRowLimit] = useState(100);
@@ -404,13 +404,17 @@ export default function Picks() {
   }, [scopedHistory]);
 
   const confTakeaway = useMemo(() => {
-    const medPlusRows = sportWindowMarketHistory.filter((h) => matchesConfFilter(h, 'MED_PLUS'));
-    const lowRows = sportWindowMarketHistory.filter((h) => matchesConfFilter(h, 'LOW'));
+    const preConfScoped =
+      historyScope === 'top6'
+        ? selectTopPicksPerDay(sportWindowMarketHistory, 6)
+        : sportWindowMarketHistory;
+    const medPlusRows = preConfScoped.filter((h) => matchesConfFilter(h, 'MED_PLUS'));
+    const lowRows = preConfScoped.filter((h) => matchesConfFilter(h, 'LOW'));
     return {
       medPlus: computeRecordStats(medPlusRows),
       low: computeRecordStats(lowRows),
     };
-  }, [sportWindowMarketHistory]);
+  }, [sportWindowMarketHistory, historyScope]);
 
   const clvStats = useMemo(() => {
     let sum = 0;
@@ -639,7 +643,7 @@ export default function Picks() {
     windowFilter !== 'ALL' ||
     marketFilter !== 'ALL' ||
     confFilter !== 'ALL' ||
-    historyScope !== 'all' ||
+    historyScope !== 'top6' ||
     outcomeFilter !== 'ALL' ||
     searchQuery.trim() !== '';
 
@@ -649,7 +653,7 @@ export default function Picks() {
     setWindowFilter('ALL');
     setMarketFilter('ALL');
     setConfFilter('ALL');
-    setHistoryScope('all');
+    setHistoryScope('top6');
     setOutcomeFilter('ALL');
     setSearchQuery('');
   };
@@ -667,11 +671,11 @@ export default function Picks() {
   const filterSummaryText = `${sportLabel} • ${seasonLabel} • ${windowLabel}${marketFilter !== 'ALL' ? ` • ${formatMarketLabel(marketFilter)}` : ''}${confFilter !== 'ALL' ? ` • ${confLabelMap[confFilter] || confFilter}` : ''}`;
 
   const renderSortIcon = (colKey) => {
-    if (sortConfig.key !== colKey) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45" aria-hidden="true" />;
+    if (sortConfig.key !== colKey) return <ArrowUpDown className="w-3.5 h-3.5 opacity-45 shrink-0" aria-hidden="true" />;
     return sortConfig.direction === 'asc' ? (
-      <ChevronUp className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+      <ChevronUp className="w-3.5 h-3.5 text-indigo-400 shrink-0" aria-hidden="true" />
     ) : (
-      <ChevronDown className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+      <ChevronDown className="w-3.5 h-3.5 text-indigo-400 shrink-0" aria-hidden="true" />
     );
   };
 
@@ -683,8 +687,8 @@ export default function Picks() {
         <button
           type="button"
           onClick={() => handleSort(colKey)}
-          className={`inline-flex items-center gap-1.5 hover:text-slate-100 transition-colors cursor-pointer ${
-            align === 'right' ? 'ml-auto justify-end' : ''
+          className={`w-full min-h-[26px] inline-flex items-center gap-1.5 rounded px-1 -mx-1 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer ${
+            align === 'right' ? 'justify-end' : 'justify-start'
           }`}
         >
           <span>{label}</span>
@@ -703,7 +707,7 @@ export default function Picks() {
         <div>
           <h1>Model Performance</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Track how often picks win, units won/lost, and overall return across sports. Winning over <strong className="text-slate-200 font-semibold">52.4%</strong> at standard -110 odds is profitable.
+            Track win rate, flat 1-unit profit, and overall return. At standard -110 odds, winning over <strong className="text-slate-200 font-semibold">52.4%</strong> makes money.
           </p>
         </div>
 
@@ -713,7 +717,7 @@ export default function Picks() {
             aria-expanded={showExplainer}
             aria-controls="grading-explainer-panel"
             onClick={() => setShowExplainer((prev) => !prev)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-sm font-medium transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
           >
             <HelpCircle className="w-4 h-4 text-indigo-400" aria-hidden="true" />
             <span>How Grading Works</span>
@@ -723,7 +727,7 @@ export default function Picks() {
             type="button"
             onClick={gradeNow}
             disabled={isGrading || loading}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-indigo-500/40 bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-50 text-indigo-200 text-sm font-semibold transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-indigo-500/40 bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-50 text-indigo-200 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${isGrading ? 'animate-spin' : ''}`} aria-hidden="true" />
             <span>{isGrading ? 'Grading...' : 'Grade Pending'}</span>
@@ -738,7 +742,7 @@ export default function Picks() {
             type="button"
             onClick={load}
             disabled={loading}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-200 text-sm font-medium transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-200 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
             <span>Refresh</span>
@@ -755,7 +759,7 @@ export default function Picks() {
         >
           <div className="flex items-center justify-between gap-2">
             <h2 id="grading-explainer-heading" className="text-base font-bold text-slate-100">
-              How Pick Tracking & Grading Works
+              How Pick Tracking Works
             </h2>
             <button
               type="button"
@@ -767,21 +771,21 @@ export default function Picks() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-300 leading-relaxed">
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
-              <div className="font-bold text-indigo-300">1. Which Picks Are Graded?</div>
+              <div className="font-bold text-indigo-300">1. Which Picks Count</div>
               <p className="text-xs text-slate-300">
-                Only picks with a clear expected edge (<strong className="text-slate-100">+2.0% edge or higher</strong>; Moneylines <strong className="text-slate-100">+5.0% edge &amp; 45%+ win chance</strong>) are saved and graded. <strong className="text-slate-100">No Bet</strong> games are skipped, while <strong className="text-slate-100">all confidence levels</strong> (High, Medium, Low) on recommended picks are graded.
+                Only picks with a real projected edge (<strong className="text-slate-100">+2.0% or higher</strong>; Moneylines <strong className="text-slate-100">+5.0% &amp; 45%+ win chance</strong>) are tracked. Passed games (<strong className="text-slate-100">No Bet</strong>) are excluded.
               </p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
-              <div className="font-bold text-emerald-300">2. What Each Outcome Means</div>
+              <div className="font-bold text-emerald-300">2. What Each Result Means</div>
               <p className="text-xs text-slate-300">
-                <strong className="text-emerald-300">Won / Lost</strong> set Win % and 1-unit profit using the bet&apos;s posted odds. <strong className="text-slate-100">Push</strong> ties the line (<code className="text-slate-200">0.00u</code>, excluded from Win %). <strong className="text-amber-300">Void</strong> marks postponed/canceled games (<code className="text-slate-200">0.00u</code>, excluded from Return %).
+                <strong className="text-emerald-300">Won / Lost</strong> set Win % and flat 1-unit profit using the posted odds. <strong className="text-slate-100">Push</strong> ties (<code className="text-slate-200">0.00u</code>, ignored in Win %). <strong className="text-amber-300">Void</strong> marks canceled games (<code className="text-slate-200">0.00u</code>, ignored in ROI).
               </p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
-              <div className="font-bold text-sky-300">3. All Picks vs Top 6 Daily Best</div>
+              <div className="font-bold text-sky-300">3. Top 6 / Day vs. All Picks</div>
               <p className="text-xs text-slate-300">
-                Use <strong className="text-slate-100">All Recommended</strong> to audit total model volume, or switch to <strong className="text-slate-100">Top 6 Daily Best</strong> to track only the 6 highest-edge plays per day. Filter by Sport above to isolate NCAAM vs MLB.
+                By default you see <strong className="text-slate-100">Top 6 / Day</strong>: the single best pick per game for up to 6 games each day. Switch to <strong className="text-slate-100">All Picks</strong> to inspect every recommended bet.
               </p>
             </div>
           </div>
@@ -902,7 +906,7 @@ export default function Picks() {
                 return (
                   <label
                     key={opt.val}
-                    className={`flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                    className={`perf-radio-pill flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                       active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -928,14 +932,14 @@ export default function Picks() {
             </legend>
             <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
               {[
-                { val: 'all', label: 'All Picks' },
                 { val: 'top6', label: 'Top 6 / Day' },
+                { val: 'all', label: 'All Picks' },
               ].map((opt) => {
                 const active = historyScope === opt.val;
                 return (
                   <label
                     key={opt.val}
-                    className={`flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                    className={`perf-radio-pill flex items-center justify-center min-h-[32px] rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                       active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -959,8 +963,8 @@ export default function Picks() {
           <div className="flex flex-wrap items-center gap-2">
             <Filter className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
             <span>
-              Viewing <strong className="text-slate-200">{filterSummaryText}</strong> •{' '}
-              <span className="font-mono text-slate-200">{scopedStats.settled.toLocaleString()}</span> settled out of{' '}
+              Showing <strong className="text-slate-200">{filterSummaryText}</strong> •{' '}
+              <span className="font-mono text-slate-200">{scopedStats.settled.toLocaleString()}</span> graded out of{' '}
               <span className="font-mono text-slate-200">{scopedStats.total.toLocaleString()}</span> picks
               {historyScope === 'top6' && ' • 1 best pick per game'}
             </span>
@@ -972,7 +976,7 @@ export default function Picks() {
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-300 hover:text-indigo-200 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Reset filters</span>
+              <span>Reset to Top 6 default</span>
             </button>
           )}
         </div>
@@ -990,9 +994,9 @@ export default function Picks() {
               {scopedStats.wins}-{scopedStats.losses}-{scopedStats.pushes}
             </div>
             <div className="text-xs text-slate-400">
-              {scopedStats.settled.toLocaleString()} settled
+              {scopedStats.settled.toLocaleString()} finished
               {scopedStats.voids > 0 ? ` • ${scopedStats.voids} void` : ''}
-              {scopedStats.pending > 0 ? ` • ${scopedStats.pending} pending` : ''}
+              {scopedStats.pending > 0 ? ` • ${scopedStats.pending} open` : ''}
             </div>
           </article>
 
@@ -1012,12 +1016,12 @@ export default function Picks() {
             <div className="text-xs text-slate-400">
               {breakEvenDelta === null
                 ? 'Break-even at -110 odds is 52.4%'
-                : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% break-even`}
+                : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% needed`}
             </div>
           </article>
 
           <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Unit Profit &amp; Staking</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Profit</div>
             <div
               className={`text-2xl font-extrabold font-mono ${
                 scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
@@ -1028,35 +1032,37 @@ export default function Picks() {
             <div className="text-xs text-slate-400">
               {scopedStats.settled > 0 ? (
                 <>
-                  <span>{formatSignedPct(scopedStats.roiPct)} flat 1u</span>
-                  <span> • Tier-weighted: </span>
+                  <span>{formatSignedPct(scopedStats.roiPct)} ROI (1u flat)</span>
+                  <span> • Tier-sized: </span>
                   <span className={`font-mono font-semibold ${weightedProfitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {formatUnits(weightedProfitUnits)}
                   </span>
                 </>
               ) : (
-                'Awaiting settled bets'
+                'Waiting on finished games'
               )}
             </div>
           </article>
 
           <article className="ui-card p-5 space-y-1.5">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Beating the Closing Line</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Closing Line Edge</div>
             <div
               className={`text-2xl font-extrabold font-mono ${
                 clvStats.avg === null
                   ? 'text-slate-300'
-                  : clvStats.avg >= 0
+                  : clvStats.avg > 0
                     ? 'text-emerald-400'
-                    : 'text-amber-300'
+                    : clvStats.avg === 0
+                      ? 'text-slate-200'
+                      : 'text-amber-300'
               }`}
             >
-              {clvStats.avg === null ? 'N/A' : `${clvStats.avg >= 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
+              {clvStats.avg === null ? 'N/A' : `${clvStats.avg > 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
             </div>
             <div className="text-xs text-slate-400">
               {clvStats.count > 0
-                ? `Beat close ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% across ${clvStats.count.toLocaleString()} picks`
-                : 'No closing-line comparisons recorded yet'}
+                ? `Beat closing line ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% (${clvStats.count.toLocaleString()} picks)`
+                : 'No closing-line checks saved yet'}
             </div>
           </article>
         </div>
@@ -1067,9 +1073,9 @@ export default function Picks() {
             <button
               type="button"
               onClick={() => bestMarketTakeaway?.best && setMarketFilter(bestMarketTakeaway.best.marketKey === marketFilter ? 'ALL' : bestMarketTakeaway.best.marketKey)}
-              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 transition-colors cursor-pointer"
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
             >
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Strongest Bet Type</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Best Bet Type</div>
               {bestMarketTakeaway?.best ? (
                 <div className="mt-0.5 text-slate-200">
                   <strong className="text-emerald-300">{bestMarketTakeaway.best.label}</strong> leads at{' '}
@@ -1077,27 +1083,29 @@ export default function Picks() {
                   <span className={`font-mono font-semibold ${bestMarketTakeaway.best.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {formatUnits(bestMarketTakeaway.best.profitUnits)}
                   </span>
-                  ){bestMarketTakeaway.worst ? ` • Drag: ${bestMarketTakeaway.worst.label} (${formatUnits(bestMarketTakeaway.worst.profitUnits)})` : ''}
+                  ){bestMarketTakeaway.worst ? ` • Weakest: ${bestMarketTakeaway.worst.label} (${formatUnits(bestMarketTakeaway.worst.profitUnits)})` : ''}
                 </div>
               ) : (
-                <div className="mt-0.5 text-slate-400">Settled picks needed for market comparison</div>
+                <div className="mt-0.5 text-slate-400">Need finished picks to compare bet types</div>
               )}
             </button>
 
             <button
               type="button"
               onClick={() => setConfFilter(confFilter === 'MED_PLUS' ? 'ALL' : 'MED_PLUS')}
-              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 transition-colors cursor-pointer"
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
             >
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Confidence Signal</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Confidence Check ({historyScope === 'top6' ? 'Top 6' : 'All'})</div>
               <div className="mt-0.5 text-slate-200">
                 <strong className="text-indigo-300">Score 50+</strong>:{' '}
                 <span className="font-mono font-semibold">
                   {confTakeaway.medPlus.decided > 0 ? `${confTakeaway.medPlus.winRate.toFixed(1)}%` : '—'}
                 </span>{' '}
-                ({formatUnits(confTakeaway.medPlus.profitUnits)}) vs Low:{' '}
+                (<span className={`font-mono font-semibold ${confTakeaway.medPlus.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatUnits(confTakeaway.medPlus.profitUnits)}
+                </span>) vs Low (&lt;50):{' '}
                 <span className="font-mono">
-                  {confTakeaway.low.decided > 0 ? `${confTakeaway.low.winRate.toFixed(1)}%` : '—'}
+                  {confTakeaway.low.decided > 0 ? `${confTakeaway.low.winRate.toFixed(1)}%` : 'None'}
                 </span>
               </div>
             </button>
@@ -1105,9 +1113,9 @@ export default function Picks() {
             <button
               type="button"
               onClick={() => setHistoryScope(historyScope === 'top6' ? 'all' : 'top6')}
-              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 transition-colors cursor-pointer"
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
             >
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Daily Selectivity</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Top 6 vs. All Picks</div>
               <div className="mt-0.5 text-slate-200">
                 <strong className="text-sky-300">Top 6 / Day</strong>:{' '}
                 <span className="font-mono font-semibold">
@@ -1116,7 +1124,9 @@ export default function Picks() {
                 (<span className={`font-mono font-semibold ${scopeComparison.top6Stats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {formatUnits(scopeComparison.top6Stats.profitUnits)}
                 </span>) vs All Picks{' '}
-                <span className="font-mono">{formatUnits(scopeComparison.allStats.profitUnits)}</span>
+                <span className={`font-mono ${scopeComparison.allStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatUnits(scopeComparison.allStats.profitUnits)}
+                </span>
               </div>
             </button>
           </div>
@@ -1246,7 +1256,7 @@ export default function Picks() {
                     Daily Best Picks by Rank (#1 to #6)
                   </h2>
                   <p className="text-xs text-slate-400">
-                    1 canonical pick per game per day, ranked by strongest daily edge (#1 = top pick) for {sportLabel}.
+                    1 best pick per game each day for {sportLabel}, ordered from #1 (strongest edge) to #6.
                   </p>
                 </div>
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-2.5 py-0.5 shrink-0">
@@ -1319,7 +1329,7 @@ export default function Picks() {
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <h2 id="pick-history-heading" className="text-lg font-bold text-slate-100">
-              Pick History &amp; Grading Log
+              Pick History &amp; Results
             </h2>
             <p className="text-xs text-slate-400">
               Showing {visibleTableRows.length.toLocaleString()} of {filteredAndSortedTableRows.length.toLocaleString()} matching picks ({filterSummaryText}).
@@ -1368,12 +1378,12 @@ export default function Picks() {
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter picks by outcome">
           {[
             { key: 'ALL', label: 'All' },
-            { key: 'SETTLED', label: 'Settled Only' },
+            { key: 'SETTLED', label: 'Finished' },
             { key: 'WON', label: 'Won' },
             { key: 'LOST', label: 'Lost' },
             { key: 'PUSH', label: 'Push' },
             { key: 'VOID', label: 'Void' },
-            { key: 'PENDING', label: 'Pending' },
+            { key: 'PENDING', label: 'Open' },
           ].map((pill) => {
             const active = outcomeFilter === pill.key;
             return (
@@ -1382,7 +1392,7 @@ export default function Picks() {
                 type="button"
                 aria-pressed={active}
                 onClick={() => setOutcomeFilter(pill.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer ${
                   active
                     ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200'
                     : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700'
@@ -1395,16 +1405,22 @@ export default function Picks() {
         </div>
 
         {/* Sortable Responsive Table */}
-        <div className="table-wrapper overflow-x-auto rounded-xl border border-slate-800/80" tabIndex={0}>
-          <table className="w-full text-left border-collapse text-sm">
-            <thead className="bg-slate-950/80 border-b border-slate-800">
+        <div
+          role="region"
+          aria-labelledby="pick-history-heading"
+          tabIndex={0}
+          className="perf-table-wrapper max-h-[560px] overflow-y-auto rounded-xl border border-slate-800/80"
+        >
+          <table className="perf-sticky-table w-full text-left border-collapse text-sm">
+            <caption className="sr-only">Pick History and Results ({filterSummaryText})</caption>
+            <thead className="bg-slate-950/90 border-b border-slate-800">
               <tr>
                 {renderSortableHeader('created_at', 'Date')}
                 {renderSortableHeader('sport', 'Sport')}
                 {renderSortableHeader('matchup', 'Matchup')}
                 {renderSortableHeader('pick', 'Pick & Odds')}
-                {renderSortableHeader('edge', 'Model Edge & Confidence', 'right')}
-                {renderSortableHeader('result', 'Grade & Score')}
+                {renderSortableHeader('edge', 'Edge & Confidence', 'right')}
+                {renderSortableHeader('result', 'Result & Score')}
                 {renderSortableHeader('pl', 'Profit', 'right')}
               </tr>
             </thead>
