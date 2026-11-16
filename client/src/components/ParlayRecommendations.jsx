@@ -119,29 +119,27 @@ function ParlayColumn({ title, icon: Icon, color, combos, loading }) {
   );
 }
 
-export default function ParlayRecommendations() {
+export default function ParlayRecommendations({ date, onSelectDate }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [allData, setAllData] = useState(null);
   const [homeFavData, setHomeFavData] = useState(null);
 
-  const [ydAllData, setYdAllData] = useState(null);
-  const [ydHomeFavData, setYdHomeFavData] = useState(null);
-
   const load = async () => {
     setLoading(true);
     setErr(null);
     try {
-      const [main, homeFav, yMain, yHomeFav] = await Promise.all([
-        api.get('/api/ncaam/parlays/today', { params: { min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 } }),
-        api.get('/api/ncaam/parlays/today', { params: { strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120 } }).catch(() => ({ data: null })),
-        api.get('/api/ncaam/parlays/today', { params: { days_ago: 1, min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 } }).catch(() => ({ data: null })),
-        api.get('/api/ncaam/parlays/today', { params: { days_ago: 1, strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120 } }).catch(() => ({ data: null })),
+      const dateParams = date ? { date } : {};
+      const [main, homeFav] = await Promise.all([
+        api.get('/api/ncaam/parlays/today', {
+          params: { ...dateParams, min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 },
+        }),
+        api.get('/api/ncaam/parlays/today', {
+          params: { ...dateParams, strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120 },
+        }).catch(() => ({ data: null })),
       ]);
       setAllData(main.data);
-      setHomeFavData(homeFav.data);
-      setYdAllData(yMain?.data);
-      setYdHomeFavData(yHomeFav?.data);
+      setHomeFavData(homeFav?.data || null);
     } catch (e) {
       setErr(e?.response?.data?.detail || e?.message || 'Failed to load parlays');
     } finally {
@@ -149,67 +147,119 @@ export default function ParlayRecommendations() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
 
   const highConf = (allData?.high_confidence || []).slice(0, 2);
   const valuePick = (allData?.payout_band || []).slice(0, 2);
   const homeFav = (homeFavData?.high_confidence || []).slice(0, 2);
-
-  const yHighConf = (ydAllData?.high_confidence || []).slice(0, 2);
-  const yValuePick = (ydAllData?.payout_band || []).slice(0, 2);
-  const yHomeFav = (ydHomeFavData?.high_confidence || []).slice(0, 2);
+  const legsConsidered = Number(allData?.legs_considered ?? 0);
+  const hasAnyCombos = highConf.length > 0 || valuePick.length > 0 || homeFav.length > 0;
+  const displayDate = allData?.date_et || date || '';
 
   return (
-    <div className="mb-6 space-y-10">
-
-      {/* TODAY section */}
-      <div>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-sm font-black text-slate-100 uppercase tracking-wider">Today&apos;s 2-Team Moneyline Parlays</div>
-            <div className="text-[11px] text-slate-500">Model-picked 2-leg combinations</div>
-          </div>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 bg-slate-800/40 hover:bg-slate-700/60 disabled:opacity-50 transition"
-          >
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            {loading ? 'Loading…' : 'Refresh'}
-          </button>
+    <div className="mb-6 space-y-5">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-bold text-slate-100">
+            2-Team Moneyline Parlays{displayDate ? ` (${displayDate})` : ''}
+          </h3>
+          <p className="text-xs text-slate-400">
+            Pairs two separate college basketball Moneyline picks that both clear our win-chance and profit-edge checks.
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 bg-slate-800/40 hover:bg-slate-700/60 disabled:opacity-50 transition cursor-pointer"
+        >
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
+          <span>{loading ? 'Loading…' : 'Refresh'}</span>
+        </button>
+      </div>
 
-        {err && <div className="text-xs text-red-400 bg-red-900/20 border border-red-900/50 p-3 rounded-xl mb-3">{err}</div>}
+      {err && (
+        <div className="text-xs text-red-400 bg-red-900/20 border border-red-900/50 p-3 rounded-xl">
+          {err}
+        </div>
+      )}
 
-        {/* 3-column layout */}
+      {!loading && !err && !hasAnyCombos ? (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 space-y-4">
+          <div className="space-y-1">
+            <h4 className="text-sm font-bold text-white">
+              No 2-Leg Parlays Qualified for {displayDate || 'This Slate'}
+            </h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              {legsConsidered === 0
+                ? 'Zero Moneyline picks met our quality rules on this date — our edges came strictly from Spreads or Totals.'
+                : `Only ${legsConsidered} Moneyline pick qualified — at least 2 from separate games are required to build a 2-leg parlay.`}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5 space-y-1">
+              <div className="font-semibold text-indigo-300">Why we require strict Moneyline legs</div>
+              <p className="text-slate-400 leading-relaxed">
+                Each leg must have <strong className="text-slate-200">52%+ win probability</strong>,{' '}
+                <strong className="text-slate-200">+5.0%+ profit edge</strong>, and odds between{' '}
+                <strong className="text-slate-200">-250 and +105</strong> (longshot underdogs are filtered out).
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5 space-y-1">
+              <div className="font-semibold text-emerald-300">No doubling up on the same game</div>
+              <p className="text-slate-400 leading-relaxed">
+                When the model already likes a team&apos;s <strong className="text-slate-200">Point Spread</strong>, it skips their standalone Moneyline so you don&apos;t double-bet one outcome.
+              </p>
+            </div>
+          </div>
+
+          {onSelectDate && displayDate && (
+            <div className="pt-1 flex flex-wrap items-center gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  const dt = new Date(`${displayDate}T12:00:00Z`);
+                  dt.setUTCDate(dt.getUTCDate() - 1);
+                  onSelectDate(dt.toISOString().slice(0, 10));
+                }}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 font-semibold text-indigo-200 cursor-pointer"
+              >
+                Check Previous Day&apos;s Parlays
+              </button>
+              <span className="text-slate-500">Use the date switcher above to inspect earlier days&apos; parlays.</span>
+            </div>
+          )}
+        </div>
+      ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <ParlayColumn
-            title="Highest Confidence"
+            title="Highest Win Chance"
             icon={Zap}
             color="amber"
             combos={highConf}
             loading={loading}
           />
           <ParlayColumn
-            title="Value Matchups"
+            title="Best Payout Value"
             icon={Target}
             color="purple"
             combos={valuePick}
             loading={loading}
           />
           <ParlayColumn
-            title="Home Favorites"
+            title="Safe Home Favorites"
             icon={Home}
             color="orange"
             combos={homeFav}
             loading={loading}
           />
         </div>
-      </div>
-
-
-
+      )}
     </div>
   );
 }

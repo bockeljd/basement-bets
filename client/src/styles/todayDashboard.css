@@ -36,9 +36,10 @@
 .today-tablist [role="tab"] {
   position: relative;
   flex: none;
+  min-block-size: 38px;
   padding: 0.625rem 0.95rem;
   white-space: nowrap;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: rgb(148 163 184);
   cursor: pointer;
@@ -47,6 +48,12 @@
 
 .today-tablist [role="tab"]:hover {
   color: rgb(226 232 240);
+}
+
+.today-tablist [role="tab"]:focus-visible {
+  outline: 2px solid rgb(56 189 248);
+  outline-offset: -2px;
+  border-radius: 0.375rem;
 }
 
 .today-tablist [role="tab"][aria-selected="true"] {
@@ -58,6 +65,67 @@
   position: absolute;
   inset: auto 0 0;
   border-block-end: 3px solid rgb(129 140 248);
+}
+
+/* Data & Tools popover:
+   Follows modern Popover + CSS Anchor Positioning rules with safe @supports fallback */
+.today-tools-popover[popover] {
+  width: min(92vw, 24rem);
+  max-height: min(80dvh, 34rem);
+  overflow-y: auto;
+  border-radius: 1rem;
+  border: 1px solid rgb(51 65 85 / 0.85);
+  background: rgb(15 23 42 / 0.98);
+  color: rgb(241 245 249);
+  box-shadow: 0 20px 50px rgb(2 6 23 / 0.72);
+  padding: 0.875rem;
+}
+
+.today-tools-popover[popover]:is(:popover-open, .\:popover-open) {
+  display: block;
+}
+
+@supports (position-area: block-end) {
+  .today-tools-popover[popover] {
+    inset: auto;
+    margin: 0.5rem 0 0;
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  }
+}
+
+@supports not (position-area: block-end) {
+  .today-tools-popover[popover] {
+    position: fixed;
+    inset: 4.5rem 1rem auto auto;
+    margin: 0;
+  }
+}
+
+/* Native <details> disclosure inside pick cards: explicit directional arrow */
+.today-card-details > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.today-card-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.today-card-details > summary::before {
+  content: "▸";
+  display: inline-block;
+  font-size: 0.75rem;
+  color: rgb(148 163 184);
+  transition: transform 0.15s ease;
+}
+
+.today-card-details[open] > summary::before {
+  transform: rotate(90deg);
 }
 
 .today-board-container {

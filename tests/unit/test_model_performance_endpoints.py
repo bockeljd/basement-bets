@@ -752,3 +752,72 @@ def test_zero_zero_score_sanitized_in_history_and_grade_endpoint(monkeypatch):
     assert captured_calls[-1] == {"backfill_days": 30, "backfill_pending": True, "max_grade_rows": 5000}
 
 
+def test_parlays_today_accepts_date_filter_and_validates_format(monkeypatch):
+    import src.database as db
+
+    seen_params = []
+
+    def fake_exec(_conn, sql, params=None):
+        s = " ".join(sql.split()).lower()
+        if "with latest_preds as" in s:
+            seen_params.append(params)
+            return _FakeCursor([
+                {
+                    "event_id": "evt_1",
+                    "model_version": "v2",
+                    "market_type": "MONEYLINE",
+                    "pick": "Duke",
+                    "outcome": "WON",
+                    "bet_line": None,
+                    "price": -180,
+                    "win_prob": 0.72,
+                    "ev_per_unit": 0.12,
+                    "selection": "Duke",
+                    "away_team": "Siena",
+                    "home_team": "Duke",
+                    "start_time": "2026-11-15T23:00:00Z",
+                    "day_et": "2026-11-15",
+                },
+                {
+                    "event_id": "evt_2",
+                    "model_version": "v2",
+                    "market_type": "MONEYLINE",
+                    "pick": "St. John's",
+                    "outcome": "WON",
+                    "bet_line": None,
+                    "price": -150,
+                    "win_prob": 0.68,
+                    "ev_per_unit": 0.13,
+                    "selection": "St. John's",
+                    "away_team": "Quinnipiac",
+                    "home_team": "St. John's",
+                    "start_time": "2026-11-15T23:30:00Z",
+                    "day_et": "2026-11-15",
+                },
+            ])
+        return _FakeCursor([("2026-11-15",)])
+
+    monkeypatch.setattr(db, "get_db_connection", lambda: _FakeConn())
+    monkeypatch.setattr(db, "_exec", fake_exec)
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+
+    client = TestClient(app)
+
+    bad_resp = client.get(
+        "/api/ncaam/parlays/today?date=11-15-2026",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert bad_resp.status_code == 400
+
+    ok_resp = client.get(
+        "/api/ncaam/parlays/today?date=2026-11-15",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert ok_resp.status_code == 200
+    body = ok_resp.json()
+    assert body["date_et"] == "2026-11-15"
+    assert body["legs_considered"] == 2
+    assert len(body["high_confidence"]) == 1
+    assert seen_params[-1]["target_date"] == "2026-11-15"
+
+

@@ -50,9 +50,9 @@ const TodayFullBoardTable = ({
     }));
   };
 
-  const rows = useMemo(() => {
+  const { rows, counts } = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const list = (edges || [])
+    const mapped = (edges || [])
       .filter((g) => !leagueFilter || g.sport === leagueFilter)
       .map((game) => {
         const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
@@ -85,11 +85,21 @@ const TodayFullBoardTable = ({
           liveInfo,
           projScore,
           plainPick,
+          modelSig,
           evVal: Number.isFinite(evVal) ? evVal : -999,
           confVal: Number.isFinite(confVal) ? confVal : -1,
         };
-      })
-      .filter((row) => {
+      });
+
+    const boardCounts = {
+      all: mapped.length,
+      picks: mapped.filter((r) => r.isActionable).length,
+      live: mapped.filter((r) => r.liveInfo.isLive).length,
+      nobet: mapped.filter((r) => !r.isActionable && !r.isFinal).length,
+      final: mapped.filter((r) => r.isFinal).length,
+    };
+
+    const list = mapped.filter((row) => {
         if (q) {
           const hay = `${row.game.away_team || ''} ${row.game.home_team || ''} ${row.rec?.selection || ''} ${row.lean?.selection || ''}`.toLowerCase();
           if (!hay.includes(q)) return false;
@@ -119,13 +129,13 @@ const TodayFullBoardTable = ({
       return new Date(a.game.start_time || 0).getTime() - new Date(b.game.start_time || 0).getTime();
     });
 
-    return list;
+    return { rows: list, counts: boardCounts };
   }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey, searchQuery, statusFilter, sortConfig]);
 
   return (
     <div className="space-y-3">
       {/* Search & Status Filter Toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/75 p-3">
+      <search aria-label="Search and filter all games" className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/75 p-3">
         <div className="relative flex-1 max-w-md">
           <label htmlFor="board-team-search" className="sr-only">
             Filter board by team or pick
@@ -147,11 +157,11 @@ const TodayFullBoardTable = ({
 
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter games by pick status">
           {[
-            { id: 'all', label: 'All Games' },
-            { id: 'picks', label: 'Best Bets' },
-            { id: 'live', label: 'Live Now' },
-            { id: 'nobet', label: 'Passes & Leans' },
-            { id: 'final', label: 'Final' },
+            { id: 'all', label: `All (${counts.all})` },
+            { id: 'picks', label: `Best Bets (${counts.picks})` },
+            ...(counts.live > 0 ? [{ id: 'live', label: `Live Now (${counts.live})` }] : []),
+            { id: 'nobet', label: `Passed (${counts.nobet})` },
+            ...(counts.final > 0 ? [{ id: 'final', label: `Final (${counts.final})` }] : []),
           ].map((opt) => {
             const active = statusFilter === opt.id;
             return (
@@ -171,7 +181,7 @@ const TodayFullBoardTable = ({
             );
           })}
         </div>
-      </div>
+      </search>
 
       {/* Responsive Container-Query Table */}
       <div

@@ -30,6 +30,13 @@ function emToWinPct(emA, emB) {
     return Math.round((1 / (1 + Math.exp(-diff / 10))) * 100);
 }
 
+// Guard against ingested non-probability Barthag values (e.g. rank integers > 1) rendering as 1100%+
+const formatBarthagPct = (raw) => {
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n) || n <= 0 || n > 1) return '—';
+    return `${(n * 100).toFixed(1)}%`;
+};
+
 // Smart Name Shortening for high-density bracket view
 const shortenTeamName = (name) => {
 
@@ -654,7 +661,7 @@ const MarchMadness = () => {
                                     </div>
                                     <span className="text-slate-400 text-sm font-bold">
                                         Barthag <span className="text-white ml-1">
-                                            {deepA?.torvik?.barthag ? `${(parseFloat(deepA.torvik.barthag) * 100).toFixed(1)}%` : (selectedTeam.torvik?.barthag ? `${(selectedTeam.torvik.barthag * 100).toFixed(1)}%` : '—')}
+                                            {formatBarthagPct(deepA?.torvik?.barthag ?? selectedTeam.torvik?.barthag)}
                                         </span>
                                     </span>
                                 </div>
@@ -886,10 +893,10 @@ const MarchMadness = () => {
                         <StatBar label="Tempo" valA={selectedTeam.adj_t} valB={selectedTeamB?.adj_t} />
                         {(deepA?.torvik?.barthag || deepB?.torvik?.barthag) && (
                             <StatBar label="Barthag"
-                                valA={(parseFloat(deepA?.torvik?.barthag) || 0) * 100}
-                                valB={(parseFloat(deepB?.torvik?.barthag) || 0) * 100}
-                                fmtA={deepA?.torvik?.barthag ? `${(parseFloat(deepA.torvik.barthag) * 100).toFixed(1)}%` : '—'}
-                                fmtB={deepB?.torvik?.barthag ? `${(parseFloat(deepB.torvik.barthag) * 100).toFixed(1)}%` : '—'} />
+                                valA={(() => { const n = parseFloat(deepA?.torvik?.barthag); return Number.isFinite(n) && n > 0 && n <= 1 ? n * 100 : 0; })()}
+                                valB={(() => { const n = parseFloat(deepB?.torvik?.barthag); return Number.isFinite(n) && n > 0 && n <= 1 ? n * 100 : 0; })()}
+                                fmtA={formatBarthagPct(deepA?.torvik?.barthag)}
+                                fmtB={formatBarthagPct(deepB?.torvik?.barthag)} />
                         )}
                         {(deepA?.torvik?.luck != null || deepB?.torvik?.luck != null) && (
                             <StatBar label="Luck" lowerIsBetter
@@ -1014,7 +1021,7 @@ const MarchMadness = () => {
                                                         {d.kenpom?.adj_em ? `+${parseFloat(d.kenpom.adj_em).toFixed(1)}` : '—'}
                                                     </td>
                                                     <td className="py-3 px-3 text-center text-blue-400">
-                                                        {!isNaN(bn) ? `${(bn * 100).toFixed(1)}%` : '—'}
+                                                        {!isNaN(bn) && bn > 0 && bn <= 1 ? `${(bn * 100).toFixed(1)}%` : '—'}
                                                     </td>
                                                     <td className={`py-3 px-3 text-center font-bold ${!isNaN(luck) ? (luck < 0 ? 'text-emerald-400' : 'text-red-400') : 'text-slate-500'}`}>
                                                         {!isNaN(luck) ? `${luck >= 0 ? '+' : ''}${luck.toFixed(3)}` : '—'}

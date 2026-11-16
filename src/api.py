@@ -5260,6 +5260,7 @@ async def get_ncaam_parlays_today(
     limit_legs: int = 80,
     strategy: str = "all",  # 'all' | 'home_fav'
     days_ago: int = 0,
+    date: Optional[str] = None,
 ):
     """2-leg ML parlay recommendations for today's NCAAM slate.
 
@@ -5273,8 +5274,15 @@ async def get_ncaam_parlays_today(
     - high_confidence: highest P(win) combos
     - payout_band: best EV combos within a reasonable payout range
     """
+    import re
     if int(max_legs) != 2:
         raise HTTPException(status_code=400, detail="Only 2-leg parlays supported in v1")
+
+    target_date = None
+    if date is not None and str(date).strip():
+        target_date = str(date).strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", target_date):
+            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
 
     # For home_fav strategy, tighten the default odds band if caller did not override
     _strategy = str(strategy or 'all').lower().strip()
@@ -5307,7 +5315,12 @@ async def get_ncaam_parlays_today(
         return int(round(-100 / x))
 
     # ET date filter
-    q = """
+    date_predicate = (
+        "(e.start_time AT TIME ZONE 'America/New_York')::date = %(target_date)s::date"
+        if target_date
+        else "(e.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York' - (%(days)s || ' days')::interval)::date"
+    )
+    q = f"""
       WITH latest_preds AS (
         SELECT DISTINCT ON (m.event_id)
           m.event_id,
@@ -5328,7 +5341,7 @@ async def get_ncaam_parlays_today(
         JOIN events e ON m.event_id = e.id
         WHERE e.league = 'NCAAM'
           AND UPPER(COALESCE(m.market_type,'')) IN ('MONEYLINE','ML')
-          AND (e.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York' - (%(days)s || ' days')::interval)::date
+          AND {date_predicate}
           AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
           AND COALESCE(m.bet_price, m.price) IS NOT NULL
         ORDER BY m.event_id, m.analyzed_at DESC
@@ -5338,8 +5351,17 @@ async def get_ncaam_parlays_today(
       LIMIT %(lim)s
     """
 
+    query_params = {"min_ev": float(min_ev_per_unit), "lim": int(limit_legs), "days": int(days_ago)}
+    if target_date:
+        query_params["target_date"] = target_date
+
     with get_db_connection() as conn:
-        legs = [dict(r) for r in _exec(conn, q, {"min_ev": float(min_ev_per_unit), "lim": int(limit_legs), "days": int(days_ago)}).fetchall()]
+        legs = [dict(r) for r in _exec(conn, q, query_params).fetchall()]
+        resolved_date_et = target_date or _exec(
+            conn,
+            "SELECT (NOW() AT TIME ZONE 'America/New_York' - (%s || ' days')::interval)::date::text",
+            (int(days_ago),),
+        ).fetchone()[0]
 
     # Build normalized leg objects
     norm_legs = []
@@ -5542,6 +5564,7 @@ async def get_ncaam_parlays_today(
 
     return {
         "status": "success",
+        "date_et": resolved_date_et,
         "strategy": _strategy,
         "legs_considered": len(norm_legs),
         "combos_considered": len(combos),

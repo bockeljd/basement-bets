@@ -139,6 +139,8 @@ def test_source_audit_picks_top6_before_subfilters():
     assert 'top6SlatePlays' in research
     assert 'scopedTopPlays' in research
     assert research.index('top6SlatePlays') < research.index('const filteredTopPlays')
+    # Ensure Today tab no longer carries the duplicate March Madness sub-tab
+    assert 'march_madness' not in research
 
 def test_source_audit_analytics_component_helpers():
     """Verify Analytics component uses shared helpers and avoids hardcoded ROI."""

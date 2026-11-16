@@ -119,10 +119,7 @@ const getFeedState = (row, feedKey) => {
   };
 };
 
-const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCAAM', onOpenKenpomUpload, onPasteKenpomClipboard }) => {
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [selectedSource, setSelectedSource] = useState(null);
-
+export const summarizeDataHealth = (dataHealth = [], edges = [], leagueFilter = 'NCAAM') => {
   const bySource = {};
   (dataHealth || []).forEach((item) => {
     if (item?.source) bySource[item.source] = item;
@@ -139,26 +136,50 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
 
   const activeFeedCount = FEED_DEFS.filter((f) => getFeedState(bySource[f.key], f.key).ok).length;
   const feedsHealthy = activeFeedCount >= 4;
+  const kenpomOk = getFeedState(bySource.kenpom, 'kenpom').ok;
 
-  const kenpomRow = bySource.kenpom;
-  const kenpomOk = getFeedState(kenpomRow, 'kenpom').ok;
+  return {
+    bySource,
+    leagueGamesCount: leagueGames.length,
+    withOdds,
+    activeFeedCount,
+    totalFeeds: FEED_DEFS.length,
+    feedsHealthy,
+    kenpomOk,
+  };
+};
+
+const TodayDataHealthStrip = ({
+  dataHealth = [],
+  edges = [],
+  leagueFilter = 'NCAAM',
+  onOpenKenpomUpload,
+  onPasteKenpomClipboard,
+  embedded = false,
+}) => {
+  const [detailsOpen, setDetailsOpen] = useState(embedded);
+  const [selectedSource, setSelectedSource] = useState(null);
+
+  const {
+    bySource,
+    leagueGamesCount,
+    withOdds,
+    activeFeedCount,
+    totalFeeds,
+    feedsHealthy,
+    kenpomOk,
+  } = summarizeDataHealth(dataHealth, edges, leagueFilter);
 
   const activeDetail = selectedSource ? bySource[selectedSource] : null;
   const activeNotes = selectedSource ? formatFeedNotes(selectedSource, activeDetail) : '';
   const activeCount = activeDetail?.last_row_count ?? activeDetail?.row_count;
 
-  const handleTogglePill = (key) => {
-    if (selectedSource === key && detailsOpen) {
-      setSelectedSource(null);
-      setDetailsOpen(false);
-    } else {
-      setSelectedSource(key);
-      setDetailsOpen(true);
-    }
-  };
+  const containerCls = embedded
+    ? 'space-y-2.5'
+    : 'rounded-xl border border-slate-800/80 bg-slate-900/60 px-3 py-2 space-y-2';
 
   return (
-    <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 px-3 py-2 space-y-2">
+    <div className={containerCls}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <span
@@ -169,40 +190,41 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
             }`}
           >
             <span className={`w-1.5 h-1.5 rounded-full ${feedsHealthy ? 'bg-emerald-400' : 'bg-amber-400'}`} aria-hidden="true" />
-            <span>Data Sources: {activeFeedCount}/{FEED_DEFS.length} Ready</span>
+            <span>Data Sources: {activeFeedCount}/{totalFeeds} Ready</span>
           </span>
 
           <span className="text-slate-400 text-[11px] px-1">
-            Odds loaded on <strong className="font-mono text-slate-200">{withOdds}/{leagueGames.length}</strong> games
+            Odds loaded on <strong className="font-mono text-slate-200">{withOdds}/{leagueGamesCount}</strong> games
           </span>
 
           {leagueFilter === 'NCAAM' && !kenpomOk && (
             <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] font-semibold">
-              KenPom Off
+              KenPom Needs Update
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            aria-expanded={detailsOpen}
-            onClick={() => {
-              setDetailsOpen((v) => !v);
-              if (detailsOpen) setSelectedSource(null);
-            }}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-950/70 hover:bg-slate-800 text-[11px] font-semibold text-slate-300 hover:text-white cursor-pointer"
-          >
-            <span>View Sources</span>
-            {detailsOpen ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
-          </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {!embedded && (
+            <button
+              type="button"
+              aria-expanded={detailsOpen}
+              onClick={() => {
+                setDetailsOpen((v) => !v);
+                if (detailsOpen) setSelectedSource(null);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-800 bg-slate-950/70 hover:bg-slate-800 text-[11px] font-semibold text-slate-300 hover:text-white cursor-pointer"
+            >
+              <span>View Sources</span>
+              {detailsOpen ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}
+            </button>
+          )}
 
           {leagueFilter === 'NCAAM' && (
             <>
               <button
                 type="button"
                 onClick={onPasteKenpomClipboard}
-                title="After copying kenpom.com (Cmd+A then Cmd+C), click to import instantly"
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 text-[11px] font-semibold transition cursor-pointer"
               >
                 <ClipboardPaste size={11} aria-hidden="true" />
@@ -225,9 +247,9 @@ const TodayDataHealthStrip = ({ dataHealth = [], edges = [], leagueFilter = 'NCA
         </div>
       </div>
 
-      {detailsOpen && (
+      {(detailsOpen || embedded) && (
         <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3 text-xs space-y-2.5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${embedded ? 'lg:grid-cols-3' : 'lg:grid-cols-5'} gap-2`}>
             {FEED_DEFS.map((feed) => {
               const row = bySource[feed.key];
               const state = getFeedState(row, feed.key);
