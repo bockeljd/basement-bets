@@ -540,6 +540,8 @@ async def add_balance_snapshot(request: Request):
             'raw_data': payload.get('raw_data'),
             'user_id': DEFAULT_USER_ID,
         })
+        if ok:
+            invalidate_analytics_cache(DEFAULT_USER_ID)
         return {'status': 'success' if ok else 'error'}
     except HTTPException:
         raise

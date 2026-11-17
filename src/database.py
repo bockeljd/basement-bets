@@ -1392,6 +1392,57 @@ def bulk_update_bet_status(bet_ids: list[int], status: str, user_id: str | None 
         print(f"[DB] bulk_update_bet_status error: {e}")
         return 0
 
+def _extract_event_text_from_fields(raw_text: str, description: str, selection: str) -> str | None:
+    """Extract a clean matchup like 'Florida A&M @ Utep' without market/odds prefixes."""
+    import re
+
+    def _clean_team_side(x: str) -> str:
+        x = (x or '').strip()
+        x = re.sub(
+            r"^(?:Spread|ML|Moneyline|Over\s*/\s*Under|Over/Under|Total|Prop|SGP|Parlay|Straight|\d+\s*Leg\s*\w+)(?:\s*[+-]\d+)?\s*:\s*",
+            "",
+            x,
+            flags=re.IGNORECASE,
+        ).strip()
+        x = re.split(r"\s+[+\-–—]\d+(?:\.\d+)?\b", x, maxsplit=1)[0]
+        x = re.split(r"\s+\b(over|under)\b\s*\d+(?:\.\d+)?\b", x, flags=re.IGNORECASE, maxsplit=1)[0]
+        x = re.split(r"\s+\bml\b", x, flags=re.IGNORECASE, maxsplit=1)[0]
+        x = re.split(r"\s+\|", x, maxsplit=1)[0]
+        x = re.sub(r"\s+", " ", x).strip()
+        x = re.sub(r"\b([A-Za-z]{3,})\s+\1\b", r"\1", x, flags=re.IGNORECASE)
+        return x.strip()
+
+    try:
+        for src in (str(raw_text or ''), str(description or ''), str(selection or '')):
+            if not src:
+                continue
+            for ln in src.splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                if ('@' in ln) or re.search(r"\b(vs\.?|versus)\b", ln, re.IGNORECASE):
+                    m = re.search(r"(.+?)\s*(?:@|vs\.?|versus)\s*(.+)$", ln, flags=re.IGNORECASE)
+                    if m:
+                        a = _clean_team_side(m.group(1))
+                        b = _clean_team_side(m.group(2))
+                        if a and b:
+                            return f"{a} @ {b}"[:160]
+
+        s = re.sub(r"\s+", " ", "\n".join([str(raw_text or ''), str(description or ''), str(selection or '')])).strip()
+        if not s:
+            return None
+        m = re.search(r"(.+?)\s*(?:@|vs\.?|versus)\s*(.+?)(?:\s*\||\s*$)", s, flags=re.IGNORECASE)
+        if not m:
+            return None
+        a = _clean_team_side(m.group(1))
+        b = _clean_team_side(m.group(2))
+        if a and b:
+            return f"{a} @ {b}"[:160]
+    except Exception:
+        return None
+    return None
+
+
 def insert_bet_v2(doc: dict, legs: list = None) -> int:
     """
     Inserts a bet into the 'bets' table with support for legs (currently ignored/summarized).
@@ -1497,62 +1548,12 @@ def insert_bet_v2(doc: dict, legs: list = None) -> int:
 
     # event_text is a lightweight, UI-friendly matchup string we persist at ingest time
     # so we don't need to ship raw_text to the client (reduces Neon egress).
-    def _extract_event_text(d: dict) -> str | None:
-        """Extract a clean matchup like "Maryland @ Minnesota".
-
-        Important: avoid appending the pick/line (e.g. "Minnesota -3.5").
-        """
-        def _clean_team_side(x: str) -> str:
-            x = (x or '').strip()
-            # Remove trailing line/total fragments and odds.
-            x = re.split(r"\s+[+\---]\d+(?:\.\d+)?\b", x, maxsplit=1)[0]
-            x = re.split(r"\s+\b(over|under)\b\s*\d+(?:\.\d+)?\b", x, flags=re.IGNORECASE, maxsplit=1)[0]
-            x = re.split(r"\s+\bml\b", x, flags=re.IGNORECASE, maxsplit=1)[0]
-            x = re.split(r"\s+\|", x, maxsplit=1)[0]
-            x = re.sub(r"\s+", " ", x).strip()
-            # Collapse duplicated tokens like "Minnesota Minnesota"
-            x = re.sub(r"\b([A-Za-z]{3,})\s+\1\b", r"\1", x, flags=re.IGNORECASE)
-            return x.strip()
-
-        try:
-            raw_text = str(d.get('raw_text') or '')
-            description = str(d.get('description') or '')
-            selection = str(d.get('selection') or '')
-
-            # 1) Best: find an explicit matchup line in raw_text
-            for src in (raw_text, description, selection):
-                if not src:
-                    continue
-                for ln in str(src).splitlines():
-                    ln = ln.strip()
-                    if not ln:
-                        continue
-                    if ('@' in ln) or re.search(r"\b(vs\.?|versus)\b", ln, re.IGNORECASE):
-                        m = re.search(r"(.+?)\s*(?:@|vs\.?|versus)\s*(.+)$", ln, flags=re.IGNORECASE)
-                        if m:
-                            a = _clean_team_side(m.group(1))
-                            b = _clean_team_side(m.group(2))
-                            if a and b:
-                                return f"{a} @ {b}"[:160]
-
-            # 2) Fallback: regex over combined text
-            s = "\n".join([raw_text, description, selection])
-            s = re.sub(r"\s+", " ", s).strip()
-            if not s:
-                return None
-            m = re.search(r"(.+?)\s*(?:@|vs\.?|versus)\s*(.+?)(?:\s*\||\s*$)", s, flags=re.IGNORECASE)
-            if not m:
-                return None
-            a = _clean_team_side(m.group(1))
-            b = _clean_team_side(m.group(2))
-            if a and b:
-                return f"{a} @ {b}"[:160]
-        except Exception:
-            return None
-        return None
-
     if 'event_text' not in doc or not doc.get('event_text'):
-        doc['event_text'] = _extract_event_text(doc)
+        doc['event_text'] = _extract_event_text_from_fields(
+            doc.get('raw_text') or '',
+            doc.get('description') or '',
+            doc.get('selection') or '',
+        )
 
     # Ensure validation_errors is present in doc, default to None
     if 'validation_errors' not in doc:
@@ -2808,47 +2809,6 @@ def update_bet_fields(bet_id: int, fields: dict, user_id: str | None = None, upd
         except Exception:
             existing = None
 
-    def _extract_event_text_from(raw_text: str, description: str, selection: str) -> str | None:
-        try:
-            def clean_side(x: str) -> str:
-                x = (x or '').strip()
-                x = re.split(r"\s+[+\---]\d+(?:\.\d+)?\b", x, maxsplit=1)[0]
-                x = re.split(r"\s+\b(over|under)\b\s*\d+(?:\.\d+)?\b", x, flags=re.IGNORECASE, maxsplit=1)[0]
-                x = re.split(r"\s+\bml\b", x, flags=re.IGNORECASE, maxsplit=1)[0]
-                x = re.split(r"\s+\|", x, maxsplit=1)[0]
-                x = re.sub(r"\s+", " ", x).strip()
-                x = re.sub(r"\b([A-Za-z]{3,})\s+\1\b", r"\1", x, flags=re.IGNORECASE)
-                return x.strip()
-
-            sources = [str(raw_text or ''), str(description or ''), str(selection or '')]
-            for src in sources:
-                if not src:
-                    continue
-                for ln in str(src).splitlines():
-                    ln = ln.strip()
-                    if not ln:
-                        continue
-                    if ('@' in ln) or re.search(r"\b(vs\.?|versus)\b", ln, re.IGNORECASE):
-                        m = re.search(r"(.+?)\s*(?:@|vs\.?|versus)\s*(.+)$", ln, flags=re.IGNORECASE)
-                        if m:
-                            a = clean_side(m.group(1))
-                            b = clean_side(m.group(2))
-                            if a and b:
-                                return f"{a} @ {b}"[:160]
-
-            s = "\n".join(sources)
-            s = re.sub(r"\s+", " ", s).strip()
-            m = re.search(r"(.+?)\s*(?:@|vs\.?|versus)\s*(.+?)(?:\s*\||\s*$)", s, flags=re.IGNORECASE)
-            if not m:
-                return None
-            a = clean_side(m.group(1))
-            b = clean_side(m.group(2))
-            if a and b:
-                return f"{a} @ {b}"[:160]
-        except Exception:
-            return None
-        return None
-
     for k, v in fields.items():
         if k not in allowed:
             continue
@@ -2872,7 +2832,6 @@ def update_bet_fields(bet_id: int, fields: dict, user_id: str | None = None, upd
                 except Exception:
                     continue
         if k == 'date':
-            # store as YYYY-MM-DD string
             v = str(v or '').strip()
             if not v:
                 continue
@@ -2886,7 +2845,7 @@ def update_bet_fields(bet_id: int, fields: dict, user_id: str | None = None, upd
             cur_sel = existing.get('selection') if hasattr(existing, 'get') else existing[2]
             new_desc = fields.get('description', cur_desc)
             new_sel = fields.get('selection', cur_sel)
-            ev = _extract_event_text_from(raw_text, new_desc, new_sel)
+            ev = _extract_event_text_from_fields(raw_text, new_desc, new_sel)
             if ev:
                 sets.append("event_text=%s")
                 params.append(ev)

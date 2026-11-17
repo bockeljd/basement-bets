@@ -349,32 +349,48 @@ class DraftKingsScraper:
 
                 cards: list[str] = []
                 seen_cards: set[str] = set()
+                matched_els = []
                 card_selectors = [
-                    "[data-testid*='bet']",
-                    "[data-test-id*='bet']",
+                    "[data-testid*='bet-card']",
+                    "[data-test-id*='bet-card']",
                     "[class*='bet-card']",
                     "[class*='BetCard']",
-                    "[class*='mybets']",
-                    "[class*='my-bets']",
+                    "[data-testid*='bet']",
+                    "[data-test-id*='bet']",
                 ]
                 for sel in card_selectors:
                     try:
                         elements = root.find_elements(By.CSS_SELECTOR, sel) if hasattr(root, "find_elements") else driver.find_elements(By.CSS_SELECTOR, sel)
                         for el in elements:
+                            matched_els.append(el)
+                    except Exception:
+                        pass
+
+                # Filter to leaf cards so ancestor wrappers (which hold tab headers like Won/Lost) are excluded
+                matched_ids = {el.id for el in matched_els if hasattr(el, "id")}
+                for el in matched_els:
+                    try:
+                        has_child_match = False
+                        for child_sel in ("[data-testid*='bet']", "[data-test-id*='bet']", "[class*='bet-card']", "[class*='BetCard']"):
                             try:
-                                t = (el.text or "").strip()
-                                if not t or len(t) <= 60 or t in seen_cards:
-                                    continue
-                                tl = t.lower()
-                                outcome = any(x in tl for x in ("won", "lost", "void", "push", "cashed"))
-                                if allow_open:
-                                    outcome = outcome or any(x in tl for x in ("open", "to win", "payout", "cash out"))
-                                money = ("$" in t) or ("usd" in tl)
-                                if outcome and money:
-                                    seen_cards.add(t)
-                                    cards.append(t)
+                                if any(c.id in matched_ids and c.id != el.id for c in el.find_elements(By.CSS_SELECTOR, child_sel)):
+                                    has_child_match = True
+                                    break
                             except Exception:
                                 pass
+                        if has_child_match:
+                            continue
+                        t = (el.text or "").strip()
+                        if not t or len(t) <= 60 or t in seen_cards:
+                            continue
+                        tl = t.lower()
+                        outcome = any(x in tl for x in ("won", "lost", "void", "push", "cashed"))
+                        if allow_open:
+                            outcome = outcome or any(x in tl for x in ("open", "to win", "payout", "cash out"))
+                        money = ("$" in t) or ("usd" in tl)
+                        if outcome and money:
+                            seen_cards.add(t)
+                            cards.append(t)
                     except Exception:
                         pass
                 return cards

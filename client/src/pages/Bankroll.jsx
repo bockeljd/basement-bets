@@ -1,8 +1,12 @@
 import React, { useState } from 'react';
-import { DollarSign } from 'lucide-react';
+import { DollarSign, CheckCircle2, AlertCircle } from 'lucide-react';
+import api from '../api/axios';
 
 export default function Bankroll({ financials, bets, formatCurrency }) {
-  const [expandedBook, setExpandedBook] = useState(null);
+  const [expandedBook, setExpandedBook] = useState('DraftKings');
+  const [editingAcc, setEditingAcc] = useState(null); // { provider, accountId, value }
+  const [savingBalance, setSavingBalance] = useState(false);
+  const [balanceMsg, setBalanceMsg] = useState(null);
 
   const normalizedFinancials = financials || {};
 
@@ -35,8 +39,65 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
     })
     .filter((x) => x.top);
 
+  const fmtCaptured = (ts) => {
+    if (!ts) return 'none';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return String(ts).slice(0, 10);
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
+
+  const handleSaveSnapshot = async (e) => {
+    e.preventDefault();
+    if (!editingAcc) return;
+    const val = Number(editingAcc.value);
+    if (!Number.isFinite(val) || val < 0) {
+      setBalanceMsg({ tone: 'err', text: 'Enter a valid non-negative balance.' });
+      return;
+    }
+    setSavingBalance(true);
+    setBalanceMsg(null);
+    try {
+      await api.post('/api/balances/snapshots', {
+        provider: editingAcc.provider,
+        account_id: editingAcc.accountId,
+        balance: val,
+        source: 'manual_bankroll_fix',
+        note: 'Set cash balance directly in Bankroll view',
+      });
+      setBalanceMsg({
+        tone: 'ok',
+        text: `Updated ${editingAcc.provider} ${editingAcc.accountId === 'User2' ? 'Secondary' : 'Primary'} cash balance to ${fmt(val)}.`,
+      });
+      setEditingAcc(null);
+      if (typeof window !== 'undefined' && typeof window.__BB_RELOAD_DASHBOARD__ === 'function') {
+        await window.__BB_RELOAD_DASHBOARD__();
+      }
+    } catch (err) {
+      setBalanceMsg({
+        tone: 'err',
+        text: err.response?.data?.detail || err.message || 'Failed to update balance snapshot.',
+      });
+    } finally {
+      setSavingBalance(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {balanceMsg && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`flex items-center gap-2 p-3 rounded-xl border text-xs font-semibold ${
+            balanceMsg.tone === 'ok'
+              ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+              : 'bg-red-950/50 border-red-500/40 text-red-200'
+          }`}
+        >
+          {balanceMsg.tone === 'ok' ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertCircle className="w-4 h-4 text-red-400" />}
+          <span>{balanceMsg.text}</span>
+        </div>
+      )}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
         <div className="p-6 border-b border-slate-800">
           <div className="flex items-center justify-between">
@@ -91,22 +152,72 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
                       <tr className="bg-slate-950/20">
                         <td colSpan={6} className="px-4 py-4">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div className="border border-slate-800 rounded-lg p-4 bg-slate-950/20">
-                              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Primary</div>
-                              <div className="mt-1 text-xl font-black text-white">{fmt(Number((primary?.ledger_in_play ?? primary?.in_play) || 0))}</div>
-                              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-                                <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(primary?.deposited || 0))}</span></div>
-                                <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(primary?.withdrawn || 0))}</span></div>
-                              </div>
-                            </div>
-                            <div className="border border-slate-800 rounded-lg p-4 bg-slate-950/20">
-                              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Secondary</div>
-                              <div className="mt-1 text-xl font-black text-white">{fmt(Number((secondary?.ledger_in_play ?? secondary?.in_play) || 0))}</div>
-                              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-                                <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(secondary?.deposited || 0))}</span></div>
-                                <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(secondary?.withdrawn || 0))}</span></div>
-                              </div>
-                            </div>
+                            {[
+                              { accId: 'Main', label: 'Primary', data: primary },
+                              { accId: 'User2', label: 'Secondary', data: secondary },
+                            ].map(({ accId, label, data }) => {
+                              const currentVal = Number((data?.ledger_in_play ?? data?.in_play) || 0);
+                              const baseVal = Number(data?.in_play || 0);
+                              const deltaVal = Number(data?.ledger_delta || 0);
+                              const isEditing = editingAcc?.provider === p && editingAcc?.accountId === accId;
+                              return (
+                                <div key={accId} className="border border-slate-800 rounded-lg p-4 bg-slate-950/20 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] uppercase tracking-widest text-slate-500 font-black">{label}</span>
+                                    {p !== 'Other' && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setEditingAcc(
+                                            isEditing ? null : { provider: p, accountId: accId, value: currentVal.toFixed(2) }
+                                          )
+                                        }
+                                        className="text-[11px] font-semibold text-indigo-300 hover:text-indigo-200 px-2 py-0.5 rounded border border-indigo-500/30 bg-indigo-950/30"
+                                      >
+                                        {isEditing ? 'Cancel' : 'Set Cash Balance'}
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="text-xl font-black text-white">{fmt(currentVal)}</div>
+                                  <div className="text-[11px] text-slate-400">
+                                    Base snapshot: <span className="font-mono text-slate-200">{fmt(baseVal)}</span>
+                                    {data?.captured_at ? ` (${fmtCaptured(data.captured_at)})` : ''} &bull;{' '}
+                                    Post-snapshot delta:{' '}
+                                    <span className={`font-mono ${deltaVal >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                                      {deltaVal >= 0 ? '+' : ''}{fmt(deltaVal)}
+                                    </span>
+                                  </div>
+                                  {isEditing && (
+                                    <form onSubmit={handleSaveSnapshot} className="flex items-center gap-2 pt-1">
+                                      <label htmlFor={`bal-${p}-${accId}`} className="sr-only">
+                                        {p} {label} Cash Balance
+                                      </label>
+                                      <input
+                                        id={`bal-${p}-${accId}`}
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={editingAcc.value}
+                                        onChange={(e) => setEditingAcc({ ...editingAcc, value: e.target.value })}
+                                        className="w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono"
+                                        required
+                                      />
+                                      <button
+                                        type="submit"
+                                        disabled={savingBalance}
+                                        className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+                                      >
+                                        {savingBalance ? 'Saving...' : 'Save'}
+                                      </button>
+                                    </form>
+                                  )}
+                                  <div className="pt-1 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                                    <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(data?.deposited || 0))}</span></div>
+                                    <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(data?.withdrawn || 0))}</span></div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </td>
                       </tr>

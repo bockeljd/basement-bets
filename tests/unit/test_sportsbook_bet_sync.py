@@ -378,3 +378,126 @@ def test_mac_sync_agent_plist_builder():
     assert plist["Label"] == "com.basementbets.syncworker"
     assert "--loop" in plist["ProgramArguments"]
     assert plist["EnvironmentVariables"]["DK_PROFILE_PATH"] == "/tmp/dk_prof"
+
+
+def test_dk_text_parser_rejects_false_won_tab_and_zero_payout():
+    from src.parsers.draftkings_text import DraftKingsTextParser
+
+    # Case 1: UI filter tabs ("All / Open / Settled / Won / Lost") captured above card + Paid: $0.00
+    raw_with_tabs = """All
+Open
+Settled
+Won
+Lost
+FLORIDA A&M +26.5
+-125
+Spread
+FLORIDA A&M @ UTEP
+LOST
+Wager: $5.00
+Paid: $0.00
+Nov 16, 2026, 7:15:00 PM
+DK638991234567890
+"""
+    parser = DraftKingsTextParser()
+    bets = parser.parse(raw_with_tabs)
+    assert len(bets) == 1
+    b = bets[0]
+    assert b["status"] == "LOST"
+    assert b["profit"] == -5.0
+    assert b["event_text"] == "FLORIDA A&M @ UTEP"
+
+    # Case 2: Card with "Paid: $0.00" where "Won" appeared earlier -> Paid: $0.00 must win -> LOST (-$5.00)
+    raw_paid_zero = """Won Boost Promo
+FLORIDA A&M +26.5
+-125
+Spread
+FLORIDA A&M @ UTEP
+Wager: $5.00
+Paid: $0.00
+Nov 16, 2026, 7:15:00 PM
+DK638991234567891
+"""
+    bets2 = parser.parse(raw_paid_zero)
+    assert len(bets2) == 1
+    assert bets2[0]["status"] == "LOST"
+    assert bets2[0]["profit"] == -5.0
+
+
+def test_extract_event_text_strips_market_odds_prefix():
+    from src.database import _extract_event_text_from_fields
+
+    ev = _extract_event_text_from_fields(
+        "",
+        "Spread -125: Florida A&M @ Utep",
+        "FLORIDA A&M +26.5",
+    )
+    assert ev == "Florida A&M @ Utep"
+
+
+def test_add_balance_snapshot_invalidates_analytics_cache(monkeypatch):
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+    headers = {"X-BASEMENT-KEY": "test-secret"}
+    client = TestClient(app)
+
+    with patch("src.database.insert_balance_snapshot", return_value=True) as mock_snap, \
+         patch("src.api.invalidate_analytics_cache") as mock_inv:
+        resp = client.post(
+            "/api/balances/snapshots",
+            headers=headers,
+            json={"provider": "DraftKings", "account_id": "Primary", "balance": 12.34},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "success"
+    mock_snap.assert_called_once()
+    mock_inv.assert_called_once()
+
+
+def test_analytics_timezone_aware_snapshot_cutoff():
+    from datetime import datetime, timezone
+    from src.analytics import AnalyticsEngine
+
+    # Snapshot captured at 20:00 UTC (15:00 -05:00 EST); bet created at 19:00 UTC (BEFORE snapshot!)
+    # Without astimezone(utc), 15:00 EST naive would look <= 19:00 UTC and falsely double-count the bet.
+    snaps = {
+        "DraftKings": {
+            "balance": 20.00,
+            "captured_at": datetime.fromisoformat("2026-11-16T15:00:00-05:00"),
+            "source": "manual",
+            "accounts": {
+                "Main": {
+                    "balance": 20.00,
+                    "captured_at": datetime.fromisoformat("2026-11-16T15:00:00-05:00"),
+                    "source": "manual",
+                }
+            },
+        }
+    }
+    bets = [
+        {
+            "id": 1,
+            "user_id": "u1",
+            "provider": "DraftKings",
+            "account_id": "Main",
+            "date": "2026-11-16",
+            "status": "LOST",
+            "wager": 5.0,
+            "profit": -5.0,
+            "created_at": datetime(2026, 11, 16, 19, 0, 0),  # 19:00 UTC == 14:00 EST -> BEFORE 15:00 EST snapshot!
+        }
+    ]
+    with patch("src.analytics.fetch_all_bets", return_value=bets), \
+         patch("src.database.fetch_latest_balance_snapshots", return_value=snaps), \
+         patch("src.analytics.get_db_connection") as mock_conn, \
+         patch("src.database.get_db_connection", new=mock_conn):
+        mock_cur = MagicMock()
+        mock_cur.fetchall.return_value = [{"provider": "DraftKings", "account_id": "Main", "date": "2026-11-14", "type": "Deposit", "description": "Deposit", "amount": 50.0, "balance": None}]
+        mock_conn.return_value.__enter__.return_value.execute.return_value = mock_cur
+        with patch("src.database._exec", return_value=mock_cur):
+            eng = AnalyticsEngine(user_id="u1")
+            fin = eng.get_financial_summary(user_id="u1")
+
+    dk_main = [r for r in fin["breakdown"] if r["provider"] == "DraftKings" and r["account_id"] == "Main"][0]
+    assert dk_main["ledger_delta"] == 0.0
+    assert dk_main["ledger_in_play"] == 20.00
+

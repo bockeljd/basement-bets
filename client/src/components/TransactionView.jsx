@@ -306,6 +306,7 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
         const sources = [bet?.raw_text, bet?.description, bet?.selection].filter(Boolean).map(s => String(s));
         const cleanSide = (x) => {
             let s = String(x || '').trim();
+            s = s.replace(/^(?:Spread|ML|Moneyline|Over\s*\/\s*Under|Over\/Under|Total|Prop|SGP|Parlay|Straight|\d+\s*Leg\s*\w+)(?:\s*[+-]\d+)?\s*:\s*/i, '').trim();
             s = s.replace(/\s+[+\-−–]\d+(?:\.\d+)?\b.*$/, '').trim();
             s = s.replace(/\s+(over|under)\s*\d+(?:\.\d+)?\b.*$/i, '').trim();
             s = s.replace(/\b([A-Za-z]{3,})\s+\1\b/gi, '$1').trim();
@@ -341,9 +342,12 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
     };
 
     const extractEvent = (bet) => {
-        // UI display function
-        if (bet?.event_text) return String(bet.event_text);
-        return computeEventText(bet);
+        // UI display function: recover cleanly if stored event_text starts with a bet-type token ("Spread @ Utep")
+        const rawEv = bet?.event_text ? String(bet.event_text).trim() : '';
+        if (rawEv && !/^(?:Spread|ML|Moneyline|Over\s*\/\s*Under|Over\/Under|Total|Prop|SGP|Straight)\s*@/i.test(rawEv)) {
+            return rawEv;
+        }
+        return computeEventText(bet) || rawEv;
     };
     const filtered = bets.filter(b => {
         // Filter out internal Wallet Transfers
@@ -430,6 +434,7 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                     ledger_delta: 0,
                     computed_in_play: 0,
                     computed_delta: 0,
+                    captured_at: null,
                 };
             }
             agg[key].deposited += Number(r.deposited || 0);
@@ -440,6 +445,9 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
             agg[key].ledger_delta += Number(r.ledger_delta || 0);
             agg[key].computed_in_play += Number(r.computed_in_play || 0);
             agg[key].computed_delta += Number(r.computed_delta || 0);
+            if (r.captured_at && (!agg[key].captured_at || String(r.captured_at) > String(agg[key].captured_at))) {
+                agg[key].captured_at = r.captured_at;
+            }
         }
 
         const breakdown = Object.values(agg).sort((a, b) => {

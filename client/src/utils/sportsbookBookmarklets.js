@@ -58,13 +58,15 @@ export const buildFanDuelBookmarklet = (appOrigin, accountId = 'Main') => {
     }
     function readBalance(){
       try{
-        var sels=['[data-testid*="balance"]','[class*="balance" i]','header','nav'];
+        var sels=['[data-testid*="balance" i]','[data-test-id*="balance" i]','[data-testid*="wallet" i]','[class*="cash-balance" i]','[class*="wallet-balance" i]','[aria-label*="balance" i]'];
+        var bad=/bonus|promo|reward|crown|dk\\s*dollar|free|boost|bet\\s*\\$|get\\s*\\$/i;
         for(var i=0;i<sels.length;i++){
           var els=document.querySelectorAll(sels[i]);
           for(var j=0;j<els.length;j++){
             var txt=(els[j].innerText||'').trim();
+            if(!txt||txt.length>80||bad.test(txt))continue;
             var m=txt.match(/\\$([0-9,]+\\.\\d{2})/);
-            if(m&&txt.length<80){return parseFloat(m[1].replace(/,/g,''));}
+            if(m){return parseFloat(m[1].replace(/,/g,''));}
           }
         }
       }catch(e){}
@@ -148,30 +150,41 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
     if(document.body){document.body.appendChild(pill);}
     function readBalance(){
       try{
-        var sels=['[data-testid*="balance"]','[class*="balance" i]','header','nav'];
+        var sels=['[data-testid*="balance" i]','[data-test-id*="balance" i]','[data-testid*="wallet" i]','[class*="cash-balance" i]','[class*="wallet-balance" i]','[aria-label*="balance" i]'];
+        var bad=/bonus|promo|reward|crown|dk\\s*dollar|free|boost|bet\\s*\\$|get\\s*\\$/i;
         for(var i=0;i<sels.length;i++){
           var els=document.querySelectorAll(sels[i]);
           for(var j=0;j<els.length;j++){
             var txt=(els[j].innerText||'').trim();
+            if(!txt||txt.length>80||bad.test(txt))continue;
             var m=txt.match(/\\$([0-9,]+\\.\\d{2})/);
-            if(m&&txt.length<80){return parseFloat(m[1].replace(/,/g,''));}
+            if(m){return parseFloat(m[1].replace(/,/g,''));}
           }
         }
       }catch(e){}
       return null;
     }
     var root=document.querySelector('main')||document.body;
-    var cardSels=["[data-testid*='bet']","[data-test-id*='bet']","[class*='bet-card']","[class*='BetCard']","[class*='mybets']","[class*='my-bets']"];
-    var seen={};var cards=[];
+    var cardSels=["[data-testid*='bet-card']","[data-test-id*='bet-card']","[class*='bet-card']","[class*='BetCard']","[data-testid*='bet']","[data-test-id*='bet']"];
+    var els=[];
     cardSels.forEach(function(sel){
       root.querySelectorAll(sel).forEach(function(el){
-        var t=(el.innerText||'').trim();
-        if(!t||t.length<45||seen[t])return;
-        var tl=t.toLowerCase();
-        var hasOutcome=/won|lost|void|push|cashed|open|to win|payout/.test(tl);
-        var hasMoney=/\\$|usd/.test(tl);
-        if(hasOutcome&&hasMoney){seen[t]=true;cards.push(t);}
+        if(els.indexOf(el)===-1){els.push(el);}
       });
+    });
+    var leafEls=els.filter(function(el){
+      return !els.some(function(other){return other!==el&&el.contains(other);});
+    });
+    var seen={};var cards=[];
+    (leafEls.length?leafEls:els).forEach(function(el){
+      var t=(el.innerText||'').trim();
+      if(!t||t.length<45||seen[t])return;
+      var dkIds=t.match(/DK\\d{10,}/g)||[];
+      if(dkIds.length>1)return;
+      var tl=t.toLowerCase();
+      var hasOutcome=/\\b(won|lost|void|push|cashed|open)\\b|to win|payout/.test(tl);
+      var hasMoney=/\\$|usd/.test(tl);
+      if(hasOutcome&&hasMoney){seen[t]=true;cards.push(t);}
     });
     var rawText=cards.length?cards.join('\\n\\n'):(root.innerText||'');
     var bal=readBalance();

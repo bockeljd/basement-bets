@@ -630,7 +630,8 @@ class AnalyticsEngine:
                     except Exception:
                         return None
             if hasattr(d, 'replace') and hasattr(d, 'tzinfo') and d.tzinfo:
-                return d.replace(tzinfo=None)
+                from datetime import timezone as _tz
+                return d.astimezone(_tz.utc).replace(tzinfo=None)
             return d
 
         bets = self.bets
@@ -1026,6 +1027,7 @@ class AnalyticsEngine:
 
         def _to_naive_dt(x):
             try:
+                from datetime import timezone as _tz
                 from dateutil.parser import parse as parse_date
                 if isinstance(x, str):
                     try:
@@ -1033,7 +1035,7 @@ class AnalyticsEngine:
                     except Exception:
                         return None
                 if hasattr(x, 'tzinfo') and x.tzinfo:
-                    x = x.replace(tzinfo=None)
+                    x = x.astimezone(_tz.utc).replace(tzinfo=None)
                 return x
             except Exception:
                 return None
@@ -1144,6 +1146,7 @@ class AnalyticsEngine:
                     "net_profit": float(acc_stats.get('withdrawn') or 0.0) - float(acc_stats.get('deposited') or 0.0),
                     "in_play": base_bal,
                     "captured_at": (snap or {}).get('captured_at'),
+                    "snapshot_source": (snap or {}).get('source'),
                     "ledger_delta": float(ledger_delta),
                     "ledger_in_play": float(ledger_in_play),
                     "computed_in_play": None,

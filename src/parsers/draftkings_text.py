@@ -173,6 +173,24 @@ class DraftKingsTextParser:
                      
                  if not is_noise:
                      cleaned_lines.append(l)
+
+            # Strip DraftKings UI filter tab bar lines (e.g. "All / Open / Settled / Won / Lost")
+            # if 2+ consecutive tab keywords appear near the start before bet financial lines.
+            _DK_TAB_WORDS = {"ALL", "OPEN", "SETTLED", "WON", "LOST", "CASHED OUT", "CASH OUT", "MY BETS", "MY BETS:", "OPEN BETS", "SETTLED BETS"}
+            while len(cleaned_lines) >= 2:
+                head_tabs = []
+                for ln in cleaned_lines:
+                    lu = ln.strip().upper()
+                    if lu in _DK_TAB_WORDS or re.fullmatch(r'(?:ALL|OPEN|SETTLED|WON|LOST|CASHED OUT)(?:\s*\|\s*(?:ALL|OPEN|SETTLED|WON|LOST|CASHED OUT))+', lu):
+                        head_tabs.append(ln)
+                    else:
+                        break
+                # Only treat leading cluster as UI navigation if >=2 distinct tab words are stacked
+                distinct_tabs = {w.strip().upper() for w in head_tabs}
+                if len(distinct_tabs) >= 2 and not any("$" in w for w in head_tabs):
+                    cleaned_lines = cleaned_lines[len(head_tabs):]
+                else:
+                    break
             
             lines = cleaned_lines
             if not lines: return None
@@ -182,6 +200,7 @@ class DraftKingsTextParser:
             status_idx = -1
             wager = 0.0
             paid = 0.0
+            has_paid = False
             wager_idx = -1
             matchup = ""
             matchup_idx = -1
@@ -223,11 +242,32 @@ class DraftKingsTextParser:
                             except Exception:
                                 odds = int(odds_matches[-1])
 
-                # Status
-                if status == "PENDING" and any(x in l_up for x in ["WON", "LOST", "CASHED OUT"]):
-                    if "WON" in l_up: status = "WON"
-                    elif "LOST" in l_up: status = "LOST"
-                    elif "CASHED OUT" in l_up: status = "CASHED OUT"
+                # Status (word-boundary matches; prefer explicit badge / latest settled token, never substring match)
+                st_tok = None
+                if re.fullmatch(r'LOST(?:\s*\(.*\))?', l_up):
+                    st_tok = "LOST"
+                elif re.fullmatch(r'WON(?:\s*\(.*\))?', l_up):
+                    st_tok = "WON"
+                elif re.fullmatch(r'(?:VOID|CANCELLED|CANCELED|REFUNDED)', l_up):
+                    st_tok = "VOID"
+                elif re.fullmatch(r'(?:PUSH|TIE|TIED)', l_up):
+                    st_tok = "PUSH"
+                elif re.fullmatch(r'CASHED\s+OUT', l_up):
+                    st_tok = "CASHED OUT"
+                elif re.search(r'\bCASHED\s+OUT\b', l_up):
+                    st_tok = "CASHED OUT"
+                elif re.search(r'\bLOST\b', l_up):
+                    st_tok = "LOST"
+                elif re.search(r'\bVOID\b', l_up):
+                    st_tok = "VOID"
+                elif re.search(r'\bPUSH\b', l_up):
+                    st_tok = "PUSH"
+                elif re.search(r'\bWON\b', l_up):
+                    st_tok = "WON"
+
+                if st_tok:
+                    # Explicit LOST/VOID/PUSH badge in card body overrides any earlier accidental match
+                    status = st_tok
                     status_idx = i
                 
                 # Wager
@@ -240,6 +280,7 @@ class DraftKingsTextParser:
                 p_match = re.search(r'(?:Paid|Payout):[\s\xa0]*\$([\d\.,]+)', l)
                 if p_match:
                     paid = float(p_match.group(1).replace(',', ''))
+                    has_paid = True
                     paid_idx = i
 
             # Matchup & Team Detection
@@ -648,11 +689,27 @@ class DraftKingsTextParser:
                 except Exception:
                     profit = None
 
-            # If we have Paid/Payout, compute profit
+            # If explicit Paid/Payout amount is present, use it as ground truth against false WON labels!
             status_up = status.upper()
+            if has_paid and wager > 0:
+                if paid == 0.0 and status_up not in ("VOID", "PUSH", "PENDING"):
+                    # Explicit Paid: $0.00 means the bet lost ($0 returned), never WON +odds profit!
+                    status = "LOST"
+                    status_up = "LOST"
+                    profit = -wager
+                elif status_up == "CASHED OUT":
+                    profit = paid - wager
+                    if profit > 0.005:
+                        status = "WON"
+                    elif profit < -0.005:
+                        status = "LOST"
+                    else:
+                        status = "PUSH"
+                    status_up = status
+
             if profit is None:
                 if status_up in ("WON", "CASHED OUT"):
-                    if paid > 0 and wager > 0:
+                    if has_paid and wager > 0:
                         profit = paid - wager
                     elif odds and wager > 0:
                         profit = wager * (odds / 100) if odds > 0 else wager * (100 / abs(odds))
@@ -718,6 +775,7 @@ class DraftKingsTextParser:
                 except Exception:
                     selection = 'DraftKings bet'
 
+            clean_ev_txt = matchup if (matchup and matchup != "Unknown Matchup" and ("@" in matchup or " vs " in matchup.lower())) else None
             return {
                 "provider": "DraftKings",
                 "external_id": ext_id,
@@ -729,6 +787,7 @@ class DraftKingsTextParser:
                 "status": status.upper(),
                 "description": description,
                 "selection": selection,
+                "event_text": clean_ev_txt,
                 "odds": odds,
                 "is_live": "LIVE" in " ".join(lines).upper(),
                 "is_bonus": "Boost" in "".join(lines) or "Bonus" in "".join(lines),
