@@ -309,7 +309,7 @@ const ModelPerformanceAnalytics = ({
       .map(finalizeBucket)
       .sort((a, b) => b.settled - a.settled);
 
-    // 6. By Sport Comparison (from allHistory across sports if supplied)
+    // 6. By Sport Breakdown (respects active filters via history unless overridden)
     const sportSource = Array.isArray(allHistory) ? allHistory : safeHistory;
     const sportMap = {};
     for (const h of sportSource) {
@@ -972,7 +972,9 @@ const ModelPerformanceAnalytics = ({
                 Performance by Sport
               </h3>
               <p className="text-xs text-slate-400">
-                {isTop6Scope ? 'All-season Top 6 / Day totals by sport.' : 'All-season totals by sport.'} Click any sport row to filter the whole page.
+                {selectedSport !== 'ALL'
+                  ? `Filtered to ${filterSummary} (${isTop6Scope ? 'Top 6 / Day' : 'All Picks'}). Click Show All Sports to compare sports.`
+                  : `${filterSummary} (${isTop6Scope ? 'Top 6 / Day' : 'All Picks'}). Click any sport row to filter the whole page.`}
               </p>
             </div>
             {selectedSport !== 'ALL' && onSelectSport && (

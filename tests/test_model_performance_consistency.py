@@ -134,6 +134,9 @@ def test_source_audit_picks_top6_before_subfilters():
     assert 'scopePreMarketHistory' in content
     assert 'preMarketHistory={scopePreMarketHistory}' in content
     assert content.index('scopeBaseAllMarketsHistory') < content.index('const scopedHistory = useMemo')
+    # Performance by Sport must honor the active Sport & Season filters (never bypass via unfiltered allHistory)
+    assert 'allSportsScopedHistory' not in content
+    assert 'allHistory={' not in content
 
     research = read_file('client/src/pages/Research.jsx')
     assert 'top6SlatePlays' in research

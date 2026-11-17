@@ -349,23 +349,6 @@ export default function Picks() {
     return scopePreConfHistory.filter((h) => matchesConfFilter(h, confFilter));
   }, [scopePreConfHistory, confFilter]);
 
-  // Cross-sport history for Performance by Sport (respects Pick Scope, Time Window, Bet Type, Confidence)
-  const allSportsScopedHistory = useMemo(() => {
-    let base = windowAllHistory;
-    if (historyScope === 'top6') {
-      const bySport = {};
-      for (const h of windowAllHistory) {
-        const sp = normalizeSport(h);
-        if (!bySport[sp]) bySport[sp] = [];
-        bySport[sp].push(h);
-      }
-      base = Object.values(bySport).flatMap((rows) => selectTopPicksPerDay(rows, 6));
-    }
-    return base.filter(
-      (h) => matchesMarketFilter(h, marketFilter) && matchesConfFilter(h, confFilter)
-    );
-  }, [windowAllHistory, historyScope, marketFilter, confFilter]);
-
   // Precompute true daily rank (#1-#6 per day across all bet types & confidence levels)
   const rankByRowKey = useMemo(() => {
     const byDay = {};
@@ -1292,7 +1275,6 @@ export default function Picks() {
         history={scopedHistory}
         preConfHistory={scopePreConfHistory}
         preMarketHistory={scopePreMarketHistory}
-        allHistory={allSportsScopedHistory}
         isTop6Scope={historyScope === 'top6'}
         selectedSport={selectedSport}
         onSelectSport={handleSportChange}
