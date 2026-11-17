@@ -190,3 +190,15 @@ def test_source_audit_day_precedence():
     
     assert day_func.index('day_et') < day_func.index('start_time')
     assert day_func.index('start_time') < day_func.index('analyzed_at')
+
+
+def test_source_audit_no_implied_win_rule_on_games():
+    """Verify implied bet-settlement rules (howItWins / shortRule) are not shown on game cards or board rows."""
+    for path in (
+        'client/src/pages/Research.jsx',
+        'client/src/components/today/TodayPlayCard.jsx',
+        'client/src/components/today/TodayFullBoardTable.jsx',
+    ):
+        content = read_file(path)
+        assert 'howItWins' not in content
+        assert 'shortRule' not in content

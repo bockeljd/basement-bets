@@ -9,7 +9,6 @@ import {
   lookupTopPickForGame,
   safeReasonText,
   getProjectedScore,
-  explainPickPlainly,
   getLiveGameStatus,
   getModelSignalData,
   getRecommendedBetSize,
@@ -67,7 +66,6 @@ const TodayFullBoardTable = ({
         const liveInfo = getLiveGameStatus(game, rec || lean, ctx);
         const isFinal = liveInfo.isFinal;
         const projScore = getProjectedScore(game, { context: ctx }, rec);
-        const plainPick = explainPickPlainly(rec || (lean ? { ...lean, bet_type: lean.bet_type || 'SPREAD' } : null), game);
         const modelSig = getModelSignalData(rec || lean, ctx, null, game);
         const evVal =
           recEv !== null
@@ -86,7 +84,6 @@ const TodayFullBoardTable = ({
           isFinal,
           liveInfo,
           projScore,
-          plainPick,
           modelSig,
           evVal: Number.isFinite(evVal) ? evVal : -999,
           confVal: Number.isFinite(confVal) ? confVal : -1,
@@ -249,7 +246,7 @@ const TodayFullBoardTable = ({
                 </td>
               </tr>
             ) : (
-              rows.map(({ game, meta, rec, recEv, conf, ctx, lean, isActionable, isFinal, liveInfo, projScore, plainPick, modelSig }) => {
+              rows.map(({ game, meta, rec, recEv, conf, ctx, lean, isActionable, isFinal, liveInfo, projScore, modelSig }) => {
                 const cleanReason = safeReasonText(meta?.reason);
                 const homeSpread = game.home_spread ?? game.spread_home;
                 const totalLine = game.total_line ?? game.total;
@@ -384,11 +381,6 @@ const TodayFullBoardTable = ({
                               {rec.selection || rec.pick}
                             </span>
                           </div>
-                          {plainPick?.shortRule && (
-                            <span className="text-[11px] text-emerald-200/90 truncate">
-                              {plainPick.shortRule}
-                            </span>
-                          )}
                           <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono text-slate-400">
                             <span>{fmtOdds(rec.price)} · {rec.book || 'Consensus'}</span>
                             {liveInfo.coverText && (
@@ -444,11 +436,6 @@ const TodayFullBoardTable = ({
                           {liveInfo.isLive && liveInfo.trendDetail && (
                             <span className="text-[10px] text-slate-300 line-clamp-1">
                               {liveInfo.trendDetail}
-                            </span>
-                          )}
-                          {plainPick?.shortRule && lean?.selection && !liveInfo.isLive && (
-                            <span className="text-[11px] text-indigo-200/90 truncate">
-                              Meaning: {plainPick.shortRule}
                             </span>
                           )}
                           {!liveInfo.isLive && cleanReason && (

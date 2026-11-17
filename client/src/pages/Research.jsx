@@ -37,7 +37,6 @@ import {
   hasTop6RiskFlag,
   decodeKenpomHashImport,
   getProjectedScore,
-  explainPickPlainly,
   getLiveGameStatus,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
@@ -1265,7 +1264,6 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                 {closestLeans.map(({ id, game, lean, meta, ctx }) => {
                   const reasonTxt = safeReasonText(lean.reason || meta?.reason);
                   const projScore = getProjectedScore(game, { context: ctx }, lean);
-                  const plainLean = explainPickPlainly(lean, game);
                   const liveInfo = getLiveGameStatus(game, lean, ctx);
                   return (
                     <article
@@ -1328,11 +1326,6 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                             {lean.ev_pct != null ? `(${fmtSigned(lean.ev_pct, 1)}%)` : ''}
                           </span>
                         </div>
-                        {plainLean?.howItWins && (
-                          <p className="text-[11px] text-emerald-200/90 leading-snug">
-                            {plainLean.howItWins}
-                          </p>
-                        )}
                         <div className="text-[11px] font-mono text-slate-400 flex flex-wrap items-center gap-x-2">
                           <span>Sportsbook: {lean.market_line != null ? lean.market_line : '—'} ({fmtOdds(lean.price)})</span>
                           <span>·</span>

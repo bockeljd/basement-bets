@@ -19,7 +19,6 @@ import {
   normalizeMovementTag,
   buildWhyPickReasons,
   getProjectedScore,
-  explainPickPlainly,
   buildVisualModelData,
   getLiveGameStatus,
   getModelSignalData,
@@ -70,7 +69,6 @@ const TodayPlayCard = ({
 
   const analysisLike = context ? { context } : null;
   const projectedScore = getProjectedScore(game, analysisLike, rec);
-  const plain = explainPickPlainly(rec, game);
   const visualData = buildVisualModelData(rec, game, analysisLike);
   const liveInfo = getLiveGameStatus(game, rec, context);
   const modelSignals = getModelSignalData(rec, context, null, game);
@@ -144,7 +142,6 @@ const TodayPlayCard = ({
           </h3>
           <p className="text-xs text-slate-400 truncate">
             {game?.away_team} {game?.neutral_site ? 'vs' : '@'} {game?.home_team}
-            {plain?.shortRule ? ` · ${plain.shortRule}` : ''}
           </p>
         </div>
 
