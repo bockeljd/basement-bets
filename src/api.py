@@ -1884,6 +1884,7 @@ async def get_history(
     lookback_days = max(30, min(lookback_days, 1200))
 
     # Combined History: Canonical Slate-backed + User Fallback
+    import src.database as _db_mod
     from src.database import fetch_recommended_history_canonical, fetch_model_history
     from src.utils.model_performance import dedupe_and_merge_history, get_row_season, normalize_sport
 
@@ -1900,14 +1901,24 @@ async def get_history(
     for r in user_rows:
         r['source_type'] = 'fallback_prediction'
 
-    rows = dedupe_and_merge_history(canonical_rows, user_rows)
+    extra_covered = set()
+    if sport_filter in (None, "NCAAM"):
+        eval_fn = getattr(_db_mod, "fetch_evaluated_ncaam_days", None)
+        if callable(eval_fn):
+            try:
+                extra_covered = {("NCAAM", d) for d in (eval_fn(lookback_days=lookback_days) or set())}
+            except Exception:
+                extra_covered = set()
+
+    rows = dedupe_and_merge_history(canonical_rows, user_rows, extra_covered_sport_days=extra_covered)
 
     # Global Fallback
     if not rows:
-        global_rows = fetch_model_history(user_id=None, league=sport_filter, recommended_only=True, limit=limit, lookback_days=lookback_days)
-        for r in global_rows:
-            r['source_type'] = 'legacy_fallback'
-        rows = dedupe_and_merge_history([], global_rows)
+        if not extra_covered:
+            global_rows = fetch_model_history(user_id=None, league=sport_filter, recommended_only=True, limit=limit, lookback_days=lookback_days)
+            for r in global_rows:
+                r['source_type'] = 'legacy_fallback'
+            rows = dedupe_and_merge_history([], global_rows, extra_covered_sport_days=extra_covered)
 
     if sport_filter:
         rows = [r for r in rows if normalize_sport(r.get('sport'), event_id=r.get('event_id')) == sport_filter]
@@ -4953,9 +4964,22 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
                 slate, items = fb_slate, fb_items
 
         if not slate or not items:
-            fb_slate, fb_items = _yesterday_items_from_predictions(conn, yday)
-            if fb_slate and fb_items:
-                slate, items = fb_slate, fb_items
+            # Only fall back to raw model_predictions if daily_top_picks never evaluated yday
+            has_dtp_eval = False
+            try:
+                cnt_row = _exec(
+                    conn,
+                    "SELECT COUNT(*) FROM daily_top_picks WHERE league='NCAAM' AND date_et=%s",
+                    (yday,),
+                ).fetchone()
+                cnt_val = (cnt_row[0] if not isinstance(cnt_row, dict) else list(cnt_row.values())[0]) if cnt_row else 0
+                has_dtp_eval = int(cnt_val or 0) > 0
+            except Exception:
+                has_dtp_eval = False
+            if not has_dtp_eval:
+                fb_slate, fb_items = _yesterday_items_from_predictions(conn, yday)
+                if fb_slate and fb_items:
+                    slate, items = fb_slate, fb_items
 
     if not slate or not items:
         return {"status": "success", "date_et": yday, "slate": None, "straight": [], "ml_parlay": [], "record": {"straight": None, "ml_parlay": None}}

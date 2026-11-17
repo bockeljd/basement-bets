@@ -2000,6 +2000,37 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         return out_rows[:limit]
 
 
+def fetch_evaluated_ncaam_days(lookback_days: int = 120) -> set:
+    """Return ET date strings covered by NCAAM recommended_slates or daily_top_picks (even if 0 actionable)."""
+    days = set()
+    try:
+        date_cond_dtp = ""
+        date_cond_rs = ""
+        params = []
+        if lookback_days and int(lookback_days) > 0:
+            date_cond_dtp = "AND date_et >= (NOW() AT TIME ZONE 'America/New_York' - (%s || ' days')::interval)::date"
+            date_cond_rs = "AND date_et >= (NOW() AT TIME ZONE 'America/New_York' - (%s || ' days')::interval)::date::text"
+            params = [int(lookback_days), int(lookback_days)]
+        q = f"""
+        SELECT DISTINCT date_et::text AS day_et
+        FROM daily_top_picks
+        WHERE league = 'NCAAM' {date_cond_dtp}
+        UNION
+        SELECT DISTINCT date_et::text AS day_et
+        FROM recommended_slates
+        WHERE league = 'NCAAM' {date_cond_rs}
+        """
+        with get_db_connection() as conn:
+            rows = _exec(conn, q, tuple(params)).fetchall()
+            for r in rows:
+                val = r["day_et"] if isinstance(r, dict) else r[0]
+                if val:
+                    days.add(str(val)[:10])
+    except Exception:
+        pass
+    return days
+
+
 def fetch_bet_detail(bet_id: int, user_id: str = None):
     """Fetch a single bet with ALL columns including raw_text (detail view)."""
     q = "SELECT * FROM bets WHERE id = %s"

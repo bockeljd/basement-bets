@@ -1,3 +1,4 @@
+from __future__ import annotations
 
 def payout_per_unit(price) -> float:
     """
@@ -492,12 +493,59 @@ def _semantic_row_key(row: dict):
     return (eid, mt)
 
 
-def dedupe_and_merge_history(canonical_rows: list, fallback_rows: list) -> list:
-    """Normalize and merge canonical slate rows with fallback predictions without double-counting."""
+def _canonical_row_day(row: dict) -> str | None:
+    """Resolve canonical ET day key (YYYY-MM-DD) for history slate matching."""
+    from datetime import datetime, timezone
+
+    raw_day = row.get("day_et")
+    if raw_day and len(str(raw_day).strip()) >= 10:
+        return str(raw_day).strip()[:10]
+
+    for key in ("start_time", "analyzed_at", "created_at"):
+        val = row.get(key)
+        if not val:
+            continue
+        if hasattr(val, "astimezone"):
+            try:
+                from zoneinfo import ZoneInfo
+
+                dt = val if getattr(val, "tzinfo", None) else val.replace(tzinfo=timezone.utc)
+                return dt.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+            except Exception:
+                return val.strftime("%Y-%m-%d")
+        txt = str(val).strip()
+        if len(txt) >= 10 and "T" in txt:
+            try:
+                from zoneinfo import ZoneInfo
+
+                dt = datetime.fromisoformat(txt.replace("Z", "+00:00"))
+                if getattr(dt, "tzinfo", None) is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+            except Exception:
+                return txt[:10]
+        if len(txt) >= 10:
+            return txt[:10]
+    return None
+
+
+def _sport_day_key(row: dict):
+    sp = normalize_sport(row.get("sport"), event_id=row.get("event_id"))
+    if not sp or sp in ("UNKNOWN", "OTHER"):
+        return None
+    day = _canonical_row_day(row)
+    if not day:
+        return None
+    return (sp, day)
+
+
+def dedupe_and_merge_history(canonical_rows: list, fallback_rows: list, extra_covered_sport_days=None) -> list:
+    """Normalize and merge canonical slate rows with fallback predictions without leaking un-published picks onto covered days."""
     merged = []
     seen_ids = set()
     seen_sem = set()
     daily_pick_eids = set()
+    covered_sport_days = set(extra_covered_sport_days or ())
 
     for raw in canonical_rows or []:
         row = normalize_history_row(raw)
@@ -505,6 +553,9 @@ def dedupe_and_merge_history(canonical_rows: list, fallback_rows: list) -> list:
         rid = row.get("id")
         eid = str(row.get("event_id") or "").strip()
         sem = _semantic_row_key(row)
+        sd = _sport_day_key(row)
+        if sd:
+            covered_sport_days.add(sd)
         if rid and rid in seen_ids:
             continue
         if sem and sem in seen_sem:
@@ -523,6 +574,11 @@ def dedupe_and_merge_history(canonical_rows: list, fallback_rows: list) -> list:
         rid = row.get("id")
         eid = str(row.get("event_id") or "").strip()
         sem = _semantic_row_key(row)
+        sd = _sport_day_key(row)
+        if sd and sd in covered_sport_days:
+            # Covered day already has an official slate (recommended_slates / daily_top_picks);
+            # never backfill un-published model_predictions rows onto it.
+            continue
         if eid and eid in daily_pick_eids:
             # Canonical daily_top_picks already holds this game's single official pick.
             continue

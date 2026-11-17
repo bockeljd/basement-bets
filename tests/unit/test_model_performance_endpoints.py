@@ -821,3 +821,84 @@ def test_parlays_today_accepts_date_filter_and_validates_format(monkeypatch):
     assert seen_params[-1]["target_date"] == "2026-11-15"
 
 
+def test_history_suppresses_unpublished_fallback_predictions_on_covered_days(monkeypatch):
+    import src.database as db
+
+    canonical_2026_11_16 = [
+        normalize_history_row({
+            "id": "fam_pred_1",
+            "event_id": "action:ncaam:fam",
+            "day_et": "2026-11-16",
+            "sport": "NCAAM",
+            "market_type": "SPREAD",
+            "away_team": "Florida A&M Rattlers",
+            "home_team": "UTEP Miners",
+            "selection": "Florida A&M Rattlers +20.5",
+            "bet_line": 20.5,
+            "bet_price": -110,
+            "ev_per_unit": 0.035,
+            "outcome": "LOST",
+            "start_time": "2026-11-17T02:00:00Z",
+        })
+    ]
+
+    leaked_fallbacks = [
+        # Same covered day (2026-11-16): parlay-only ML + transient line moves must be suppressed!
+        normalize_history_row({
+            "id": "ml_st_thomas",
+            "event_id": "action:ncaam:stthomas",
+            "day_et": "2026-11-16",
+            "sport": "NCAAM",
+            "market_type": "MONEYLINE",
+            "away_team": "St. Thomas Tommies",
+            "home_team": "LIU Sharks",
+            "selection": "St. Thomas Tommies",
+            "bet_price": -108,
+            "ev_per_unit": 0.073,
+            "outcome": "WON",
+            "start_time": "2026-11-17T00:00:00Z",
+        }),
+        # Zero-actionable evaluated day (2026-11-17) must also suppress raw fallbacks!
+        normalize_history_row({
+            "id": "zero_day_leak",
+            "event_id": "action:ncaam:nov17",
+            "day_et": "2026-11-17",
+            "sport": "NCAAM",
+            "market_type": "SPREAD",
+            "selection": "Test +4.5",
+            "bet_price": -110,
+            "ev_per_unit": 0.04,
+            "outcome": "PENDING",
+            "start_time": "2026-11-17T23:00:00Z",
+        }),
+        # Older legacy day NOT covered by canonical slate or daily_top_picks is still kept
+        normalize_history_row({
+            "id": "legacy_uncovered",
+            "event_id": "action:ncaam:legacy10",
+            "day_et": "2026-11-10",
+            "sport": "NCAAM",
+            "market_type": "SPREAD",
+            "selection": "Legacy +3.5",
+            "bet_price": -110,
+            "ev_per_unit": 0.05,
+            "outcome": "WON",
+            "start_time": "2026-11-10T23:00:00Z",
+        }),
+    ]
+
+    monkeypatch.setattr(db, "fetch_recommended_history_canonical", lambda **kwargs: list(canonical_2026_11_16))
+    monkeypatch.setattr(db, "fetch_model_history", lambda **kwargs: list(leaked_fallbacks))
+    monkeypatch.setattr(db, "fetch_evaluated_ncaam_days", lambda **kwargs: {"2026-11-16", "2026-11-17"})
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+
+    client = TestClient(app)
+    resp = client.get("/api/research/history?sport=NCAAM", headers={"X-BASEMENT-KEY": "test-secret"})
+    assert resp.status_code == 200
+    ids = [r["id"] for r in resp.json()]
+    assert "fam_pred_1" in ids
+    assert "ml_st_thomas" not in ids
+    assert "zero_day_leak" not in ids
+    assert "legacy_uncovered" in ids
+
+
+
