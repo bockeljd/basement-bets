@@ -109,6 +109,7 @@ def _latest_existing_dk_placed_at(user_id: str, account_id: str) -> datetime | N
                 WHERE provider='DraftKings'
                   AND user_id=%s
                   AND account_id=%s
+                  AND COALESCE(UPPER(status), '') NOT IN ('PENDING', 'OPEN')
                   AND date IS NOT NULL
                 ORDER BY id DESC
                 LIMIT 250
@@ -175,9 +176,9 @@ class DraftKingsIngestService:
         message = None
 
         try:
-            # 1. Scrape
+            # 1. Scrape (settled + open bets)
             scraper = DraftKingsScraper()
-            raw_text = scraper.scrape_settled_bets_automated()
+            raw_text = scraper.scrape_settled_bets_automated(include_open=True)
 
             # 2. Parse
             parser = DraftKingsTextParser()
@@ -213,8 +214,8 @@ class DraftKingsIngestService:
                     filtered.append(bet)
                     continue
 
-                # Strictly greater than cutoff to avoid re-ingesting the last known bet.
-                if dt > cutoff:
+                # Include open bets and >= cutoff so same-timestamp PENDING bets can settle cleanly.
+                if str(bet.get("status") or "").upper() in ("PENDING", "OPEN") or dt >= cutoff:
                     filtered.append(bet)
 
             # 4. Cap

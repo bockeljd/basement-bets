@@ -14,6 +14,8 @@ import MLB from './pages/MLB';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
 import TransactionView from './components/TransactionView';
 import ManualAddBetModal from './components/ManualAddBetModal';
+import ActualsModelReconciliationCard from './components/ActualsModelReconciliationCard';
+import { decodeSportsbookHashImport } from './utils/sportsbookBookmarklets';
 
 console.log("Basement Bets Frontend v1.6.5 Loaded at " + new Date().toISOString());
 
@@ -365,7 +367,66 @@ function App() {
 
         // expose for child components (Transactions edit) without prop drilling
         window.__BB_RELOAD_DASHBOARD__ = reloadDashboard;
-    }, []);
+    }, [showLogin]);
+
+    const [sbImportBanner, setSbImportBanner] = useState(null);
+
+    // Auto-import FanDuel/DraftKings browser bookmarklet payloads (#sb_import=...)
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        let cancelled = false;
+
+        const processSbImport = async () => {
+            let payloadObj = null;
+            try {
+                if (window.location.hash && window.location.hash.includes('sb_import=')) {
+                    payloadObj = decodeSportsbookHashImport(window.location.hash);
+                    if (payloadObj) {
+                        sessionStorage.setItem('pending_sb_import', JSON.stringify(payloadObj));
+                        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+                    }
+                } else {
+                    const cached = sessionStorage.getItem('pending_sb_import');
+                    if (cached) payloadObj = JSON.parse(cached);
+                }
+            } catch (err) {
+                setSbImportBanner({ tone: 'err', text: `Could not read browser sync payload: ${err?.message || 'invalid data'}` });
+                try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch { }
+                return;
+            }
+
+            if (!payloadObj || showLogin || cancelled) return;
+
+            setSbImportBanner({ tone: 'info', text: `Importing ${payloadObj.provider || 'sportsbook'} bets from Chrome...` });
+            try {
+                const res = await api.post('/api/sync/browser-payload', payloadObj);
+                sessionStorage.removeItem('pending_sb_import');
+                const d = res.data || {};
+                const balPart = d.balance_snapshot_saved ? ' • wallet balance saved' : '';
+                setSbImportBanner({
+                    tone: 'ok',
+                    text: `${d.provider || 'Sportsbook'} synced: ${d.bets_saved ?? 0} bets saved (${d.bets_inserted ?? 0} new, ${d.bets_updated ?? 0} updated)${balPart}.`,
+                });
+                setPage('actuals');
+                setActualsTab('transactions');
+                if (typeof window.__BB_RELOAD_DASHBOARD__ === 'function') {
+                    window.__BB_RELOAD_DASHBOARD__();
+                }
+            } catch (err) {
+                setSbImportBanner({
+                    tone: 'err',
+                    text: `Browser sync failed: ${err?.response?.data?.detail || err?.message || 'Request failed'}`,
+                });
+            }
+        };
+
+        processSbImport();
+        window.addEventListener('hashchange', processSbImport);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('hashchange', processSbImport);
+        };
+    }, [showLogin]);
 
     if (showLogin) {
         return (
@@ -453,6 +514,28 @@ function App() {
         <ErrorBoundary>
             <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans selection:bg-brand-blue/30">
                 <div className="max-w-7xl mx-auto">
+                    {sbImportBanner && (
+                        <div
+                            role="status"
+                            aria-live="polite"
+                            className={`mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-xl border text-xs font-semibold ${
+                                sbImportBanner.tone === 'ok'
+                                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200'
+                                    : sbImportBanner.tone === 'err'
+                                    ? 'bg-red-950/60 border-red-500/40 text-red-200'
+                                    : 'bg-blue-950/60 border-blue-500/40 text-blue-200'
+                            }`}
+                        >
+                            <span>{sbImportBanner.text}</span>
+                            <button
+                                type="button"
+                                onClick={() => setSbImportBanner(null)}
+                                className="px-2 py-1 rounded bg-slate-900/60 hover:bg-slate-800 text-slate-300"
+                            >
+                                Dismiss
+                            </button>
+                        </div>
+                    )}
                     {/* Header */}
                     <header className="mb-6 md:mb-8 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                         <div>
@@ -821,8 +904,11 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
     // Charts-only view (no daily picks feed here).
     if (!timeSeries || timeSeries.length === 0) {
         return (
-            <div className="bg-slate-900 border border-slate-800 p-10 rounded-xl text-center">
-                <p className="text-gray-400">No performance data available yet. Settle some bets to see your equity curve!</p>
+            <div className="space-y-6">
+                <ActualsModelReconciliationCard />
+                <div className="bg-slate-900 border border-slate-800 p-10 rounded-xl text-center">
+                    <p className="text-gray-400">No performance data available yet. Settle some bets to see your equity curve!</p>
+                </div>
             </div>
         );
     }
@@ -875,6 +961,8 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                     })}
                 </div>
             </div>
+
+            <ActualsModelReconciliationCard />
 
             {/* Scatter: Win% vs ROI by sport + bet type */}
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">

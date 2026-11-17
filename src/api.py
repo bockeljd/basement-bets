@@ -820,9 +820,13 @@ async def sync_fanduel_token(request: Request):
             token = raw_input.strip()
             if "curl " in raw_input or "-H " in raw_input:
                 import re
-                match = re.search(r"x-authentication:\s*([^\s'\"]+)", raw_input, re.IGNORECASE)
+                match = re.search(
+                    r"(?:x-authentication|x-auth-token|authorization)\s*:\s*(?:Bearer\s+)?([^\s'\";]+)",
+                    raw_input,
+                    re.IGNORECASE,
+                )
                 if match:
-                    token = match.group(1)
+                    token = match.group(1).strip()
             
             if not token.startswith("eyJ"):
                 raise HTTPException(status_code=400, detail="Invalid Token format")
@@ -832,98 +836,201 @@ async def sync_fanduel_token(request: Request):
             update_user_preference(str(user_id), "fanduel_token", token)
             
         from src.api_clients.fanduel_client import FanDuelAPIClient
-        client = FanDuelAPIClient(auth_token=token)
-        
-        # Fetch Bets
-        bets = client.fetch_bets(to_record=50) # Fetch last 50
-        
-        # Ingest into DB (similar to parse_slip but internal object)
-        from src.database import insert_bet_v2
-        from src.services.event_linker import EventLinker
-        linker = EventLinker()
-        
-        user_id = user.get("sub")
-        saved_count = 0
-        
-        for bet in bets:
-            # Check if exists (Idempotency) - FD betId is unique
-            # We use betId as hash_id or part of it?
-            # Schema uses hash_id.
-            
-            # Construct Doc
-            profit = bet.get('profit', 0)
-            status = bet.get('status', 'PENDING')
-            
-            # Map Sport to standard keys if possible
-            sport = bet.get('sport', 'Unknown')
-            
-            doc = {
-                "user_id": user_id,
-                "account_id": f"FD_{user_id}", # Virtual account
-                "provider": "FanDuel",
-                "date": bet['date'],
-                "sport": sport,
-                "bet_type": bet['bet_type'],
-                "wager": bet['wager'],
-                "profit": round(profit, 2),
-                "status": status,
-                "description": bet['description'],
-                "selection": bet['selection'],
-                "odds": bet.get('odds', 0), # American
-                "is_live": bet.get('is_live', False),
-                "is_bonus": bet.get('is_bonus', False),
-                "raw_text": bet.get('raw_text'),
-                "external_id": bet.get('external_id') or bet.get('id') or bet.get('bet_id'),
-                "source": "sync_api",
-            }
-            
-            # Unique Hash for FD: Provider|BetId ? 
-            # But we don't have BetID in standardised 'bet' object returned by client? 
-            # Client returns dict. Let's ensure Client returns external_id if available.
-            # I need to update Client to pass 'betId' in raw_text or separate field?
-            # It's in raw_text.
-            
-            import hashlib
-            # Use description + date + wager as hash if no ID
-            # Better: Update Client to return 'id'.
-            # For now, legacy hash:
-            raw_string = f"{user_id}|FanDuel|{doc['date']}|{doc['description']}|{doc['wager']}"
-            doc['hash_id'] = hashlib.sha256(raw_string.encode()).hexdigest()
-            doc['is_parlay'] = "parlay" in doc['bet_type'].lower()
-            
-            # Create Leg (Simplified for SGP/Parlay, we just store one summary leg or try to split?)
-            # Parsing "A | B | C" into legs is complex.
-            # Storing as single composite leg for now.
-            leg = {
-                "leg_type": doc['bet_type'], 
-                "selection": doc['selection'],
-                "market_key": doc['bet_type'],
-                "odds_american": doc['odds'],
-                "status": doc['status'],
-                "subject_id": None, 
-                "side": None, 
-                "line_value": None
-            }
-            
-            # Link (Best Effort)
-            link_result = linker.link_leg(leg, doc['sport'], doc['date'], doc['description'])
-            leg['event_id'] = link_result['event_id']
-            leg['link_status'] = link_result['link_status']
-            
-            try:
-                insert_bet_v2(doc, legs=[leg])
-                saved_count += 1
-            except Exception as e:
-                # Log duplicates or failures
-                # If duplicate key, it's fine. If usage error, we need to know.
-                print(f"[Sync] Failed to insert bet: {e}")
-                pass
-                
-        return {"status": "success", "bets_fetched": len(bets), "bets_saved": saved_count}
+        from src.services.bet_sync_service import (
+            ingest_normalized_bets,
+            normalize_account_id,
+            record_balance_snapshot,
+        )
 
+        account_id = normalize_account_id(data.get("account_id"), default="Main")
+        include_open = bool(data.get("include_open", True))
+        client = FanDuelAPIClient(auth_token=token)
+        bets = (
+            client.fetch_all_recent_bets(settled_limit=100, open_limit=50)
+            if include_open
+            else client.fetch_bets(to_record=100, is_settled=True)
+        )
+
+        result = ingest_normalized_bets(
+            bets,
+            user_id=str(user_id),
+            default_provider="FanDuel",
+            default_account_id=account_id,
+            source="fanduel_api",
+        )
+        balance_saved = False
+        if data.get("balance") is not None:
+            balance_saved = record_balance_snapshot(
+                provider="FanDuel",
+                account_id=account_id,
+                balance=data.get("balance"),
+                user_id=str(user_id),
+                source="fanduel_api",
+                note="Captured from FanDuel token sync",
+            )
+        invalidate_analytics_cache(str(user_id))
+        return {
+            "status": "success",
+            "provider": "FanDuel",
+            "account_id": account_id,
+            "bets_fetched": len(bets),
+            "bets_saved": result["saved"],
+            "bets_inserted": result["inserted"],
+            "bets_updated": result["updated"],
+            "balance_snapshot_saved": balance_saved,
+            "errors": result["errors"],
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[FD Sync] Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/sync/browser-payload")
+async def sync_browser_payload(request: Request, user: dict = Depends(get_current_user)):
+    """Ingest DraftKings or FanDuel bets, transactions, and balance sent by a 1-click Chrome bookmarklet."""
+    try:
+        from src.sync_jobs import DEFAULT_USER_ID
+        from src.services.bet_sync_service import ingest_browser_payload
+
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="Invalid browser payload")
+
+        user_id = str((user or {}).get("sub") or DEFAULT_USER_ID)
+        result = ingest_browser_payload(data, user_id=user_id)
+        invalidate_analytics_cache(user_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Browser Sync] Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/bets/import-csv")
+async def import_statement_csv(request: Request, user: dict = Depends(get_current_user)):
+    """Import DraftKings or FanDuel CSV statements (bets, deposits, withdrawals, ending balance)."""
+    try:
+        from src.sync_jobs import DEFAULT_USER_ID
+        from src.parsers.statement_csv import parse_sportsbook_statement_csv
+        from src.services.bet_sync_service import (
+            ingest_normalized_bets,
+            ingest_statement_transactions,
+            normalize_account_id,
+            record_balance_snapshot,
+        )
+
+        user_id = str((user or {}).get("sub") or DEFAULT_USER_ID)
+        content_type = (request.headers.get("content-type") or "").lower()
+        csv_text = ""
+        sportsbook = "Auto"
+        account_id = "Main"
+
+        if "multipart/form-data" in content_type:
+            from email.parser import BytesParser
+            from email.policy import default as email_default
+
+            raw_ct = request.headers.get("content-type") or ""
+            raw_body = await request.body()
+            msg = BytesParser(policy=email_default).parsebytes(
+                f"Content-Type: {raw_ct}\r\nMIME-Version: 1.0\r\n\r\n".encode("latin-1") + raw_body
+            )
+            for part in msg.iter_parts():
+                name = part.get_param("name", header="content-disposition")
+                payload_bytes = part.get_payload(decode=True) or b""
+                payload_str = payload_bytes.decode("utf-8", errors="replace")
+                if name in ("file", "csv_text", "text") and payload_str.strip():
+                    csv_text = payload_str
+                elif name in ("sportsbook", "provider"):
+                    sportsbook = payload_str.strip() or sportsbook
+                elif name == "account_id":
+                    account_id = normalize_account_id(payload_str, default="Main")
+        else:
+            data = await request.json()
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=400, detail="Invalid JSON payload")
+            csv_text = str(data.get("csv_text") or data.get("text") or "")
+            sportsbook = str(data.get("sportsbook") or data.get("provider") or "Auto")
+            account_id = normalize_account_id(data.get("account_id"), default="Main")
+
+        parsed = parse_sportsbook_statement_csv(csv_text, sportsbook=sportsbook, account_id=account_id)
+        provider = parsed["provider"]
+        bet_res = ingest_normalized_bets(
+            parsed["bets"],
+            user_id=user_id,
+            default_provider=provider,
+            default_account_id=account_id,
+            source=f"{provider.lower()}_csv",
+        )
+        txn_saved = ingest_statement_transactions(
+            parsed["transactions"],
+            user_id=user_id,
+            default_provider=provider,
+            default_account_id=account_id,
+        )
+        balance_saved = False
+        if parsed.get("closing_balance") is not None:
+            balance_saved = record_balance_snapshot(
+                provider=provider,
+                account_id=account_id,
+                balance=parsed["closing_balance"],
+                user_id=user_id,
+                source=f"{provider.lower()}_csv",
+                note="Closing balance from CSV statement import",
+            )
+        invalidate_analytics_cache(user_id)
+        return {
+            "status": "success",
+            "provider": provider,
+            "account_id": account_id,
+            "rows_scanned": parsed["rows_scanned"],
+            "bets_parsed": len(parsed["bets"]),
+            "bets_saved": bet_res["saved"],
+            "bets_inserted": bet_res["inserted"],
+            "bets_updated": bet_res["updated"],
+            "transactions_saved": txn_saved,
+            "closing_balance": parsed.get("closing_balance"),
+            "balance_snapshot_saved": balance_saved,
+            "errors": bet_res["errors"],
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[CSV Import] Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/actuals/model-reconciliation")
+async def get_actuals_model_reconciliation(
+    lookback_days: int = 120,
+    league: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Compare actual placed DK/FD bets against model recommendations and theoretical ROI."""
+    try:
+        from src.sync_jobs import DEFAULT_USER_ID
+        from src.database import fetch_all_bets, fetch_model_history
+        from src.services.bet_sync_service import compute_actuals_model_reconciliation
+
+        user_id = str((user or {}).get("sub") or DEFAULT_USER_ID)
+        bets = fetch_all_bets(user_id=user_id) or []
+        preds = fetch_model_history(
+            limit=1200,
+            league=league,
+            user_id=user_id,
+            recommended_only=True,
+            dedupe=True,
+            lookback_days=lookback_days,
+        ) or []
+        return compute_actuals_model_reconciliation(bets, preds)
+    except Exception as e:
+        print(f"[Actuals Reconciliation] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/sync/draftkings")
 async def sync_draftkings(request: Request, user: dict = Depends(get_current_user)):

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api/axios';
 import { AlertCircle, CheckCircle2, Loader2, Save, X } from 'lucide-react';
+import SportsbookSyncHub from './SportsbookSyncHub';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -288,34 +289,53 @@ export function PasteSlipContainer({ onSaveSuccess, onClose }) {
                             >
                                 Deposit / Withdrawal
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => { setEntryType('SYNC'); setRawText(''); setParsedData(null); setBatchResults(null); setError(null); }}
+                                className={`px-3 py-2 rounded-xl text-sm font-semibold transition ${entryType === 'SYNC' ? 'bg-indigo-600/80 text-white shadow-sm ring-1 ring-indigo-400/40' : 'text-indigo-300 hover:text-indigo-200 hover:bg-slate-800/40'}`}
+                            >
+                                Auto-Sync / CSV
+                            </button>
                         </div>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Sportsbook</label>
-                        <select
-                            value={sportsbook}
-                            onChange={(e) => setSportsbook(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                        >
-                            {SPORTSBOOKS.map(sb => (
-                                <option key={sb.id} value={sb.id}>{sb.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Bankroll Account</label>
-                        <select
-                            value={bankrollAccount}
-                            onChange={(e) => setBankrollAccount(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                        >
-                            <option value="Main">Primary</option>
-                            <option value="User2">Secondary</option>
-                        </select>
-                    </div>
+                    {entryType !== 'SYNC' && (
+                        <>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Sportsbook</label>
+                                <select
+                                    value={sportsbook}
+                                    onChange={(e) => setSportsbook(e.target.value)}
+                                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                >
+                                    {SPORTSBOOKS.map(sb => (
+                                        <option key={sb.id} value={sb.id}>{sb.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Bankroll Account</label>
+                                <select
+                                    value={bankrollAccount}
+                                    onChange={(e) => setBankrollAccount(e.target.value)}
+                                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                                >
+                                    <option value="Main">Primary</option>
+                                    <option value="User2">Secondary</option>
+                                </select>
+                            </div>
+                        </>
+                    )}
                 </div>
 
-                {/* Sync buttons removed for now (not set up). */}
+                {entryType === 'SYNC' && (
+                    <div className="pt-2">
+                        <SportsbookSyncHub
+                            onSyncComplete={() => {
+                                if (onSaveSuccess) onSaveSuccess();
+                            }}
+                        />
+                    </div>
+                )}
 
                 {entryType === 'BET' && isSyncing && sportsbook === 'FD' && (
                     <div className="space-y-3 animate-in fade-in slide-in-from-top-2">

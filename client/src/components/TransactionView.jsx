@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
+import SportsbookSyncHub from './SportsbookSyncHub';
 import { Trash, DollarSign, Activity, Pencil, CheckCircle2 } from 'lucide-react';
 import EditBetModal from './EditBetModal';
 import SportAuditorModal from './SportAuditorModal';
@@ -85,6 +86,7 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
     const [editNote, setEditNote] = useState('');
 
     // Auditor UI (sport mismatches)
+    const [showSyncModal, setShowSyncModal] = useState(false);
     const [showAudit, setShowAudit] = useState(false);
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditItems, setAuditItems] = useState([]);
@@ -454,6 +456,36 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
 
     return (
         <div className="space-y-8">
+            {showSyncModal && (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Sync Sportsbooks or Import CSV"
+                    className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+                >
+                    <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                            <h2 className="text-base font-bold text-white">Sync Sportsbooks &amp; Statements</h2>
+                            <button
+                                type="button"
+                                onClick={() => setShowSyncModal(false)}
+                                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <SportsbookSyncHub
+                            onSyncComplete={() => {
+                                setTimeout(() => {
+                                    try { localStorage.setItem('nav_after_save', 'transactions'); } catch (e) { }
+                                    window.location.reload();
+                                }, 900);
+                            }}
+                        />
+                    </div>
+                </div>
+            )}
+
             <SportAuditorModal
                 show={showAudit}
                 items={auditItems}
@@ -765,6 +797,15 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                     <div className="flex items-center gap-2">
                         <>
                             <button
+                                type="button"
+                                onClick={() => setShowSyncModal(true)}
+                                className="text-xs text-indigo-300 hover:text-indigo-200 font-semibold px-3 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-950/30 hover:bg-indigo-900/30 transition"
+                            >
+                                Sync / CSV Import
+                            </button>
+
+                            <button
+                                type="button"
                                 onClick={() => setShowManualAdd(true)}
                                 className="text-xs text-green-300 hover:text-green-200 font-medium px-3 py-1.5 rounded-lg border border-green-900/40 hover:bg-green-900/20 transition"
                             >

@@ -38,111 +38,82 @@ def _worker_id() -> str:
     return f"{host}:{pid}"
 
 
-def _ingest_bets_v2(user_id: str, provider_label: str, bets: list[dict]) -> int:
-    """Ingest parsed bet dicts into bets_v2 via insert_bet_v2.
+def _extract_job_account_id(job: dict) -> str:
+    import json as _json
+    from src.services.bet_sync_service import normalize_account_id
 
-    Accepts heterogeneous bet dicts from DK/FD parsers.
-    """
-    import hashlib
-    from datetime import datetime
-
-    from src.database import insert_bet_v2
-    from src.services.event_linker import EventLinker
-
-    linker = EventLinker()
-    saved = 0
-
-    for bet in bets:
-        # Normalize fields from various parsers
-        status = (bet.get("status") or "PENDING").upper()
-        stake = float(bet.get("stake") or bet.get("wager") or 0.0)
-        odds = bet.get("odds")
-        profit = bet.get("profit")
-
-        placed_at = bet.get("placed_at") or bet.get("date") or ""
-        date_part = placed_at.split(" ")[0].split("T")[0] if placed_at else datetime.now().strftime("%Y-%m-%d")
-
-        doc = {
-            "user_id": user_id,
-            "account_id": bet.get("account_id"),
-            "provider": provider_label,
-            "date": date_part,
-            "sport": bet.get("sport") or "Unknown",
-            "bet_type": bet.get("market_type") or bet.get("bet_type"),
-            "wager": stake,
-            "profit": round(float(profit), 2) if profit is not None else 0.0,
-            "status": status,
-            "description": bet.get("event_name") or bet.get("description"),
-            "selection": bet.get("selection"),
-            "odds": int(odds) if odds is not None else None,
-            "is_live": bool(bet.get("is_live", False)),
-            "is_bonus": bool(bet.get("is_bonus", False)),
-            "raw_text": bet.get("raw_text"),
-        }
-
-        # Idempotency hash
-        raw_string = f"{user_id}|{doc['provider']}|{doc['date']}|{doc['description']}|{doc['wager']}|{doc.get('selection')}|{doc.get('odds')}"
-        doc["hash_id"] = hashlib.sha256(raw_string.encode()).hexdigest()
-        doc["is_parlay"] = "parlay" in str(doc.get("bet_type") or "").lower()
-
-        leg = {
-            "leg_type": doc["bet_type"],
-            "selection": doc["selection"],
-            "market_key": doc["bet_type"],
-            "odds_american": doc["odds"],
-            "status": doc["status"],
-            "subject_id": None,
-            "side": None,
-            "line_value": bet.get("line") or bet.get("points"),
-        }
-
+    meta = job.get("meta") or {}
+    payload_raw = job.get("payload_json") or {}
+    if isinstance(payload_raw, str):
         try:
-            link_result = linker.link_leg(leg, doc["sport"], doc["date"], doc["description"])
-            leg["event_id"] = link_result.get("event_id")
-            leg["selection_team_id"] = link_result.get("selection_team_id")
-            leg["link_status"] = link_result.get("link_status")
+            payload_raw = _json.loads(payload_raw)
         except Exception:
-            leg["event_id"] = None
-            leg["selection_team_id"] = None
-            leg["link_status"] = "UNLINKED"
+            payload_raw = {}
+    return normalize_account_id(payload_raw.get("account_id") or meta.get("account_id"), default="Main")
 
-        insert_bet_v2(doc, legs=[leg])
-        saved += 1
 
-    return saved
+def _ingest_bets_v2(user_id: str, provider_label: str, bets: list[dict], account_id: str = "Main", source: str = "sync_worker") -> int:
+    """Ingest parsed bet dicts into canonical `bets` via shared bet_sync_service."""
+    from src.services.bet_sync_service import ingest_normalized_bets
+
+    res = ingest_normalized_bets(
+        bets,
+        user_id=str(user_id),
+        default_provider=provider_label,
+        default_account_id=account_id or "Main",
+        source=source,
+    )
+    return int(res.get("saved", 0))
 
 
 def _run_fanduel_job(job: dict) -> dict:
-    """FanDuel sync using stored token preference."""
+    """FanDuel sync using stored token preference (open + settled bets)."""
     from src.database import get_user_preference
     from src.api_clients.fanduel_client import FanDuelAPIClient
 
     user_id = job.get("user_id")
+    account_id = _extract_job_account_id(job)
     token = get_user_preference(str(user_id), "fanduel_token")
     if not token:
-        raise RuntimeError("No stored FanDuel token. Use Add Bet → FanDuel to store token once.")
+        raise RuntimeError("No stored FanDuel token. Use Add Bet -> Sync -> FanDuel Token to save your token first.")
 
     client = FanDuelAPIClient(auth_token=token)
-    bets = client.fetch_bets(to_record=50)
-    saved = _ingest_bets_v2(user_id=str(user_id), provider_label="FanDuel", bets=bets)
-    return {"bets_fetched": len(bets), "bets_saved": saved}
+    bets = client.fetch_all_recent_bets(settled_limit=100, open_limit=50)
+    saved = _ingest_bets_v2(
+        user_id=str(user_id),
+        provider_label="FanDuel",
+        bets=bets,
+        account_id=account_id,
+        source="fanduel_worker",
+    )
+    return {"bets_fetched": len(bets), "bets_saved": saved, "account_id": account_id}
 
 
 def _run_draftkings_job(job: dict) -> dict:
-    """DraftKings sync via interactive browser automation on the Mac."""
+    """DraftKings sync via interactive browser automation on the Mac (open + settled bets)."""
     from src.scrapers.user_draftkings import DraftKingsScraper
     from src.parsers.draftkings_text import DraftKingsTextParser
 
     user_id = job.get("user_id")
+    account_id = _extract_job_account_id(job)
 
     scraper = DraftKingsScraper()
-    raw_text = scraper.scrape()
+    if hasattr(scraper, "scrape_settled_bets_automated"):
+        raw_text = scraper.scrape_settled_bets_automated(include_open=True)
+    else:
+        raw_text = scraper.scrape()
 
     parser = DraftKingsTextParser()
     parsed = parser.parse(raw_text)
 
-    saved = _ingest_bets_v2(user_id=str(user_id), provider_label="DraftKings", bets=parsed)
-    return {"bets_fetched": len(parsed), "bets_saved": saved}
+    saved = _ingest_bets_v2(
+        user_id=str(user_id),
+        provider_label="DraftKings",
+        bets=parsed,
+        account_id=account_id,
+        source="dk_worker",
+    )
+    return {"bets_fetched": len(parsed), "bets_saved": saved, "account_id": account_id}
 
 
 def _run_dk_ingest_job(job: dict) -> dict:

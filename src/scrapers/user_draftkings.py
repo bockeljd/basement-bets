@@ -191,9 +191,9 @@ class DraftKingsScraper:
     # Automated settled-bets scraper (additive — does not change scrape())
     # ------------------------------------------------------------------
 
-    def scrape_settled_bets_automated(self) -> str:
+    def scrape_settled_bets_automated(self, include_open: bool = False) -> str:
         """
-        Automated wrapper for scraping DraftKings 'My Bets → Settled'.
+        Automated wrapper for scraping DraftKings 'My Bets -> Settled' (and optionally 'Open').
 
         Environment vars consumed:
           DK_PROFILE_PATH    — persistent Chrome profile directory (required)
@@ -314,7 +314,82 @@ class DraftKingsScraper:
             except Exception:
                 pass
 
-            # 3. Click 'Settled' tab with resilient selectors
+            def _collect_tab_cards(tab_name: str, tab_selectors: list, allow_open: bool = False) -> list[str]:
+                clicked = False
+                for by, sel in tab_selectors:
+                    try:
+                        for el in driver.find_elements(by, sel):
+                            if el.is_displayed():
+                                el.click()
+                                clicked = True
+                                print(f"[DK-Auto] Clicked '{tab_name}' via {sel}")
+                                break
+                        if clicked:
+                            break
+                    except Exception:
+                        pass
+                if not clicked:
+                    print(f"[DK-Auto] '{tab_name}' tab not clicked; proceeding with current view.")
+                time.sleep(3)
+
+                last_h = driver.execute_script("return document.body.scrollHeight")
+                for i in range(scroll_pages):
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(1.5)
+                    new_h = driver.execute_script("return document.body.scrollHeight")
+                    if new_h == last_h:
+                        print(f"[DK-Auto] Scroll ({tab_name}) stopped at page {i+1} (no new content).")
+                        break
+                    last_h = new_h
+
+                try:
+                    root = driver.find_element(By.TAG_NAME, "main")
+                except Exception:
+                    root = driver
+
+                cards: list[str] = []
+                seen_cards: set[str] = set()
+                card_selectors = [
+                    "[data-testid*='bet']",
+                    "[data-test-id*='bet']",
+                    "[class*='bet-card']",
+                    "[class*='BetCard']",
+                    "[class*='mybets']",
+                    "[class*='my-bets']",
+                ]
+                for sel in card_selectors:
+                    try:
+                        elements = root.find_elements(By.CSS_SELECTOR, sel) if hasattr(root, "find_elements") else driver.find_elements(By.CSS_SELECTOR, sel)
+                        for el in elements:
+                            try:
+                                t = (el.text or "").strip()
+                                if not t or len(t) <= 60 or t in seen_cards:
+                                    continue
+                                tl = t.lower()
+                                outcome = any(x in tl for x in ("won", "lost", "void", "push", "cashed"))
+                                if allow_open:
+                                    outcome = outcome or any(x in tl for x in ("open", "to win", "payout", "cash out"))
+                                money = ("$" in t) or ("usd" in tl)
+                                if outcome and money:
+                                    seen_cards.add(t)
+                                    cards.append(t)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                return cards
+
+            bet_texts: list[str] = []
+            if include_open:
+                open_selectors = [
+                    (By.XPATH, "//button[normalize-space()='Open']"),
+                    (By.XPATH, "//a[normalize-space()='Open']"),
+                    (By.XPATH, "//*[@data-testid='open-tab']"),
+                    (By.XPATH, "//div[normalize-space()='Open']"),
+                    (By.XPATH, "//span[normalize-space()='Open']"),
+                ]
+                bet_texts.extend(_collect_tab_cards("Open", open_selectors, allow_open=True))
+
             settled_selectors = [
                 (By.XPATH, "//button[normalize-space()='Settled']"),
                 (By.XPATH, "//a[normalize-space()='Settled']"),
@@ -323,76 +398,7 @@ class DraftKingsScraper:
                 (By.XPATH, "//div[normalize-space()='Settled']"),
                 (By.XPATH, "//span[normalize-space()='Settled']"),
             ]
-            settled_clicked = False
-            for by, sel in settled_selectors:
-                try:
-                    elements = driver.find_elements(by, sel)
-                    for el in elements:
-                        if el.is_displayed():
-                            el.click()
-                            settled_clicked = True
-                            print(f"[DK-Auto] Clicked 'Settled' via {sel}")
-                            break
-                    if settled_clicked:
-                        break
-                except Exception:
-                    pass
-
-            if not settled_clicked:
-                print("[DK-Auto] Settled tab not clicked; proceeding with current view.")
-
-            time.sleep(4)
-
-            # 4. Scroll to load more bets
-            last_h = driver.execute_script("return document.body.scrollHeight")
-            for i in range(scroll_pages):
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
-                new_h = driver.execute_script("return document.body.scrollHeight")
-                if new_h == last_h:
-                    print(f"[DK-Auto] Scroll stopped at page {i+1} (no new content).")
-                    break
-                last_h = new_h
-
-            # 5. Extract bet card text
-            # Prefer scoping to the main content area so we don't accidentally scrape
-            # sidebar marketing/empty-state text.
-            root = None
-            try:
-                root = driver.find_element(By.TAG_NAME, "main")
-            except Exception:
-                root = driver
-
-            bet_texts = []
-            card_selectors = [
-                "[data-testid*='bet']",
-                "[data-test-id*='bet']",
-                "[class*='bet-card']",
-                "[class*='BetCard']",
-                "[class*='mybets']",
-                "[class*='my-bets']",
-            ]
-
-            for sel in card_selectors:
-                try:
-                    elements = root.find_elements(By.CSS_SELECTOR, sel) if hasattr(root, 'find_elements') else driver.find_elements(By.CSS_SELECTOR, sel)
-                    for el in elements:
-                        try:
-                            t = (el.text or "").strip()
-                            if not t or len(t) <= 60:
-                                continue
-
-                            tl = t.lower()
-                            # Heuristic: real settled bet cards almost always contain an outcome word
-                            # and a currency amount. This avoids grabbing nav/marketing blocks.
-                            outcome = any(x in tl for x in ("won", "lost", "void", "push", "cashed"))
-                            money = ("$" in t) or ("usd" in tl)
-                            if outcome and money:
-                                bet_texts.append(t)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+            bet_texts.extend(_collect_tab_cards("Settled", settled_selectors, allow_open=False))
 
             if bet_texts:
                 body = "\n\n".join(bet_texts)
