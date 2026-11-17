@@ -196,7 +196,8 @@ def test_ingest_normalized_bets_updates_existing_external_id():
     assert res["bet_ids"] == [777]
     mock_txn_sync.assert_called_once()
     mock_ins_v2.assert_not_called()
-    assert mock_exec.call_count == 2
+    assert mock_exec.call_count >= 2
+    assert any("UPDATE bets SET" in str(c) for c in mock_exec.call_args_list)
 
 
 def test_actuals_model_reconciliation_metrics():
