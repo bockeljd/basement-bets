@@ -5509,13 +5509,10 @@ async def get_ncaam_parlays_today(
     # For home_fav strategy, tighten the default odds band if caller did not override
     _strategy = str(strategy or 'all').lower().strip()
     if _strategy == 'home_fav':
-        # Only override defaults, not explicit caller params.
-        # FastAPI doesn't differentiate default vs explicit, so we use sentinel checks:
-        # If caller passed the global defaults (-120 / 800), apply home_fav tighter defaults.
-        if parlay_odds_lo == -120:
-            parlay_odds_lo = -180
-        if parlay_odds_hi == 800:
-            parlay_odds_hi = 250
+        if parlay_odds_lo in (-120, -200):
+            parlay_odds_lo = -165
+        if parlay_odds_hi in (800, 120):
+            parlay_odds_hi = 140
 
     from src.database import get_db_connection, _exec
 
@@ -5617,10 +5614,127 @@ async def get_ncaam_parlays_today(
             "is_home_pick": is_home_pick,
         })
 
-    # Apply strategy filter AFTER building norm_legs so we can inspect is_home_pick
+    # Enrich legs with board spread context and include qualifying -4.5 to -9.5 Home Favorites
+    # for the home_fav 2-leg parlay builder even when a spread pick was also evaluated on the game.
+    try:
+        import math
+        from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+        hf_query = f"""
+          SELECT
+            e.id AS event_id,
+            e.away_team,
+            e.home_team,
+            e.start_time,
+            s_home.line_value AS home_spread,
+            ml_home.price AS ml_home_price,
+            p_latest.mu_final,
+            p_latest.sigma,
+            p_latest.pick AS pred_pick,
+            p_latest.model_version
+          FROM events e
+          JOIN LATERAL (
+            SELECT line_value
+            FROM odds_snapshots
+            WHERE event_id = e.id AND market_type = 'SPREAD' AND side = 'HOME'
+              AND COALESCE(book, '') NOT IN ('action_open', 'open')
+            ORDER BY (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
+            LIMIT 1
+          ) s_home ON TRUE
+          JOIN LATERAL (
+            SELECT price
+            FROM odds_snapshots
+            WHERE event_id = e.id AND market_type = 'MONEYLINE' AND side = 'HOME'
+              AND COALESCE(book, '') NOT IN ('action_open', 'open')
+            ORDER BY (CASE WHEN price IS NOT NULL THEN 0 ELSE 1 END), price DESC, captured_at DESC
+            LIMIT 1
+          ) ml_home ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT mu_final, sigma, pick, model_version
+            FROM model_predictions
+            WHERE event_id = e.id AND market_type = 'SPREAD'
+            ORDER BY analyzed_at DESC
+            LIMIT 1
+          ) p_latest ON TRUE
+          WHERE e.league = 'NCAAM'
+            AND COALESCE(e.neutral_site, FALSE) = FALSE
+            AND {date_predicate}
+            AND s_home.line_value BETWEEN -9.5 AND -4.5
+            AND ml_home.price BETWEEN -380 AND -155
+          ORDER BY e.start_time ASC
+          LIMIT 40
+        """
+        hf_params = {"days": int(days_ago)}
+        if target_date:
+            hf_params["target_date"] = target_date
+        with get_db_connection() as conn:
+            hf_rows = [dict(r) for r in _exec(conn, hf_query, hf_params).fetchall()]
+
+        if hf_rows:
+            cal_model = NCAAMMarketFirstModelV2()
+            existing_by_eid = {leg.get("event_id"): leg for leg in norm_legs if leg.get("event_id")}
+            for hr in hf_rows:
+                eid = hr.get("event_id")
+                home_team = hr.get("home_team") or ""
+                away_team = hr.get("away_team") or ""
+                home_sp = float(hr.get("home_spread"))
+                ml_price = int(hr.get("ml_home_price"))
+                mu_raw = hr.get("mu_final")
+                pred_pick = str(hr.get("pred_pick") or "").strip().lower()
+                if mu_raw is not None:
+                    mu_f = float(mu_raw)
+                    fair_sp_home = mu_f if (not pred_pick or pred_pick == home_team.strip().lower() or pred_pick.startswith(home_team.strip().lower())) else -mu_f
+                else:
+                    fair_sp_home = home_sp
+                sigma_val = max(8.0, float(hr.get("sigma") or 10.8))
+                p_raw = 0.5 * (1.0 - math.erf(float(fair_sp_home) / (sigma_val * math.sqrt(2.0))))
+                wp_cal = float(cal_model._calibrate_win_prob(p_raw))
+                ev_leg = wp_cal * (dec_from_american(ml_price) - 1.0) - (1.0 - wp_cal)
+                is_sweet = (
+                    (-9.5 <= home_sp <= -4.5)
+                    and (fair_sp_home <= home_sp - 0.5)
+                    and (wp_cal >= 0.68)
+                    and (ev_leg >= 0.005)
+                )
+
+                if eid in existing_by_eid and existing_by_eid[eid].get("is_home_pick"):
+                    existing_by_eid[eid]["home_spread"] = round(home_sp, 1)
+                    existing_by_eid[eid]["fair_spread_home"] = round(fair_sp_home, 1)
+                    existing_by_eid[eid]["is_sweet_spot_7pt"] = bool(is_sweet)
+                    continue
+
+                if not is_sweet or eid in existing_by_eid:
+                    continue
+                if _strategy == "home_fav" and ev_leg < 0.005:
+                    continue
+                if _strategy != "home_fav" and ev_leg < float(min_ev_per_unit):
+                    continue
+
+                norm_legs.append({
+                    "event_id": eid,
+                    "matchup": f"{away_team} @ {home_team}",
+                    "team_pick": home_team,
+                    "price": ml_price,
+                    "win_prob": round(wp_cal, 4),
+                    "ev_per_unit": round(ev_leg, 4),
+                    "outcome": "PENDING",
+                    "model_version": hr.get("model_version") or "board_hf_7pt_v1",
+                    "start_time": str(hr.get("start_time") or ""),
+                    "is_home_pick": True,
+                    "home_spread": round(home_sp, 1),
+                    "fair_spread_home": round(fair_sp_home, 1),
+                    "is_sweet_spot_7pt": True,
+                })
+    except Exception:
+        pass
+
+    # Apply strategy filter AFTER building/enriching norm_legs
     if _strategy == 'home_fav':
-        # Keep only legs where the model is picking the home team AND they are HIGHLY favored (ML <= -150)
-        norm_legs = [leg for leg in norm_legs if leg.get('is_home_pick') and leg.get('price', 0) <= -150]
+        # Keep non-neutral home favorite legs (-380..-150, prioritizing -4.5..-9.5 spreads)
+        norm_legs = [
+            leg for leg in norm_legs
+            if leg.get('is_home_pick') and -380 <= int(leg.get('price') or 0) <= -150
+        ]
 
     # Enumerate all 2-leg combos (different events)
     combos = []
@@ -5673,6 +5787,7 @@ async def get_ncaam_parlays_today(
                 "american_odds": amer,
                 "ev": ev,
                 "outcome": parlay_outcome,
+                "sweet_spot_legs": sum(1 for leg_item in (a, b) if leg_item.get("is_sweet_spot_7pt")),
                 "suggested_units": parlay_sizing["units"],
                 "bankroll_pct": parlay_sizing["bankroll_pct"],
                 "sizing_tier": parlay_sizing["sizing_tier"],
@@ -5684,6 +5799,8 @@ async def get_ncaam_parlays_today(
         try:
             a = int(c.get('american_odds') or 0)
         except Exception:
+            return False
+        if _strategy == 'home_fav' and float(c.get('ev') or 0.0) < 0.01:
             return False
         return a >= int(parlay_odds_lo) and a <= int(parlay_odds_hi)
 
@@ -5705,7 +5822,14 @@ async def get_ncaam_parlays_today(
         return accepted, used
 
     # 1. High confidence shortlist (within band)
-    sorted_by_win = sorted(combos_in_band, key=lambda x: (x['p_win'], x['ev']), reverse=True)
+    if _strategy == 'home_fav':
+        sorted_by_win = sorted(
+            combos_in_band,
+            key=lambda x: (int(x.get('sweet_spot_legs') or 0), round(float(x['p_win']), 3), x['ev']),
+            reverse=True,
+        )
+    else:
+        sorted_by_win = sorted(combos_in_band, key=lambda x: (x['p_win'], x['ev']), reverse=True)
     high_conf, used_eids = get_independent_combos(sorted_by_win, 5)
 
     # 2. Payout band shortlist (Value Matchups)
@@ -6035,6 +6159,30 @@ async def get_ncaam_live_calibration():
     from src.services.live_calibration_service import get_live_calibration_summary
 
     return get_live_calibration_summary()
+
+
+@app.get("/api/ncaam/model-learning")
+async def get_ncaam_model_learning():
+    """Return self-learning adaptive archetype stats, ROI buckets, and bias adjustments."""
+    from src.services.archetype_learning_service import load_adaptive_model_learning
+
+    data = load_adaptive_model_learning()
+    if not data:
+        return {
+            "status": "empty",
+            "league": "NCAAM",
+            "total_graded": 0,
+            "by_market_side": {},
+            "by_spread_bucket": {},
+            "by_edge_bucket": {},
+            "by_home_fav_7pt_ml": {},
+            "learned_adjustments": {},
+        }
+    return {
+        "status": "active",
+        **{k: v for k, v in data.items() if k != "bins"},
+        "bins_count": len(data.get("bins") or {}),
+    }
 
 
 @app.post("/api/ncaam/live-calibration/rebuild")

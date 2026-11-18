@@ -1249,6 +1249,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 effective_cap_spread = max(self.CAP_SPREAD, 2.2 if agree_count >= 3 else self.CAP_SPREAD)
             else:
                 effective_cap_spread = max(self.CAP_SPREAD, 3.2)
+        if (os.getenv('NCAAM_CAP_SPREAD') is None) and game_month == 11 and agree_count == 0:
+            effective_cap_spread = min(effective_cap_spread, 1.85)
         if (os.getenv('NCAAM_CAP_SPREAD') is None) and mu_market_spread is not None:
             abs_mkt_spread = abs(float(mu_market_spread))
             if abs_mkt_spread >= 25.0:
@@ -1257,9 +1259,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 effective_cap_spread = min(effective_cap_spread, 2.0 if is_early_season else 2.6)
         if abs(mu_spread_final - mu_market_spread) > effective_cap_spread:
              mu_spread_final = mu_market_spread + (effective_cap_spread * math.copysign(1, mu_spread_final - mu_market_spread))
-        # Post-cap shrinkage on extreme 6+ pt rating-vs-market clashes (curbs unpriced-lineup edge traps)
-        if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_sp_gap >= 6.0 and mu_market_spread is not None:
-            sp_div_shrink = max(0.55, 1.0 - (mean_sp_gap - 6.0) * 0.11)
+        # Post-cap shrinkage on extreme 5.5+ pt rating-vs-market clashes (curbs unpriced-lineup edge traps)
+        if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_sp_gap >= 5.5 and mu_market_spread is not None:
+            sp_div_shrink = max(0.50, 1.0 - (mean_sp_gap - 5.5) * 0.115)
             mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * sp_div_shrink)
 
         # Total - None-safe handling without synthetic 145.0 fallbacks
@@ -1363,6 +1365,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 if council_adjustment_total != 0.0:
                     print(f"[MODEL] Council total adj {council_adjustment_total:+.2f} computed but GATED (Phase 1 mode).")
 
+            # Apply learned empirical scoring-environment bias from settled TOTAL predictions
+            try:
+                learned_tot_bias = float(((self._load_adaptive_learning() or {}).get("learned_adjustments") or {}).get("total_bias_pts") or 0.0)
+                if learned_tot_bias != 0.0:
+                    mu_total_final += 0.5 * learned_tot_bias
+            except Exception:
+                pass
+
             # Asymmetric TOTAL OVER calibration: efficiency ensembles systematically run hot
             # above sharp market totals in early season and fast-tempo matchups.
             if os.getenv('NCAAM_DISABLE_OVER_DAMP') is None and mu_total_final > mu_market_total:
@@ -1419,10 +1429,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
         blowout_sigma_add = 0.0
         if mu_market_spread is not None and abs(float(mu_market_spread)) >= 14.0:
             blowout_sigma_add = min(4.5, (abs(float(mu_market_spread)) - 14.0) * 0.18)
+        elif mu_market_spread is not None and abs(float(mu_market_spread)) >= 6.0:
+            blowout_sigma_add = (abs(float(mu_market_spread)) - 6.0) * 0.09
 
         sigma_spread = (((base_sigma_spread + blowout_sigma_add) * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
         sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * (abs(mu_torvik_total - mu_market_total) if (mu_torvik_total is not None and mu_market_total is not None) else 0.0)) * early_season_sigma_mult
-        if game_month == 11 and abs(diff_torvik) >= 4.0 and agree_count >= 2:
+        if game_month == 11 and agree_count == 0:
+            sigma_spread *= 1.035
+        elif game_month == 11 and abs(diff_torvik) >= 4.0 and agree_count >= 2:
             sigma_spread *= 1.05
         elif is_early_season and abs(diff_torvik) >= 4.5:
             sigma_spread *= 1.06
@@ -1433,8 +1447,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         # Extreme model-vs-market divergence reflects likely unpriced roster/situational info;
         # widen sigma smoothly so 12%+ edge outliers do not overstate predicted cover probability.
-        if mean_sp_gap >= 6.0:
-            sigma_spread *= (1.0 + min(0.16, (mean_sp_gap - 6.0) * 0.035))
+        if mean_sp_gap >= 5.5:
+            sigma_spread *= (1.0 + min(0.18, (mean_sp_gap - 5.5) * 0.04))
         if mean_tot_gap >= 6.5:
             sigma_total *= (1.0 + min(0.16, (mean_tot_gap - 6.5) * 0.03))
         if has_total and mu_market_total is not None and mu_total_final is not None and mu_total_final > mu_market_total and game_tempo >= 72.0:
@@ -1622,6 +1636,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         max_auto_spread_dev = effective_cap_spread + blowout_buffer
         if abs(mu_spread_final - mu_market_spread) > max_auto_spread_dev:
             mu_spread_final = mu_market_spread + (max_auto_spread_dev * math.copysign(1, mu_spread_final - mu_market_spread))
+        if (
+            os.getenv('NCAAM_DISABLE_MID_SPREAD_GATE') is None
+            and mu_market_spread is not None
+            and 6.0 <= abs(float(mu_market_spread)) < 14.0
+        ):
+            mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.80)
 
         # --- Feature: Live Injury Impact Toggle (applied after automated clamp) ---
         if self.manual_adjustments:
@@ -2459,37 +2479,53 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 ev_home = float(ev_per_unit(prob_home, int(ml_price_home)) or 0.0)
                 ev_away = float(ev_per_unit(prob_away, int(ml_price_away)) or 0.0)
 
-                # Choose side with higher EV
-                side = 'HOME' if ev_home >= ev_away else 'AWAY'
+                # Evaluate ~7pt home favorite 2-leg ML parlay qualifier (-4.5 to -9.5 spread)
+                spread_home_snap = market_snapshot.get('spread_home') if isinstance(market_snapshot, dict) else None
+                best_tags = (best_rec or {}).get('movement_tags') if isinstance(best_rec, dict) else None
+                is_home_fav_parlay_leg = self.is_sweet_spot_home_fav_ml_leg(
+                    spread_home=spread_home_snap,
+                    fair_spread_home=mu_spread_final,
+                    win_prob_home=prob_home,
+                    ml_price_home=ml_price_home,
+                    ev_home=ev_home,
+                    is_neutral=bool(is_neutral),
+                    movement_tags=best_tags,
+                )
+
+                # Choose side with higher EV (unless HOME qualifies specifically for the ~7pt ML parlay builder)
+                side = 'HOME' if (ev_home >= ev_away or is_home_fav_parlay_leg) else 'AWAY'
                 team = event.get('home_team') if side == 'HOME' else event.get('away_team')
                 price = int(ml_price_home) if side == 'HOME' else int(ml_price_away)
                 book = ml_book_home if side == 'HOME' else ml_book_away
                 wp = prob_home if side == 'HOME' else prob_away
                 ev = ev_home if side == 'HOME' else ev_away
 
-                # Gate Moneyline persistence strictly to curb unprofitable longshots / marginal noise
-                should_persist_ml = self._passes_ml_persist_gates(
-                    win_prob=wp,
-                    ev=ev,
-                    price=price,
-                )
-                should_persist_ml = should_persist_ml and team is not None and str(team).strip() != ''
-
-                # Prevent correlated same-game double exposure: if we already persisted a SPREAD
-                # bet on the exact same team/side (either as best_rec or secondary rec), skip
-                # persisting a standalone MONEYLINE row.
-                team_norm = str(team or '').strip().lower()
-                same_team_spread_persisted = side in persisted_spread_sides
-                if not same_team_spread_persisted and should_persist and str(res.get('market_type') or '').upper() == 'SPREAD':
-                    spread_pick_norm = str(res.get('pick') or res.get('selection') or '').strip().lower()
-                    rec_side_norm = str((best_rec or {}).get('side') or '').strip().upper()
-                    same_team_spread_persisted = bool(team_norm) and (
-                        spread_pick_norm == team_norm
-                        or spread_pick_norm.startswith(team_norm)
-                        or rec_side_norm == side
+                if side == 'HOME' and is_home_fav_parlay_leg and ev_home >= 0.005:
+                    should_persist_ml = bool(team is not None and str(team).strip() != '')
+                else:
+                    # Gate Moneyline persistence strictly to curb unprofitable longshots / marginal noise
+                    should_persist_ml = self._passes_ml_persist_gates(
+                        win_prob=wp,
+                        ev=ev,
+                        price=price,
                     )
-                if same_team_spread_persisted:
-                    should_persist_ml = False
+                    should_persist_ml = should_persist_ml and team is not None and str(team).strip() != ''
+
+                    # Prevent correlated same-game double exposure: if we already persisted a SPREAD
+                    # bet on the exact same team/side (either as best_rec or secondary rec), skip
+                    # persisting a standalone MONEYLINE row.
+                    team_norm = str(team or '').strip().lower()
+                    same_team_spread_persisted = side in persisted_spread_sides
+                    if not same_team_spread_persisted and should_persist and str(res.get('market_type') or '').upper() == 'SPREAD':
+                        spread_pick_norm = str(res.get('pick') or res.get('selection') or '').strip().lower()
+                        rec_side_norm = str((best_rec or {}).get('side') or '').strip().upper()
+                        same_team_spread_persisted = bool(team_norm) and (
+                            spread_pick_norm == team_norm
+                            or spread_pick_norm.startswith(team_norm)
+                            or rec_side_norm == side
+                        )
+                    if same_team_spread_persisted:
+                        should_persist_ml = False
 
                 # Apply same lock window
                 if should_persist_ml:
@@ -2522,7 +2558,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         fallback_win_prob=(0.50 + max(0.0, float(edge_prob or 0.0))),
                         ev_per_unit=float(ev),
                     )
-                    if relax_gates or ml_conf_0_100 >= 55:
+                    if (side == 'HOME' and is_home_fav_parlay_leg) or relax_gates or ml_conf_0_100 >= 55:
                         doc_ml = {
                             **{k: res.get(k) for k in ("event_id", "user_id", "analyzed_at", "model_version", "mu_market", "mu_torvik", "mu_final", "sigma", "inputs_json", "outputs_json", "narrative_json", "context_json")},
                             "id": str(uuid.uuid4()),
@@ -2540,7 +2576,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             "edge_points": (round(float(edge_prob), 4) if edge_prob is not None else None),
                             "open_line": None,
                             "open_price": price,
-                            "clv_method": "odds_selector_v1",
+                            "clv_method": ("home_fav_7pt_parlay_v1" if (side == 'HOME' and is_home_fav_parlay_leg) else "odds_selector_v1"),
                         }
                         insert_model_prediction(doc_ml)
         except Exception as e:
@@ -2567,6 +2603,58 @@ class NCAAMMarketFirstModelV2(BaseModel):
     PUBLISH_MIN_N_TORVIK_OK = 40
     PUBLISH_MIN_N_TORVIK_MISSING = 60
     PUBLISH_MIN_EV_TORVIK_MISSING_BUMP = 0.005  # +0.5%
+    HOME_FAV_PARLAY_SPREAD_MIN = -9.5
+    HOME_FAV_PARLAY_SPREAD_MAX = -4.5
+    MAX_ML_HOME_FAV_PARLAY_PRICE = -380
+    MIN_ML_HOME_FAV_WIN_PROB = 0.68
+
+    def is_sweet_spot_home_fav_ml_leg(
+        self,
+        *,
+        spread_home: Any,
+        fair_spread_home: Any,
+        win_prob_home: Any,
+        ml_price_home: Any,
+        ev_home: Any = None,
+        is_neutral: bool = False,
+        movement_tags: Optional[List[str]] = None,
+    ) -> bool:
+        """Return True when a non-neutral +EV ~7pt (-4.5 to -9.5) home favorite qualifies for 2-leg ML parlays."""
+        if is_neutral:
+            return False
+        try:
+            sp = float(spread_home)
+            wp = float(win_prob_home)
+            pr = int(ml_price_home)
+        except Exception:
+            return False
+
+        if not (self.HOME_FAV_PARLAY_SPREAD_MIN <= sp <= self.HOME_FAV_PARLAY_SPREAD_MAX):
+            return False
+        if not (self.MAX_ML_HOME_FAV_PARLAY_PRICE <= pr <= -160):
+            return False
+        if wp < float(self.MIN_ML_HOME_FAV_WIN_PROB):
+            return False
+
+        if ev_home is not None:
+            try:
+                if float(ev_home) < 0.005:
+                    return False
+            except Exception:
+                return False
+
+        if fair_spread_home is not None:
+            try:
+                if float(fair_spread_home) > sp - 0.5:
+                    return False
+            except Exception:
+                pass
+
+        for t in movement_tags or []:
+            low = str(t or "").strip().lower()
+            if low == "contra_sharp_money" or low.startswith("reverse_steam="):
+                return False
+        return True
 
     def _passes_ml_persist_gates(self, *, win_prob: Any, ev: Any, price: Any) -> bool:
         """Apply calibrated Moneyline profitability & price-band gates before persisting."""
@@ -2630,9 +2718,22 @@ class NCAAMMarketFirstModelV2(BaseModel):
         return payout if o == "WON" else -1.0
 
     _action_network_stats: Optional[Dict[str, Any]] = None
+    _adaptive_learning_cache: Optional[Dict[str, Any]] = None
 
     def _resolve_model_param_path(self, filename: str) -> str:
         return resolve_model_param_path(filename)
+
+    def _load_adaptive_learning(self) -> Dict[str, Any]:
+        """Load persisted self-learning archetype ROI & bias state (empty dict offline)."""
+        if self._adaptive_learning_cache is not None:
+            return self._adaptive_learning_cache
+        try:
+            from src.services.archetype_learning_service import load_adaptive_model_learning
+
+            self._adaptive_learning_cache = load_adaptive_model_learning() or {}
+        except Exception:
+            self._adaptive_learning_cache = {}
+        return self._adaptive_learning_cache
 
     def _load_action_network_stats(self) -> Dict[str, Any]:
         if self._action_network_stats is not None:
@@ -2642,10 +2743,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         try:
             with open(path, 'r', encoding='utf-8') as f:
-                self._action_network_stats = json.load(f)
+                base_stats = json.load(f)
         except Exception:
-            self._action_network_stats = {"bins": {}}
+            base_stats = {"bins": {}}
 
+        bins = dict((base_stats or {}).get('bins') or {})
+        try:
+            learned_bins = (self._load_adaptive_learning() or {}).get('bins')
+            if isinstance(learned_bins, dict) and learned_bins:
+                bins.update(learned_bins)
+        except Exception:
+            pass
+        self._action_network_stats = {**(base_stats or {}), "bins": bins}
         return self._action_network_stats
 
     def _get_archetype_stats(self, key: str) -> Dict[str, Any]:
@@ -2755,6 +2864,31 @@ class NCAAMMarketFirstModelV2(BaseModel):
         else:
             base_ev = float(self.PUBLISH_MIN_EV)
         min_ev = base_ev if torvik_ok else (base_ev + float(self.PUBLISH_MIN_EV_TORVIK_MISSING_BUMP))
+
+        # Mid-spread (6–14 pt) ATS selectivity gate & adaptive learned adjustments
+        if market == "SPREAD" and market_line_home is not None:
+            try:
+                abs_sp_line = abs(float(market_line_home))
+                if 6.0 <= abs_sp_line < 14.0 and os.getenv("NCAAM_DISABLE_MID_SPREAD_GATE") is None:
+                    tags = [str(t or "").strip().lower() for t in (rec.get("movement_tags") or [])]
+                    has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags)
+                    mid_bump = 0.004 if has_sharp else 0.012
+                    try:
+                        sb_bumps = ((self._load_adaptive_learning() or {}).get("learned_adjustments") or {}).get("spread_bucket_ev_bump") or {}
+                        if "mid_6_14" in sb_bumps and not has_sharp:
+                            mid_bump = float(sb_bumps["mid_6_14"])
+                    except Exception:
+                        pass
+                    min_ev += max(0.0, mid_bump)
+            except Exception:
+                pass
+        try:
+            ms_bumps = ((self._load_adaptive_learning() or {}).get("learned_adjustments") or {}).get("market_side_ev_bump") or {}
+            ms_key = f"{market}:{side_lower}"
+            if ms_key in ms_bumps:
+                min_ev += float(ms_bumps[ms_key])
+        except Exception:
+            pass
 
         if ev < min_ev:
             return False

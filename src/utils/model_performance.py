@@ -272,13 +272,13 @@ def compute_top6_quality_score(row: dict) -> float:
     except Exception:
         ev = 0.0
 
-    # Diminishing returns above +8.5% EV and damper above +14% so extreme outliers don't steal #1
+    # Diminishing returns above +8.5% EV and damper above +10.5% so extreme outliers don't steal #1
     if ev <= 0.085:
         eff_ev = ev
-    elif ev <= 0.14:
-        eff_ev = 0.085 + (ev - 0.085) * 0.25
+    elif ev <= 0.105:
+        eff_ev = 0.085 + (ev - 0.085) * 0.30
     else:
-        eff_ev = 0.085 + (0.055 * 0.25) - (ev - 0.14) * 0.15
+        eff_ev = 0.085 + (0.020 * 0.30) - (ev - 0.105) * 0.20
     score = eff_ev
 
     lb10 = row.get("win_prob_lb10")
@@ -308,10 +308,12 @@ def compute_top6_quality_score(row: dict) -> float:
             line_val = _first_present(row.get("market_line"), row.get("bet_line"), row.get("line"))
             if line_val is not None:
                 abs_line = abs(float(line_val))
-                if 14.0 <= abs_line < 22.0:
+                if abs_line < 6.0:
+                    score += 0.005
+                elif 14.0 <= abs_line < 22.0:
                     score -= 0.012
                 elif 6.0 <= abs_line < 14.0:
-                    score -= 0.006
+                    score -= 0.022
         except Exception:
             pass
 

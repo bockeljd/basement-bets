@@ -85,6 +85,7 @@ def build_offline_model(
     model._calculate_fatigue_penalty = lambda *a, **kw: 0.0
     model._apply_referee_signal = lambda eid, tot: tot
     model._get_archetype_stats = lambda key: {"n": 80, "mean": 0.02, "sd": 0.90}
+    model._load_adaptive_learning = lambda: {}
     if winprob_cal is not None:
         model._load_winprob_calibration = lambda: winprob_cal
     else:
@@ -529,9 +530,9 @@ def main() -> None:
     for lbl, lo, hi in (("Edge 2-5%", 0.02, 0.05), ("Edge 5-8%", 0.05, 0.08), ("Edge 8-12%", 0.08, 0.12), ("Edge 12%+", 0.12, 1.0)):
         print_row(lbl, summarize([r for r in all_recs if lo <= r["ev"] < hi]))
 
-    print("\n--- By Daily Rank (#1 to #6) ---")
+    print("\n--- By Daily Rank (#1 to #6, Quality-Ranked Top 6) ---")
     for rk in range(1, 7):
-        print_row(f"Rank #{rk}", summarize([r for r in top6_recs if r["daily_rank"] == rk]))
+        print_row(f"Rank #{rk}", summarize([r for r in top6_new_recs if r["daily_rank"] == rk]))
 
     # 2. Adversarial Stress Tests (6 targeted extreme scenarios)
     print("\n=== 2. ADVERSARIAL STRESS TESTS ON CURRENT MODEL ===")
@@ -693,6 +694,168 @@ def main() -> None:
         score_fn=quality_rank_score,
     )
     print_row("D. Combined Filters+QualRank", summarize(combined))
+
+    # 4. 2-Leg Home Favorite (~7 pt spread: -4.5 to -9.5) Moneyline Parlay Backtest
+    print("\n=== 4. 2-LEG HOME FAVORITE (~7 PT SPREAD: -4.5 TO -9.5) MONEYLINE PARLAY BACKTEST ===")
+    import src.database as db_mod
+
+    ml_rng = random.Random(20261117)
+
+    def _ml_price_with_vig(mkt_spread_home: float) -> int:
+        p_fair = 1.0 - model._normal_cdf(0.0, -float(mkt_spread_home), 10.8)
+        vig_add = ml_rng.uniform(0.004, 0.022)
+        p_book = min(0.88, max(0.55, p_fair + vig_add))
+        return int(round(-100.0 * p_book / (1.0 - p_book)))
+
+    def _dec_from_amer(a: int) -> float:
+        return (1.0 + a / 100.0) if a > 0 else (1.0 + 100.0 / abs(a))
+
+    def _amer_from_dec(d: float) -> int:
+        x = d - 1.0
+        return int(round(x * 100.0)) if x >= 1.0 else int(round(-100.0 / max(1e-6, x)))
+
+    unfiltered_hf_by_day: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    gated_hf_by_day: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    curr_splits: Dict[str, Any] = {}
+    orig_splits_fn2 = getattr(db_mod, "get_latest_action_splits", None)
+    db_mod.get_latest_action_splits = lambda eid: curr_splits.get(eid, {})
+    try:
+        for g in season_games:
+            sp = float(g["mkt_spread_home"])
+            if not (-9.5 <= sp <= -4.5):
+                continue
+            eid = g["event_id"]
+            curr_splits[eid] = g.get("splits") or {}
+            ml_h = _ml_price_with_vig(sp)
+            model.torvik_service.get_projection.return_value = {
+                "margin": g["tv_margin"],
+                "official_margin": g["tv_margin"],
+                "total": g["tv_total"],
+                "projected_score": "70-72",
+                "lean": "Home",
+            }
+            model.torvik_service.get_matchup_team_stats.return_value = {
+                "game_tempo": g["tempo"],
+                "home": {"luck": 0.0, "continuity": g["continuity"], "record": "6-2"},
+                "away": {"luck": 0.0, "continuity": g["continuity"], "record": "5-3"},
+            }
+            model.kenpom_client.calculate_kenpom_adjustment.return_value = {
+                "spread_adj": g["kp_margin"],
+                "neutral_margin": g["kp_margin"] - 3.2,
+                "fair_margin": g["kp_margin"],
+                "total_adj": 0.0,
+                "fair_total": g["kp_total"],
+                "expected_tempo": g["tempo"],
+                "sos_spread_adj": 0.0,
+                "four_factors_adj": 0.0,
+                "exp_height_adj": 0.0,
+            }
+            model.kenpom_client.get_team_rating.return_value = {"adj_t": g["tempo"]}
+            model.haslametrics_client.calculate_projection.return_value = {
+                "available": True,
+                "margin": g["hs_margin"],
+                "total": g["hs_total"],
+                "game_tempo": g["tempo"],
+                "home": {"sos": 60, "mom": 0.0, "inc": 0.05},
+                "away": {"sos": 70, "mom": 0.0, "inc": 0.05},
+            }
+            snap = {
+                "spread_home": sp,
+                "spread_price_home": -110,
+                "total": g["mkt_total"],
+                "total_over_price": -110,
+                "moneyline_price_home": ml_h,
+                "moneyline_price_away": 210,
+                "book_spread": "Consensus",
+                "book_total": "Consensus",
+                "_best_spread_home": {"line_value": sp, "price": -110, "book": "DK"},
+                "_best_spread_away": {"line_value": -sp, "price": -110, "book": "FD"},
+                "_best_total_over": {"line_value": g["mkt_total"], "price": -110, "book": "DK"},
+                "_best_total_under": {"line_value": g["mkt_total"], "price": -110, "book": "FD"},
+                "_market_consensus": {
+                    "open_spread_home": sp - g.get("spread_move", 0.0),
+                    "current_spread_home": sp,
+                    "spread_move_home": g.get("spread_move", 0.0),
+                    "open_total": g["mkt_total"] - g.get("total_move", 0.0),
+                    "current_total": g["mkt_total"],
+                    "total_move": g.get("total_move", 0.0),
+                },
+            }
+            ev_ctx = {
+                "id": eid,
+                "home_team": g["home_team"],
+                "away_team": g["away_team"],
+                "start_time": g["start_time"],
+                "neutral_site": False,
+                "action_splits": g.get("splits") or {},
+            }
+            res = model.analyze(eid, market_snapshot=snap, event_context=ev_ctx, persist=False)
+            ctx = res.get("context") or {}
+            fair_sp_home = float(ctx.get("fair_spread_home") if ctx.get("fair_spread_home") is not None else sp)
+            wp_home = float(model._calibrate_win_prob(1.0 - model._normal_cdf(0.0, -fair_sp_home, 10.8)))
+            ev_ml = wp_home * (_dec_from_amer(ml_h) - 1.0) - (1.0 - wp_home)
+            leg_obj = {
+                "event_id": eid,
+                "ml_price": ml_h,
+                "wp": wp_home,
+                "ev": ev_ml,
+                "edge_gap": sp - fair_sp_home,
+                "home_won": g["actual_home"] > g["actual_away"],
+            }
+            unfiltered_hf_by_day[g["day"]].append(leg_obj)
+            best_tags = ((res.get("recommendations") or [{}])[0] or {}).get("movement_tags") or []
+            if model.is_sweet_spot_home_fav_ml_leg(
+                spread_home=sp,
+                fair_spread_home=fair_sp_home,
+                win_prob_home=wp_home,
+                ml_price_home=ml_h,
+                ev_home=ev_ml,
+                is_neutral=False,
+                movement_tags=best_tags,
+            ):
+                gated_hf_by_day[g["day"]].append(leg_obj)
+    finally:
+        if orig_splits_fn2 is not None:
+            db_mod.get_latest_action_splits = orig_splits_fn2
+
+    def _score_parlays(by_day: Dict[str, List[Dict[str, Any]]], min_parlay_ev: Optional[float] = None):
+        wins = losses = 0
+        pl = 0.0
+        odds_list: List[int] = []
+        for _day, day_legs in sorted(by_day.items()):
+            ranked = sorted(day_legs, key=lambda x: (x["ev"], x["wp"]), reverse=True)
+            for idx in range(0, len(ranked) - 1, 2):
+                leg_a, leg_b = ranked[idx], ranked[idx + 1]
+                dec = _dec_from_amer(leg_a["ml_price"]) * _dec_from_amer(leg_b["ml_price"])
+                amer = _amer_from_dec(dec)
+                if not (-165 <= amer <= 140):
+                    continue
+                p_par = leg_a["wp"] * leg_b["wp"]
+                ev_par = p_par * (dec - 1.0) - (1.0 - p_par)
+                if min_parlay_ev is not None and ev_par < min_parlay_ev:
+                    continue
+                odds_list.append(amer)
+                if leg_a["home_won"] and leg_b["home_won"]:
+                    wins += 1
+                    pl += (dec - 1.0)
+                else:
+                    losses += 1
+                    pl -= 1.0
+        n_p = wins + losses
+        wr_p = (wins / n_p * 100.0) if n_p > 0 else 0.0
+        roi_p = (pl / n_p * 100.0) if n_p > 0 else 0.0
+        avg_o = int(round(sum(odds_list) / len(odds_list))) if odds_list else 0
+        return wins, losses, n_p, wr_p, avg_o, pl, roi_p
+
+    for lbl, bmap, min_pev in (
+        ("Unfiltered -4.5..-9.5 ML", unfiltered_hf_by_day, None),
+        ("Model-Gated +EV -7pt ML", gated_hf_by_day, 0.02),
+    ):
+        w_p, l_p, n_p, wr_p, avg_o, pl_p, roi_p = _score_parlays(bmap, min_pev)
+        print(
+            f"  {lbl:<28} |  {w_p:3d}-{l_p:<3d} ({n_p:3d}) | "
+            f"WR {wr_p:5.1f}% | AvgOdds {avg_o:+d} | PL {pl_p:+7.2f}u | ROI {roi_p:+5.1f}%"
+        )
 
 
 if __name__ == "__main__":

@@ -91,8 +91,15 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[10px] text-slate-500 font-bold uppercase">{fmtTime(leg.start_time)}</span>
                   <span className="text-xs text-slate-400 font-medium">{leg.matchup}</span>
-                  {color === 'orange' && leg.is_home_pick && (
-                    <span className="text-[9px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded-full uppercase tracking-wider">Home Favorite</span>
+                  {leg.home_spread != null && (
+                    <span className="text-[9px] font-mono font-bold text-sky-300 bg-sky-500/10 border border-sky-400/25 px-1.5 py-0.5 rounded-full">
+                      Home Spread {Number(leg.home_spread) > 0 ? `+${Number(leg.home_spread).toFixed(1)}` : Number(leg.home_spread).toFixed(1)}
+                    </span>
+                  )}
+                  {(leg.is_sweet_spot_7pt || (color === 'orange' && leg.is_home_pick)) && (
+                    <span className="text-[9px] font-bold text-orange-300 bg-orange-400/10 border border-orange-400/25 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                      {leg.is_sweet_spot_7pt ? 'Sweet-Spot ~7pt Home Fav' : 'Home Favorite'}
+                    </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -179,7 +186,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
           params: { ...dateParams, min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 },
         }),
         api.get('/api/ncaam/parlays/today', {
-          params: { ...dateParams, strategy: 'home_fav', parlay_odds_lo: -200, parlay_odds_hi: 120 },
+          params: { ...dateParams, strategy: 'home_fav', parlay_odds_lo: -165, parlay_odds_hi: 140 },
         }).catch(() => ({ data: null })),
       ]);
       setAllData(main.data);
@@ -212,7 +219,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
             2-Team Moneyline Parlays{displayDate ? ` (${displayDate})` : ''}
           </h3>
           <p className="text-xs text-slate-400">
-            Pairs two separate college basketball Moneyline picks that both clear our win-chance and profit-edge checks.
+            Pairs strong Moneyline legs — including non-neutral ~7-pt Home Favorites (-4.5 to -9.5 spread, -165 to +140 combined odds) so mid-spread favorites avoid backdoor covers.
           </p>
         </div>
         <button
@@ -255,9 +262,9 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
               </p>
             </div>
             <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5 space-y-1">
-              <div className="font-semibold text-emerald-300">No doubling up on the same game</div>
+              <div className="font-semibold text-emerald-300">~7-Point Home Favorite ML Parlays</div>
               <p className="text-slate-400 leading-relaxed">
-                When the model already likes a team&apos;s <strong className="text-slate-200">Point Spread</strong>, it skips their standalone Moneyline so you don&apos;t double-bet one outcome.
+                Non-neutral home favorites in the <strong className="text-slate-200">-4.5 to -9.5 spread band</strong> win outright at high rates even when late fouls spoil ATS covers. Qualifying pairs combine into <strong className="text-slate-200">-165 to +140</strong> parlays automatically.
               </p>
             </div>
           </div>
@@ -300,7 +307,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
             onAddBet={onAddBet}
           />
           <ParlayColumn
-            title="Safe Home Favorites"
+            title="Home Favorites (~7pt ML)"
             icon={Home}
             color="orange"
             combos={homeFav}

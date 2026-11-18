@@ -197,9 +197,9 @@ export const getRecQualityScore = (rec) => {
   const effEv =
     ev <= 0.085
       ? ev
-      : ev <= 0.14
-        ? 0.085 + (ev - 0.085) * 0.25
-        : 0.085 + 0.055 * 0.25 - (ev - 0.14) * 0.15;
+      : ev <= 0.105
+        ? 0.085 + (ev - 0.085) * 0.30
+        : 0.085 + 0.020 * 0.30 - (ev - 0.105) * 0.20;
   let score = effEv;
 
   const lb10 = Number(rec.win_prob_lb10);
@@ -222,8 +222,9 @@ export const getRecQualityScore = (rec) => {
     const lineVal = Number(rec.market_line ?? rec.bet_line ?? rec.line);
     if (Number.isFinite(lineVal)) {
       const absLine = Math.abs(lineVal);
-      if (absLine >= 14 && absLine < 22) score -= 0.012;
-      else if (absLine >= 6 && absLine < 14) score -= 0.006;
+      if (absLine < 6) score += 0.005;
+      else if (absLine >= 14 && absLine < 22) score -= 0.012;
+      else if (absLine >= 6 && absLine < 14) score -= 0.022;
     }
   }
 

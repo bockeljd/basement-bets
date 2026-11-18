@@ -933,5 +933,133 @@ def test_board_unordered_matchup_dedup_sql_and_calibration_guard():
     assert interpolate_pava_prob(0.32, tail_curve) < 0.38
 
 
+def test_adaptive_archetype_learning_service_and_endpoint(monkeypatch):
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.services.archetype_learning_service import (
+        classify_spread_bucket,
+        fit_adaptive_learning_from_rows,
+    )
+
+    assert classify_spread_bucket(-3.5) == "under_6"
+    assert classify_spread_bucket(-7.0) == "mid_6_14"
+    assert classify_spread_bucket(18.0) == "blowout_14_22"
+    assert classify_spread_bucket(-24.0) == "blowout_22_plus"
+
+    rows = []
+    # 12 losing mid-spread ATS picks (-7.5) and 6 winning tight-spread picks (-3.5)
+    for idx in range(12):
+        rows.append({
+            "market_type": "SPREAD",
+            "pick": "Home Team",
+            "home_team": "Home Team",
+            "away_team": "Away Team",
+            "bet_line": -7.5,
+            "bet_price": -110,
+            "ev_per_unit": 0.06,
+            "edge_points": 2.0,
+            "outcome": "LOST" if idx < 10 else "WON",
+        })
+    for idx in range(6):
+        rows.append({
+            "market_type": "SPREAD",
+            "pick": "Underdog Team",
+            "home_team": "Fav Team",
+            "away_team": "Underdog Team",
+            "bet_line": 3.5,
+            "bet_price": -110,
+            "ev_per_unit": 0.04,
+            "edge_points": 1.5,
+            "outcome": "WON" if idx < 5 else "LOST",
+        })
+    # Add TOTAL rows whose actual final scores ran +4 pts hotter than mu_final
+    for _ in range(10):
+        rows.append({
+            "market_type": "TOTAL",
+            "pick": "OVER",
+            "bet_line": 144.5,
+            "bet_price": -110,
+            "ev_per_unit": 0.05,
+            "edge_points": 2.0,
+            "mu_final": 146.0,
+            "home_score": 78,
+            "away_score": 72,
+            "outcome": "WON",
+        })
+    # Add winning ~7pt Home Favorite ML row
+    rows.append({
+        "market_type": "MONEYLINE",
+        "pick": "Home Team",
+        "home_team": "Home Team",
+        "away_team": "Away Team",
+        "bet_price": -275,
+        "ev_per_unit": 0.025,
+        "edge_points": 0.03,
+        "outcome": "WON",
+    })
+
+    learned = fit_adaptive_learning_from_rows(rows, baseline_bins={"SPREAD:home:2:big": {"n": 45, "mean": 0.02, "sd": 0.95}})
+    assert learned["total_graded"] == 29
+    assert learned["by_spread_bucket"]["mid_6_14"]["n"] == 12
+    assert learned["learned_adjustments"]["spread_bucket_ev_bump"]["mid_6_14"] > 0.0
+    assert learned["learned_adjustments"]["total_bias_pts"] > 0.5
+    assert learned["by_home_fav_7pt_ml"]["wins"] == 1
+    assert "SPREAD:home:2:big" in learned["bins"]
+
+    # ~7pt Home Favorite ML qualifier checks
+    model = NCAAMMarketFirstModelV2()
+    assert model.is_sweet_spot_home_fav_ml_leg(
+        spread_home=-7.0,
+        fair_spread_home=-8.2,
+        win_prob_home=0.77,
+        ml_price_home=-280,
+        ev_home=0.025,
+        is_neutral=False,
+        movement_tags=["sharp_backing"],
+    ) is True
+    assert model.is_sweet_spot_home_fav_ml_leg(
+        spread_home=-7.0,
+        fair_spread_home=-8.2,
+        win_prob_home=0.77,
+        ml_price_home=-280,
+        ev_home=-0.01,
+        is_neutral=False,
+    ) is False
+    assert model.is_sweet_spot_home_fav_ml_leg(
+        spread_home=-7.0,
+        fair_spread_home=-8.2,
+        win_prob_home=0.77,
+        ml_price_home=-280,
+        is_neutral=True,
+    ) is False
+    assert model.is_sweet_spot_home_fav_ml_leg(
+        spread_home=-2.5,
+        fair_spread_home=-4.0,
+        win_prob_home=0.69,
+        ml_price_home=-165,
+        is_neutral=False,
+    ) is False
+    assert model.is_sweet_spot_home_fav_ml_leg(
+        spread_home=-7.0,
+        fair_spread_home=-8.2,
+        win_prob_home=0.77,
+        ml_price_home=-280,
+        is_neutral=False,
+        movement_tags=["contra_sharp_money"],
+    ) is False
+
+    import src.services.archetype_learning_service as als
+
+    monkeypatch.setattr(als, "load_adaptive_model_learning", lambda: learned)
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+    client = TestClient(app)
+    resp = client.get("/api/ncaam/model-learning", headers={"X-BASEMENT-KEY": "test-secret"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "active"
+    assert body["total_graded"] == 29
+    assert body["by_home_fav_7pt_ml"]["wins"] == 1
+
+
+
 
 

@@ -174,6 +174,16 @@ class GradingService:
         except Exception as e:
             print(f"[GRADING] Pregame winprob calibration warning: {e}")
 
+        try:
+            from src.services.archetype_learning_service import rebuild_adaptive_model_learning
+            from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+
+            rebuild_adaptive_model_learning(persist=True)
+            NCAAMMarketFirstModelV2._adaptive_learning_cache = None
+            NCAAMMarketFirstModelV2._action_network_stats = None
+        except Exception as e:
+            print(f"[GRADING] Adaptive model learning warning: {e}")
+
         return {
             "status": "Success",
             "graded": graded_count,
