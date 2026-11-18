@@ -972,11 +972,104 @@ class AnalyticsEngine:
         # (Current Equity + Withdrawals) - Deposits = realized gains from betting
         net_bet_profit = (total_equity + total_withdrawals) - total_deposits
 
+        import re
+        from datetime import date, datetime, timezone as _tz
+
+        def _to_naive_dt(x):
+            try:
+                from dateutil.parser import parse as parse_date
+                if isinstance(x, str):
+                    try:
+                        x = parse_date(x)
+                    except Exception:
+                        return None
+                if hasattr(x, 'tzinfo') and x.tzinfo:
+                    x = x.astimezone(_tz.utc).replace(tzinfo=None)
+                return x
+            except Exception:
+                # Fallback if dateutil is unavailable
+                try:
+                    if isinstance(x, str):
+                        s = x.strip()
+                        if s.endswith('Z'):
+                            s = s[:-1] + '+00:00'
+                        parsed = datetime.fromisoformat(s)
+                        if parsed.tzinfo:
+                            parsed = parsed.astimezone(_tz.utc).replace(tzinfo=None)
+                        return parsed
+                    if hasattr(x, 'tzinfo') and x.tzinfo:
+                        return x.astimezone(_tz.utc).replace(tzinfo=None)
+                    return x if isinstance(x, datetime) else None
+                except Exception:
+                    return None
+
+        def _norm_prov(p_raw):
+            s = str(p_raw or '').strip()
+            low = s.lower()
+            if 'draftkings' in low or low == 'dk':
+                return 'DraftKings'
+            if 'fanduel' in low or low == 'fd':
+                return 'FanDuel'
+            return s
+
+        def _norm_acc(a_raw):
+            s = str(a_raw or '').strip()
+            if not s or s.lower() in ('primary', 'main', '1'):
+                return 'Main'
+            if s.lower() in ('secondary', 'user2', '2'):
+                return 'User2'
+            return s
+
+        account_last_sync = {}
+
+        def _update_last_sync(prov_raw, acc_raw, dt_val):
+            if not prov_raw or dt_val is None or dt_val == '':
+                return
+            prov = _norm_prov(prov_raw)
+            acc = _norm_acc(acc_raw)
+            is_date_only = False
+            if isinstance(dt_val, str):
+                s = dt_val.strip()
+                if not s:
+                    return
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+                    is_date_only = True
+                dt_naive = _to_naive_dt(s)
+            elif isinstance(dt_val, datetime):
+                dt_naive = _to_naive_dt(dt_val)
+            elif isinstance(dt_val, date):
+                dt_naive = datetime(dt_val.year, dt_val.month, dt_val.day)
+                is_date_only = True
+            else:
+                dt_naive = _to_naive_dt(dt_val)
+            if not isinstance(dt_naive, datetime):
+                return
+            key = (prov, acc)
+            cand = (dt_naive, not is_date_only)
+            prev = account_last_sync.get(key)
+            if prev is None or cand > prev:
+                account_last_sync[key] = cand
+
+        def _format_sync_iso(entry):
+            if not entry:
+                return None
+            dt_val, has_time = entry
+            if not isinstance(dt_val, datetime):
+                return None
+            return dt_val.strftime('%Y-%m-%dT%H:%M:%SZ') if has_time else dt_val.strftime('%Y-%m-%d')
+
+        for p_snap, accs_map in (snap_accounts or {}).items():
+            if isinstance(accs_map, dict) and accs_map:
+                for acc_id, snap in accs_map.items():
+                    _update_last_sync(p_snap, acc_id, (snap or {}).get('captured_at'))
+            elif snap_captured.get(p_snap):
+                _update_last_sync(p_snap, 'Main', snap_captured.get(p_snap))
+
         # Breakdown by Provider + Account
         provider_stats = defaultdict(lambda: {'deposited': 0.0, 'withdrawn': 0.0})
         provider_account_stats = defaultdict(lambda: {'deposited': 0.0, 'withdrawn': 0.0})
         query_all = """
-        SELECT provider, COALESCE(account_id,'Main') as account_id, type, amount
+        SELECT provider, COALESCE(account_id,'Main') as account_id, type, amount, date, created_at
         FROM transactions
         WHERE (%(user_id)s IS NULL OR user_id = %(user_id)s)
         """
@@ -991,10 +1084,13 @@ class AnalyticsEngine:
                 cur = _exec(conn, query_all, {"user_id": user_id})
                 rows = cur.fetchall()
                 for r in rows:
-                    p = r['provider']
-                    acc = r.get('account_id') or 'Main'
-                    amt = float(r['amount'] or 0)
-                    typ = r['type']
+                    p = _norm_prov(r.get('provider'))
+                    if not p:
+                        continue
+                    acc = _norm_acc(r.get('account_id') or 'Main')
+                    _update_last_sync(p, acc, r.get('created_at') or r.get('date'))
+                    amt = float(r.get('amount') or 0)
+                    typ = r.get('type')
 
                     if typ == 'Deposit':
                         provider_stats[p]['deposited'] += amt
@@ -1006,14 +1102,39 @@ class AnalyticsEngine:
             # Transactions table may not exist yet - degrade gracefully
             print(f"[Analytics] Skipping provider breakdown (table may not exist): {e}")
 
+        # Latest recorded sync/ingest runs per book + account
+        try:
+            with get_db_connection() as conn:
+                from src.database import _exec
+                ingest_rows = _exec(
+                    conn,
+                    """
+                    SELECT book,
+                           COALESCE(NULLIF(account_id, ''), 'Main') AS account_id,
+                           MAX(COALESCE(run_finished_at, run_started_at)) AS last_ingest_at
+                    FROM book_ingest_runs
+                    WHERE UPPER(COALESCE(status, '')) NOT IN ('ERROR', 'FAILED')
+                    GROUP BY book, COALESCE(NULLIF(account_id, ''), 'Main')
+                    """,
+                ).fetchall()
+                for r in ingest_rows or []:
+                    if r.get('book') and r.get('last_ingest_at'):
+                        _update_last_sync(r.get('book'), r.get('account_id') or 'Main', r.get('last_ingest_at'))
+        except Exception:
+            pass
+
         # Compute "computed" balances from ledger + settled bet P/L (does NOT affect current/snapshot balance)
         bet_profit = defaultdict(float)
+        bets = []
         try:
-            bets = self.bets
+            bets = self.bets or []
             if user_id and user_id != self.user_id:
                 bets = [b for b in self.bets if b.get('user_id') == user_id]
             for b in bets:
-                prov = b.get('provider', 'Unknown')
+                prov = _norm_prov(b.get('provider', 'Unknown'))
+                acc_b = _norm_acc(b.get('account_id') or 'Main')
+                if (b.get('category') or '').lower() != 'transaction':
+                    _update_last_sync(prov, acc_b, b.get('created_at') or b.get('date_et') or b.get('date'))
                 st = str(b.get('status') or '').upper().strip()
                 if st in ('PENDING', 'OPEN', 'VOID'):
                     continue
@@ -1023,119 +1144,123 @@ class AnalyticsEngine:
         except Exception:
             bet_profit = defaultdict(float)
 
-        provider_breakdown = []
+        for req_p in ('DraftKings', 'FanDuel'):
+            _ = provider_stats[req_p]
+        for snap_p in (snap_accounts or {}).keys():
+            if snap_p:
+                _ = provider_stats[_norm_prov(snap_p)]
 
-        def _to_naive_dt(x):
-            try:
-                from datetime import timezone as _tz
-                from dateutil.parser import parse as parse_date
-                if isinstance(x, str):
-                    try:
-                        x = parse_date(x)
-                    except Exception:
-                        return None
-                if hasattr(x, 'tzinfo') and x.tzinfo:
-                    x = x.astimezone(_tz.utc).replace(tzinfo=None)
-                return x
-            except Exception:
-                return None
+        provider_breakdown = []
 
         # Build per-provider + per-account breakdown using snapshots as baseline.
         for p, stats in provider_stats.items():
             net = stats['withdrawn'] - stats['deposited']
 
-            accounts = (snap_accounts.get(p) or {})
-            if not accounts:
+            accounts = dict(snap_accounts.get(p) or {})
+            if not accounts and (p in snap_balances or p in snap_captured):
                 # Backward compatible: single baseline per provider (no account snapshots yet)
                 accounts = {'Main': {"balance": float(snap_balances.get(p, 0.0) or 0.0), "captured_at": snap_captured.get(p), "source": None}}
+
+            base_accs = ['Main', 'User2'] if p in ('DraftKings', 'FanDuel') else ['Main']
+            acc_ids = list(dict.fromkeys(base_accs + list(accounts.keys())))
 
             # account rows
             prov_total_in_play = 0.0
             prov_total_ledger_in_play = 0.0
             prov_total_ledger_delta = 0.0
+            prov_last_sync_entry = None
 
-            for acc_id, snap in accounts.items():
-                base_bal = float((snap or {}).get('balance') or 0.0)
-                cap0 = _to_naive_dt((snap or {}).get('captured_at'))
+            for acc_id in acc_ids:
+                has_snapshot = acc_id in accounts
+                snap = accounts.get(acc_id) if has_snapshot else {}
+                base_bal = float((snap or {}).get('balance') or 0.0) if has_snapshot else 0.0
+                cap0 = _to_naive_dt((snap or {}).get('captured_at')) if has_snapshot else None
 
                 ledger_delta = 0.0
+                if has_snapshot:
+                    # 1) Settled bet P/L after snapshot
+                    for b in (bets or []):
+                        if _norm_prov(b.get('provider') or '') != p:
+                            continue
+                        if _norm_acc(b.get('account_id') or 'Main') != str(acc_id):
+                            continue
+                        st = str(b.get('status') or '').upper().strip()
+                        if st in ('PENDING', 'OPEN', 'VOID'):
+                            continue
+                        if (b.get('category') or '').lower() == 'transaction':
+                            continue
+                        bc = _to_naive_dt(b.get('created_at'))
+                        if cap0:
+                            # Snapshot anchored: only include bets after baseline
+                            if not bc:
+                                continue
+                            if bc <= cap0:
+                                continue
+                        ledger_delta += float(b.get('profit') or 0)
 
-                # 1) Settled bet P/L after snapshot
-                for b in (bets or []):
-                    if (b.get('provider') or '') != p:
-                        continue
-                    if str(b.get('account_id') or 'Main') != str(acc_id):
-                        continue
-                    st = str(b.get('status') or '').upper().strip()
-                    if st in ('PENDING', 'OPEN', 'VOID'):
-                        continue
-                    if (b.get('category') or '').lower() == 'transaction':
-                        continue
-                    bc = _to_naive_dt(b.get('created_at'))
-                    if cap0:
-                        # Snapshot anchored: only include bets after baseline
-                        if not bc:
+                    # 1b) Open/pending wagers after snapshot (reduce displayed balance immediately)
+                    for b in (bets or []):
+                        if _norm_prov(b.get('provider') or '') != p:
                             continue
-                        if bc <= cap0:
+                        if _norm_acc(b.get('account_id') or 'Main') != str(acc_id):
                             continue
-                    ledger_delta += float(b.get('profit') or 0)
-
-                # 1b) Open/pending wagers after snapshot (reduce displayed balance immediately)
-                for b in (bets or []):
-                    if (b.get('provider') or '') != p:
-                        continue
-                    if str(b.get('account_id') or 'Main') != str(acc_id):
-                        continue
-                    st = str(b.get('status') or '').upper().strip()
-                    if st not in ('PENDING', 'OPEN'):
-                        continue
-                    bc = _to_naive_dt(b.get('created_at'))
-                    if cap0:
-                        if not bc:
+                        st = str(b.get('status') or '').upper().strip()
+                        if st not in ('PENDING', 'OPEN'):
                             continue
-                        if bc <= cap0:
-                            continue
-                    try:
-                        w = float(b.get('wager') or 0.0)
-                    except Exception:
-                        w = 0.0
-                    if w > 0:
-                        ledger_delta -= w
-
-                # 2) Cashflows (deposits/withdrawals) after snapshot
-                # These should move the computed bankroll immediately, even before the next sportsbook snapshot.
-                try:
-                    with get_db_connection() as conn:
-                        from src.database import _exec
-                        # Defensive migration
+                        bc = _to_naive_dt(b.get('created_at'))
+                        if cap0:
+                            if not bc:
+                                continue
+                            if bc <= cap0:
+                                continue
                         try:
-                            _exec(conn, "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_id TEXT;")
+                            w = float(b.get('wager') or 0.0)
                         except Exception:
-                            pass
+                            w = 0.0
+                        if w > 0:
+                            ledger_delta -= w
 
-                        tx_rows = _exec(conn, """
-                            SELECT date, type, amount
-                            FROM transactions
-                            WHERE (%(user_id)s IS NULL OR user_id = %(user_id)s)
-                              AND provider = %(prov)s
-                              AND COALESCE(account_id,'Main') = %(acc)s
-                              AND type IN ('Deposit','Withdrawal')
-                        """, {"user_id": user_id, "prov": p, "acc": str(acc_id)}).fetchall()
+                    # 2) Cashflows (deposits/withdrawals) after snapshot
+                    # These should move the computed bankroll immediately, even before the next sportsbook snapshot.
+                    try:
+                        with get_db_connection() as conn:
+                            from src.database import _exec
+                            # Defensive migration
+                            try:
+                                _exec(conn, "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS account_id TEXT;")
+                            except Exception:
+                                pass
 
-                    for tr in tx_rows:
-                        dt = _to_naive_dt(tr.get('date'))
-                        if cap0 and dt and dt <= cap0:
-                            continue
-                        # Deposits are positive, withdrawals often negative. Add raw amount.
-                        ledger_delta += float(tr.get('amount') or 0.0)
-                except Exception:
-                    pass
+                            tx_rows = _exec(conn, """
+                                SELECT date, type, amount
+                                FROM transactions
+                                WHERE (%(user_id)s IS NULL OR user_id = %(user_id)s)
+                                  AND provider = %(prov)s
+                                  AND COALESCE(account_id,'Main') = %(acc)s
+                                  AND type IN ('Deposit','Withdrawal')
+                            """, {"user_id": user_id, "prov": p, "acc": str(acc_id)}).fetchall()
 
-                ledger_in_play = base_bal + float(ledger_delta or 0)
+                        for tr in tx_rows:
+                            dt = _to_naive_dt(tr.get('date'))
+                            if cap0 and dt and dt <= cap0:
+                                continue
+                            # Deposits are positive, withdrawals often negative. Add raw amount.
+                            ledger_delta += float(tr.get('amount') or 0.0)
+                    except Exception:
+                        pass
+
+                ledger_in_play = (base_bal + float(ledger_delta or 0)) if has_snapshot else 0.0
 
                 prov_total_in_play += base_bal
                 prov_total_ledger_in_play += ledger_in_play
                 prov_total_ledger_delta += float(ledger_delta or 0)
+
+                sync_entry = account_last_sync.get((p, str(acc_id)))
+                if sync_entry is None and has_snapshot and (snap or {}).get('captured_at'):
+                    _update_last_sync(p, str(acc_id), (snap or {}).get('captured_at'))
+                    sync_entry = account_last_sync.get((p, str(acc_id)))
+                if sync_entry and (prov_last_sync_entry is None or sync_entry > prov_last_sync_entry):
+                    prov_last_sync_entry = sync_entry
 
                 acc_stats = provider_account_stats.get((p, str(acc_id)), {'deposited': 0.0, 'withdrawn': 0.0})
                 provider_breakdown.append({
@@ -1145,8 +1270,9 @@ class AnalyticsEngine:
                     "withdrawn": float(acc_stats.get('withdrawn') or 0.0),
                     "net_profit": float(acc_stats.get('withdrawn') or 0.0) - float(acc_stats.get('deposited') or 0.0),
                     "in_play": base_bal,
-                    "captured_at": (snap or {}).get('captured_at'),
-                    "snapshot_source": (snap or {}).get('source'),
+                    "captured_at": (snap or {}).get('captured_at') if has_snapshot else None,
+                    "last_sync_at": _format_sync_iso(sync_entry),
+                    "snapshot_source": (snap or {}).get('source') if has_snapshot else None,
                     "ledger_delta": float(ledger_delta),
                     "ledger_in_play": float(ledger_in_play),
                     "computed_in_play": None,
@@ -1167,6 +1293,7 @@ class AnalyticsEngine:
                 "net_profit": net,
                 "in_play": provider_balance,
                 "captured_at": snap_captured.get(p),
+                "last_sync_at": _format_sync_iso(prov_last_sync_entry),
                 "ledger_delta": ledger_delta,
                 "ledger_in_play": ledger_in_play,
                 "computed_in_play": computed_balance,

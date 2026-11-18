@@ -498,6 +498,96 @@ def test_analytics_timezone_aware_snapshot_cutoff():
             fin = eng.get_financial_summary(user_id="u1")
 
     dk_main = [r for r in fin["breakdown"] if r["provider"] == "DraftKings" and r["account_id"] == "Main"][0]
+    dk_user2 = [r for r in fin["breakdown"] if r["provider"] == "DraftKings" and r["account_id"] == "User2"][0]
+    fd_main = [r for r in fin["breakdown"] if r["provider"] == "FanDuel" and r["account_id"] == "Main"][0]
+    fd_user2 = [r for r in fin["breakdown"] if r["provider"] == "FanDuel" and r["account_id"] == "User2"][0]
     assert dk_main["ledger_delta"] == 0.0
     assert dk_main["ledger_in_play"] == 20.00
+    assert dk_main["last_sync_at"] == "2026-11-16T20:00:00Z"
+    assert dk_user2["last_sync_at"] is None
+    assert dk_user2["ledger_delta"] == 0.0
+    assert dk_user2["ledger_in_play"] == 0.0
+    assert fd_main["last_sync_at"] is None
+    assert fd_user2["last_sync_at"] is None
+
+
+def test_financial_summary_last_sync_per_account_from_bets_snaps_and_ingest():
+    from datetime import datetime, timezone
+    from src.analytics import AnalyticsEngine
+    from src.services.bet_sync_service import record_sync_run
+
+    snaps = {
+        "DraftKings": {
+            "balance": 46.00,
+            "captured_at": datetime(2026, 11, 16, 20, 0, 0, tzinfo=timezone.utc),
+            "source": "manual",
+            "accounts": {
+                "Main": {
+                    "balance": 46.00,
+                    "captured_at": datetime(2026, 11, 16, 20, 0, 0, tzinfo=timezone.utc),
+                    "source": "manual",
+                }
+            },
+        }
+    }
+    bets = [
+        {
+            "id": 10,
+            "user_id": "u1",
+            "provider": "DraftKings",
+            "account_id": "User2",
+            "date": "2026-11-17",
+            "status": "PENDING",
+            "wager": 10.0,
+            "profit": 0.0,
+            "created_at": datetime(2026, 11, 17, 15, 30, 0),
+        }
+    ]
+
+    def _fake_exec(_conn, sql, _params=None):
+        cur = MagicMock()
+        sql_low = str(sql or "").lower()
+        if "from book_ingest_runs" in sql_low:
+            cur.fetchall.return_value = [
+                {
+                    "book": "FanDuel",
+                    "account_id": "Main",
+                    "last_ingest_at": datetime(2026, 11, 17, 18, 45, 0, tzinfo=timezone.utc),
+                },
+                {
+                    "book": "FanDuel",
+                    "account_id": "User2",
+                    "last_ingest_at": datetime(2026, 11, 15, 12, 0, 0, tzinfo=timezone.utc),
+                },
+            ]
+        elif "from transactions" in sql_low and "deposit" in sql_low:
+            cur.fetchall.return_value = []
+        else:
+            cur.fetchall.return_value = []
+        return cur
+
+    with patch("src.analytics.fetch_all_bets", return_value=bets), \
+         patch("src.database.fetch_latest_balance_snapshots", return_value=snaps), \
+         patch("src.analytics.get_db_connection") as mock_conn, \
+         patch("src.database.get_db_connection", new=mock_conn), \
+         patch("src.database._exec", side_effect=_fake_exec):
+        eng = AnalyticsEngine(user_id="u1")
+        fin = eng.get_financial_summary(user_id="u1")
+
+    by_key = {(r["provider"], r["account_id"]): r for r in fin["breakdown"]}
+    assert by_key[("DraftKings", "Main")]["last_sync_at"] == "2026-11-16T20:00:00Z"
+    assert by_key[("DraftKings", "User2")]["last_sync_at"] == "2026-11-17T15:30:00Z"
+    # User2 without snapshot remains anchored at 0 rather than subtracting unanchored bets
+    assert by_key[("DraftKings", "User2")]["ledger_delta"] == 0.0
+    assert by_key[("DraftKings", "User2")]["ledger_in_play"] == 0.0
+    assert by_key[("FanDuel", "Main")]["last_sync_at"] == "2026-11-17T18:45:00Z"
+    assert by_key[("FanDuel", "User2")]["last_sync_at"] == "2026-11-15T12:00:00Z"
+    assert by_key[("FanDuel", None)]["last_sync_at"] == "2026-11-17T18:45:00Z"
+
+    with patch("src.database.get_db_connection") as mock_conn2, patch("src.database._exec") as mock_exec2:
+        ok = record_sync_run("fd", "Secondary", count_parsed=5, inserted=2, updated=1, message="test")
+        assert ok is True
+        assert mock_exec2.called
+        assert mock_conn2.return_value.__enter__.return_value.commit.called
+
 

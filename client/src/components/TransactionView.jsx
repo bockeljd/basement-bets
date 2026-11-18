@@ -6,6 +6,84 @@ import EditBetModal from './EditBetModal';
 import SportAuditorModal from './SportAuditorModal';
 import ManualAddBetModal from './ManualAddBetModal';
 
+const normalizeAccountKey = (rawAcc) => {
+    const s = String(rawAcc || '').trim().toLowerCase();
+    if (!s || s === 'primary' || s === 'main' || s === '1') return 'Main';
+    if (s === 'secondary' || s === 'user2' || s === '2') return 'User2';
+    return String(rawAcc || '').trim();
+};
+
+const parseSyncTimestampMs = (ts) => {
+    if (!ts) return null;
+    const raw = String(ts).trim();
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        const [y, m, d] = raw.split('-').map(Number);
+        const dt = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+        return Number.isNaN(dt.getTime()) ? null : { ms: dt.getTime(), dateOnly: true, y, m, d };
+    }
+    const dt = new Date(raw);
+    if (Number.isNaN(dt.getTime())) return null;
+    return { ms: dt.getTime(), dateOnly: false };
+};
+
+export const formatSyncDateLabel = (ts) => {
+    if (!ts) return 'Never synced';
+    const parsed = parseSyncTimestampMs(ts);
+    if (!parsed) return String(ts).slice(0, 16);
+    if (parsed.dateOnly) {
+        const dt = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d, 12, 0, 0));
+        return dt.toLocaleDateString('en-US', {
+            timeZone: 'America/New_York',
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        });
+    }
+    return new Date(parsed.ms).toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+};
+
+export const getAccountLastSync = (provName, accId, accRow, allBets = []) => {
+    const targetProv = String(provName || '').trim().toLowerCase();
+    const targetAcc = normalizeAccountKey(accId);
+    const candidates = [];
+    if (accRow?.last_sync_at) candidates.push(accRow.last_sync_at);
+    if (accRow?.captured_at) candidates.push(accRow.captured_at);
+
+    for (const b of allBets || []) {
+        const bProv = String(b?.provider || '').trim().toLowerCase();
+        if (!bProv || bProv !== targetProv) continue;
+        const bAcc = normalizeAccountKey(b?.account_id);
+        if (bAcc !== targetAcc) continue;
+        if (b?.category && String(b.category).toLowerCase() === 'transaction') continue;
+        const ts = b?.created_at || b?.date_et || b?.date;
+        if (ts) candidates.push(ts);
+    }
+
+    let best = null;
+    let bestParsed = null;
+    for (const cand of candidates) {
+        const parsed = parseSyncTimestampMs(cand);
+        if (!parsed) continue;
+        if (
+            !bestParsed ||
+            parsed.ms > bestParsed.ms ||
+            (parsed.ms === bestParsed.ms && !parsed.dateOnly && bestParsed.dateOnly)
+        ) {
+            best = cand;
+            bestParsed = parsed;
+        }
+    }
+    return best;
+};
+
 // Extracted from App.jsx. Keep behavior identical; dependencies are passed as props when needed.
 
 export default function TransactionView({ bets, setBets, financials, reconciliation, loading, formatCurrency, formatDateMDY, showOpenBets = true, showFinancials = true }) {
@@ -435,6 +513,7 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                     computed_in_play: 0,
                     computed_delta: 0,
                     captured_at: null,
+                    last_sync_at: null,
                 };
             }
             agg[key].deposited += Number(r.deposited || 0);
@@ -445,8 +524,20 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
             agg[key].ledger_delta += Number(r.ledger_delta || 0);
             agg[key].computed_in_play += Number(r.computed_in_play || 0);
             agg[key].computed_delta += Number(r.computed_delta || 0);
-            if (r.captured_at && (!agg[key].captured_at || String(r.captured_at) > String(agg[key].captured_at))) {
-                agg[key].captured_at = r.captured_at;
+            if (r.captured_at) {
+                const prevCap = parseSyncTimestampMs(agg[key].captured_at);
+                const nextCap = parseSyncTimestampMs(r.captured_at);
+                if (!prevCap || (nextCap && nextCap.ms > prevCap.ms)) {
+                    agg[key].captured_at = r.captured_at;
+                }
+            }
+            const syncCand = r.last_sync_at || r.captured_at;
+            if (syncCand) {
+                const prevSync = parseSyncTimestampMs(agg[key].last_sync_at);
+                const nextSync = parseSyncTimestampMs(syncCand);
+                if (!prevSync || (nextSync && (nextSync.ms > prevSync.ms || (nextSync.ms === prevSync.ms && !nextSync.dateOnly && prevSync.dateOnly)))) {
+                    agg[key].last_sync_at = syncCand;
+                }
             }
         }
 
@@ -564,6 +655,8 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                             const totalBal = Number((total?.ledger_in_play ?? total?.in_play) || 0);
                             const priBal = Number((primary?.ledger_in_play ?? primary?.in_play) || 0);
                             const secBal = Number((secondary?.ledger_in_play ?? secondary?.in_play) || 0);
+                            const priLastSync = formatSyncDateLabel(getAccountLastSync(provName, 'Main', primary, bets));
+                            const secLastSync = formatSyncDateLabel(getAccountLastSync(provName, 'User2', secondary, bets));
 
                             const borderCls = provName === 'DraftKings' ? 'border-orange-600/30' : 'border-blue-600/30';
                             const textCls = provName === 'DraftKings' ? 'text-orange-400' : 'text-blue-400';
@@ -584,12 +677,16 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                                         <div className="bg-slate-950/30 border border-slate-800 rounded-lg p-2">
                                             <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Primary</div>
                                             <div className="text-slate-100 font-mono font-black text-lg">{formatCurrency(priBal)}</div>
-                                            
+                                            <div className="mt-1 text-[10px] text-slate-400 truncate" title={`Last sync: ${priLastSync}`}>
+                                                Last sync: <span className="text-slate-300 font-medium">{priLastSync}</span>
+                                            </div>
                                         </div>
                                         <div className="bg-slate-950/30 border border-slate-800 rounded-lg p-2">
                                             <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Secondary</div>
                                             <div className="text-slate-100 font-mono font-black text-lg">{formatCurrency(secBal)}</div>
-                                            
+                                            <div className="mt-1 text-[10px] text-slate-400 truncate" title={`Last sync: ${secLastSync}`}>
+                                                Last sync: <span className="text-slate-300 font-medium">{secLastSync}</span>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -760,6 +857,9 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                                                                 <div className="border border-slate-800 rounded-lg p-4 bg-slate-950/20">
                                                                     <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Primary</div>
                                                                     <div className="mt-1 text-xl font-black text-white">{fmt(Number((primary?.ledger_in_play ?? primary?.in_play) || 0))}</div>
+                                                                    <div className="mt-1 text-[11px] text-slate-400">
+                                                                        Last sync: <span className="font-mono text-slate-200">{formatSyncDateLabel(getAccountLastSync(p, 'Main', primary, bets))}</span>
+                                                                    </div>
                                                                     <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
                                                                         <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(primary?.deposited || 0))}</span></div>
                                                                         <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(primary?.withdrawn || 0))}</span></div>
@@ -768,6 +868,9 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                                                                 <div className="border border-slate-800 rounded-lg p-4 bg-slate-950/20">
                                                                     <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Secondary</div>
                                                                     <div className="mt-1 text-xl font-black text-white">{fmt(Number((secondary?.ledger_in_play ?? secondary?.in_play) || 0))}</div>
+                                                                    <div className="mt-1 text-[11px] text-slate-400">
+                                                                        Last sync: <span className="font-mono text-slate-200">{formatSyncDateLabel(getAccountLastSync(p, 'User2', secondary, bets))}</span>
+                                                                    </div>
                                                                     <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
                                                                         <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(secondary?.deposited || 0))}</span></div>
                                                                         <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(secondary?.withdrawn || 0))}</span></div>

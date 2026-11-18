@@ -842,6 +842,7 @@ async def sync_fanduel_token(request: Request):
             ingest_normalized_bets,
             normalize_account_id,
             record_balance_snapshot,
+            record_sync_run,
         )
 
         account_id = normalize_account_id(data.get("account_id"), default="Main")
@@ -870,6 +871,14 @@ async def sync_fanduel_token(request: Request):
                 source="fanduel_api",
                 note="Captured from FanDuel token sync",
             )
+        record_sync_run(
+            provider="FanDuel",
+            account_id=account_id,
+            count_parsed=len(bets),
+            inserted=result["inserted"],
+            updated=result["updated"],
+            message="fanduel_api",
+        )
         invalidate_analytics_cache(str(user_id))
         return {
             "status": "success",
@@ -923,6 +932,7 @@ async def import_statement_csv(request: Request, user: dict = Depends(get_curren
             ingest_statement_transactions,
             normalize_account_id,
             record_balance_snapshot,
+            record_sync_run,
         )
 
         user_id = str((user or {}).get("sub") or DEFAULT_USER_ID)
@@ -983,6 +993,14 @@ async def import_statement_csv(request: Request, user: dict = Depends(get_curren
                 source=f"{provider.lower()}_csv",
                 note="Closing balance from CSV statement import",
             )
+        record_sync_run(
+            provider=provider,
+            account_id=account_id,
+            count_parsed=len(parsed["bets"]),
+            inserted=bet_res["inserted"],
+            updated=bet_res["updated"],
+            message=f"{provider.lower()}_csv",
+        )
         invalidate_analytics_cache(user_id)
         return {
             "status": "success",

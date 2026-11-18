@@ -572,6 +572,46 @@ def record_balance_snapshot(
     )
 
 
+def record_sync_run(
+    provider: str,
+    account_id: str,
+    count_parsed: int = 0,
+    inserted: int = 0,
+    updated: int = 0,
+    message: Optional[str] = None,
+) -> bool:
+    """Best-effort audit record in book_ingest_runs so every sync updates last_sync_at."""
+    from src.database import _exec, get_db_connection
+
+    prov = normalize_sync_provider(provider)
+    acc = normalize_account_id(account_id)
+    now_utc = datetime.now(timezone.utc)
+    try:
+        with get_db_connection() as conn:
+            _exec(
+                conn,
+                """
+                INSERT INTO book_ingest_runs
+                    (book, account_id, run_started_at, run_finished_at, status, count_parsed, inserted, updated, message)
+                VALUES (%s, %s, %s, %s, 'SUCCESS', %s, %s, %s, %s)
+                """,
+                (
+                    prov,
+                    acc,
+                    now_utc,
+                    now_utc,
+                    int(count_parsed or 0),
+                    int(inserted or 0),
+                    int(updated or 0),
+                    message[:300] if message else None,
+                ),
+            )
+            conn.commit()
+        return True
+    except Exception:
+        return False
+
+
 def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
     Process payloads sent by Chrome Bookmarklets or local browser capture tools.
@@ -643,6 +683,15 @@ def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, A
             source=source,
             note=f"Captured during {source}",
         )
+
+    record_sync_run(
+        provider=provider,
+        account_id=account_id,
+        count_parsed=len(bets_to_ingest),
+        inserted=bet_result["inserted"],
+        updated=bet_result["updated"],
+        message=source,
+    )
 
     return {
         "status": "ok",

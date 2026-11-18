@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { DollarSign, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../api/axios';
+import { formatSyncDateLabel, getAccountLastSync } from '../components/TransactionView';
 
 export default function Bankroll({ financials, bets, formatCurrency }) {
   const [expandedBook, setExpandedBook] = useState('DraftKings');
@@ -179,6 +180,9 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
                                     )}
                                   </div>
                                   <div className="text-xl font-black text-white">{fmt(currentVal)}</div>
+                                  <div className="text-[11px] text-slate-400">
+                                    Last sync: <span className="font-mono text-slate-200">{formatSyncDateLabel(getAccountLastSync(p, accId, data, bets))}</span>
+                                  </div>
                                   <div className="text-[11px] text-slate-400">
                                     Base snapshot: <span className="font-mono text-slate-200">{fmt(baseVal)}</span>
                                     {data?.captured_at ? ` (${fmtCaptured(data.captured_at)})` : ''} &bull;{' '}
