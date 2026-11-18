@@ -34,10 +34,16 @@ class TorvikProjectionService:
         # 1. Official Projection Fetch (prefer cached DB ingest)
         official_projs = self._fetch_official_from_db(date_compact, conn=conn)
 
-        # In backtests, avoid network calls; fall back to computed projections when DB cache missing.
-        no_net = str(os.getenv('BACKTEST_NO_NETWORK', '')).strip() not in ('', '0', 'false', 'False')
+        # In backtests / DB-free runs, avoid network calls; fall back to computed projections when DB cache missing.
+        no_net = (
+            str(os.getenv('BACKTEST_NO_NETWORK', '')).strip() not in ('', '0', 'false', 'False')
+            or str(os.getenv('REQUIRE_DATABASE', '')).strip() == '0'
+        )
         if official_projs is None and (not no_net):
-            official_projs = self.bt_client.fetch_daily_projections(date_compact) or {}
+            try:
+                official_projs = self.bt_client.fetch_daily_projections(date_compact) or {}
+            except Exception:
+                official_projs = {}
             self._official_cache[date_compact] = official_projs
 
         # Match by name (Torvik uses specific naming)
@@ -64,9 +70,11 @@ class TorvikProjectionService:
 
         if conn:
             return self._exec_fetch_official(conn, date_yyyymmdd)
-        else:
+        try:
             with get_db_connection() as c:
                 return self._exec_fetch_official(c, date_yyyymmdd)
+        except Exception:
+            return None
 
     def _exec_fetch_official(self, conn, date_yyyymmdd):
         try:
@@ -231,17 +239,20 @@ class TorvikProjectionService:
         if cache_key in self._metrics_cache:
             return self._metrics_cache[cache_key]
 
-        # Find canonical name
-        t = self.matcher.find_source_name(team_name, "bt_team_metrics_daily", "team_text")
-        if not t:
-            self._metrics_cache[cache_key] = None
-            return None
+        try:
+            # Find canonical name
+            t = self.matcher.find_source_name(team_name, "bt_team_metrics_daily", "team_text")
+            if not t:
+                self._metrics_cache[cache_key] = None
+                return None
 
-        if conn:
-            return self._exec_metrics_query(conn, t, date_iso, cache_key)
-        else:
+            if conn:
+                return self._exec_metrics_query(conn, t, date_iso, cache_key)
             with get_db_connection() as c:
                 return self._exec_metrics_query(c, t, date_iso, cache_key)
+        except Exception:
+            self._metrics_cache[cache_key] = None
+            return None
 
     def _exec_metrics_query(self, conn, t, date, cache_key):
         # Enforce both upper bound (<= game date) and current-season lower bound (>= Nov 1 of season)

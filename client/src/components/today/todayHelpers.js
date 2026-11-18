@@ -79,13 +79,19 @@ export const safeReasonText = (rawReason) => {
   return text;
 };
 
+const normalizeBoardTeamKey = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/\bnorth carolina state\b|\bn\.c\. state\b|\bn\.c\. st\.?\b|\bnc st\.?\b/g, 'nc state')
+    .replace(/\bappalachian state\b|\bapp state\b|\bappalachian st\.?\b/g, 'appalachian state')
+    .replace(/\bsouth carolina upstate\b|\bu\.s\.c\. upstate\b/g, 'usc upstate')
+    .replace(/\blong island university\b|\bl\.i\.u\.?\b/g, 'liu')
+    .replace(/\bst\.?\s*francis\b/g, 'saint francis')
+    .replace(/[^a-z0-9]/g, '');
+
 export const makeMatchupKey = (dayEt, away, home) => {
-  const norm = (s) =>
-    String(s || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '');
   if (!dayEt || !away || !home) return '';
-  return `${dayEt}|${norm(away)}|${norm(home)}`;
+  return `${dayEt}|${normalizeBoardTeamKey(away)}|${normalizeBoardTeamKey(home)}`;
 };
 
 export const lookupTopPickForGame = (game, rowTopPicks = {}, rowTopPicksByKey = {}) => {
@@ -93,7 +99,52 @@ export const lookupTopPickForGame = (game, rowTopPicks = {}, rowTopPicksByKey = 
   if (rowTopPicks[game.id]) return rowTopPicks[game.id];
   const day = game.day_et || (game.start_time ? String(game.start_time).slice(0, 10) : '');
   const k = makeMatchupKey(day, game.away_team, game.home_team);
-  return k ? rowTopPicksByKey[k] || null : null;
+  if (k && rowTopPicksByKey[k]) return rowTopPicksByKey[k];
+  const revK = makeMatchupKey(day, game.home_team, game.away_team);
+  return revK ? rowTopPicksByKey[revK] || null : null;
+};
+
+/**
+ * Deduplicate board games using unordered matchup keys so reversed home/away
+ * neutral-site feeds (e.g. ESPN vs Action Network) collapse to the richer priced row.
+ */
+export const dedupeBoardGames = (games) => {
+  if (!Array.isArray(games) || games.length === 0) return [];
+
+  const rowScore = (g) => {
+    const hasOdds =
+      g?.home_spread != null || g?.total_line != null || g?.ml_home_odds != null || g?.ml_away_odds != null ? 10 : 0;
+    const idStr = String(g?.id || '').toLowerCase();
+    const srcScore = idStr.startsWith('action:') ? 2 : idStr.startsWith('espn:') ? 1 : 0;
+    return hasOdds + srcScore;
+  };
+
+  const bestByKey = new Map();
+  const order = [];
+  for (const g of games) {
+    if (!g) continue;
+    const league = String(g.sport || g.league || 'NCAAM').toUpperCase();
+    const day = g.day_et || (g.start_time ? String(g.start_time).slice(0, 10) : '');
+    const tA = normalizeBoardTeamKey(g.away_team);
+    const tB = normalizeBoardTeamKey(g.home_team);
+    if (!tA || !tB) {
+      const fallbackKey = String(g.id || order.length);
+      if (!bestByKey.has(fallbackKey)) {
+        bestByKey.set(fallbackKey, g);
+        order.push(fallbackKey);
+      }
+      continue;
+    }
+    const [first, second] = tA <= tB ? [tA, tB] : [tB, tA];
+    const key = `${league}|${day}|${first}|${second}`;
+    if (!bestByKey.has(key)) {
+      bestByKey.set(key, g);
+      order.push(key);
+    } else if (rowScore(g) > rowScore(bestByKey.get(key))) {
+      bestByKey.set(key, g);
+    }
+  }
+  return order.map((k) => bestByKey.get(k));
 };
 
 export const normalizeMovementTag = (tag) => {

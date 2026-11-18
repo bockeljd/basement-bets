@@ -38,6 +38,7 @@ import {
   decodeKenpomHashImport,
   getProjectedScore,
   getLiveGameStatus,
+  dedupeBoardGames,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
 
@@ -124,7 +125,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
           : Promise.resolve({ data: { predictions: [] } }),
       ]);
 
-      setEdges(Array.isArray(boardRes.data) ? boardRes.data : []);
+      setEdges(dedupeBoardGames(Array.isArray(boardRes.data) ? boardRes.data : []));
       setDataHealth(healthRes?.data?.items || []);
 
       const mProfiles = {};
@@ -214,7 +215,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         const cachedBoard = loadCache('/api/board', boardParams);
         const cachedTop = leagueFilter === 'NCAAM' ? loadCache('/api/ncaam/top-picks', topPicksParams) : null;
         if (cachedBoard?.payload) {
-          setEdges(cachedBoard.payload || []);
+          setEdges(dedupeBoardGames(cachedBoard.payload || []));
           setDegradedMode(true);
           setDegradedAsOf(cachedBoard?.at || null);
         }
@@ -270,7 +271,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
           params: { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT, live: true },
         });
         if (Array.isArray(res?.data)) {
-          setEdges(res.data);
+          setEdges(dedupeBoardGames(res.data));
         }
       } catch {
         // Ignore silent live-poll errors

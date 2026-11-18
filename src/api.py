@@ -3047,7 +3047,7 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
       SELECT *
       FROM (
         SELECT *,
-          ROW_NUMBER() OVER (PARTITION BY league, day_et, home_key, away_key ORDER BY src_rank ASC, start_time ASC) AS rn
+          ROW_NUMBER() OVER (PARTITION BY league, day_et, LEAST(home_key, away_key), GREATEST(home_key, away_key) ORDER BY src_rank ASC, start_time ASC) AS rn
         FROM base_events
       ) t
       WHERE rn = 1

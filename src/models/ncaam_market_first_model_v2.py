@@ -573,9 +573,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         except TypeError:
             torvik_view = self.torvik_service.get_projection(team_a_canon, team_b_canon, date=game_date_str, conn=conn)
         try:
-            kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn, neutral_site=True)
-        except TypeError:
-            kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn)
+            try:
+                kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn, neutral_site=True)
+            except TypeError:
+                kenpom_adj = self.kenpom_client.calculate_kenpom_adjustment(team_a_canon, team_b_canon, conn=conn)
+        except Exception:
+            kenpom_adj = None
 
         # Team style + player facts for narratives (best-effort)
         kp_a = None
@@ -617,8 +620,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
             news_top_urls = []
         
         # 3. Features
-        mods_a = tf.get_tournament_modifiers(team_a_canon, conn=conn)
-        mods_b = tf.get_tournament_modifiers(team_b_canon, conn=conn)
+        try:
+            mods_a = tf.get_tournament_modifiers(team_a_canon, conn=conn)
+        except Exception:
+            mods_a = {}
+        try:
+            mods_b = tf.get_tournament_modifiers(team_b_canon, conn=conn)
+        except Exception:
+            mods_b = {}
         
         # 4. Math
         fallback_used = False

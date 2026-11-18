@@ -42,6 +42,8 @@ def is_valid_winprob_calibration(
             continue
     if len(valid_pcal) < 2:
         return False
+    if len(valid_pcal) < 3 and max(valid_pcal) <= 0.535:
+        return False
 
     try:
         n_obs = int(calibration.get("n_obs") or 0)
@@ -130,9 +132,9 @@ def interpolate_pava_prob(
         return p_val
 
     if p_val <= xs[0]:
-        p_cal = max(0.0, min(1.0, ys[0]))
+        p_cal = max(0.01, min(1.0, ys[0] - 0.75 * (xs[0] - p_val)))
     elif p_val >= xs[-1]:
-        p_cal = max(0.0, min(1.0, ys[-1]))
+        p_cal = max(0.0, min(0.99, ys[-1] + 0.75 * (p_val - xs[-1])))
     else:
         p_cal = p_val
         for i in range(1, len(xs)):

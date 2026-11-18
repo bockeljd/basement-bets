@@ -1,19 +1,10 @@
 {
   "sport": "ncaam",
-  "days": 180,
-  "n_obs": 347,
-  "method": "isotonic_pava_piecewise_linear",
-  "points": [
-    {
-      "p": 0.5053418023076923,
-      "p_cal": 0.44377668794230773
-    },
-    {
-      "p": 0.571989832024922,
-      "p_cal": 0.525
-    }
-  ],
   "league": "NCAAM",
   "season": "2026-27",
-  "season_start": "2026-11-01"
+  "season_start": "2026-11-01",
+  "days": 180,
+  "n_obs": 0,
+  "method": "isotonic_pava_piecewise_linear",
+  "points": []
 }

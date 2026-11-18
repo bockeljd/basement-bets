@@ -153,17 +153,32 @@ def fit_calibration_artifact(obs: List[Obs], days: int = 30, min_points: int = 1
         dedup.append((float(p), float(y)))
         last_p = p
 
-    # Early-season cold stretches (>=50 obs where PAVA collapses to <2 blocks or peak < 0.525)
-    # would otherwise get rejected by is_valid_winprob_calibration and leave predictions uncalibrated.
+    # Early-season cold stretches (>=50 obs where PAVA collapses to <4 blocks or peak < 0.54)
+    # would otherwise clamp strong raw edges or fail validation.
     # Expand collapsed curves across [min_p, max_p] and blend monotonically toward a shrinkage prior.
-    if len(obs) >= 50 and dedup and (len(dedup) < 2 or max((y for _, y in dedup), default=0.0) < 0.525):
+    if len(obs) >= 50 and dedup and (len(dedup) < 4 or max((y for _, y in dedup), default=0.0) < 0.54):
         work = list(dedup)
-        if len(work) < 2:
+        if len(work) < 4:
             ps = [float(o.p) for o in obs]
             lo_p, hi_p = min(ps), max(ps)
-            base_y = float(work[0][1])
             if hi_p > lo_p + 1e-6:
-                work = [(lo_p + (hi_p - lo_p) * (k / 4.0), base_y) for k in range(5)]
+                def _interp_dedup(pv: float) -> float:
+                    if len(dedup) == 1 or pv <= dedup[0][0]:
+                        return float(dedup[0][1])
+                    if pv >= dedup[-1][0]:
+                        return float(dedup[-1][1])
+                    for k in range(1, len(dedup)):
+                        x0, y0 = dedup[k - 1]
+                        x1, y1 = dedup[k]
+                        if pv <= x1:
+                            t = 0.0 if x1 <= x0 else (pv - x0) / (x1 - x0)
+                            return float(y0 + t * (y1 - y0))
+                    return float(dedup[-1][1])
+
+                work = [
+                    (lo_p + (hi_p - lo_p) * (k / 4.0), _interp_dedup(lo_p + (hi_p - lo_p) * (k / 4.0)))
+                    for k in range(5)
+                ]
 
         reg: List[Tuple[float, float]] = []
         last_reg_y = -1.0
@@ -171,7 +186,7 @@ def fit_calibration_artifact(obs: List[Obs], days: int = 30, min_points: int = 1
             p_shrink = 0.50 + 0.55 * (float(p_val) - 0.50)
             y_reg = max(float(y_val), 0.50 * float(y_val) + 0.50 * p_shrink)
             if idx == len(work) - 1 and float(p_val) >= 0.55:
-                y_reg = max(y_reg, 0.525)
+                y_reg = max(y_reg, 0.54)
             y_reg = max(last_reg_y, max(0.01, min(0.99, y_reg)))
             reg.append((float(p_val), float(y_reg)))
             last_reg_y = y_reg

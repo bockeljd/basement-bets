@@ -901,4 +901,37 @@ def test_history_suppresses_unpublished_fallback_predictions_on_covered_days(mon
     assert "legacy_uncovered" in ids
 
 
+def test_board_unordered_matchup_dedup_sql_and_calibration_guard():
+    import pathlib
+    from src.utils.model_calibration import interpolate_pava_prob, is_valid_winprob_calibration
+
+    api_src = pathlib.Path("src/api.py").read_text(encoding="utf-8")
+    board_idx = api_src.index('@app.get("/api/board")')
+    board_block = api_src[board_idx : board_idx + 4000]
+    assert "LEAST(home_key, away_key), GREATEST(home_key, away_key)" in board_block
+
+    collapsed_two_knot = {
+        "season": "2026-27",
+        "season_start": "2026-11-01",
+        "n_obs": 347,
+        "points": [
+            {"p": 0.505, "p_cal": 0.444},
+            {"p": 0.572, "p_cal": 0.525},
+        ],
+    }
+    assert is_valid_winprob_calibration(collapsed_two_knot, min_obs=60, min_max_pcal=0.52, min_season_start="2026-11-01") is False
+
+    tail_curve = {
+        "n_obs": 200,
+        "points": [
+            {"p": 0.40, "p_cal": 0.38},
+            {"p": 0.50, "p_cal": 0.49},
+            {"p": 0.58, "p_cal": 0.56},
+        ],
+    }
+    assert interpolate_pava_prob(0.66, tail_curve) > 0.56
+    assert interpolate_pava_prob(0.32, tail_curve) < 0.38
+
+
+
 
