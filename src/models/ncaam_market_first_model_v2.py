@@ -1084,8 +1084,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         home_rec_games = _parse_games_from_record((torvik_team_stats.get('home') or {}).get('record'))
         away_rec_games = _parse_games_from_record((torvik_team_stats.get('away') or {}).get('record'))
         known_rec_games = [g for g in (home_rec_games, away_rec_games) if g is not None]
-        if known_rec_games:
-            min_rec_games = min(known_rec_games)
+        min_rec_games: Optional[int] = min(known_rec_games) if known_rec_games else None
+        if min_rec_games is not None:
             luck_scale = 0.0 if min_rec_games < 3 else min(1.0, (min_rec_games - 2) / 10.0)
             situational_scale = round(min(1.0, 0.35 + 0.65 * max(0, min_rec_games - 1) / 10.0), 3)
         else:
@@ -1180,21 +1180,31 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 agree_count = len(spread_sig_diffs)
 
         is_early_season = game_month in (11, 12)
+        low_sample_teams = (min_rec_games is not None and min_rec_games < 6)
         if os.getenv('NCAAM_W_BASE') is None and agree_count >= 2:
-            if game_month == 11:
-                conv_mult = 1.20 if agree_count >= 3 else 1.12
+            if game_month == 11 or low_sample_teams:
+                conv_mult = 1.15 if agree_count >= 3 else 1.08
             elif game_month == 12:
-                conv_mult = 1.30 if agree_count >= 3 else 1.20
+                conv_mult = 1.25 if agree_count >= 3 else 1.16
             else:
                 conv_mult = 1.45 if agree_count >= 3 else 1.30
             w_base *= conv_mult
             w_kp *= conv_mult
             w_hasla *= conv_mult
 
-        max_eff_sum = (
-            0.35 if (os.getenv('NCAAM_W_BASE') is None and game_month == 11)
-            else (0.45 if (os.getenv('NCAAM_W_BASE') is None and game_month == 12) else 0.60)
-        )
+        if os.getenv('NCAAM_W_BASE') is not None:
+            max_eff_sum = 0.60
+        elif game_month == 11:
+            if agree_count >= 3:
+                max_eff_sum = 0.35
+            elif agree_count == 2:
+                max_eff_sum = 0.26 if not low_sample_teams else 0.24
+            else:
+                max_eff_sum = 0.20 if not low_sample_teams else 0.18
+        elif game_month == 12:
+            max_eff_sum = 0.44 if agree_count >= 3 else (0.36 if agree_count == 2 else 0.28)
+        else:
+            max_eff_sum = 0.60 if agree_count >= 2 else 0.45
         eff_sum = w_base + w_kp + w_hasla
         if eff_sum > max_eff_sum and eff_sum > 0:
             scale_back = max_eff_sum / eff_sum
@@ -1272,19 +1282,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 effective_cap_spread = max(self.CAP_SPREAD, 2.2 if agree_count >= 3 else self.CAP_SPREAD)
             else:
                 effective_cap_spread = max(self.CAP_SPREAD, 3.2)
-        if (os.getenv('NCAAM_CAP_SPREAD') is None) and game_month == 11 and agree_count == 0:
-            effective_cap_spread = min(effective_cap_spread, 1.85)
+        if (os.getenv('NCAAM_CAP_SPREAD') is None) and game_month == 11 and agree_count < 2:
+            effective_cap_spread = min(effective_cap_spread, 1.65)
         if (os.getenv('NCAAM_CAP_SPREAD') is None) and mu_market_spread is not None:
             abs_mkt_spread = abs(float(mu_market_spread))
             if abs_mkt_spread >= 25.0:
-                effective_cap_spread = min(effective_cap_spread, 2.0 if is_early_season else 2.4)
+                effective_cap_spread = min(effective_cap_spread, 1.85 if is_early_season else 2.4)
             elif abs_mkt_spread >= 15.0:
-                effective_cap_spread = min(effective_cap_spread, 2.0 if is_early_season else 2.6)
+                effective_cap_spread = min(effective_cap_spread, 1.95 if is_early_season else 2.6)
         if abs(mu_spread_final - mu_market_spread) > effective_cap_spread:
              mu_spread_final = mu_market_spread + (effective_cap_spread * math.copysign(1, mu_spread_final - mu_market_spread))
-        # Post-cap shrinkage on extreme 5.5+ pt rating-vs-market clashes (curbs unpriced-lineup edge traps)
-        if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_sp_gap >= 5.5 and mu_market_spread is not None:
-            sp_div_shrink = max(0.50, 1.0 - (mean_sp_gap - 5.5) * 0.115)
+        # Post-cap shrinkage on extreme 4.5+ pt rating-vs-market clashes (curbs unpriced-lineup edge traps)
+        if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_sp_gap >= 4.5 and mu_market_spread is not None:
+            sp_div_shrink = max(0.38, 1.0 - (mean_sp_gap - 4.5) * 0.14)
             mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * sp_div_shrink)
 
         # Total - None-safe handling without synthetic 145.0 fallbacks
@@ -1340,9 +1350,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         if os.getenv('NCAAM_W_BASE') is None and agree_count_total >= 2:
             tot_sum = w_total_torvik + w_total_kp + w_total_hasla
-            max_tot_sum = 0.32 if game_month == 11 else (0.43 if game_month == 12 else 0.55)
+            max_tot_sum = (
+                0.30
+                if (agree_count_total >= 3 and game_month == 11)
+                else (0.22 if game_month == 11 else (0.36 if game_month == 12 else 0.54))
+            )
             mult_tot_agree = (
-                (1.18 if agree_count_total >= 3 else 1.11)
+                (1.18 if agree_count_total >= 3 else 1.08)
                 if is_early_season
                 else (1.35 if agree_count_total >= 3 else 1.25)
             )
@@ -1356,7 +1370,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         effective_cap_total = self.CAP_TOTAL
         if os.getenv('NCAAM_CAP_TOTAL') is None:
             if is_early_season and self.CAP_TOTAL <= self.DEFAULT_CAP_TOTAL:
-                effective_cap_total = min(self.CAP_TOTAL, 2.2 if game_month == 11 else 2.7)
+                effective_cap_total = min(self.CAP_TOTAL, 2.2 if game_month == 11 else 2.6)
             elif agree_count_total >= 2 and not is_early_season:
                 effective_cap_total = max(self.CAP_TOTAL, 4.5 if agree_count_total >= 3 else 3.8)
 
@@ -1379,8 +1393,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 + (w_total_kp * diff_kp_tot)
                 + (w_total_hasla * diff_hs_tot)
             )
-            mu_total_final += kp_player_total_adj
-            mu_total_final += kp_total_ff_adj * situational_scale
+            tot_adj_scale = 0.45 if (game_month == 11 or low_sample_teams) else 1.0
+            mu_total_final += kp_player_total_adj * tot_adj_scale
+            mu_total_final += kp_total_ff_adj * situational_scale * tot_adj_scale
             potential_adjustment_total = council_adjustment_total
             if COUNCIL_ADJUSTMENTS_ENABLED:
                 mu_total_final += council_adjustment_total
@@ -1399,20 +1414,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
             # Asymmetric TOTAL OVER calibration: efficiency ensembles systematically run hot
             # above sharp market totals in early season and fast-tempo matchups.
             if os.getenv('NCAAM_DISABLE_OVER_DAMP') is None and mu_total_final > mu_market_total:
-                over_damp = 0.80 if is_early_season else 0.85
+                if game_month == 11 or low_sample_teams:
+                    over_damp = 0.68 if agree_count_total >= 3 else 0.60
+                else:
+                    over_damp = 0.74 if is_early_season else 0.80
                 if game_tempo_val >= 72.0:
                     over_damp *= 0.72
                 mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * over_damp)
                 eff_cap_tot_use = min(
                     effective_cap_total,
-                    2.2 if game_month == 11 else (2.4 if game_tempo_val >= 72.0 else 3.2),
+                    (2.0 if agree_count_total >= 3 else 1.80) if (game_month == 11 or low_sample_teams) else (2.25 if game_tempo_val >= 72.0 else 3.0),
                 )
             else:
                 eff_cap_tot_use = effective_cap_total
             if abs(mu_total_final - mu_market_total) > eff_cap_tot_use:
                 mu_total_final = mu_market_total + (eff_cap_tot_use * math.copysign(1, mu_total_final - mu_market_total))
-            if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_tot_gap >= 6.5:
-                tot_div_shrink = max(0.58, 1.0 - (mean_tot_gap - 6.5) * 0.10)
+            if os.getenv('NCAAM_DISABLE_EXTREME_SHRINK') is None and mean_tot_gap >= 6.0:
+                tot_div_shrink = max(0.50, 1.0 - (mean_tot_gap - 6.0) * 0.10)
                 mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * tot_div_shrink)
         else:
             # Market total absent: compute display-only total from available real projections (never synthetic 145.0).
@@ -1446,6 +1464,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         base_sigma_total = 15.0  # Restored D1 total scoring sigma to curb marginal O/U false positives
 
         early_season_sigma_mult = 1.11 if game_month == 11 else (1.045 if game_month == 12 else 1.0)
+        if min_rec_games is not None and min_rec_games < 5:
+            early_season_sigma_mult *= 1.03
         if avg_continuity < 0.5:
             early_season_sigma_mult *= 1.05
 
@@ -1464,16 +1484,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
         elif is_early_season and abs(diff_torvik) >= 4.5:
             sigma_spread *= 1.06
         if game_month == 11 and abs(diff_tv_tot) >= 4.5:
-            sigma_total *= 1.05
+            sigma_total *= 1.055
         elif is_early_season and abs(diff_tv_tot) >= 6.0:
             sigma_total *= 1.06
 
         # Extreme model-vs-market divergence reflects likely unpriced roster/situational info;
         # widen sigma smoothly so 12%+ edge outliers do not overstate predicted cover probability.
-        if mean_sp_gap >= 5.5:
-            sigma_spread *= (1.0 + min(0.18, (mean_sp_gap - 5.5) * 0.04))
-        if mean_tot_gap >= 6.5:
-            sigma_total *= (1.0 + min(0.16, (mean_tot_gap - 6.5) * 0.03))
+        if mean_sp_gap >= 4.5:
+            sigma_spread *= (1.0 + min(0.22, (mean_sp_gap - 4.5) * 0.045))
+        if mean_tot_gap >= 5.5:
+            sigma_total *= (1.0 + min(0.20, (mean_tot_gap - 5.5) * 0.035))
         if has_total and mu_market_total is not None and mu_total_final is not None and mu_total_final > mu_market_total and game_tempo >= 72.0:
             sigma_total *= 1.08
 
@@ -1694,12 +1714,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if mu_market_total is not None and mu_total_final > mu_market_total and os.getenv('NCAAM_DISABLE_OVER_DAMP') is None:
                 base_tot_cap = min(
                     effective_cap_total,
-                    2.2 if game_month == 11 else (2.4 if game_tempo >= 72.0 else 3.2),
+                    (2.0 if agree_count_total >= 3 else 1.80) if (game_month == 11 or low_sample_teams) else (2.25 if game_tempo >= 72.0 else 3.0),
                 )
                 if float(mu_market_total) >= 152.0:
-                    base_tot_cap = min(base_tot_cap, 1.95)
-                    mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * 0.82)
-            max_auto_total_dev = base_tot_cap + (0.4 if is_early_season else 1.0)
+                    base_tot_cap = min(base_tot_cap, 1.65 if is_early_season else 1.95)
+                    mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * 0.78)
+            max_auto_total_dev = base_tot_cap + (0.35 if is_early_season else 1.0)
             if mu_market_total is not None and abs(mu_total_final - mu_market_total) > max_auto_total_dev:
                 mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
         
@@ -1719,6 +1739,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
             relax_gates=relax_gates,
             action_splits=action_splits,
             injury_context=injury_context,
+            model_ctx={
+                "game_month": game_month,
+                "min_rec_games": min_rec_games,
+                "is_early_season": is_early_season,
+                "agree_count": agree_count,
+                "agree_count_total": agree_count_total,
+                "mean_sp_gap": mean_sp_gap,
+                "mean_tot_gap": mean_tot_gap,
+            },
         )
 
         # Only fetch news context if something passed the gates.
@@ -2156,6 +2185,34 @@ class NCAAMMarketFirstModelV2(BaseModel):
         except Exception:
             within_lock_window = False
 
+        def _extract_open_line_and_price(rec_obj):
+            if not isinstance(rec_obj, dict):
+                return None, None
+            mkt_o = str(rec_obj.get('market') or '').upper()
+            side_o = str(rec_obj.get('side') or '').lower()
+            mc_open = market_snapshot.get('_market_consensus') if isinstance(market_snapshot, dict) else None
+            open_l = None
+            open_p = None
+            if isinstance(mc_open, dict):
+                if mkt_o == 'SPREAD':
+                    osh = _safe_float(mc_open.get('open_spread_home'))
+                    if osh is not None:
+                        open_l = round(-osh if side_o == 'away' else osh, 2)
+                    if side_o == 'home':
+                        open_p = mc_open.get('open_spread_price_home')
+                elif mkt_o == 'TOTAL':
+                    open_l = _safe_float(mc_open.get('open_total'))
+                    open_p = (
+                        mc_open.get('open_total_over_price')
+                        if side_o == 'over'
+                        else mc_open.get('open_total_under_price')
+                    )
+            if open_l is None:
+                open_l = rec_obj.get('line')
+            if open_p is None:
+                open_p = rec_obj.get('price')
+            return open_l, (int(open_p) if open_p is not None else None)
+
         if recs:
             def _normalize_spread_line(side, raw_line):
                 if raw_line is None:
@@ -2237,6 +2294,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     if mu_market is not None and mu_final_val is not None:
                         edge = float(mu_final_val) - float(mu_market)
 
+                open_line_val, open_price_val = _extract_open_line_and_price(rec)
+
                 doc = {
                     "event_id": event_id,
                     "model_version": self.VERSION,
@@ -2244,6 +2303,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     "pick": pick,
                     "bet_line": bet_line,
                     "bet_price": int(price) if price is not None else None,
+                    "open_line": open_line_val,
+                    "open_price": open_price_val,
                     "book": book,
                     "mu_market": mu_market,
                     "mu_torvik": mu_torvik_val,
@@ -2467,8 +2528,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "price": best_rec['price'] if best_rec else None,
             "fair_line": fair_line_persist,
             "edge_points": edge_points_persist,
-            "open_line": best_rec['line'] if best_rec else None,
-            "open_price": best_rec['price'] if best_rec else None,
+            "open_line": _extract_open_line_and_price(best_rec)[0] if best_rec else None,
+            "open_price": _extract_open_line_and_price(best_rec)[1] if best_rec else None,
             "clv_method": "odds_selector_v1",
             "debug": debug_info
         }
@@ -2518,8 +2579,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             # mu_spread_final is home-perspective margin mean.
             if ml_price_home is not None and ml_price_away is not None:
                 prob_home_raw = 1.0 - self._normal_cdf(0.0, -float(mu_spread_final), float(sigma_spread))
-                prob_home = self._calibrate_win_prob(prob_home_raw)
-                prob_away = self._calibrate_win_prob(1.0 - prob_home_raw)
+                prob_home = self._calibrate_win_prob(prob_home_raw, is_early_season=is_early_season)
+                prob_away = self._calibrate_win_prob(1.0 - prob_home_raw, is_early_season=is_early_season)
 
                 ev_home = float(ev_per_unit(prob_home, int(ml_price_home)) or 0.0)
                 ev_away = float(ev_per_unit(prob_away, int(ml_price_away)) or 0.0)
@@ -2637,7 +2698,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     # Straight bets only for now. (Correlation/parlays are handled elsewhere.)
     PUBLISH_MIN_EV = 0.02  # +2.0% per unit
     PUBLISH_MIN_EV_TOTAL = 0.035  # +3.5% EV required on Over/Under totals (curbs O/U bleed)
-    PUBLISH_MIN_EV_TOTAL_OVER = 0.041  # +4.1% EV required on TOTAL OVER (curbs early-season O/U inflation)
+    PUBLISH_MIN_EV_TOTAL_OVER = 0.041  # +4.1% base EV required on TOTAL OVER (higher early-season/solo bars below)
     PUBLISH_MIN_WINPROB_LB10 = 0.52  # Require >= 52% 10th-pct cover prob (maps to >= 55 conf / Medium+)
     PUBLISH_MIN_EV_ML = 0.05  # +5.0% EV required on Moneyline picks
     MIN_ML_WIN_PROB = 0.52    # Exclude plus-money / sub-52% underdogs (historically ~20% win rate)
@@ -2900,9 +2961,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         min_n = self.PUBLISH_MIN_N_TORVIK_OK if torvik_ok else self.PUBLISH_MIN_N_TORVIK_MISSING
         side_lower = str(rec.get("side") or "").strip().lower()
+        tags = [str(t or "").strip().lower() for t in (rec.get("movement_tags") or [])]
+        has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags)
+        is_early = bool(rec.get("_is_early_season"))
+        min_games = rec.get("_min_rec_games")
+        low_sample = min_games is not None and int(min_games) < 6
+        agree_sp = rec.get("_agree_count")
+        agree_tot = rec.get("_agree_count_total")
+
         if market == "TOTAL":
             base_ev = (
-                float(getattr(self, "PUBLISH_MIN_EV_TOTAL_OVER", 0.041))
+                float(getattr(self, "PUBLISH_MIN_EV_TOTAL_OVER", 0.052))
                 if side_lower == "over"
                 else float(self.PUBLISH_MIN_EV_TOTAL)
             )
@@ -2910,13 +2979,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             base_ev = float(self.PUBLISH_MIN_EV)
         min_ev = base_ev if torvik_ok else (base_ev + float(self.PUBLISH_MIN_EV_TORVIK_MISSING_BUMP))
 
-        # Mid-spread (6–14 pt) ATS selectivity gate & adaptive learned adjustments
+        # Mid-spread (6–14 pt), blowout (14–22 pt), and early-season selectivity gates
         if market == "SPREAD" and market_line_home is not None:
             try:
                 abs_sp_line = abs(float(market_line_home))
                 if 6.0 <= abs_sp_line < 14.0 and os.getenv("NCAAM_DISABLE_MID_SPREAD_GATE") is None:
-                    tags = [str(t or "").strip().lower() for t in (rec.get("movement_tags") or [])]
-                    has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags)
                     mid_bump = 0.004 if has_sharp else 0.012
                     try:
                         sb_bumps = ((self._load_adaptive_learning() or {}).get("learned_adjustments") or {}).get("spread_bucket_ev_bump") or {}
@@ -2925,10 +2992,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     except Exception:
                         pass
                     min_ev += max(0.0, mid_bump)
+                elif 14.0 <= abs_sp_line < 22.0 and not has_sharp:
+                    min_ev += 0.006
+                if (is_early or low_sample) and not has_sharp:
+                    if abs_sp_line < 6.0 and (agree_sp is not None and int(agree_sp) < 2):
+                        min_ev += 0.012
+                    elif low_sample and (agree_sp is not None and int(agree_sp) < 2):
+                        min_ev += 0.008
                 # Road favorite gate: laying points away demands stronger EV unless backed by sharp money
                 if side_lower == "away" and float(market_line_home) > 0.0 and os.getenv("NCAAM_DISABLE_AWAY_FAV_GATE") is None:
-                    tags = [str(t or "").strip().lower() for t in (rec.get("movement_tags") or [])]
-                    has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags)
                     if has_sharp:
                         min_ev += 0.008
                     elif float(market_line_home) >= 5.5:
@@ -2942,6 +3014,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 line_val = abs(float(rec.get("line") or rec.get("market_line") or 0.0))
                 if line_val >= 152.0:
                     min_ev += 0.010
+                if (is_early or low_sample) and not has_sharp:
+                    min_ev += 0.010
+                    if agree_tot is not None and int(agree_tot) < 2:
+                        min_ev += 0.012
             except Exception:
                 pass
         try:
@@ -3019,7 +3095,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         )
         return self._winprob_calibration
 
-    def _calibrate_win_prob(self, p: float) -> float:
+    def _calibrate_win_prob(self, p: float, is_early_season: bool = False) -> float:
         """Calibrate raw win probability using empirical-weighted PAVA mapping."""
         try:
             p_val = float(p)
@@ -3029,6 +3105,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return 0.0
         if p_val >= 1.0:
             return 1.0
+        cal = self._load_winprob_calibration()
         try:
             blend_w = float(os.getenv('NCAAM_WINPROB_CAL_BLEND', '0.65'))
             blend_w = max(0.0, min(1.0, blend_w))
@@ -3036,7 +3113,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             blend_w = 0.65
         return interpolate_pava_prob(
             p_val,
-            self._load_winprob_calibration(),
+            cal,
             blend_weight=blend_w,
         )
 
@@ -3055,12 +3132,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
             self._model_conf_params = {}
         return self._model_conf_params
 
-    def _tau_for_market(self, market: str) -> float:
+    def _tau_for_market(
+        self,
+        market: str,
+        *,
+        game_month: Optional[int] = None,
+        min_rec_games: Optional[int] = None,
+        mean_gap: float = 0.0,
+        agree_count: Optional[int] = None,
+    ) -> float:
         """Return shrinkage-adjusted tau for mu-uncertainty bounds.
 
-        Enabled by default (set ENABLE_MU_UNCERTAINTY_CONF=0 to disable) using empirical
-        closing-line dispersion scaled by posterior market-anchor shrinkage so lb10
-        penalizes noisy/thin edges without crushing capped consensus edges.
+        Scales uncertainty higher during early-season low-sample windows and wide
+        model-vs-market divergences so November predictions do not over-claim High confidence.
         """
         try:
             if str(os.getenv('ENABLE_MU_UNCERTAINTY_CONF', '1')).strip() == '0':
@@ -3072,7 +3156,21 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 raw_tau = float(params.get('tau_spread') or 0.0)
             if raw_tau <= 0.0:
                 return 0.0
-            shrinkage = float(os.getenv('NCAAM_MU_TAU_SHRINKAGE', '0.25'))
+            env_shrink = os.getenv('NCAAM_MU_TAU_SHRINKAGE')
+            if env_shrink is not None:
+                shrinkage = float(env_shrink)
+            elif min_rec_games is not None and int(min_rec_games) < 5:
+                shrinkage = 0.38
+            elif game_month == 11:
+                shrinkage = 0.35
+            elif game_month == 12:
+                shrinkage = 0.30
+            else:
+                shrinkage = 0.25
+            if agree_count is not None and int(agree_count) < 2 and (game_month in (11, 12) or (min_rec_games is not None and int(min_rec_games) < 6)):
+                shrinkage *= 1.10
+            if float(mean_gap or 0.0) >= 5.0:
+                shrinkage *= 1.10
             shrinkage = max(0.10, min(1.0, shrinkage))
             return raw_tau * shrinkage
         except Exception:
@@ -3095,18 +3193,30 @@ class NCAAMMarketFirstModelV2(BaseModel):
         line: float,
         side: str,
         n_sims: int = 600,
+        *,
+        game_month: Optional[int] = None,
+        min_rec_games: Optional[int] = None,
+        mean_gap: float = 0.0,
+        agree_count: Optional[int] = None,
     ) -> Dict[str, Optional[float]]:
         """Compute deterministic win_prob p10/p90 bounds from uncertainty in mu.
 
         NOTE: `mu` and `line` are passed in HOME perspective for SPREAD, and absolute for TOTAL.
         """
-        tau = self._tau_for_market(market)
+        tau = self._tau_for_market(
+            market,
+            game_month=game_month,
+            min_rec_games=min_rec_games,
+            mean_gap=mean_gap,
+            agree_count=agree_count,
+        )
         if not (tau and tau > 0.0 and sigma and sigma > 0.0):
             return {"lb10": None, "ub90": None}
 
         probs: List[float] = []
         mkt = str(market).upper()
         side = str(side).lower().strip()
+        is_early = game_month in (11, 12) or (min_rec_games is not None and int(min_rec_games) < 6)
 
         def _push_prob(line_v: float) -> float:
             try:
@@ -3136,7 +3246,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 p_under = (1.0 - prob_over_raw) - (push_prob / 2)
                 p = p_over if side == 'over' else p_under
 
-            probs.append(self._calibrate_win_prob(p))
+            probs.append(self._calibrate_win_prob(p, is_early_season=is_early))
 
         return {
             "lb10": float(min(probs)),
@@ -3330,6 +3440,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         min_gate_ev = float(self.PUBLISH_MIN_EV)
                     if not relax_gates and float(rec.get("ev") or 0.0) < min_gate_ev:
                         continue
+                    if not relax_gates and rec.get("win_prob_lb10") is not None and float(rec["win_prob_lb10"]) < float(getattr(self, "PUBLISH_MIN_WINPROB_LB10", 0.52)):
+                        continue
 
             if inj_count > 0 and "injury_report_active" not in tags:
                 tags.append("injury_report_active")
@@ -3338,7 +3450,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             if tags:
                 rec["movement_tags"] = tags
-            filtered.append(rec)
+            filtered.append({k: v for k, v in rec.items() if not str(k).startswith("_")})
 
         return filtered
 
@@ -3354,10 +3466,20 @@ class NCAAMMarketFirstModelV2(BaseModel):
         relax_gates: bool = False,
         action_splits: Optional[Dict] = None,
         injury_context: Optional[Dict] = None,
+        model_ctx: Optional[Dict[str, Any]] = None,
     ) -> List[Dict]:
         recs: List[Dict[str, Any]] = []
         if not snap:
             return recs
+
+        mctx = model_ctx or {}
+        g_month = mctx.get("game_month")
+        g_min_games = mctx.get("min_rec_games")
+        g_is_early = bool(mctx.get("is_early_season")) if "is_early_season" in mctx else (g_month in (11, 12))
+        g_agree_sp = mctx.get("agree_count")
+        g_agree_tot = mctx.get("agree_count_total")
+        g_gap_sp = float(mctx.get("mean_sp_gap") or 0.0)
+        g_gap_tot = float(mctx.get("mean_tot_gap") or 0.0)
 
         # Torvik availability: do not hard-require; used to tighten gates.
         torvik_ok = True
@@ -3606,13 +3728,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
             price_away_bet = _clean_main_price(best_away.get('price') if best_away else None, default=price_away)
 
             prob_home = _spread_cover_prob_home(mu_s, sig_s, line_home_bet)
-            prob_home_cal = self._calibrate_win_prob(prob_home)
+            prob_home_cal = self._calibrate_win_prob(prob_home, is_early_season=g_is_early)
             push_prob_home = get_push_prob(float(line_home_bet), float(sig_s))
             ev_home = self._calculate_ev(prob_home_cal, price_home_bet, push_prob=push_prob_home)
             kelly_home = self._calculate_kelly(prob_home_cal, price_home_bet)
 
             prob_away = 1.0 - _spread_cover_prob_home(mu_s, sig_s, -float(line_away_bet))
-            prob_away_cal = self._calibrate_win_prob(prob_away)
+            prob_away_cal = self._calibrate_win_prob(prob_away, is_early_season=g_is_early)
             push_prob_away = get_push_prob(float(line_away_bet), float(sig_s))
             ev_away = self._calculate_ev(prob_away_cal, price_away_bet, push_prob=push_prob_away)
             kelly_away = self._calculate_kelly(prob_away_cal, price_away_bet)
@@ -3626,6 +3748,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 sigma=float(sig_s),
                 line=float(line_home_bet),
                 side='home',
+                game_month=g_month,
+                min_rec_games=g_min_games,
+                mean_gap=g_gap_sp,
+                agree_count=g_agree_sp,
             )
 
             cand_home = {
@@ -3642,6 +3768,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_home, 4)),
                 "book": best_home.get('book') or book_consensus,
                 "edge_points": float(round(edge_pts_home, 2)),
+                "_is_early_season": g_is_early,
+                "_min_rec_games": g_min_games,
+                "_agree_count": g_agree_sp,
+                "_agree_count_total": g_agree_tot,
             }
 
             bounds_away = self._confidence_bounds_from_mu_uncertainty(
@@ -3650,6 +3780,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 sigma=float(sig_s),
                 line=-float(line_away_bet),
                 side='away',
+                game_month=g_month,
+                min_rec_games=g_min_games,
+                mean_gap=g_gap_sp,
+                agree_count=g_agree_sp,
             )
 
             cand_away = {
@@ -3666,6 +3800,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_away, 4)),
                 "book": (best_away or {}).get('book') or book_consensus,
                 "edge_points": float(round(edge_pts_away, 2)),
+                "_is_early_season": g_is_early,
+                "_min_rec_games": g_min_games,
+                "_agree_count": g_agree_sp,
+                "_agree_count_total": g_agree_tot,
             }
 
             # Choose the higher-EV side, then gate it.
@@ -3731,7 +3869,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                         p_raw_adj = _spread_cover_prob_home(mu_s, sig_s_adj, float(out['line']))
                                     else:
                                         p_raw_adj = 1.0 - _spread_cover_prob_home(mu_s, sig_s_adj, -float(out['line']))
-                                    p_cal_adj = self._calibrate_win_prob(p_raw_adj)
+                                    p_cal_adj = self._calibrate_win_prob(p_raw_adj, is_early_season=g_is_early)
                                     push_p_adj = get_push_prob(float(out['line']), sig_s_adj)
                                     ev_recomp = float(self._calculate_ev(p_cal_adj, int(out['price']), push_prob=push_p_adj))
                                     ev_adj = min(ev_raw, ev_recomp) - float(ev_penalty or 0.0)
@@ -3745,6 +3883,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                     sigma=sig_s_adj,
                                     line=home_persp_line,
                                     side=out_side,
+                                    game_month=g_month,
+                                    min_rec_games=g_min_games,
+                                    mean_gap=g_gap_sp,
+                                    agree_count=g_agree_sp,
                                 )
                                 if b2:
                                     out['win_prob_lb10'] = (round(float(b2.get('lb10')), 3) if b2.get('lb10') is not None else out.get('win_prob_lb10'))
@@ -3798,8 +3940,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             push_prob_over = get_push_prob(line_over_bet, sig_t)
             push_prob_under = get_push_prob(line_under_bet, sig_t)
 
-            prob_over_cal = self._calibrate_win_prob(prob_over_raw)
-            prob_under_cal = self._calibrate_win_prob(prob_under_raw)
+            prob_over_cal = self._calibrate_win_prob(prob_over_raw, is_early_season=g_is_early)
+            prob_under_cal = self._calibrate_win_prob(prob_under_raw, is_early_season=g_is_early)
 
             ev_over = self._calculate_ev(prob_over_cal, price_over, push_prob=push_prob_over)
             kelly_over = self._calculate_kelly(prob_over_cal, price_over)
@@ -3815,6 +3957,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 sigma=float(sig_t),
                 line=float(line_over_bet),
                 side='over',
+                game_month=g_month,
+                min_rec_games=g_min_games,
+                mean_gap=g_gap_tot,
+                agree_count=g_agree_tot,
             )
 
             cand_over = {
@@ -3830,6 +3976,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_over, 4)),
                 "book": book_over,
                 "edge_points": float(round(edge_pts_over, 2)),
+                "_is_early_season": g_is_early,
+                "_min_rec_games": g_min_games,
+                "_agree_count": g_agree_sp,
+                "_agree_count_total": g_agree_tot,
             }
 
             bounds_under = self._confidence_bounds_from_mu_uncertainty(
@@ -3838,6 +3988,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 sigma=float(sig_t),
                 line=float(line_under_bet),
                 side='under',
+                game_month=g_month,
+                min_rec_games=g_min_games,
+                mean_gap=g_gap_tot,
+                agree_count=g_agree_tot,
             )
 
             cand_under = {
@@ -3853,6 +4007,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_under, 4)),
                 "book": book_under,
                 "edge_points": float(round(edge_pts_under, 2)),
+                "_is_early_season": g_is_early,
+                "_min_rec_games": g_min_games,
+                "_agree_count": g_agree_sp,
+                "_agree_count_total": g_agree_tot,
             }
 
             best = cand_over if cand_over["ev"] >= cand_under["ev"] else cand_under
@@ -3911,7 +4069,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                         p_raw_adj = 1.0 - self._normal_cdf(float(out['line']), float(mu_t), sig_t_adj)
                                     else:
                                         p_raw_adj = self._normal_cdf(float(out['line']), float(mu_t), sig_t_adj)
-                                    p_cal_adj = self._calibrate_win_prob(p_raw_adj)
+                                    p_cal_adj = self._calibrate_win_prob(p_raw_adj, is_early_season=g_is_early)
                                     push_p_adj = get_push_prob(float(out['line']), sig_t_adj)
                                     ev_recomp = float(self._calculate_ev(p_cal_adj, int(out['price']), push_prob=push_p_adj))
                                     ev_adj = min(ev_raw, ev_recomp) - float(ev_penalty or 0.0)
@@ -3924,6 +4082,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                     sigma=sig_t_adj,
                                     line=float(out['line']),
                                     side=str(out.get('side') or ''),
+                                    game_month=g_month,
+                                    min_rec_games=g_min_games,
+                                    mean_gap=g_gap_tot,
+                                    agree_count=g_agree_tot,
                                 )
                                 if b2:
                                     out['win_prob_lb10'] = (round(float(b2.get('lb10')), 3) if b2.get('lb10') is not None else out.get('win_prob_lb10'))

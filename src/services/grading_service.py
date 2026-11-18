@@ -373,19 +373,15 @@ class GradingService:
 
         return count
 
-    def _compute_clv_for_started_games(self, *, max_rows: int = 250, lookback_days: int = 3, include_all_ev: bool = True):
+    def _compute_clv_for_started_games(self, *, max_rows: int = 250, lookback_days: int = 7, include_all_ev: bool = True):
         """Compute CLV for games that have started.
 
-        This version is DB-driven and side-aware so it actually fills close_line/close_price
-        for recommended bets.
-
-        Bounded for serverless execution.
+        Compares each posted bet line/price against the latest pre-tip market snapshot
+        (with case-insensitive team/selection fallback so standardized picks still match).
         """
         min_ev = float(os.getenv('GRADING_MIN_EV_PER_UNIT', '0.02'))
         ev_clause = "" if include_all_ev else "AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s"
 
-        # DB-driven batch update using LATERAL to pick the last snapshot before tip.
-        # This avoids per-row connections and makes CLV usable.
         upd_q = f"""
         WITH candidates AS (
           SELECT
@@ -393,21 +389,30 @@ class GradingService:
             m.event_id,
             m.market_type,
             m.pick,
-            COALESCE(m.open_line, m.bet_line) as open_line,
-            COALESCE(m.open_price, m.bet_price, m.price) as open_price,
+            m.selection,
+            COALESCE(m.bet_line, m.open_line) AS base_line,
+            COALESCE(m.bet_price, m.open_price, m.price) AS base_price,
             e.start_time,
             e.home_team,
             e.away_team,
             CASE
-              WHEN m.market_type='TOTAL' AND UPPER(m.pick) IN ('OVER','UNDER') THEN UPPER(m.pick)
-              WHEN m.market_type IN ('SPREAD','MONEYLINE') AND m.pick = e.home_team THEN 'HOME'
-              WHEN m.market_type IN ('SPREAD','MONEYLINE') AND m.pick = e.away_team THEN 'AWAY'
-              WHEN m.market_type IN ('SPREAD','MONEYLINE') AND LOWER(m.pick)='home' THEN 'HOME'
-              WHEN m.market_type IN ('SPREAD','MONEYLINE') AND LOWER(m.pick)='away' THEN 'AWAY'
+              WHEN m.market_type = 'TOTAL' AND UPPER(TRIM(m.pick)) IN ('OVER', 'UNDER') THEN UPPER(TRIM(m.pick))
+              WHEN m.market_type = 'TOTAL' AND UPPER(COALESCE(m.selection, '')) LIKE 'OVER%%' THEN 'OVER'
+              WHEN m.market_type = 'TOTAL' AND UPPER(COALESCE(m.selection, '')) LIKE 'UNDER%%' THEN 'UNDER'
+              WHEN m.market_type IN ('SPREAD', 'MONEYLINE') AND (
+                LOWER(TRIM(m.pick)) = 'home'
+                OR LOWER(TRIM(m.pick)) = LOWER(TRIM(e.home_team))
+                OR LOWER(TRIM(COALESCE(m.selection, ''))) LIKE (LOWER(TRIM(e.home_team)) || ' %%')
+              ) THEN 'HOME'
+              WHEN m.market_type IN ('SPREAD', 'MONEYLINE') AND (
+                LOWER(TRIM(m.pick)) = 'away'
+                OR LOWER(TRIM(m.pick)) = LOWER(TRIM(e.away_team))
+                OR LOWER(TRIM(COALESCE(m.selection, ''))) LIKE (LOWER(TRIM(e.away_team)) || ' %%')
+              ) THEN 'AWAY'
               ELSE NULL
-            END as side
+            END AS side
           FROM model_predictions m
-          JOIN events e ON e.id=m.event_id
+          JOIN events e ON e.id = m.event_id
           WHERE (
               (m.market_type IN ('SPREAD','TOTAL') AND m.close_line IS NULL)
               OR (m.market_type='MONEYLINE' AND m.close_price IS NULL)
@@ -415,25 +420,24 @@ class GradingService:
             AND e.start_time < CURRENT_TIMESTAMP
             AND e.start_time > (CURRENT_TIMESTAMP - (%(d)s || ' days')::interval)
             {ev_clause}
-            AND m.market_type IN ('SPREAD','TOTAL','MONEYLINE')
-            AND UPPER(COALESCE(m.market_type,'')) <> 'AUTO'
+            AND m.market_type IN ('SPREAD', 'TOTAL', 'MONEYLINE')
+            AND UPPER(COALESCE(m.market_type, '')) <> 'AUTO'
             AND m.pick IS NOT NULL
             AND TRIM(m.pick) <> ''
             AND UPPER(TRIM(m.pick)) NOT IN ('NONE', 'NO BET', 'PASS')
             AND m.selection IS NOT NULL
             AND TRIM(m.selection) <> ''
             AND m.selection <> '—'
-            -- ignore last-second analyses (shouldn't be considered "published" recs)
-            AND m.analyzed_at <= (e.start_time - INTERVAL '10 minutes')
+            AND m.analyzed_at <= e.start_time
           ORDER BY e.start_time DESC
           LIMIT %(lim)s
         ), snaps AS (
           SELECT
-            c.id as mid,
+            c.id AS mid,
             c.market_type,
-            c.pick,
-            c.open_line,
-            c.open_price,
+            c.side,
+            c.base_line,
+            c.base_price,
             s.line_value,
             s.price,
             s.captured_at
@@ -441,16 +445,20 @@ class GradingService:
           JOIN LATERAL (
             SELECT line_value, price, captured_at
             FROM odds_snapshots
-            WHERE event_id=c.event_id
-              AND market_type=c.market_type
-              AND side=c.side
+            WHERE event_id = c.event_id
+              AND market_type = c.market_type
+              AND side = c.side
               AND COALESCE(book, '') NOT IN ('action_open', 'open')
               AND captured_at <= c.start_time
               AND (
-                (c.market_type IN ('SPREAD','TOTAL') AND line_value IS NOT NULL)
-                OR (c.market_type='MONEYLINE' AND price IS NOT NULL AND price != 0)
+                (c.market_type IN ('SPREAD', 'TOTAL') AND line_value IS NOT NULL)
+                OR (c.market_type = 'MONEYLINE' AND price IS NOT NULL AND price != 0)
               )
-            ORDER BY captured_at DESC, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END) ASC
+            ORDER BY
+              captured_at DESC,
+              (CASE WHEN LOWER(COALESCE(book, '')) IN ('pinnacle', 'circa sports', 'bookmaker') THEN 0
+                    WHEN LOWER(COALESCE(book, '')) = 'consensus' THEN 1
+                    ELSE 2 END) ASC
             LIMIT 1
           ) s ON TRUE
           WHERE c.side IS NOT NULL
@@ -462,22 +470,22 @@ class GradingService:
             price,
             captured_at,
             CASE
-              WHEN market_type='SPREAD' THEN (open_line - line_value)
-              WHEN market_type='TOTAL' AND UPPER(pick)='OVER' THEN (line_value - open_line)
-              WHEN market_type='TOTAL' AND UPPER(pick)='UNDER' THEN (open_line - line_value)
-              WHEN market_type='MONEYLINE' AND open_price IS NOT NULL AND open_price != 0 AND price IS NOT NULL AND price != 0 THEN
+              WHEN market_type = 'SPREAD' AND base_line IS NOT NULL THEN ROUND((base_line - line_value)::numeric, 2)::double precision
+              WHEN market_type = 'TOTAL' AND side = 'OVER' AND base_line IS NOT NULL THEN ROUND((line_value - base_line)::numeric, 2)::double precision
+              WHEN market_type = 'TOTAL' AND side = 'UNDER' AND base_line IS NOT NULL THEN ROUND((base_line - line_value)::numeric, 2)::double precision
+              WHEN market_type = 'MONEYLINE' AND base_price IS NOT NULL AND base_price != 0 AND price IS NOT NULL AND price != 0 THEN
                 ROUND(
                   ((
                     (CASE WHEN price < 0 THEN (-price)::double precision / ((-price)::double precision + 100.0)
                           ELSE 100.0 / (price::double precision + 100.0) END)
                     -
-                    (CASE WHEN open_price < 0 THEN (-open_price)::double precision / ((-open_price)::double precision + 100.0)
-                          ELSE 100.0 / (open_price::double precision + 100.0) END)
+                    (CASE WHEN base_price < 0 THEN (-base_price)::double precision / ((-base_price)::double precision + 100.0)
+                          ELSE 100.0 / (base_price::double precision + 100.0) END)
                   ) * 100.0)::numeric,
                   2
                 )::double precision
               ELSE NULL
-            END as clv_val
+            END AS clv_val
           FROM snaps
         )
         UPDATE model_predictions m

@@ -1183,6 +1183,108 @@ def test_ncaam_model_hardening_and_sync(monkeypatch):
     assert stale_row["quality_score"] == compute_top6_quality_score(stale_row)
 
 
+def test_ncaam_model_leak_fixes_and_clv_capture(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock, patch
+    import pytest
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.services.grading_service import GradingService
+    import src.database as db_mod
+
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.kenpom_client = MagicMock()
+    model.haslametrics_client = MagicMock()
+    model.injury_service = MagicMock()
+    model.geo_service = MagicMock()
+    model.news_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 100.0
+    model.kenpom_client.get_team_rating.return_value = {"adj_t": 68.0}
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.kenpom_client.get_team_player_agg.return_value = None
+    model.injury_service.get_matchup_injuries.return_value = {"has_injuries": False, "injuries": []}
+    model.news_service.fetch_game_context.return_value = {}
+    model.news_service.summarize_impact.return_value = ""
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda k: {"n": 80, "mean": 0.04, "sd": 0.90})
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+    monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
+
+    # 1. Early-season low-sample (<5 games) widens tau vs late season on identical spread inputs
+    tau_nov = model._tau_for_market("SPREAD", game_month=11, min_rec_games=3, agree_count=1, mean_gap=5.5)
+    tau_feb = model._tau_for_market("SPREAD", game_month=2, min_rec_games=20, agree_count=3, mean_gap=2.0)
+    assert tau_nov > tau_feb * 1.4
+
+    # 2. Early-season solo TOTAL OVER requires stricter EV (+6.3% bar) vs agreed/Under
+    assert model._passes_publish_gates(
+        {"market": "TOTAL", "side": "over", "ev": 0.048, "edge_points": 2.0, "_is_early_season": True, "_agree_count_total": 1},
+        None,
+        True,
+    ) is False
+    assert model._passes_publish_gates(
+        {"market": "TOTAL", "side": "under", "ev": 0.040, "edge_points": 2.0, "_is_early_season": True, "_agree_count_total": 2},
+        None,
+        True,
+    ) is True
+
+    # 3. _build_rec_doc preserves open_line/open_price from _market_consensus (adjusted for AWAY side)
+    model.torvik_service.get_projection.return_value = {"margin": -9.0, "official_margin": -9.0, "total": 146.0, "lean": "Away"}
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "continuity": 0.75, "record": "12-4"},
+        "away": {"luck": 0.0, "continuity": 0.75, "record": "12-4"},
+    }
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": -9.0, "fair_margin": -9.0, "fair_total": 146.0, "summary": "KP"}
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": -9.0, "total": 146.0}
+
+    inserted_docs = []
+    import src.models.ncaam_market_first_model_v2 as model_mod
+    monkeypatch.setattr(model_mod, "insert_model_prediction", lambda doc: inserted_docs.append(dict(doc)))
+    snap_open = {
+        "spread_home": -3.5,
+        "spread_price_home": -110,
+        "total": 146.0,
+        "_best_spread_away": {"line_value": 3.5, "price": -108, "book": "DK"},
+        "_market_consensus": {
+            "open_spread_home": -2.5,
+            "current_spread_home": -3.5,
+            "spread_move_home": -1.0,
+            "open_spread_price_home": -112,
+        },
+    }
+    ev_ctx = {"id": "clv1", "home_team": "Home Univ", "away_team": "Road State", "start_time": datetime(2027, 2, 12, 20, 0, tzinfo=timezone.utc), "action_splits": {}}
+    model.analyze("clv1", market_snapshot=snap_open, event_context=ev_ctx, persist=True, relax_gates=True)
+    assert inserted_docs and inserted_docs[0]["market_type"] == "SPREAD"
+    assert inserted_docs[0]["open_line"] == pytest.approx(2.5)  # away-perspective open spread (-open_spread_home)
+
+    # 4. insert_model_prediction preserves earliest analyzed_at/open_line; Grading CLV handles alias/case-insensitive match
+    mock_conn = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_conn
+    with patch("src.database.get_db_connection", return_value=mock_ctx), \
+         patch("src.database._exec") as mock_db_exec:
+        mock_db_exec.return_value.fetchone.return_value = {"id": "p1"}
+        db_mod.insert_model_prediction({"event_id": "clv1", "market_type": "SPREAD", "pick": "Road State", "bet_line": 3.5, "open_line": 2.5})
+        db_sql = mock_db_exec.call_args[0][1]
+        assert "LEAST(model_predictions.analyzed_at, EXCLUDED.analyzed_at)" in db_sql
+        assert "COALESCE(model_predictions.open_line, EXCLUDED.open_line)" in db_sql
+
+    svc = GradingService()
+    with patch("src.services.grading_service.get_db_connection", return_value=mock_ctx), \
+         patch("src.services.grading_service._exec") as mock_gr_exec:
+        mock_gr_exec.return_value.rowcount = 1
+        svc._compute_clv_for_started_games(max_rows=50, lookback_days=7)
+        clv_sql = mock_gr_exec.call_args[0][1]
+        assert "LOWER(TRIM(m.pick)) = LOWER(TRIM(e.away_team))" in clv_sql
+        assert "COALESCE(m.bet_line, m.open_line)" in clv_sql
+
+
 
 
 

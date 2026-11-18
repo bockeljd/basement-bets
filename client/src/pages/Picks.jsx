@@ -799,7 +799,7 @@ export default function Picks() {
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
               <div className="font-bold text-indigo-300">1. Which Picks Count</div>
               <p className="text-xs text-slate-300">
-                Only picks with a real projected edge (<strong className="text-slate-100">Spreads +2.0%+</strong>, <strong className="text-slate-100">Totals +3.5% Under / +4.1% Over</strong>, and <strong className="text-slate-100">Moneylines +5.0% &amp; 52%+ win chance</strong>) are tracked. Passed games (<strong className="text-slate-100">No Bet</strong>) are excluded.
+                Only picks with a real projected edge (<strong className="text-slate-100">Spreads +2.0%+</strong>, <strong className="text-slate-100">Totals +3.5% Under / +4.1%+ Over</strong>, and <strong className="text-slate-100">Moneylines +5.0% &amp; 52%+ win chance</strong>) are tracked. Passed games (<strong className="text-slate-100">No Bet</strong>) are excluded.
               </p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">

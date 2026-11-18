@@ -1134,7 +1134,7 @@ def insert_model_prediction(doc: dict) -> bool:
         :close_line, :close_price, :clv_points, :clv_method, :close_captured_at,
         :prediction_key
     ) ON CONFLICT (prediction_key) DO UPDATE SET
-        analyzed_at = EXCLUDED.analyzed_at,
+        analyzed_at = LEAST(model_predictions.analyzed_at, EXCLUDED.analyzed_at),
         outputs_json = EXCLUDED.outputs_json,
         narrative_json = EXCLUDED.narrative_json,
         context_json = COALESCE(EXCLUDED.context_json, model_predictions.context_json),
@@ -1145,8 +1145,8 @@ def insert_model_prediction(doc: dict) -> bool:
         price = EXCLUDED.price,
         fair_line = EXCLUDED.fair_line,
         edge_points = EXCLUDED.edge_points,
-        open_line = EXCLUDED.open_line,
-        open_price = EXCLUDED.open_price,
+        open_line = COALESCE(model_predictions.open_line, EXCLUDED.open_line),
+        open_price = COALESCE(model_predictions.open_price, EXCLUDED.open_price),
         bet_line = EXCLUDED.bet_line,
         bet_price = EXCLUDED.bet_price,
         book = EXCLUDED.book,
