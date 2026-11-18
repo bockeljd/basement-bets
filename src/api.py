@@ -3402,6 +3402,9 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         # Newer model format already matches; still ensure sizing & quality fields exist
         if rec.get('bet_type') is not None:
             out = dict(rec)
+            from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
+            out['top6_eligible'] = False if (out.get('top6_eligible') is False or has_top6_risk_flag(out)) else True
+            out['quality_score'] = compute_top6_quality_score(out)
             if out.get('suggested_units') is None:
                 try:
                     from src.utils.ev import compute_recommended_bet_size
@@ -3479,11 +3482,16 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
 
         out = {
             'bet_type': bet_type,
+            'side': rec.get('side'),
             'selection': selection,
             'market_line': line,
+            'fair_line': rec.get('fair_line'),
+            'edge_points': rec.get('edge_points'),
             'price': price,
             'edge': edge,
             'confidence': conf,
+            'confidence_0_100': rec.get('confidence_0_100'),
+            'confidence_tier': rec.get('confidence_tier'),
             'book': rec.get('book')
         }
         if rec.get('ev') is not None:
@@ -3500,7 +3508,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             out['movement_tags'] = rec.get('movement_tags')
         from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
         out['top6_eligible'] = bool(rec.get('top6_eligible', not has_top6_risk_flag(rec)))
-        out['quality_score'] = rec.get('quality_score') if rec.get('quality_score') is not None else compute_top6_quality_score(rec)
+        out['quality_score'] = compute_top6_quality_score(out)
         try:
             from src.utils.ev import compute_recommended_bet_size
             if rec.get('suggested_units') is not None:
@@ -4826,6 +4834,7 @@ def _yesterday_items_from_daily_top_picks(conn, yday: str):
             'event_id': r.get('event_id'),
             'sport': r.get('sport') or 'NCAAM',
             'market_type': rec.get('bet_type') or rec.get('market_type') or r.get('pred_market'),
+            'side': rec.get('side'),
             'selection': rec.get('selection') or rec.get('side') or (r.get('pred_selection') if mkt_matches else None) or (r.get('pred_pick') if mkt_matches else None),
             'bet_line': line_val,
             'price': price_val,

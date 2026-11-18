@@ -854,10 +854,31 @@ class NCAAMMarketFirstModelV2(BaseModel):
         else:
             raw_snaps = market_snapshot.get('_raw_snaps', [])
 
-        # VALIDATION: If *both* spread and total are missing, we can't do anything.
+        # VALIDATION: If *both* spread and total are missing (or out of sane D1 bounds), we can't do anything.
         # Otherwise, proceed and only generate recommendations for markets with valid lines.
-        has_spread = market_snapshot.get('spread_home') is not None
-        has_total = market_snapshot.get('total') is not None
+        raw_sp = market_snapshot.get('spread_home')
+        has_spread = False
+        if raw_sp is not None:
+            try:
+                sp_val = float(raw_sp)
+                if math.isfinite(sp_val) and abs(sp_val) <= 55.0:
+                    has_spread = True
+                else:
+                    market_snapshot['spread_home'] = None
+            except Exception:
+                market_snapshot['spread_home'] = None
+
+        raw_tot = market_snapshot.get('total')
+        has_total = False
+        if raw_tot is not None:
+            try:
+                tot_val = float(raw_tot)
+                if math.isfinite(tot_val) and 85.0 <= tot_val <= 215.0:
+                    has_total = True
+                else:
+                    market_snapshot['total'] = None
+            except Exception:
+                market_snapshot['total'] = None
 
         if (not has_spread) and (not has_total):
             return {
@@ -972,6 +993,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     )
             except Exception as e:
                 print(f"[MODEL] Injury lookup error: {e}")
+        if not isinstance(injury_context, dict):
+            injury_context = {"has_injuries": False, "injuries": [], "sigma_mult": 1.0, "spread_adj": 0.0, "total_adj": 0.0}
 
         action_splits = {}
         try:
@@ -2169,7 +2192,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     pick = event.get('home_team') if side == 'home' else event.get('away_team')
                     bet_line = _normalize_spread_line(side, line_val)
                     if pick and bet_line is not None:
-                        selection = f"{pick} {bet_line:+.1f}"
+                        v = float(bet_line)
+                        sign = '+' if v > 0 else ''
+                        selection = f"{pick} {sign}{v:g}"
                     else:
                         selection = pick or selection or 'SPREAD'
                     spread_home = market_snapshot.get('spread_home')
@@ -3381,7 +3406,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 labels.append("risk guardrail triggered")
             return "Held for safety: " + "; ".join(dict.fromkeys(labels))
 
-        def _sanity_adjust(market: str, side: str, win_prob: float, ev: float, mc: Optional[Dict[str, Any]]):
+        def _sanity_adjust(market: str, side: str, win_prob: float, ev: float, mc: Optional[Dict[str, Any]], eval_price: Optional[int] = None):
             """Soft guardrails + market-movement uncertainty.
 
             Returns: (score:int, reasons:list[str], sigma_mult:float, ev_penalty:float)
@@ -3415,7 +3440,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     best_price = None
                     cons_price = None
 
-                ip = implied_prob_american(best_price)
+                eff_best = eval_price if eval_price is not None else best_price
+                ip = implied_prob_american(eff_best)
                 if ip is not None:
                     dp = float(win_prob) - float(ip)
                     if abs(dp) >= float(os.getenv('SANITY_MAX_PROB_GAP', '0.18')):
@@ -3424,8 +3450,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         sigma_mult *= 1.35
 
                 # If best price is a wild outlier vs consensus, it's often bad ingest.
-                if cons_price is not None and best_price is not None:
-                    ip_best = implied_prob_american(best_price)
+                if cons_price is not None and eff_best is not None:
+                    ip_best = implied_prob_american(eff_best)
                     ip_cons = implied_prob_american(cons_price)
                     if ip_best is not None and ip_cons is not None:
                         gap = abs(float(ip_best) - float(ip_cons))
@@ -3523,16 +3549,34 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return score, reasons, sigma_mult, ev_penalty
 
 
+        def _clean_main_price(raw_p, default: int = -110) -> int:
+            try:
+                if raw_p is None:
+                    return int(default)
+                p = int(round(float(raw_p)))
+            except Exception:
+                return int(default)
+            if abs(p) < 100 or p < -165 or p > 145:
+                return int(default)
+            return p
+
         candidates_eval: List[Dict[str, Any]] = []
 
         # --- Spread ---
         line_s = snap.get("spread_home")
-        price_home = snap.get("spread_price_home", -110)
+        price_home = _clean_main_price(snap.get("spread_price_home", -110))
         best_away = snap.get("_best_spread_away", {})
-        price_away = best_away.get("price", -110) if best_away else -110
+        price_away = _clean_main_price(best_away.get("price", -110) if best_away else -110)
         book_consensus = snap.get("book_spread", "Consensus")
 
+        line_s_valid = False
         if line_s is not None:
+            try:
+                line_s_valid = math.isfinite(float(line_s)) and abs(float(line_s)) <= 55.0
+            except Exception:
+                line_s_valid = False
+
+        if line_s_valid:
             def _snap_half(x: float) -> float:
                 try:
                     return round(float(x) * 2.0) / 2.0
@@ -3558,8 +3602,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 if (best_away_line is not None and abs(float(best_away_line) - (-market_line_s)) <= 1.0)
                 else -market_line_s
             )
-            price_home_bet = int(best_home.get('price')) if best_home.get('price') is not None else int(price_home)
-            price_away_bet = int(best_away.get('price')) if (best_away and best_away.get('price') is not None) else int(price_away)
+            price_home_bet = _clean_main_price(best_home.get('price'), default=price_home)
+            price_away_bet = _clean_main_price(best_away.get('price') if best_away else None, default=price_away)
 
             prob_home = _spread_cover_prob_home(mu_s, sig_s, line_home_bet)
             prob_home_cal = self._calibrate_win_prob(prob_home)
@@ -3639,7 +3683,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     sanity_on = str(os.getenv('SANITY_ENABLE', '1')).strip() not in ('0', 'false', 'False', '')
                     if sanity_on and isinstance(snap, dict):
                         mc = snap.get('_market_consensus')
-                        score, reasons, sigma_mult, ev_penalty = _sanity_adjust('SPREAD', str(best.get('side') or ''), float(best.get('win_prob') or 0.5), float(best.get('ev') or 0.0), mc)
+                        score, reasons, sigma_mult, ev_penalty = _sanity_adjust(
+                            'SPREAD',
+                            str(best.get('side') or ''),
+                            float(best.get('win_prob') or 0.5),
+                            float(best.get('ev') or 0.0),
+                            mc,
+                            eval_price=best.get('price'),
+                        )
                         if reason:
                             try:
                                 reasons = list(reasons or [])
@@ -3712,12 +3763,20 @@ class NCAAMMarketFirstModelV2(BaseModel):
         best_over = snap.get("_best_total_over")
         best_under = snap.get("_best_total_under")
 
-        price_over = best_over["price"] if best_over else snap.get("total_over_price", -110)
-        price_under = best_under["price"] if best_under else -110
+        price_tot_cons = _clean_main_price(snap.get("total_over_price", -110))
+        price_over = _clean_main_price(best_over.get("price") if isinstance(best_over, dict) else None, default=price_tot_cons)
+        price_under = _clean_main_price(best_under.get("price") if isinstance(best_under, dict) else None, default=-110)
         book_over = best_over["book"] if best_over else snap.get("book_total", "Consensus")
         book_under = best_under["book"] if best_under else snap.get("book_total", "Consensus")
 
-        if line_t is not None:
+        line_t_valid = False
+        if line_t is not None and mu_t is not None:
+            try:
+                line_t_valid = math.isfinite(float(line_t)) and (85.0 <= float(line_t) <= 215.0)
+            except Exception:
+                line_t_valid = False
+
+        if line_t_valid:
             market_line_t = float(line_t)
             fair_line_t = float(mu_t)
 
@@ -3808,7 +3867,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     sanity_on = str(os.getenv('SANITY_ENABLE', '1')).strip() not in ('0', 'false', 'False', '')
                     if sanity_on and isinstance(snap, dict):
                         mc = snap.get('_market_consensus')
-                        score, reasons, sigma_mult, ev_penalty = _sanity_adjust('TOTAL', str(best.get('side') or ''), float(best.get('win_prob') or 0.5), float(best.get('ev') or 0.0), mc)
+                        score, reasons, sigma_mult, ev_penalty = _sanity_adjust(
+                            'TOTAL',
+                            str(best.get('side') or ''),
+                            float(best.get('win_prob') or 0.5),
+                            float(best.get('ev') or 0.0),
+                            mc,
+                            eval_price=best.get('price'),
+                        )
                         if reason:
                             try:
                                 reasons = list(reasons or [])

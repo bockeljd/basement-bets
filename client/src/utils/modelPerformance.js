@@ -57,9 +57,9 @@ export const getPerformanceDay = (row) => {
  * e.g. -110 -> 0.909, +120 -> 1.2
  */
 export const payoutPerUnitFromAmericanOdds = (price) => {
-  const p = parseFloat(price);
-  if (isNaN(p)) return 0.90909; // fallback to -110
-  if (p === 0) return 1.0;
+  // Mirror src/utils/model_performance.py payout_per_unit(): missing/zero/non-numeric price => -110
+  const p = parseInt(price, 10);
+  if (!Number.isFinite(p) || p === 0) return 100 / 110;
   if (p > 0) return p / 100;
   return 100 / Math.abs(p);
 };
@@ -397,8 +397,6 @@ export const hasTop6RiskFlag = (row) => {
 
 export const getQualityRankScore = (row) => {
   if (!row) return -999;
-  const explicit = Number(row.quality_score);
-  if (Number.isFinite(explicit)) return explicit;
 
   const evRaw = getNumericEdge(row);
   const ev = evRaw !== null && Number.isFinite(evRaw) ? evRaw : 0;
@@ -410,7 +408,9 @@ export const getQualityRankScore = (row) => {
         : 0.085 + 0.020 * 0.30 - (ev - 0.105) * 0.20;
   let score = effEv;
 
-  const lb10 = Number(row.win_prob_lb10);
+  const lb10 = row.win_prob_lb10 === null || row.win_prob_lb10 === undefined || row.win_prob_lb10 === ''
+    ? NaN
+    : Number(row.win_prob_lb10);
   if (Number.isFinite(lb10)) {
     score += Math.max(0, lb10 - 0.52) * 0.35;
   } else {

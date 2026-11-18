@@ -1949,6 +1949,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                     "prediction_id": rd.get("prediction_id") if mkt_matches else None,
                     "sport": rd.get("sport") or "NCAAM",
                     "market_type": rec.get("bet_type") or rec.get("market_type") or rd.get("pred_market"),
+                    "side": rec.get("side"),
                     "selection": sel_val,
                     "pick": rd.get("pred_pick") if mkt_matches else sel_val,
                     "bet_line": line_val,

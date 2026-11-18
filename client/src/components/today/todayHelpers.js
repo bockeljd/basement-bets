@@ -189,8 +189,6 @@ export const hasTop6RiskFlag = (rec) => {
 
 export const getRecQualityScore = (rec) => {
   if (!rec) return -999;
-  const explicit = Number(rec.quality_score);
-  if (Number.isFinite(explicit)) return explicit;
 
   const evRaw = getRecEv(rec);
   const ev = evRaw !== null && Number.isFinite(evRaw) ? evRaw : 0;
@@ -202,7 +200,9 @@ export const getRecQualityScore = (rec) => {
         : 0.085 + 0.020 * 0.30 - (ev - 0.105) * 0.20;
   let score = effEv;
 
-  const lb10 = Number(rec.win_prob_lb10);
+  const lb10 = rec.win_prob_lb10 === null || rec.win_prob_lb10 === undefined || rec.win_prob_lb10 === ''
+    ? NaN
+    : Number(rec.win_prob_lb10);
   if (Number.isFinite(lb10)) {
     score += Math.max(0, lb10 - 0.52) * 0.35;
   } else {
@@ -1592,42 +1592,7 @@ export const getModelSignalData = (rec, context, debugInfo, game) => {
     });
   }
 
-  if (sosMomShift && sosMomShift.pts >= 0.1) {
-    pills.push({
-      id: 'sos-mom',
-      tone: 'emerald',
-      label: `Form/Sched: ${sosMomShift.text}`,
-    });
-  }
-  if (restSpotShift && restSpotShift.pts >= 0.1) {
-    pills.push({
-      id: 'rest-spot',
-      tone: 'amber',
-      label: `Rest Edge: ${restSpotShift.text}`,
-    });
-  }
-  if (blowoutSigmaAdd >= 0.1) {
-    pills.push({
-      id: 'blowout',
-      tone: 'amber',
-      label: 'High Blowout Risk',
-    });
-  }
-  if (isTotalBet && totalMove) {
-    pills.push({
-      id: 'total-move',
-      tone: 'blue',
-      label: `Line Moved: ${totalMove.text}`,
-    });
-  } else if (!isTotalBet && spreadMove) {
-    pills.push({
-      id: 'spread-move',
-      tone: 'blue',
-      label: `Line Moved: ${spreadMove.text}`,
-    });
-  }
-
-  // NCAAM research-backed spot context pills
+  // NCAAM research-backed spot context pills (surface immediately after consensus/weight so card slice keeps them)
   const spotSport = String(game?.sport || rec?.sport || 'NCAAM').toUpperCase();
   if (spotSport === 'NCAAM' || spotSport === 'NCAAB') {
     const rawSpotLine = rec?.market_line ?? rec?.bet_line ?? rec?.line;
@@ -1665,6 +1630,41 @@ export const getModelSignalData = (rec, context, debugInfo, game) => {
         }
       }
     }
+  }
+
+  if (sosMomShift && sosMomShift.pts >= 0.1) {
+    pills.push({
+      id: 'sos-mom',
+      tone: 'emerald',
+      label: `Form/Sched: ${sosMomShift.text}`,
+    });
+  }
+  if (restSpotShift && restSpotShift.pts >= 0.1) {
+    pills.push({
+      id: 'rest-spot',
+      tone: 'amber',
+      label: `Rest Edge: ${restSpotShift.text}`,
+    });
+  }
+  if (blowoutSigmaAdd >= 0.1) {
+    pills.push({
+      id: 'blowout',
+      tone: 'amber',
+      label: 'High Blowout Risk',
+    });
+  }
+  if (isTotalBet && totalMove) {
+    pills.push({
+      id: 'total-move',
+      tone: 'blue',
+      label: `Line Moved: ${totalMove.text}`,
+    });
+  } else if (!isTotalBet && spreadMove) {
+    pills.push({
+      id: 'spread-move',
+      tone: 'blue',
+      label: `Line Moved: ${spreadMove.text}`,
+    });
   }
 
   return {

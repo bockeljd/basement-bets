@@ -1069,6 +1069,121 @@ def test_adaptive_archetype_learning_service_and_endpoint(monkeypatch):
     assert body["by_home_fav_7pt_ml"]["wins"] == 1
 
 
+def test_ncaam_model_hardening_and_sync(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.utils.model_performance import compute_top6_quality_score, normalize_history_row
+
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.torvik_service.get_projection.return_value = {
+        "margin": 11.5,
+        "official_margin": 11.5,
+        "total": 146.0,
+        "projected_score": "79-67",
+        "lean": "Home",
+    }
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "continuity": 0.75},
+        "away": {"luck": 0.0, "continuity": 0.75},
+    }
+    model.kenpom_client = MagicMock()
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {
+        "spread_adj": 11.5,
+        "neutral_margin": 8.3,
+        "fair_margin": 11.5,
+        "fair_total": 146.0,
+        "summary": "KP",
+    }
+    model.kenpom_client.get_team_rating.return_value = {"adj_t": 68.0}
+    model.kenpom_client.get_home_court.return_value = None
+    model.kenpom_client.get_player_stats_for_team.return_value = []
+    model.kenpom_client.get_team_player_agg.return_value = None
+    model.haslametrics_client = MagicMock()
+    model.haslametrics_client.calculate_projection.return_value = {
+        "available": True,
+        "margin": 11.5,
+        "total": 146.0,
+        "home": {"sos": 100, "mom": 0.0, "inc": 0.04},
+        "away": {"sos": 100, "mom": 0.0, "inc": 0.04},
+    }
+    model.injury_service = MagicMock()
+    model.injury_service.get_matchup_injuries.return_value = None
+    model.geo_service = MagicMock()
+    model.geo_service.get_altitude_adjustment.return_value = 0.0
+    model.geo_service.calculate_distance.return_value = 100.0
+    model.news_service = MagicMock()
+    model.news_service.fetch_game_context.return_value = {}
+    model.news_service.summarize_impact.return_value = ""
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda k: {"n": 80, "mean": 0.04, "sd": 0.90})
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+    monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
+
+    ev_ctx = {
+        "id": "hard1",
+        "home_team": "Home State",
+        "away_team": "Road Tech",
+        "start_time": datetime(2027, 2, 10, 20, 0, tzinfo=timezone.utc),
+        "neutral_site": False,
+        "action_splits": {},
+    }
+
+    # 1. Out-of-range spread (>55) and 1H/broken total (<85) rejected -> No Line
+    bad_snap = {"spread_home": 70.0, "total": 65.0}
+    res_bad = model.analyze("hard1", market_snapshot=bad_snap, event_context=ev_ctx, persist=False)
+    assert res_bad["is_actionable"] is False
+    assert res_bad["recommendation"] == "No Line"
+
+    bad_zero_tot = {"spread_home": None, "total": 0.0}
+    res_zero = model.analyze("hard1", market_snapshot=bad_zero_tot, event_context=ev_ctx, persist=False)
+    assert res_zero["is_actionable"] is False
+
+    # 2 & 3. Corrupted odds (0 / +5000) sanitized to -110; whole-number spread uses :g formatting across UI & DB doc
+    inserted_docs = []
+    import src.models.ncaam_market_first_model_v2 as model_mod
+
+    monkeypatch.setattr(model_mod, "insert_model_prediction", lambda doc: inserted_docs.append(dict(doc)))
+    snap_whole = {
+        "spread_home": -7.0,
+        "spread_price_home": 0,
+        "total": None,
+        "_best_spread_home": {"line_value": -7.0, "price": 5000, "book": "DK"},
+        "_best_spread_away": {"line_value": 7.0, "price": 0, "book": "FD"},
+    }
+    res_whole = model.analyze("hard1", market_snapshot=snap_whole, event_context=ev_ctx, persist=True, relax_gates=True)
+    recs = res_whole.get("recommendations") or []
+    assert len(recs) >= 1
+    assert recs[0]["price"] == -110
+    assert recs[0]["side"] == "home"
+    assert recs[0]["selection"] == "Home State -7"
+    assert len(inserted_docs) >= 1
+    assert inserted_docs[0]["selection"] == "Home State -7"
+    assert inserted_docs[0]["bet_price"] == -110
+
+    # 4. normalize_history_row always recomputes fresh canonical quality_score (never keeps stale cached value)
+    stale_row = normalize_history_row({
+        "market_type": "SPREAD",
+        "side": "away",
+        "home_team": "Home State",
+        "away_team": "Road Tech",
+        "selection": "Road Tech +4.5",
+        "bet_line": 4.5,
+        "ev_per_unit": 0.06,
+        "win_prob_lb10": 0.54,
+        "quality_score": 0.9999,
+    })
+    assert stale_row["quality_score"] != 0.9999
+    assert stale_row["quality_score"] == compute_top6_quality_score(stale_row)
+
+
+
 
 
 

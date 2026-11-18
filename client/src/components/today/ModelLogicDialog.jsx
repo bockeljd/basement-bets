@@ -466,8 +466,9 @@ const ModelLogicDialog = ({ open, onClose, dataHealth = [], onKenpomUploaded, on
             <p className="text-slate-400">
               We also adjust for <strong>schedule strength</strong>, <strong>luck regression</strong>,{' '}
               <strong>recent form</strong>, <strong>rest/travel</strong>, and <strong>key player injuries</strong>. A
-              play is only posted when our edge clears <strong>+2.0% expected profit value</strong> and passes safety
-              checks against sharp line moves against us.
+              play is only posted when our edge clears <strong>+2.0%</strong> on Spreads (with stricter bars on
+              6&ndash;14 pt spreads and road favorites), <strong>+3.5% Under / +4.1% Over</strong> on Totals, and{' '}
+              <strong>+5.0% &amp; 52%+ win chance</strong> on Moneylines, while passing safety checks against sharp line moves against us.
             </p>
           </section>
 

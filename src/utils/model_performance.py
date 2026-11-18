@@ -297,7 +297,8 @@ def compute_top6_quality_score(row: dict) -> float:
     mkt = normalize_market_type(
         _first_present(row.get("market_type"), row.get("market"), row.get("bet_type"))
     )
-    side_text = str(_first_present(row.get("side"), row.get("selection"), row.get("pick")) or "").upper()
+    rec_side = row["rec_json"].get("side") if isinstance(row.get("rec_json"), dict) else None
+    side_text = str(_first_present(row.get("side"), rec_side, row.get("selection"), row.get("pick")) or "").upper()
     raw_line = _first_present(row.get("market_line"), row.get("bet_line"), row.get("line"))
     if mkt == "TOTAL":
         if "OVER" in side_text:
@@ -325,7 +326,7 @@ def compute_top6_quality_score(row: dict) -> float:
                 elif 6.0 <= abs_line < 14.0:
                     score -= 0.022
 
-                side_hint = str(row.get("side") or "").strip().lower()
+                side_hint = str(_first_present(row.get("side"), rec_side) or "").strip().lower()
                 is_away = None
                 if side_hint in ("away", "home"):
                     is_away = side_hint == "away"
@@ -467,8 +468,7 @@ def normalize_history_row(row: dict) -> dict:
         out["top6_eligible"] = not has_top6_risk_flag(out)
     elif out.get("top6_eligible") is not False and has_top6_risk_flag(out):
         out["top6_eligible"] = False
-    if out.get("quality_score") is None:
-        out["quality_score"] = compute_top6_quality_score(out)
+    out["quality_score"] = compute_top6_quality_score(out)
 
     if out["sport"] != "EPL" and str(out.get("score") or "").strip() == "0-0":
         out["score"] = None
