@@ -1,6 +1,9 @@
 import json
+import time
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api import app
@@ -1283,6 +1286,292 @@ def test_ncaam_model_leak_fixes_and_clv_capture(monkeypatch):
         clv_sql = mock_gr_exec.call_args[0][1]
         assert "LOWER(TRIM(m.pick)) = LOWER(TRIM(e.away_team))" in clv_sql
         assert "COALESCE(m.bet_line, m.open_line)" in clv_sql
+
+
+def test_odds_api_client_free_tier_budget_caps_and_adaptive_ttl(monkeypatch):
+    from src.models.odds_client import OddsAPIClient
+
+    monkeypatch.setenv("REQUIRE_DATABASE", "0")
+    monkeypatch.setenv("ODDS_API_KEY", "test_free_key")
+    monkeypatch.delenv("ODDS_API_DAILY_CAP", raising=False)
+    monkeypatch.delenv("ODDS_API_MONTHLY_BUDGET", raising=False)
+    monkeypatch.delenv("ODDS_API_MIN_REMAINING", raising=False)
+
+    assert OddsAPIClient.estimate_credit_cost("spreads,totals", bookmakers="pinnacle,lowvig,betonlineag") == 2
+    assert OddsAPIClient.estimate_credit_cost("h2h,spreads,totals", bookmakers="pinnacle,lowvig,betonlineag") == 3
+    assert OddsAPIClient.estimate_credit_cost(
+        "spreads,totals",
+        bookmakers=",".join(f"book{i}" for i in range(11)),
+    ) == 4
+
+    client = OddsAPIClient()
+
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status_code=200, payload=None, headers=None, text=""):
+            self.status_code = status_code
+            self._payload = payload if payload is not None else []
+            self.headers = headers or {}
+            self.text = text
+
+        def json(self):
+            return self._payload
+
+    monkeypatch.setattr("src.models.odds_client.requests.get", lambda *a, **kw: calls.append(kw) or FakeResp(
+        200,
+        [{"id": "ev1", "home_team": "Duke", "away_team": "UNC", "bookmakers": []}],
+        {"x-requests-remaining": "498", "x-requests-used": "2", "x-requests-last": "2"},
+    ))
+
+    # 1. No upcoming games -> skipped with 0 credits spent
+    monkeypatch.setattr(client, "_active_ncaam_tip_window", lambda horizon_hours=10: (0, None))
+    r_idle = client.fetch_ncaam_sharp_odds_budgeted()
+    assert r_idle["status"] == "no_upcoming_games"
+    assert r_idle["credits_spent"] == 0
+    assert len(calls) == 0
+
+    # 2. Peak tip window (60 min) triggers live fetch costing 2 credits
+    monkeypatch.setattr(client, "_active_ncaam_tip_window", lambda horizon_hours=10: (3, 60.0))
+    r_live = client.fetch_ncaam_sharp_odds_budgeted()
+    assert r_live["status"] == "ok"
+    assert r_live["source"] == "live"
+    assert r_live["credits_spent"] == 2
+    assert len(r_live["events"]) == 1
+    assert len(calls) == 1
+
+    # 3. Immediate repeat hits fresh cache (0 HTTP calls)
+    r_cached = client.fetch_ncaam_sharp_odds_budgeted()
+    assert r_cached["status"] == "cache_fresh"
+    assert r_cached["credits_spent"] == 0
+    assert len(calls) == 1
+
+    # 4. 90m-old cache: quiet window (4h TTL) reuses cache; peak window (75m TTL) refreshes
+    cached_payload, _ = client._mem_cache[client.SHARP_CACHE_KEY]
+    client._mem_cache[client.SHARP_CACHE_KEY] = (cached_payload, time.time() - 5400.0)
+    monkeypatch.setattr(client, "_active_ncaam_tip_window", lambda horizon_hours=10: (3, 240.0))
+    r_quiet = client.fetch_ncaam_sharp_odds_budgeted()
+    assert r_quiet["status"] == "cache_fresh"
+    assert len(calls) == 1
+
+    monkeypatch.setattr(client, "_active_ncaam_tip_window", lambda horizon_hours=10: (3, 60.0))
+    r_peak_refresh = client.fetch_ncaam_sharp_odds_budgeted()
+    assert r_peak_refresh["status"] == "ok"
+    assert r_peak_refresh["credits_spent"] == 2
+    assert len(calls) == 2
+
+    # 5. Daily cap (14 credits), monthly cap (460), and remaining reserve (<=35) guards
+    state = client._load_quota_state()
+    state["day_credits_used"] = 14
+    client._save_quota_state(state)
+    r_day_cap = client.fetch_ncaam_sharp_odds_budgeted(force=True)
+    assert r_day_cap["status"].startswith("daily_cap_reached")
+    assert len(calls) == 2
+
+    state["day_credits_used"] = 0
+    state["month_credits_used"] = 460
+    client._save_quota_state(state)
+    r_month_cap = client.fetch_ncaam_sharp_odds_budgeted(force=True)
+    assert r_month_cap["status"].startswith("monthly_budget_reached")
+    assert len(calls) == 2
+
+    state["month_credits_used"] = 10
+    state["last_remaining"] = 36  # 36 - 2 < 35 floor
+    client._save_quota_state(state)
+    r_reserve = client.fetch_ncaam_sharp_odds_budgeted(force=True)
+    assert r_reserve["status"].startswith("min_remaining_guard")
+    assert len(calls) == 2
+
+    # 6. Non-200 HTTP triggers 30m error cooldown
+    state["last_remaining"] = 450
+    client._save_quota_state(state)
+    monkeypatch.setattr("src.models.odds_client.requests.get", lambda *a, **kw: calls.append(kw) or FakeResp(429, {}, {}, "rate limited"))
+    r_err = client.fetch_ncaam_sharp_odds_budgeted(force=True)
+    assert r_err["status"] == "http_429"
+    assert len(calls) == 3
+    r_cool = client.fetch_ncaam_sharp_odds_budgeted(force=True)
+    assert r_cool["status"] == "error_cooldown"
+    assert len(calls) == 3
+
+
+def test_odds_adapter_team_disambiguation_and_pinnacle_normalization(monkeypatch):
+    from datetime import datetime, timezone
+    from src.services.odds_adapter import OddsAdapter
+
+    adapter = OddsAdapter()
+    monkeypatch.setattr(adapter, "_get_canonical_name", lambda name, league: name)
+
+    tip = datetime(2027, 2, 14, 23, 0, tzinfo=timezone.utc)
+    candidates = [
+        {"id": "ev_ind_st", "home_team": "Indiana State Sycamores", "away_team": "Drake Bulldogs", "start_time": tip},
+        {"id": "ev_ind", "home_team": "Indiana Hoosiers", "away_team": "Purdue Boilermakers", "start_time": tip},
+    ]
+
+    # Must match Indiana Hoosiers without colliding with Indiana State
+    matched = adapter._resolve_canonical_event("NCAAM", "Indiana", "Purdue", tip, candidates_cache=candidates)
+    assert matched is not None
+    assert matched["id"] == "ev_ind"
+    assert matched["swapped"] is False
+
+    # Neutral-site flipped Home/Away preserves canonical DB event HOME/AWAY side orientation
+    raw_event = {
+        "home_team": "Purdue Boilermakers",
+        "away_team": "Indiana Hoosiers",
+        "commence_time": "2027-02-14T23:00:00Z",
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "markets": [
+                    {
+                        "key": "spreads",
+                        "outcomes": [
+                            {"name": "Indiana Hoosiers", "price": -108, "point": -3.5},
+                            {"name": "Purdue Boilermakers", "price": -104, "point": 3.5},
+                        ],
+                    },
+                    {
+                        "key": "totals",
+                        "outcomes": [
+                            {"name": "Over", "price": -105, "point": 146.5},
+                            {"name": "Under", "price": -107, "point": 146.5},
+                        ],
+                    },
+                ],
+            },
+            {
+                "key": "lowvig",
+                "title": "LowVig",
+                "markets": [
+                    {
+                        "key": "spreads",
+                        "outcomes": [{"name": "Indiana Hoosiers", "price": -106, "point": -3.5}],
+                    }
+                ],
+            },
+        ],
+    }
+    snaps = adapter._from_odds_api(raw_event, "NCAAM", tip, candidates_cache=candidates)
+    books = {s["book"] for s in snaps}
+    assert books == {"Pinnacle", "LowVig"}
+    ind_spread = [s for s in snaps if s["market_type"] == "SPREAD" and s["book"] == "Pinnacle" and s["line_value"] == -3.5][0]
+    assert ind_spread["side"] == "HOME"  # Indiana is HOME in canonical ev_ind
+    over_snap = [s for s in snaps if s["market_type"] == "TOTAL" and s["side"] == "OVER"][0]
+    assert over_snap["line_value"] == 146.5
+
+
+def test_odds_selection_separates_retail_cards_from_sharp_benchmarks():
+    from src.services.odds_selection_service import OddsSelectionService
+
+    selector = OddsSelectionService()
+    snaps = [
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -110, "captured_at": "2027-02-14T21:00:00Z"},
+        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -112, "captured_at": "2027-02-14T21:00:00Z"},
+        {"book": "Pinnacle", "market_type": "SPREAD", "side": "HOME", "line_value": -6.0, "price": -102, "captured_at": "2027-02-14T21:00:00Z"},
+        {"book": "LowVig", "market_type": "SPREAD", "side": "HOME", "line_value": -5.5, "price": -105, "captured_at": "2027-02-14T21:00:00Z"},
+    ]
+
+    cons = selector.get_consensus_snapshot(snaps, "SPREAD", "HOME")
+    assert cons["line_value"] == pytest.approx(-4.5)  # sharp books excluded from retail consensus
+
+    best = selector.get_best_price_for_side(snaps, "SPREAD", "HOME", target_line=-4.5)
+    assert best["book"] == "DraftKings"  # playable US retail book, never Pinnacle/LowVig
+
+    sharp = selector.get_sharp_benchmark_snapshot(snaps, "SPREAD", "HOME")
+    assert sharp["book"] == "Pinnacle"
+    assert sharp["line_value"] == pytest.approx(-6.0)
+
+
+def test_ncaam_model_sharp_benchmark_anchoring_edge_bonus_and_contra_penalty(monkeypatch):
+    from datetime import datetime, timezone
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
+
+    monkeypatch.setenv("REQUIRE_DATABASE", "0")
+    model = NCAAMMarketFirstModelV2()
+    model.torvik_service = MagicMock()
+    model.kenpom_client = MagicMock()
+    model.haslametrics_client = MagicMock()
+    model.news_service = MagicMock()
+    model.injury_service = MagicMock()
+
+    model.news_service.fetch_game_context.return_value = {}
+    model.news_service.summarize_impact.return_value = ""
+    model.injury_service.get_matchup_injuries.return_value = {"has_injuries": False, "injuries": []}
+    model.injury_service.get_game_injury_context.return_value = {"has_injuries": False, "spread_adj": 0.0, "total_adj": 0.0, "injuries": []}
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda k: {"n": 80, "mean": 0.04, "sd": 0.90})
+    monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
+    monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
+    model.torvik_service.get_projection.return_value = {"margin": 9.5, "official_margin": 9.5, "total": 144.0, "lean": "Home"}
+    model.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "continuity": 0.75, "record": "14-3"},
+        "away": {"luck": 0.0, "continuity": 0.75, "record": "11-6"},
+    }
+    model.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 9.5, "fair_margin": 9.5, "fair_total": 144.0, "summary": "KP"}
+    model.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 9.5, "total": 144.0}
+
+    ev_ctx = {
+        "id": "sharp_ev1",
+        "home_team": "Home Univ",
+        "away_team": "Road State",
+        "start_time": datetime(2027, 2, 14, 23, 0, tzinfo=timezone.utc),
+        "action_splits": {},
+    }
+
+    # Case A: Retail DraftKings is -4.5 while sharp Pinnacle is -6.5 (+2.0 pt sharp edge)
+    snaps_plus_sharp = [
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -112, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "AWAY", "line_value": 4.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "UNDER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "Pinnacle", "market_type": "SPREAD", "side": "HOME", "line_value": -6.5, "price": -105, "captured_at": "2027-02-14T22:00:00Z"},
+    ]
+    monkeypatch.setattr(model, "_get_all_recent_odds", lambda eid: snaps_plus_sharp)
+    monkeypatch.setattr(model, "_get_market_consensus", lambda eid: {})
+
+    res_a = model.analyze("sharp_ev1", event_context=ev_ctx, persist=False, relax_gates=True)
+    assert res_a["context"]["sharp_book"] == "Pinnacle"
+    assert res_a["context"]["sharp_spread_home"] == pytest.approx(-6.5)
+    assert res_a["context"]["anchored_market_spread_home"] == pytest.approx(-5.5)  # 50/50 blend (-4.5 and -6.5)
+    spread_recs_a = [r for r in res_a["recommendations"] if r["bet_type"] == "SPREAD"]
+    assert spread_recs_a
+    rec_a = spread_recs_a[0]
+    assert rec_a["book"] == "DraftKings"  # Playable US book
+    assert rec_a["sharp_book"] == "Pinnacle"
+    assert rec_a["sharp_edge_pts"] == pytest.approx(2.0)
+    assert "sharp_price_edge" in (rec_a.get("movement_tags") or [])
+    assert rec_a["top6_eligible"] is True
+    assert not has_top6_risk_flag(rec_a)
+    base_q = compute_top6_quality_score({**rec_a, "movement_tags": []})
+    assert compute_top6_quality_score(rec_a) == pytest.approx(base_q + 0.008)
+
+    # Case B: Retail DraftKings/FanDuel agree on -5.5 while sharp Pinnacle is -3.5 (-2.0 pt against Home)
+    snaps_contra_sharp = [
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -5.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -5.5, "price": -112, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "AWAY", "line_value": 5.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "UNDER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "Pinnacle", "market_type": "SPREAD", "side": "HOME", "line_value": -3.5, "price": -105, "captured_at": "2027-02-14T22:00:00Z"},
+    ]
+    monkeypatch.setattr(model, "_get_all_recent_odds", lambda eid: snaps_contra_sharp)
+    res_b = model.analyze("sharp_ev1", event_context=ev_ctx, persist=False, relax_gates=True)
+    spread_recs_b = [r for r in res_b["recommendations"] if r["bet_type"] == "SPREAD"]
+    assert spread_recs_b
+    rec_b = spread_recs_b[0]
+    assert rec_b["sharp_edge_pts"] == pytest.approx(-2.0)
+    assert "contra_sharp_line" in (rec_b.get("movement_tags") or [])
+    assert float(rec_b.get("ev_penalty") or 0.0) >= 0.015
+    assert rec_b["top6_eligible"] is False
+    assert has_top6_risk_flag(rec_b) is True
+
 
 
 

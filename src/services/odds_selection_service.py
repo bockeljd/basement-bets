@@ -12,7 +12,8 @@ class OddsSelectionService:
     BOOK_PRIORITY = {
         "Pinnacle": 1,
         "Circa Sports": 2,
-        "Bookmaker": 3,
+        "LowVig": 3,
+        "Bookmaker": 4,
         "DraftKings": 10,
         "FanDuel": 11,
         "BetMGM": 12,
@@ -26,10 +27,24 @@ class OddsSelectionService:
     DEFAULT_PRIORITY = 99
 
     EXCLUDED_LIVE_BOOKS = {"action_open", "open"}
+    SHARP_BENCHMARK_BOOKS = {
+        "pinnacle",
+        "circa sports",
+        "circa",
+        "lowvig",
+        "bookmaker",
+        "betonline",
+        "betonlineag",
+    }
 
     @classmethod
     def _is_live_book(cls, book_name: Optional[str]) -> bool:
         return str(book_name or "").strip().lower() not in cls.EXCLUDED_LIVE_BOOKS
+
+    @classmethod
+    def _is_sharp_benchmark(cls, book_name: Optional[str]) -> bool:
+        b = str(book_name or "").strip().lower()
+        return b in cls.SHARP_BENCHMARK_BOOKS or any(k in b for k in cls.SHARP_BENCHMARK_BOOKS)
 
     @classmethod
     def _is_named_retail_or_consensus(cls, book_name: Optional[str]) -> bool:
@@ -113,10 +128,18 @@ class OddsSelectionService:
         if not lines: return None
         return statistics.median(lines)
 
-    def get_consensus_snapshot(self, snapshots: List[Dict], market_type: str, side: str = None) -> Optional[Dict]:
+    def get_consensus_snapshot(
+        self,
+        snapshots: List[Dict],
+        market_type: str,
+        side: str = None,
+        exclude_sharp_benchmarks: bool = True,
+    ) -> Optional[Dict]:
         """
         Get a "consensus" snapshot with median line and median price.
         This represents what the "market average" thinks.
+        By default excludes sharp benchmark books when non-sharp retail books are present
+        so sharp benchmarks can be weighed explicitly without double-counting.
         """
         filtered = [
             s for s in snapshots
@@ -124,6 +147,11 @@ class OddsSelectionService:
         ]
         if side:
             filtered = [s for s in filtered if s.get('side') == side]
+
+        if exclude_sharp_benchmarks:
+            non_sharp = [s for s in filtered if not self._is_sharp_benchmark(s.get('book'))]
+            if non_sharp:
+                filtered = non_sharp
         
         lines = [s['line_value'] for s in filtered if s.get('line_value') is not None]
         prices = [s['price'] for s in filtered if s.get('price') is not None]
@@ -143,18 +171,83 @@ class OddsSelectionService:
             'selection_method': 'median_consensus'
         }
 
+    def get_sharp_benchmark_snapshot(
+        self,
+        snapshots: List[Dict],
+        market_type: str,
+        side: str = None,
+    ) -> Optional[Dict]:
+        """Select the sharpest fresh offshore/sharp benchmark snapshot (Pinnacle > LowVig > BetOnline)."""
+        if not snapshots:
+            return None
+
+        mkt_upper = str(market_type or '').upper()
+        filtered = [
+            s for s in snapshots
+            if str(s.get('market_type') or '').upper() == mkt_upper
+            and (side is None or s.get('side') == side)
+            and self._is_live_book(s.get('book'))
+            and self._is_sharp_benchmark(s.get('book'))
+            and (mkt_upper == 'MONEYLINE' or s.get('line_value') is not None)
+        ]
+        if not filtered:
+            return None
+
+        latest_by_book: Dict[str, Dict] = {}
+        for s in filtered:
+            book_key = str(s.get('book') or '__unknown__')
+            prev = latest_by_book.get(book_key)
+            if prev is None or str(s.get('captured_at') or '') > str(prev.get('captured_at') or ''):
+                latest_by_book[book_key] = s
+
+        candidates = list(latest_by_book.values())
+
+        def _parse_ts(val) -> Optional[float]:
+            if isinstance(val, datetime):
+                return val.timestamp()
+            if isinstance(val, str) and val.strip():
+                try:
+                    return datetime.fromisoformat(val.strip().replace('Z', '+00:00')).timestamp()
+                except Exception:
+                    return None
+            return None
+
+        ts_vals = [t for t in (_parse_ts(c.get('captured_at')) for c in candidates) if t is not None]
+        if ts_vals:
+            max_ts = max(ts_vals)
+            recent = [
+                c for c in candidates
+                if (_parse_ts(c.get('captured_at')) or max_ts) >= (max_ts - 5400.0)
+            ]
+            if recent:
+                candidates = recent
+
+        candidates.sort(
+            key=lambda x: (
+                self._book_priority_for(x.get('book')),
+                -(_parse_ts(x.get('captured_at')) or 0.0),
+            )
+        )
+        best = candidates[0].copy()
+        best['selection_method'] = 'sharp_benchmark'
+        return best
+
     def get_best_price_for_side(
         self,
         snapshots: List[Dict],
         market_type: str,
         side: str,
         target_line: Optional[float] = None,
+        exclude_sharp_benchmarks: bool = True,
     ) -> Optional[Dict]:
         """Find the best available price for a specific side (HOME/AWAY or OVER/UNDER).
 
         Deduplicates by book (keeping newest ``captured_at``), restricts SPREAD/TOTAL
         shopping to within 0.5 pts of ``target_line`` (or the median line), and ranks
         by most favorable line first then highest American price.
+        When ``exclude_sharp_benchmarks`` is True, keeps sharp benchmark books (Pinnacle,
+        LowVig, BetOnline, Circa, Bookmaker) out of bet-card recommendations whenever
+        playable US retail books exist.
         """
         filtered = [
             s for s in snapshots
@@ -165,6 +258,10 @@ class OddsSelectionService:
         ]
         if not filtered:
             return None
+        if exclude_sharp_benchmarks:
+            non_sharp = [s for s in filtered if not self._is_sharp_benchmark(s.get('book'))]
+            if non_sharp:
+                filtered = non_sharp
         named_only = [s for s in filtered if self._is_named_retail_or_consensus(s.get('book'))]
         if named_only:
             filtered = named_only

@@ -254,7 +254,7 @@ def has_top6_risk_flag(row: dict) -> bool:
         return True
     for tag in _extract_movement_tags(row):
         low = tag.lower()
-        if low == "contra_sharp_money" or low.startswith("reverse_steam="):
+        if low in ("contra_sharp_money", "contra_sharp_line") or low.startswith("reverse_steam="):
             return True
     return False
 
@@ -357,8 +357,12 @@ def compute_top6_quality_score(row: dict) -> float:
         score += 0.012
     if "rlm_confirmed" in tags:
         score += 0.006
+    if "sharp_price_edge" in tags:
+        score += 0.008
     if "contra_sharp_money" in tags:
         score -= 0.030
+    if "contra_sharp_line" in tags:
+        score -= 0.018
     if any(t.startswith("reverse_steam=") for t in tags):
         score -= 0.020
 

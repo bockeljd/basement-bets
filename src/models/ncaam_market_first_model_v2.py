@@ -64,6 +64,65 @@ class NCAAMMarketFirstModelV2(BaseModel):
     AGGRESSIVE_CAP_SPREAD = 4.0
     AGGRESSIVE_CAP_TOTAL = 5.0
 
+    @staticmethod
+    def _anchor_with_sharp(retail_val, sharp_val, max_diff: float = 3.0) -> Optional[float]:
+        """Blend retail consensus 50/50 with sharp benchmark when difference is within sanity bounds."""
+        r = _safe_float(retail_val)
+        if r is None:
+            return None
+        s = _safe_float(sharp_val)
+        if s is not None and abs(s - r) <= float(max_diff):
+            return round((0.50 * s) + (0.50 * r), 2)
+        return float(r)
+
+    @staticmethod
+    def _sharp_line_for_side(
+        market: str,
+        side: str,
+        sharp_spread_home=None,
+        sharp_total=None,
+    ) -> Optional[float]:
+        mkt = str(market or "").upper()
+        s_low = str(side or "").strip().lower()
+        if mkt == "SPREAD":
+            sh = _safe_float(sharp_spread_home)
+            if sh is None:
+                return None
+            val = sh if s_low == "home" else -sh
+            return round(val, 1)
+        if mkt == "TOTAL":
+            st = _safe_float(sharp_total)
+            return round(st, 1) if st is not None else None
+        return None
+
+    @staticmethod
+    def _compute_sharp_edge_pts(
+        market: str,
+        side: str,
+        bet_line,
+        sharp_spread_home=None,
+        sharp_total=None,
+    ) -> Optional[float]:
+        """Points the bettable retail line beats (+) or trails (-) the sharp benchmark line."""
+        bl = _safe_float(bet_line)
+        if bl is None:
+            return None
+        mkt = str(market or "").upper()
+        s_low = str(side or "").strip().lower()
+        if mkt == "SPREAD":
+            sh = _safe_float(sharp_spread_home)
+            if sh is None:
+                return None
+            sharp_side = sh if s_low == "home" else -sh
+            return round(bl - sharp_side, 2)
+        if mkt == "TOTAL":
+            st = _safe_float(sharp_total)
+            if st is None:
+                return None
+            diff = (st - bl) if s_low == "over" else (bl - st)
+            return round(diff, 2)
+        return None
+
     def __init__(self, aggressive: bool = False, cap_spread: float = None, cap_total: float = None, manual_adjustments: dict = None):
         """Initialize model with configurable parameters.
 
@@ -791,12 +850,35 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if not market_snapshot:
             raw_snaps = self._get_all_recent_odds(event_id)
             
-            # Step A: Get CONSENSUS lines (median of all books) for model input
+            # Step A: Get retail CONSENSUS lines (median of retail books) + separate SHARP benchmark
             consensus_spread = self.odds_selector.get_consensus_snapshot(raw_snaps, 'SPREAD', 'HOME')
             consensus_spread_away = self.odds_selector.get_consensus_snapshot(raw_snaps, 'SPREAD', 'AWAY')
             consensus_total = self.odds_selector.get_consensus_snapshot(raw_snaps, 'TOTAL', 'OVER')
             consensus_ml_home = self.odds_selector.get_consensus_snapshot(raw_snaps, 'MONEYLINE', 'HOME')
             consensus_ml_away = self.odds_selector.get_consensus_snapshot(raw_snaps, 'MONEYLINE', 'AWAY')
+
+            sharp_spread_home_snap = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'SPREAD', 'HOME')
+            sharp_spread_away_snap = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'SPREAD', 'AWAY')
+            sharp_total_over_snap = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'TOTAL', 'OVER')
+            sharp_total_under_snap = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'TOTAL', 'UNDER')
+
+            sharp_spread_home_val = None
+            sharp_spread_book = None
+            if sharp_spread_home_snap and sharp_spread_home_snap.get('line_value') is not None:
+                sharp_spread_home_val = float(sharp_spread_home_snap['line_value'])
+                sharp_spread_book = sharp_spread_home_snap.get('book')
+            elif sharp_spread_away_snap and sharp_spread_away_snap.get('line_value') is not None:
+                sharp_spread_home_val = -float(sharp_spread_away_snap['line_value'])
+                sharp_spread_book = sharp_spread_away_snap.get('book')
+
+            sharp_total_val = None
+            sharp_total_book = None
+            if sharp_total_over_snap and sharp_total_over_snap.get('line_value') is not None:
+                sharp_total_val = float(sharp_total_over_snap['line_value'])
+                sharp_total_book = sharp_total_over_snap.get('book')
+            elif sharp_total_under_snap and sharp_total_under_snap.get('line_value') is not None:
+                sharp_total_val = float(sharp_total_under_snap['line_value'])
+                sharp_total_book = sharp_total_under_snap.get('book')
 
             spread_target_home = consensus_spread['line_value'] if consensus_spread else None
             spread_target_away = (
@@ -806,7 +888,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             )
             total_target = consensus_total['line_value'] if consensus_total else None
 
-            # Step B: Get BEST PRICES for later (after we find an edge), anchored within 0.5 pts of consensus
+            # Step B: Get BEST RETAIL PRICES for betting (never sharp benchmark books when retail exists)
             best_spread_home = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'HOME', target_line=spread_target_home)
             best_spread_away = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'AWAY', target_line=spread_target_away)
             best_total_over = self.odds_selector.get_best_price_for_side(raw_snaps, 'TOTAL', 'OVER', target_line=total_target)
@@ -833,6 +915,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 'book_spread': 'Consensus',
                 'book_total': 'Consensus',
                 'book_ml': 'Consensus',
+                # Sharp offshore/benchmark reference (Pinnacle / LowVig / BetOnline)
+                '_sharp_spread_home': sharp_spread_home_val,
+                '_sharp_spread_book': sharp_spread_book,
+                '_sharp_total': sharp_total_val,
+                '_sharp_total_book': sharp_total_book,
                 # Movement / derived
                 '_market_consensus': mc,
                 'open_spread_home': (mc.get('open_spread_home') if mc else None),
@@ -853,6 +940,22 @@ class NCAAMMarketFirstModelV2(BaseModel):
             }
         else:
             raw_snaps = market_snapshot.get('_raw_snaps', [])
+            if raw_snaps and market_snapshot.get('_sharp_spread_home') is None:
+                s_h = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'SPREAD', 'HOME')
+                s_a = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'SPREAD', 'AWAY')
+                if s_h and s_h.get('line_value') is not None:
+                    market_snapshot['_sharp_spread_home'] = float(s_h['line_value'])
+                    market_snapshot['_sharp_spread_book'] = s_h.get('book')
+                elif s_a and s_a.get('line_value') is not None:
+                    market_snapshot['_sharp_spread_home'] = -float(s_a['line_value'])
+                    market_snapshot['_sharp_spread_book'] = s_a.get('book')
+            if raw_snaps and market_snapshot.get('_sharp_total') is None:
+                t_o = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'TOTAL', 'OVER')
+                t_u = self.odds_selector.get_sharp_benchmark_snapshot(raw_snaps, 'TOTAL', 'UNDER')
+                t_s = t_o if (t_o and t_o.get('line_value') is not None) else t_u
+                if t_s and t_s.get('line_value') is not None:
+                    market_snapshot['_sharp_total'] = float(t_s['line_value'])
+                    market_snapshot['_sharp_total_book'] = t_s.get('book')
 
         # VALIDATION: If *both* spread and total are missing (or out of sane D1 bounds), we can't do anything.
         # Otherwise, proceed and only generate recommendations for markets with valid lines.
@@ -890,8 +993,20 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         # If one market is missing, we still compute the other market.
         # Keep missing total as None instead of fabricating 145.0; _generate_recommendations skips missing markets.
-        mu_market_spread = float(market_snapshot['spread_home']) if has_spread else 0.0
-        mu_market_total = float(market_snapshot['total']) if has_total else None
+        # Blend market prior 50/50 with sharp benchmark (Pinnacle/LowVig/BetOnline) when within 3.0 pts.
+        mu_market_spread = (
+            self._anchor_with_sharp(market_snapshot['spread_home'], market_snapshot.get('_sharp_spread_home'))
+            if has_spread
+            else 0.0
+        )
+        mu_market_total = (
+            self._anchor_with_sharp(market_snapshot['total'], market_snapshot.get('_sharp_total'))
+            if has_total
+            else None
+        )
+        if isinstance(market_snapshot, dict):
+            market_snapshot['_anchored_spread_home'] = mu_market_spread if has_spread else None
+            market_snapshot['_anchored_total'] = mu_market_total if has_total else None
 
         # 3. External Projections & Signals
         # Torvik - PRIMARY SIGNAL
@@ -1828,6 +1943,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "impact_players": (injury_context or {}).get("impact_players") or [],
             } if ((injury_context or {}).get("has_injuries") or inj_spread_adj != 0.0 or inj_total_adj != 0.0) else None,
             "referees": ref_summary,
+            "sharp_benchmark": {
+                "spread_book": market_snapshot.get("_sharp_spread_book"),
+                "spread_home": market_snapshot.get("_sharp_spread_home"),
+                "total_book": market_snapshot.get("_sharp_total_book"),
+                "total": market_snapshot.get("_sharp_total"),
+                "anchored_spread_home": market_snapshot.get("_anchored_spread_home"),
+                "anchored_total": market_snapshot.get("_anchored_total"),
+            } if (
+                market_snapshot.get("_sharp_spread_home") is not None
+                or market_snapshot.get("_sharp_total") is not None
+            ) else None,
             "weights": {
                 "torvik": round(float(w_base), 3),
                 "kenpom": round(float(w_kp), 3),
@@ -1928,6 +2054,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             'sigma_total': float(sigma_total) if sigma_total is not None else None,
             'line_at_prediction_spread_home': (float(market_snapshot.get('spread_home')) if market_snapshot.get('spread_home') is not None else None) if isinstance(market_snapshot, dict) else None,
             'line_at_prediction_total': (float(market_snapshot.get('total')) if market_snapshot.get('total') is not None else None) if isinstance(market_snapshot, dict) else None,
+            'sharp_book': (market_snapshot.get('_sharp_spread_book') or market_snapshot.get('_sharp_total_book')) if isinstance(market_snapshot, dict) else None,
+            'sharp_spread_home': _safe_float(market_snapshot.get('_sharp_spread_home')) if isinstance(market_snapshot, dict) else None,
+            'sharp_total': _safe_float(market_snapshot.get('_sharp_total')) if isinstance(market_snapshot, dict) else None,
+            'anchored_market_spread_home': _safe_float(market_snapshot.get('_anchored_spread_home')) if isinstance(market_snapshot, dict) else None,
+            'anchored_market_total': _safe_float(market_snapshot.get('_anchored_total')) if isinstance(market_snapshot, dict) else None,
             'open_spread_home': _safe_float(mc.get('open_spread_home')) if mc else None,
             'current_spread_home': _safe_float(mc.get('current_spread_home')) if mc else None,
             'spread_move_home': _safe_float(mc.get('spread_move_home')) if mc else None,
@@ -2110,6 +2241,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "confidence_tier": str(conf_label).upper(),
                 "confidence_0_100": conf_score,
                 "book": r['book'],
+                "sharp_book": r.get('sharp_book'),
+                "sharp_line": r.get('sharp_line'),
+                "sharp_edge_pts": r.get('sharp_edge_pts'),
                 # Movement/uncertainty instrumentation
                 "sigma_mult": r.get('sigma_mult'),
                 "ev_raw": r.get('ev_raw'),
@@ -3528,7 +3662,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 labels.append("risk guardrail triggered")
             return "Held for safety: " + "; ".join(dict.fromkeys(labels))
 
-        def _sanity_adjust(market: str, side: str, win_prob: float, ev: float, mc: Optional[Dict[str, Any]], eval_price: Optional[int] = None):
+        def _sanity_adjust(market: str, side: str, win_prob: float, ev: float, mc: Optional[Dict[str, Any]], eval_price: Optional[int] = None, bet_line: Optional[float] = None):
             """Soft guardrails + market-movement uncertainty.
 
             Returns: (score:int, reasons:list[str], sigma_mult:float, ev_penalty:float)
@@ -3542,6 +3676,26 @@ class NCAAMMarketFirstModelV2(BaseModel):
             reasons = []
             sigma_mult = 1.0
             ev_penalty = 0.0
+
+            # Sharp offshore/benchmark check (Pinnacle / LowVig / BetOnline vs US retail line)
+            try:
+                sharp_edge_pts = self._compute_sharp_edge_pts(
+                    market,
+                    side,
+                    bet_line,
+                    snap.get('_sharp_spread_home') if isinstance(snap, dict) else None,
+                    snap.get('_sharp_total') if isinstance(snap, dict) else None,
+                )
+                if sharp_edge_pts is not None:
+                    if sharp_edge_pts >= 0.5:
+                        reasons.append("sharp_price_edge")
+                    elif sharp_edge_pts <= -1.0:
+                        score += 1
+                        reasons.append("contra_sharp_line")
+                        sigma_mult *= 1.12
+                        ev_penalty += float(os.getenv('CONTRA_SHARP_EV_PENALTY', '0.015'))
+            except Exception:
+                pass
 
             # Odds/prob mismatch + best-vs-consensus odds outlier check
             try:
@@ -3768,6 +3922,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_home, 4)),
                 "book": best_home.get('book') or book_consensus,
                 "edge_points": float(round(edge_pts_home, 2)),
+                "sharp_book": snap.get("_sharp_spread_book"),
+                "sharp_line": self._sharp_line_for_side("SPREAD", "home", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
+                "sharp_edge_pts": self._compute_sharp_edge_pts("SPREAD", "home", line_home_bet, snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
                 "_is_early_season": g_is_early,
                 "_min_rec_games": g_min_games,
                 "_agree_count": g_agree_sp,
@@ -3800,6 +3957,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_away, 4)),
                 "book": (best_away or {}).get('book') or book_consensus,
                 "edge_points": float(round(edge_pts_away, 2)),
+                "sharp_book": snap.get("_sharp_spread_book"),
+                "sharp_line": self._sharp_line_for_side("SPREAD", "away", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
+                "sharp_edge_pts": self._compute_sharp_edge_pts("SPREAD", "away", line_away_bet, snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
                 "_is_early_season": g_is_early,
                 "_min_rec_games": g_min_games,
                 "_agree_count": g_agree_sp,
@@ -3828,6 +3988,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             float(best.get('ev') or 0.0),
                             mc,
                             eval_price=best.get('price'),
+                            bet_line=best.get('line'),
                         )
                         if reason:
                             try:
@@ -3976,6 +4137,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_over, 4)),
                 "book": book_over,
                 "edge_points": float(round(edge_pts_over, 2)),
+                "sharp_book": snap.get("_sharp_total_book"),
+                "sharp_line": self._sharp_line_for_side("TOTAL", "over", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
+                "sharp_edge_pts": self._compute_sharp_edge_pts("TOTAL", "over", line_over_bet, snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
                 "_is_early_season": g_is_early,
                 "_min_rec_games": g_min_games,
                 "_agree_count": g_agree_sp,
@@ -4007,6 +4171,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_under, 4)),
                 "book": book_under,
                 "edge_points": float(round(edge_pts_under, 2)),
+                "sharp_book": snap.get("_sharp_total_book"),
+                "sharp_line": self._sharp_line_for_side("TOTAL", "under", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
+                "sharp_edge_pts": self._compute_sharp_edge_pts("TOTAL", "under", line_under_bet, snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
                 "_is_early_season": g_is_early,
                 "_min_rec_games": g_min_games,
                 "_agree_count": g_agree_sp,
@@ -4032,6 +4199,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             float(best.get('ev') or 0.0),
                             mc,
                             eval_price=best.get('price'),
+                            bet_line=best.get('line'),
                         )
                         if reason:
                             try:
@@ -4426,11 +4594,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
             and str(s.get('book') or '').strip().lower() not in ('action_open', 'open')
         ]
         if live_sp_rows:
-            sp_vals = [_safe_float(s.get('line_value')) for s in live_sp_rows]
-            sp_vals = [v for v in sp_vals if v is not None]
             books = {str(s.get('book')).strip() for s in live_sp_rows if s.get('book')}
             if books and (mc.get('books_count') is None or len(books) > int(mc.get('books_count') or 0)):
                 mc['books_count'] = len(books)
+            retail_sp_rows = [
+                s for s in live_sp_rows if not self.odds_selector._is_sharp_benchmark(s.get('book'))
+            ]
+            disp_sp_rows = retail_sp_rows if len(retail_sp_rows) >= 2 else live_sp_rows
+            sp_vals = [_safe_float(s.get('line_value')) for s in disp_sp_rows]
+            sp_vals = [v for v in sp_vals if v is not None]
             if len(sp_vals) >= 2:
                 mc['spread_disagreement'] = round(max(sp_vals) - min(sp_vals), 2)
 
@@ -4442,7 +4614,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             and str(s.get('book') or '').strip().lower() not in ('action_open', 'open')
         ]
         if live_tot_rows:
-            tot_vals = [_safe_float(s.get('line_value')) for s in live_tot_rows]
+            retail_tot_rows = [
+                s for s in live_tot_rows if not self.odds_selector._is_sharp_benchmark(s.get('book'))
+            ]
+            disp_tot_rows = retail_tot_rows if len(retail_tot_rows) >= 2 else live_tot_rows
+            tot_vals = [_safe_float(s.get('line_value')) for s in disp_tot_rows]
             tot_vals = [v for v in tot_vals if v is not None]
             if len(tot_vals) >= 2:
                 mc['total_disagreement'] = round(max(tot_vals) - min(tot_vals), 2)

@@ -1,113 +1,170 @@
-from src.utils.normalize import normalize_market, normalize_side, normalize_feed_provider
-
-    # ... (existing imports)
-
-    # In methods, replace self._normalize_market(x) with normalize_market(x)
-
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta, timezone
+from src.utils.normalize import (
+    normalize_market,
+    normalize_side,
+    normalize_feed_provider,
+    normalize_provider,
+)
 from src.database import store_odds_snapshots, get_db_connection, _exec
+from src.services.injury_service import _team_names_match
 from src.services.team_identity_service import TeamIdentityService
+from src.utils.team_matcher import TeamMatcher
+
+
+ODDS_API_BOOK_MAP = {
+    "pinnacle": "Pinnacle",
+    "lowvig": "LowVig",
+    "betonlineag": "BetOnline",
+    "betonline": "BetOnline",
+    "bookmaker": "Bookmaker",
+    "circa": "Circa Sports",
+    "circasports": "Circa Sports",
+    "draftkings": "DraftKings",
+    "fanduel": "FanDuel",
+    "betmgm": "BetMGM",
+    "caesars": "Caesars",
+    "williamhill_us": "Caesars",
+    "betrivers": "BetRivers",
+    "bet365": "bet365",
+    "bovada": "Bovada",
+    "consensus": "Consensus",
+}
+
 
 class OddsAdapter:
     def __init__(self):
         self.identity = TeamIdentityService()
+        self.matcher = TeamMatcher()
+        self._canon_cache: Dict[Tuple[str, str], str] = {}
+
+    @staticmethod
+    def _coerce_utc_datetime(val) -> Optional[datetime]:
+        if isinstance(val, datetime):
+            return val.replace(tzinfo=timezone.utc) if val.tzinfo is None else val.astimezone(timezone.utc)
+        if isinstance(val, (int, float)):
+            ts = val / 1000.0 if val > 20000000000 else float(val)
+            return datetime.fromtimestamp(ts, timezone.utc)
+        if isinstance(val, str) and val.strip():
+            try:
+                parsed = datetime.fromisoformat(val.strip().replace('Z', '+00:00'))
+                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _normalize_odds_api_book(bm: Dict) -> str:
+        raw_key = str((bm or {}).get('key') or '').strip().lower()
+        if raw_key in ODDS_API_BOOK_MAP:
+            return ODDS_API_BOOK_MAP[raw_key]
+        raw_title = str((bm or {}).get('title') or '').strip()
+        if raw_title.lower() in ODDS_API_BOOK_MAP:
+            return ODDS_API_BOOK_MAP[raw_title.lower()]
+        return normalize_provider(raw_title or raw_key or 'Unknown')
 
     def _get_canonical_name(self, name, league):
         """
         Resolve raw name to canonical name via Identity service.
         """
-        if not name: return None
-        # Get canonical ID
-        tid = self.identity.get_team_by_name(name, league)
-        if tid:
-            # Fetch official name for this ID
-            with get_db_connection() as conn:
-                row = _exec(conn, "SELECT name FROM teams WHERE id=%s", (tid,)).fetchone()
-                if row: return row[0]
-        return name
-
-    def _resolve_canonical_event_id(self, league, home_team, away_team, start_time):
-        """
-        Map provider event to internal event_id using Text-based matching on names.
-        """
-        if not home_team or not away_team:
+        if not name:
             return None
-            
-        # 1. Canonicalize names
-        home_canon = self._get_canonical_name(home_team, league) or home_team
-        away_canon = self._get_canonical_name(away_team, league) or away_team
+        cache_key = (str(league or '').upper(), str(name).strip())
+        if cache_key in self._canon_cache:
+            return self._canon_cache[cache_key]
+        resolved = name
+        try:
+            tid = self.identity.get_team_by_name(name, league)
+            if tid:
+                with get_db_connection() as conn:
+                    row = _exec(conn, "SELECT name FROM teams WHERE id = :id", {"id": tid}).fetchone()
+                    if row:
+                        resolved = row[0]
+        except Exception:
+            resolved = name
+        self._canon_cache[cache_key] = resolved
+        return resolved
 
-        # 2. Parse Start Time
-        if isinstance(start_time, str):
-            try:
-                dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            except:
-                dt = datetime.now(timezone.utc)
-        elif isinstance(start_time, (int, float)):
-            # Assume milliseconds if large
-            if start_time > 20000000000: 
-                dt = datetime.fromtimestamp(start_time / 1000.0, timezone.utc)
-            else:
-                dt = datetime.fromtimestamp(start_time, timezone.utc)
-        elif isinstance(start_time, datetime):
-            dt = start_time
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-        else:
-             dt = datetime.now(timezone.utc)
-
-        start_window = dt - timedelta(hours=6)
-        end_window = dt + timedelta(hours=6)
-        
-        # 3. Query events by text matching
-        # 3. Query events in window and fuzzy match
-        # Fetch candidates
+    def _load_candidate_events(self, league: str, start_window: datetime, end_window: datetime) -> List[Dict]:
         query_candidates = """
-        SELECT id, home_team, away_team FROM events
+        SELECT id, home_team, away_team, start_time FROM events
         WHERE league = :l
           AND start_time BETWEEN :start AND :end
         """
-        
-        candidates = []
-        with get_db_connection() as conn:
-            rows = _exec(conn, query_candidates, {
-                "l": league,
-                "start": start_window,
-                "end": end_window
-            }).fetchall()
-            candidates = [dict(r) for r in rows]
+        try:
+            with get_db_connection() as conn:
+                rows = _exec(conn, query_candidates, {
+                    "l": league,
+                    "start": start_window,
+                    "end": end_window,
+                }).fetchall()
+                return [dict(r._mapping) if hasattr(r, "_mapping") else dict(r) for r in rows]
+        except Exception:
+            return []
 
-        # Fuzzy Matcher Helper
-        def matches(provider_name, event_team_name):
-            if not provider_name or not event_team_name: return False
-            p = provider_name.lower().replace('.', '').strip()
-            e = event_team_name.lower().replace('.', '').strip()
-            # Check containment (e.g. "xavier" in "xavier musketeers")
-            if p in e or e in p:
-                return True
-            # Check team matcher logic if imported, or alias
+    def _teams_equivalent(self, a: Optional[str], b: Optional[str]) -> bool:
+        if not a or not b:
             return False
+        if a.strip().lower() == b.strip().lower():
+            return True
+        return _team_names_match(self.matcher, a, b)
 
-        # Find best match
-        best_match = None
+    def _resolve_canonical_event(
+        self,
+        league,
+        home_team,
+        away_team,
+        start_time,
+        candidates_cache: Optional[List[Dict]] = None,
+    ) -> Optional[Dict]:
+        """
+        Map provider event to internal event record using TeamMatcher-safe matching.
+        """
+        if not home_team or not away_team:
+            return None
+
+        home_canon = self._get_canonical_name(home_team, league) or home_team
+        away_canon = self._get_canonical_name(away_team, league) or away_team
+
+        dt = self._coerce_utc_datetime(start_time) or datetime.now(timezone.utc)
+        start_window = dt - timedelta(hours=6)
+        end_window = dt + timedelta(hours=6)
+
+        if candidates_cache is not None:
+            candidates = []
+            for cand in candidates_cache:
+                cand_dt = self._coerce_utc_datetime(cand.get('start_time'))
+                if cand_dt is None or (start_window <= cand_dt <= end_window):
+                    candidates.append(cand)
+        else:
+            candidates = self._load_candidate_events(league, start_window, end_window)
+
+        home_forms = [home_team] if home_canon == home_team else [home_team, home_canon]
+        away_forms = [away_team] if away_canon == away_team else [away_team, away_canon]
+
         for cand in candidates:
-            # Check both home/away (provider might have them flipped or normalized differently)
-            # Direct: Home-Home, Away-Away
-            if matches(home_canon, cand['home_team']) and matches(away_canon, cand['away_team']):
-                best_match = cand['id']
-                break
-            # Swap: Home-Away, Away-Home
-            if matches(home_canon, cand['away_team']) and matches(away_canon, cand['home_team']):
-                best_match = cand['id']
-                break
-        
-        if best_match:
-            return best_match
-        
-        # Debug Log on failure
-        # print(f"[OddsAdapter] Failed to resolve: {league} | {home_team} vs {away_team} | {dt}")
+            ch = cand.get('home_team')
+            ca = cand.get('away_team')
+            if any(self._teams_equivalent(h, ch) for h in home_forms) and any(self._teams_equivalent(a, ca) for a in away_forms):
+                return {**cand, "swapped": False}
+            if any(self._teams_equivalent(h, ca) for h in home_forms) and any(self._teams_equivalent(a, ch) for a in away_forms):
+                return {**cand, "swapped": True}
+
         return None
+
+    def _resolve_canonical_event_id(
+        self,
+        league,
+        home_team,
+        away_team,
+        start_time,
+        candidates_cache: Optional[List[Dict]] = None,
+    ):
+        """
+        Map provider event to internal event_id using Text-based matching on names.
+        """
+        matched = self._resolve_canonical_event(league, home_team, away_team, start_time, candidates_cache=candidates_cache)
+        return matched.get('id') if matched else None
 
     def normalize_and_store(self, raw_data: List[Dict], league: str = None, provider: str = "odds_api", captured_at: datetime = None):
         """
@@ -163,11 +220,31 @@ class OddsAdapter:
                 return 0 <= x <= 400
             return True
 
+        candidates_cache = None
+        if provider != "action_network" and league:
+            parsed_times = [
+                self._coerce_utc_datetime(ev.get('commence_time') or ev.get('start_time'))
+                for ev in raw_data
+                if isinstance(ev, dict)
+            ]
+            parsed_times = [t for t in parsed_times if t is not None]
+            if parsed_times:
+                candidates_cache = self._load_candidate_events(
+                    league,
+                    min(parsed_times) - timedelta(hours=6),
+                    max(parsed_times) + timedelta(hours=6),
+                )
+
         for event in raw_data:
             if provider == "action_network":
                 snaps = self._from_action_network(event, league, captured_at) or []
             else:
-                snaps = self._from_odds_api(event, league, captured_at) or []
+                snaps = self._from_odds_api(
+                    event,
+                    league,
+                    captured_at,
+                    candidates_cache=candidates_cache,
+                ) or []
 
             for s in snaps:
                 try:
@@ -198,44 +275,67 @@ class OddsAdapter:
 
         return store_odds_snapshots(final_snapshots)
 
-    def _from_odds_api(self, event: Dict, league: str, captured_at: datetime) -> List[Dict]:
+    def _from_odds_api(
+        self,
+        event: Dict,
+        league: str,
+        captured_at: datetime,
+        candidates_cache: Optional[List[Dict]] = None,
+    ) -> List[Dict]:
         """
         Convert Odds API event to snapshots.
         """
         final_snaps = []
         home_team = event.get('home_team')
         away_team = event.get('away_team')
-        start_time = event.get('commence_time')
+        start_time = event.get('commence_time') or event.get('start_time')
 
-        event_id = self._resolve_canonical_event_id(league, home_team, away_team, start_time)
-        if not event_id: return []
+        matched = self._resolve_canonical_event(
+            league,
+            home_team,
+            away_team,
+            start_time,
+            candidates_cache=candidates_cache,
+        )
+        if not matched or not matched.get('id'):
+            return []
+
+        event_id = matched['id']
+        # Orient HOME/AWAY relative to the canonical DB event row even on neutral-site swaps.
+        eff_home = away_team if matched.get('swapped') else home_team
+        eff_away = home_team if matched.get('swapped') else away_team
 
         bookmakers = event.get('bookmakers', [])
         for bm in bookmakers:
-            book_key = bm.get('key')
+            book_name = self._normalize_odds_api_book(bm)
             for mkt in bm.get('markets', []):
                 mkt_key = normalize_market(mkt.get('key'))
                 for out in mkt.get('outcomes', []):
                     # Safety Filter: Price is None
-                    if out.get('price') is None: continue
-                    
-                    side = self._detect_side(out.get('name'), home_team, away_team)
-                    
+                    if out.get('price') is None:
+                        continue
+
+                    side = (
+                        normalize_side(out.get('name'))
+                        if mkt_key == 'TOTAL'
+                        else self._detect_side(out.get('name'), eff_home, eff_away)
+                    )
+
                     # Safety Filter: Line value numeric check for SPREAD/TOTAL
                     line_val = out.get('point')
                     if mkt_key in ('SPREAD', 'TOTAL') and line_val is None:
-                         continue
+                        continue
 
                     snap = {
                         "event_id": event_id,
                         "provider": "odds_api",
-                        "book": book_key,
+                        "book": book_name,
                         "market_type": mkt_key,
                         "side": side,
                         "line_value": line_val,
                         "price": out.get('price'),
                         "captured_at": captured_at,
-                        "raw_json": None
+                        "raw_json": None,
                     }
                     final_snaps.append(snap)
         return final_snaps
@@ -401,8 +501,12 @@ class OddsAdapter:
         return snaps
 
     def _detect_side(self, outcome_name, home_team, away_team):
-        if home_team and outcome_name == home_team: return "HOME"
-        if away_team and outcome_name == away_team: return "AWAY"
+        if not outcome_name:
+            return "UNKNOWN"
+        if self._teams_equivalent(outcome_name, home_team):
+            return "HOME"
+        if self._teams_equivalent(outcome_name, away_team):
+            return "AWAY"
         return normalize_side(outcome_name)
 
 

@@ -5,8 +5,48 @@ import datetime
 # Allow running from root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
+from src.models.odds_client import OddsAPIClient
 from src.services.odds_adapter import OddsAdapter
 from src.services.odds_fetcher_service import OddsFetcherService
+
+
+def ingest_ncaam_sharp_odds(adapter: OddsAdapter) -> dict:
+    """Ingest NCAAM sharp benchmark odds (Pinnacle/LowVig/BetOnline) within free-tier budget."""
+    client = OddsAPIClient()
+    res = client.fetch_ncaam_sharp_odds_budgeted()
+    status = str(res.get("status") or "unknown")
+    source = str(res.get("source") or "skipped")
+    events = res.get("events") or []
+    budget = res.get("budget") or {}
+    credits_spent = int(res.get("credits_spent") or 0)
+
+    stored_count = 0
+    if source == "live" and events:
+        stored_count = adapter.normalize_and_store(events, league="NCAAM", provider="odds_api")
+
+    print(
+        "[ingest_odds][sharp] "
+        f"status={status} source={source} events={len(events)} stored={stored_count} "
+        f"spent={credits_spent} day={budget.get('day_credits_used')}/{budget.get('daily_cap')} "
+        f"month={budget.get('month_credits_used')}/{budget.get('monthly_budget')} "
+        f"api_remaining={budget.get('last_remaining')}"
+    )
+
+    try:
+        from src.scripts.update_data_health import upsert
+        health_status = "ok" if status in ("ok", "cache_fresh", "no_upcoming_games") else "stale"
+        row_count = stored_count if source == "live" else len(events)
+        notes = (
+            f"status={status},source={source},spent={credits_spent},"
+            f"day={budget.get('day_credits_used')}/{budget.get('daily_cap')},"
+            f"month={budget.get('month_credits_used')}/{budget.get('monthly_budget')},"
+            f"remaining={budget.get('last_remaining')}"
+        )
+        upsert("odds_api_sharp", status=health_status, row_count=int(row_count), notes=notes)
+    except Exception as e:
+        print(f"[ingest_odds] sharp data_health upsert failed: {e}")
+
+    return res
 
 def main():
     print(f"[{datetime.datetime.now()}] Starting Odds Ingestion...")
@@ -60,6 +100,12 @@ def main():
             print(f"ERROR processing {league}: {e}")
             import traceback
             traceback.print_exc()
+
+    # Budget-capped sharp benchmarks for NCAAM (free 500/mo Starter tier guard)
+    try:
+        ingest_ncaam_sharp_odds(adapter)
+    except Exception as e:
+        print(f"[ingest_odds] sharp NCAAM ingestion failed (continuing): {e}")
 
     # Derived data: market consensus + health status
     try:

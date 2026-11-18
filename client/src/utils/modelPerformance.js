@@ -391,7 +391,7 @@ export const hasTop6RiskFlag = (row) => {
       : [];
   return tags.some((t) => {
     const low = String(t || '').trim().toLowerCase();
-    return low === 'contra_sharp_money' || low.startsWith('reverse_steam=');
+    return low === 'contra_sharp_money' || low === 'contra_sharp_line' || low.startsWith('reverse_steam=');
   });
 };
 
@@ -468,7 +468,9 @@ export const getQualityRankScore = (row) => {
   const tags = tagList.map((t) => String(t || '').trim().toLowerCase()).filter(Boolean);
   if (tags.includes('sharp_backing')) score += 0.012;
   if (tags.includes('rlm_confirmed')) score += 0.006;
+  if (tags.includes('sharp_price_edge')) score += 0.008;
   if (tags.includes('contra_sharp_money')) score -= 0.03;
+  if (tags.includes('contra_sharp_line')) score -= 0.018;
   if (tags.some((t) => t.startsWith('reverse_steam='))) score -= 0.02;
 
   return score;

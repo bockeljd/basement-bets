@@ -3,8 +3,10 @@ name: NCAAM Frequent Jobs
 
 on:
   schedule:
-    # Twice-hourly schedule so late pre-tip odds & closing-line snapshots are fresh
-    - cron: '*/30 * * * *'
+    # 15m peak pre-tip slate (21:00-03:59 UTC / 4pm-11pm EST), 30m daytime, hourly overnight ($0 free)
+    - cron: '*/15 21-23,0-3 * * *'
+    - cron: '*/30 12-20 * * *'
+    - cron: '0 4-11 * * *'
   workflow_dispatch:
     inputs:
       backfill_pending:
@@ -43,6 +45,7 @@ jobs:
         if: ${{ !inputs.backfill_pending }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: python3 src/scripts/ingest_odds.py
 
       - name: Build Market Consensus

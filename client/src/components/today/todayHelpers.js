@@ -183,7 +183,7 @@ export const hasTop6RiskFlag = (rec) => {
       : [];
   return tags.some((t) => {
     const low = String(t || '').trim().toLowerCase();
-    return low === 'contra_sharp_money' || low.startsWith('reverse_steam=');
+    return low === 'contra_sharp_money' || low === 'contra_sharp_line' || low.startsWith('reverse_steam=');
   });
 };
 
@@ -250,10 +250,17 @@ export const getRecQualityScore = (rec) => {
   }
 
   const rawTags = rec.movement_tags || rec.sanity_reasons;
-  const tags = (Array.isArray(rawTags) ? rawTags : []).map((t) => String(t || '').trim().toLowerCase());
+  const tagList = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === 'string'
+      ? rawTags.split(',')
+      : [];
+  const tags = tagList.map((t) => String(t || '').trim().toLowerCase()).filter(Boolean);
   if (tags.includes('sharp_backing')) score += 0.012;
   if (tags.includes('rlm_confirmed')) score += 0.006;
+  if (tags.includes('sharp_price_edge')) score += 0.008;
   if (tags.includes('contra_sharp_money')) score -= 0.03;
+  if (tags.includes('contra_sharp_line')) score -= 0.018;
   if (tags.some((t) => t.startsWith('reverse_steam='))) score -= 0.02;
 
   return score;
@@ -1664,6 +1671,25 @@ export const getModelSignalData = (rec, context, debugInfo, game) => {
       id: 'spread-move',
       tone: 'blue',
       label: `Line Moved: ${spreadMove.text}`,
+    });
+  }
+
+  const sharpEdge = toNum(rec?.sharp_edge_pts);
+  const recTags = Array.isArray(rec?.movement_tags) ? rec.movement_tags : [];
+  if (sharpEdge != null && sharpEdge >= 0.5) {
+    pills.push({
+      id: 'sharp-line-edge',
+      tone: 'emerald',
+      label: `Beats Sharp Line (+${sharpEdge.toFixed(1)})`,
+    });
+  } else if (
+    (sharpEdge != null && sharpEdge <= -1.0) ||
+    recTags.some((t) => String(t || '').trim().toLowerCase() === 'contra_sharp_line')
+  ) {
+    pills.push({
+      id: 'contra-sharp-line',
+      tone: 'amber',
+      label: sharpEdge != null ? `Sharp Line Against (${sharpEdge.toFixed(1)})` : 'Sharp Line Against',
     });
   }
 
