@@ -1642,6 +1642,20 @@ class NCAAMMarketFirstModelV2(BaseModel):
             and 6.0 <= abs(float(mu_market_spread)) < 14.0
         ):
             mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.80)
+        # Road favorite asymmetry: market/public favorites on the road face foul trouble & late-clock risk
+        if (
+            os.getenv('NCAAM_DISABLE_AWAY_FAV_GATE') is None
+            and not is_neutral
+            and mu_market_spread is not None
+            and float(mu_market_spread) > 0.0
+            and float(mu_spread_final) > float(mu_market_spread)
+        ):
+            mkt_sp_pos = float(mu_market_spread)
+            if mkt_sp_pos >= 5.5 or is_early_season:
+                mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.65)
+                sigma_spread *= 1.035
+            else:
+                mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.85)
 
         # --- Feature: Live Injury Impact Toggle (applied after automated clamp) ---
         if self.manual_adjustments:
@@ -1659,6 +1673,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     effective_cap_total,
                     2.2 if game_month == 11 else (2.4 if game_tempo >= 72.0 else 3.2),
                 )
+                if float(mu_market_total) >= 152.0:
+                    base_tot_cap = min(base_tot_cap, 1.95)
+                    mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * 0.82)
             max_auto_total_dev = base_tot_cap + (0.4 if is_early_season else 1.0)
             if mu_market_total is not None and abs(mu_total_final - mu_market_total) > max_auto_total_dev:
                 mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
@@ -1985,6 +2002,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             quality_input = {
                 "market_type": r['market'],
                 "side": r.get('side'),
+                "home_team": event.get('home_team'),
+                "away_team": event.get('away_team'),
                 "selection": sel,
                 "bet_line": r.get('line'),
                 "market_line": market_line_side,
@@ -2014,6 +2033,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             ui_rec = {
                 "bet_type": r['market'],
+                "side": r.get('side'),
                 "selection": sel,
                 # Numeric EV (decimal & %) + legacy 'edge' string for backward compatibility
                 "ev": round(float(r['ev']), 4),
@@ -2880,6 +2900,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     except Exception:
                         pass
                     min_ev += max(0.0, mid_bump)
+                # Road favorite gate: laying points away demands stronger EV unless backed by sharp money
+                if side_lower == "away" and float(market_line_home) > 0.0 and os.getenv("NCAAM_DISABLE_AWAY_FAV_GATE") is None:
+                    tags = [str(t or "").strip().lower() for t in (rec.get("movement_tags") or [])]
+                    has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags)
+                    if has_sharp:
+                        min_ev += 0.008
+                    elif float(market_line_home) >= 5.5:
+                        min_ev += 0.022
+                    else:
+                        min_ev += 0.014
+            except Exception:
+                pass
+        elif market == "TOTAL" and side_lower == "over" and os.getenv("NCAAM_DISABLE_OVER_DAMP") is None:
+            try:
+                line_val = abs(float(rec.get("line") or rec.get("market_line") or 0.0))
+                if line_val >= 152.0:
+                    min_ev += 0.010
             except Exception:
                 pass
         try:

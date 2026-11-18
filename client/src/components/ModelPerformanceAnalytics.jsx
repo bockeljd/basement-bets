@@ -336,6 +336,115 @@ const ModelPerformanceAnalytics = ({
       .map(finalizeBucket)
       .sort((a, b) => (b.settled + b.pending) - (a.settled + a.pending));
 
+    // 7. NCAAM Edge Insights & Sweet Spots (simple breakdown + walk-forward benchmark)
+    const ncaamGraded = graded.filter((h) => normalizeSport(h) === 'NCAAM');
+    const roleAcc = {
+      away_dog: createBucketAccumulator('Away Underdog (+)'),
+      home_dog: createBucketAccumulator('Home Underdog (+)'),
+      home_fav: createBucketAccumulator('Home Favorite (-)'),
+      away_fav: createBucketAccumulator('Away Favorite (-)'),
+    };
+    const zoneAcc = {
+      tight_sp: createBucketAccumulator('Tight Spread (<6 pts)'),
+      mid_tot: createBucketAccumulator('Mid Total (140–151.5)'),
+      high_under: createBucketAccumulator('High Total Under (152+)'),
+      mid_sp: createBucketAccumulator('Mid Spread (6–13.5 pts)'),
+      high_over: createBucketAccumulator('High Total Over (152+)'),
+    };
+    const convAcc = {
+      sharp: createBucketAccumulator('Sharp / RLM Backed'),
+      high_conf: createBucketAccumulator('High Confidence (80+)'),
+      med_conf: createBucketAccumulator('Medium (50–79)'),
+    };
+
+    for (const h of ncaamGraded) {
+      const mkt = normalizeMarketType(h);
+      const rawLine = h?.bet_line ?? h?.market_line ?? h?.line;
+      const numLine = rawLine !== null && rawLine !== undefined && rawLine !== '' ? Number(rawLine) : NaN;
+      if (mkt === 'SPREAD' && Number.isFinite(numLine)) {
+        const absSp = Math.abs(numLine);
+        if (absSp < 6) accumulateRowInto(zoneAcc.tight_sp, h);
+        else if (absSp < 14) accumulateRowInto(zoneAcc.mid_sp, h);
+
+        const sideHint = String(h?.side || '').trim().toLowerCase();
+        let isAway = null;
+        if (sideHint === 'away' || sideHint === 'home') {
+          isAway = sideHint === 'away';
+        } else {
+          const selLow = String(h?.selection || h?.pick || '').trim().toLowerCase();
+          let awayTeam = String(h?.away_team || '').trim().toLowerCase();
+          let homeTeam = String(h?.home_team || '').trim().toLowerCase();
+          if (!awayTeam && !homeTeam) {
+            const mTxt = String(h?.matchup || '').trim().toLowerCase();
+            if (mTxt.includes(' @ ')) [awayTeam, homeTeam] = mTxt.split(' @ ').map((s) => s.trim());
+            else if (mTxt.includes(' vs ')) [awayTeam, homeTeam] = mTxt.split(' vs ').map((s) => s.trim());
+          }
+          if (awayTeam && selLow.startsWith(awayTeam)) isAway = true;
+          else if (homeTeam && selLow.startsWith(homeTeam)) isAway = false;
+        }
+        if (numLine > 0 && isAway === true) accumulateRowInto(roleAcc.away_dog, h);
+        else if (numLine > 0 && isAway === false) accumulateRowInto(roleAcc.home_dog, h);
+        else if (numLine < 0 && isAway === false) accumulateRowInto(roleAcc.home_fav, h);
+        else if (numLine < 0 && isAway === true) accumulateRowInto(roleAcc.away_fav, h);
+      } else if (mkt === 'TOTAL' && Number.isFinite(numLine)) {
+        const totLine = Math.abs(numLine);
+        const sideTxt = `${h?.side || ''} ${h?.selection || ''} ${h?.pick || ''}`.toUpperCase();
+        const isOver = sideTxt.includes('OVER');
+        const isUnder = sideTxt.includes('UNDER');
+        if (totLine >= 140 && totLine < 152) {
+          accumulateRowInto(zoneAcc.mid_tot, h);
+        } else if (totLine >= 152) {
+          if (isUnder) accumulateRowInto(zoneAcc.high_under, h);
+          else if (isOver) accumulateRowInto(zoneAcc.high_over, h);
+        }
+      }
+
+      const rawTags = h?.movement_tags || h?.sanity_reasons;
+      const tags = (
+        Array.isArray(rawTags)
+          ? rawTags
+          : typeof rawTags === 'string'
+            ? rawTags.split(',')
+            : []
+      ).map((t) => String(t || '').trim().toLowerCase());
+      if (tags.includes('sharp_backing') || tags.includes('rlm_confirmed')) {
+        accumulateRowInto(convAcc.sharp, h);
+      }
+
+      const cTier = getConfidenceBucket(h);
+      if (cTier === 'High') accumulateRowInto(convAcc.high_conf, h);
+      else if (cTier === 'Medium') accumulateRowInto(convAcc.med_conf, h);
+    }
+
+    const withMeta = (acc, badge, tone, benchmark) => ({
+      ...finalizeBucket(acc),
+      badge,
+      tone,
+      benchmark,
+    });
+
+    const ncaamEdgeInsights = {
+      sampleCount: ncaamGraded.length,
+      spreadRoles: [
+        withMeta(roleAcc.away_dog, 'Sweet Spot', 'emerald', 'Backtest: 63.5% WR · +20.9% ROI'),
+        withMeta(roleAcc.home_dog, 'Strong Edge', 'emerald', 'Backtest: 61.4% WR · +16.8% ROI'),
+        withMeta(roleAcc.home_fav, 'Solid', 'sky', 'Backtest: 56.7% WR · +8.2% ROI'),
+        withMeta(roleAcc.away_fav, 'Guarded', 'amber', 'Backtest: 39.5% WR · -24.6% ROI (Tight EV Gate)'),
+      ],
+      lineZones: [
+        withMeta(zoneAcc.tight_sp, 'Best Spread Zone', 'emerald', 'Backtest: 55.3% WR · +5.6% ROI'),
+        withMeta(zoneAcc.mid_tot, 'Best Total Zone', 'emerald', 'Backtest: 69.4% WR · +31.7% ROI'),
+        withMeta(zoneAcc.high_under, 'Pace Ceiling', 'sky', 'Backtest: 58.3% WR · +11.4% ROI'),
+        withMeta(zoneAcc.mid_sp, 'Damped / High-Bar', 'amber', 'Raised EV bar & shrink vs backdoor risk'),
+        withMeta(zoneAcc.high_over, 'Damped / High-Bar', 'amber', 'Backtest: 51.7% WR · -1.3% ROI (Capped Over)'),
+      ],
+      conviction: [
+        withMeta(convAcc.sharp, 'Top Multiplier', 'emerald', 'Backtest: 65.5% WR · +24.5% ROI'),
+        withMeta(convAcc.high_conf, 'Top Tier', 'sky', 'Filtered to highest lower-bound win chance'),
+        withMeta(convAcc.med_conf, 'Baseline', 'slate', 'Standard qualifying picks (50–79 score)'),
+      ],
+    };
+
     return {
       gradedCount: graded.length,
       settledDays,
@@ -346,6 +455,7 @@ const ModelPerformanceAnalytics = ({
       confidenceTiers,
       betTypes,
       sportBreakdown,
+      ncaamEdgeInsights,
       latestCumulativeUnits: settledDays.length > 0 ? settledDays[settledDays.length - 1].cumulativeUnits : 0,
     };
   }, [history, allHistory, preConfHistory, preMarketHistory]);
@@ -1037,6 +1147,91 @@ const ModelPerformanceAnalytics = ({
           )}
         </article>
       </div>
+
+      {/* Row 3.5: NCAAM Model Insights & Sweet Spots */}
+      {(selectedSport === 'NCAAM' || selectedSport === 'ALL') && (() => {
+        const insights = analytics.ncaamEdgeInsights;
+        const toneCls = {
+          emerald: 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300',
+          sky: 'bg-sky-500/15 border-sky-500/35 text-sky-300',
+          amber: 'bg-amber-500/15 border-amber-500/35 text-amber-300',
+          slate: 'bg-slate-800 border-slate-700 text-slate-300',
+        };
+        const renderInsightCol = (title, subtitle, items) => (
+          <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-4 space-y-2.5">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">{title}</h4>
+              <p className="text-[11px] text-slate-400">{subtitle}</p>
+            </div>
+            <div className="space-y-2">
+              {items.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-lg border border-slate-800/80 bg-slate-900/50 px-3 py-2 space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-100">{item.label}</span>
+                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold shrink-0 ${toneCls[item.tone] || toneCls.slate}`}>
+                      {item.badge}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    {item.settled > 0 ? (
+                      <>
+                        <span className="font-mono text-slate-300">
+                          {item.recordText} · {formatPct(item.winRate)}
+                        </span>
+                        <span className={`font-mono font-semibold ${item.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {formatUnits(item.profitUnits)} ({formatSignedPct(item.roiPct)})
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-slate-500">No settled picks in filter</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono">{item.benchmark}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+        return (
+          <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="ncaam-insights-heading">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 id="ncaam-insights-heading" className="text-base font-bold text-slate-100">
+                  NCAAM Model Insights &amp; Sweet Spots
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Compares your live graded NCAAM picks ({insights.sampleCount.toLocaleString()} settled in current filter) against 1,600-game walk-forward benchmarks so you know which spots deserve trust.
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded-full border border-indigo-500/35 bg-indigo-500/15 text-indigo-200 text-xs font-semibold">
+                NCAAM Strategy Intel
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {renderInsightCol(
+                'Spread Role Edge',
+                'Underdogs & home favorites outperform road favorites.',
+                insights.spreadRoles
+              )}
+              {renderInsightCol(
+                'Spread & Total Zones',
+                'Tight spreads (<6) and 140–151.5 totals lead ROI.',
+                insights.lineZones
+              )}
+              {renderInsightCol(
+                'Conviction Signals',
+                'Sharp/RLM confirmation is our highest-ROI multiplier.',
+                insights.conviction
+              )}
+            </div>
+          </article>
+        );
+      })()}
 
       {/* Row 4: Live In-Game Win-Chance Accuracy */}
       {(() => {

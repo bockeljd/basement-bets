@@ -937,6 +937,8 @@ def test_adaptive_archetype_learning_service_and_endpoint(monkeypatch):
     from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
     from src.services.archetype_learning_service import (
         classify_spread_bucket,
+        classify_spread_role,
+        classify_total_zone,
         fit_adaptive_learning_from_rows,
     )
 
@@ -944,6 +946,10 @@ def test_adaptive_archetype_learning_service_and_endpoint(monkeypatch):
     assert classify_spread_bucket(-7.0) == "mid_6_14"
     assert classify_spread_bucket(18.0) == "blowout_14_22"
     assert classify_spread_bucket(-24.0) == "blowout_22_plus"
+    assert classify_spread_role("SPREAD", "away", 4.5) == "away_dog"
+    assert classify_spread_role("SPREAD", "away", -4.5) == "away_fav"
+    assert classify_total_zone("TOTAL", "over", 145.5) == "over_mid_140_152"
+    assert classify_total_zone("TOTAL", "under", 154.0) == "under_high_152+"
 
     rows = []
     # 12 losing mid-spread ATS picks (-7.5) and 6 winning tight-spread picks (-3.5)
@@ -1000,6 +1006,9 @@ def test_adaptive_archetype_learning_service_and_endpoint(monkeypatch):
     learned = fit_adaptive_learning_from_rows(rows, baseline_bins={"SPREAD:home:2:big": {"n": 45, "mean": 0.02, "sd": 0.95}})
     assert learned["total_graded"] == 29
     assert learned["by_spread_bucket"]["mid_6_14"]["n"] == 12
+    assert learned["by_spread_role"]["home_fav"]["n"] == 12
+    assert learned["by_spread_role"]["away_dog"]["n"] == 6
+    assert learned["by_total_zone"]["over_mid_140_152"]["n"] == 10
     assert learned["learned_adjustments"]["spread_bucket_ev_bump"]["mid_6_14"] > 0.0
     assert learned["learned_adjustments"]["total_bias_pts"] > 0.5
     assert learned["by_home_fav_7pt_ml"]["wins"] == 1

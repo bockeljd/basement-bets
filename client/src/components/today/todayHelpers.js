@@ -215,16 +215,37 @@ export const getRecQualityScore = (rec) => {
 
   const mkt = String(rec.bet_type || rec.market_type || rec.market || '').toUpperCase();
   const sel = String(rec.selection || rec.side || '').toUpperCase();
+  const rawLine = rec.market_line ?? rec.bet_line ?? rec.line;
+  const parsedLine = rawLine !== null && rawLine !== undefined && rawLine !== '' ? Number(rawLine) : NaN;
   if (mkt.includes('TOTAL')) {
     if (sel.includes('OVER')) score -= 0.015;
     else if (sel.includes('UNDER')) score += 0.008;
+    if (Number.isFinite(parsedLine)) {
+      const totLine = Math.abs(parsedLine);
+      if (totLine >= 140 && totLine < 152) score += 0.005;
+      else if (totLine >= 152 && sel.includes('OVER')) score -= 0.012;
+    }
   } else if (mkt.includes('SPREAD')) {
-    const lineVal = Number(rec.market_line ?? rec.bet_line ?? rec.line);
-    if (Number.isFinite(lineVal)) {
-      const absLine = Math.abs(lineVal);
+    if (Number.isFinite(parsedLine)) {
+      const absLine = Math.abs(parsedLine);
       if (absLine < 6) score += 0.005;
       else if (absLine >= 14 && absLine < 22) score -= 0.012;
       else if (absLine >= 6 && absLine < 14) score -= 0.022;
+
+      const sideHint = String(rec.side || '').trim().toLowerCase();
+      let isAway = null;
+      if (sideHint === 'away' || sideHint === 'home') {
+        isAway = sideHint === 'away';
+      } else {
+        const selLow = String(rec.selection || rec.pick || '').trim().toLowerCase();
+        const awayTeam = String(rec.away_team || '').trim().toLowerCase();
+        const homeTeam = String(rec.home_team || '').trim().toLowerCase();
+        if (awayTeam && selLow.startsWith(awayTeam)) isAway = true;
+        else if (homeTeam && selLow.startsWith(homeTeam)) isAway = false;
+      }
+
+      if (parsedLine > 0) score += isAway ? 0.007 : 0.005;
+      else if (parsedLine < 0 && isAway) score -= 0.016;
     }
   }
 
@@ -1604,6 +1625,46 @@ export const getModelSignalData = (rec, context, debugInfo, game) => {
       tone: 'blue',
       label: `Line Moved: ${spreadMove.text}`,
     });
+  }
+
+  // NCAAM research-backed spot context pills
+  const spotSport = String(game?.sport || rec?.sport || 'NCAAM').toUpperCase();
+  if (spotSport === 'NCAAM' || spotSport === 'NCAAB') {
+    const rawSpotLine = rec?.market_line ?? rec?.bet_line ?? rec?.line;
+    const spotLine =
+      rawSpotLine !== null && rawSpotLine !== undefined && rawSpotLine !== ''
+        ? Number(rawSpotLine)
+        : NaN;
+    if (Number.isFinite(spotLine)) {
+      if (isTotalBet) {
+        const totLine = Math.abs(spotLine);
+        const isUnder = /\bUNDER\b/i.test(String(rec?.side || rec?.selection || rec?.pick || ''));
+        if (totLine >= 140 && totLine < 152) {
+          pills.push({ id: 'spot-zone', tone: 'emerald', label: 'Mid-Total Sweet Spot' });
+        } else if (totLine >= 152 && isUnder) {
+          pills.push({ id: 'spot-zone', tone: 'emerald', label: '152+ Under Value' });
+        }
+      } else if (betType === 'SPREAD') {
+        const sideHint = String(rec?.side || '').trim().toLowerCase();
+        let isAway = null;
+        if (sideHint === 'away' || sideHint === 'home') {
+          isAway = sideHint === 'away';
+        } else {
+          const selLow = String(rec?.selection || rec?.pick || '').trim().toLowerCase();
+          const aLow = String(game?.away_team || '').trim().toLowerCase();
+          const hLow = String(game?.home_team || '').trim().toLowerCase();
+          if (aLow && selLow.startsWith(aLow)) isAway = true;
+          else if (hLow && selLow.startsWith(hLow)) isAway = false;
+        }
+        if (spotLine > 0 && isAway === true) {
+          pills.push({ id: 'spot-role', tone: 'emerald', label: 'Road Dog Sweet Spot' });
+        } else if (spotLine > 0 && isAway === false) {
+          pills.push({ id: 'spot-role', tone: 'emerald', label: 'Home Dog Value' });
+        } else if (spotLine < 0 && isAway === true) {
+          pills.push({ id: 'spot-role', tone: 'amber', label: 'Road Fav (High Bar)' });
+        }
+      }
+    }
   }
 
   return {

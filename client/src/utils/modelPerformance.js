@@ -420,16 +420,42 @@ export const getQualityRankScore = (row) => {
 
   const mkt = normalizeMarketType(row);
   const sideText = `${row.side || ''} ${row.selection || ''} ${row.pick || ''}`.toUpperCase();
+  const rawLine = row.market_line ?? row.bet_line ?? row.line;
+  const parsedLine = rawLine !== null && rawLine !== undefined && rawLine !== '' ? Number(rawLine) : NaN;
   if (mkt === 'TOTAL') {
     if (sideText.includes('OVER')) score -= 0.015;
     else if (sideText.includes('UNDER')) score += 0.008;
+    if (Number.isFinite(parsedLine)) {
+      const totLine = Math.abs(parsedLine);
+      if (totLine >= 140 && totLine < 152) score += 0.005;
+      else if (totLine >= 152 && sideText.includes('OVER')) score -= 0.012;
+    }
   } else if (mkt === 'SPREAD') {
-    const lineVal = Number(row.market_line ?? row.bet_line ?? row.line);
-    if (Number.isFinite(lineVal)) {
-      const absLine = Math.abs(lineVal);
+    if (Number.isFinite(parsedLine)) {
+      const absLine = Math.abs(parsedLine);
       if (absLine < 6) score += 0.005;
       else if (absLine >= 14 && absLine < 22) score -= 0.012;
       else if (absLine >= 6 && absLine < 14) score -= 0.022;
+
+      const sideHint = String(row.side || '').trim().toLowerCase();
+      let isAway = null;
+      if (sideHint === 'away' || sideHint === 'home') {
+        isAway = sideHint === 'away';
+      } else {
+        const selLow = String(row.selection || row.pick || '').trim().toLowerCase();
+        let awayTeam = String(row.away_team || '').trim().toLowerCase();
+        let homeTeam = String(row.home_team || '').trim().toLowerCase();
+        if (!awayTeam && !homeTeam) {
+          const mTxt = String(row.matchup || '').trim().toLowerCase();
+          if (mTxt.includes(' @ ')) [awayTeam, homeTeam] = mTxt.split(' @ ').map((s) => s.trim());
+          else if (mTxt.includes(' vs ')) [awayTeam, homeTeam] = mTxt.split(' vs ').map((s) => s.trim());
+        }
+        if (awayTeam && selLow.startsWith(awayTeam)) isAway = true;
+        else if (homeTeam && selLow.startsWith(homeTeam)) isAway = false;
+      }
+
+      if (parsedLine > 0) score += isAway ? 0.007 : 0.005;
+      else if (parsedLine < 0 && isAway) score -= 0.016;
     }
   }
 

@@ -350,6 +350,7 @@ def run_model_on_games(
                     else:
                         outcome, pl = "LOST", -1.0
                     side_tag = "SPREAD"
+                    role_tag = f"{'home' if is_home_pick else 'away'}_{'dog' if line_f > 0 else ('fav' if line_f < 0 else 'pk')}"
                 elif mt == "TOTAL":
                     is_over = sel.upper().startswith("OVER")
                     diff = (tot_score - line_f) if is_over else (line_f - tot_score)
@@ -360,6 +361,7 @@ def run_model_on_games(
                     else:
                         outcome, pl = "LOST", -1.0
                     side_tag = "TOTAL_OVER" if is_over else "TOTAL_UNDER"
+                    role_tag = None
                 else:
                     continue
 
@@ -369,7 +371,9 @@ def run_model_on_games(
                         "day": g["day"],
                         "month": g["month"],
                         "market": mt,
+                        "side": str(rec.get("side") or "").lower(),
                         "side_tag": side_tag,
+                        "spread_role": role_tag,
                         "abs_spread": abs(float(sp)),
                         "line": line_f,
                         "ev": float(rec.get("ev") or 0.0),
@@ -523,6 +527,16 @@ def main() -> None:
         print_row(f"Market: {side}", summarize([r for r in all_recs if r["side_tag"] == side]))
     for lbl, lo, hi in (("Spread <6", 0, 6), ("Spread 6-14", 6, 14), ("Spread 14-22", 14, 22), ("Spread 22+", 22, 99)):
         print_row(lbl, summarize([r for r in all_recs if r["market"] == "SPREAD" and lo <= r["abs_spread"] < hi]))
+
+    print("\n--- By Spread Role & Total Zone (All Picks / Top 6) ---")
+    for lbl, role_k in (("Role: Away Dog (+)", "away_dog"), ("Role: Home Dog (+)", "home_dog"), ("Role: Home Fav (-)", "home_fav"), ("Role: Away Fav (-)", "away_fav")):
+        print_row(f"All {lbl}", summarize([r for r in all_recs if r.get("spread_role") == role_k]))
+    for lbl, role_k in (("Top6 Away Dog (+)", "away_dog"), ("Top6 Home Dog (+)", "home_dog"), ("Top6 Home Fav (-)", "home_fav"), ("Top6 Away Fav (-)", "away_fav")):
+        print_row(lbl, summarize([r for r in top6_new_recs if r.get("spread_role") == role_k]))
+    print_row("All Total Low (<140)", summarize([r for r in all_recs if r["market"] == "TOTAL" and abs(r["line"]) < 140]))
+    print_row("All Total Mid (140-152)", summarize([r for r in all_recs if r["market"] == "TOTAL" and 140 <= abs(r["line"]) < 152]))
+    print_row("All Total Under 152+", summarize([r for r in all_recs if r["side_tag"] == "TOTAL_UNDER" and abs(r["line"]) >= 152]))
+    print_row("All Total Over 152+", summarize([r for r in all_recs if r["side_tag"] == "TOTAL_OVER" and abs(r["line"]) >= 152]))
 
     print("\n--- By Confidence Tier & Edge Bucket (All Picks) ---")
     for tier in ("High", "Medium", "Low"):

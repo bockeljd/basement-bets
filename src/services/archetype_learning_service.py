@@ -52,6 +52,46 @@ def classify_edge_bucket(ev_per_unit: Optional[float]) -> str:
     return "12_plus"
 
 
+def classify_spread_role(market: str, side: str, bet_line: Any) -> Optional[str]:
+    """Classify SPREAD pick into ('away_dog', 'home_dog', 'home_fav', 'away_fav')."""
+    if str(market or "").strip().upper() != "SPREAD" or bet_line is None:
+        return None
+    s = str(side or "").strip().lower()
+    if s not in ("home", "away"):
+        return None
+    try:
+        line_val = float(bet_line)
+    except Exception:
+        return None
+    if line_val > 0.0:
+        return "away_dog" if s == "away" else "home_dog"
+    if line_val < 0.0:
+        return "away_fav" if s == "away" else "home_fav"
+    return None
+
+
+def classify_total_zone(market: str, side: str, bet_line: Any) -> Optional[str]:
+    """Classify TOTAL pick by direction & scoring environment."""
+    if str(market or "").strip().upper() != "TOTAL" or bet_line is None:
+        return None
+    s = str(side or "").strip().lower()
+    if s not in ("over", "under"):
+        return None
+    try:
+        tot_val = abs(float(bet_line))
+    except Exception:
+        return None
+    if tot_val < 40.0:
+        return None
+    if tot_val < 140.0:
+        zone = "low_<140"
+    elif tot_val < 152.0:
+        zone = "mid_140_152"
+    else:
+        zone = "high_152+"
+    return f"{s}_{zone}"
+
+
 def _archetype_spread_band(line: Optional[float]) -> str:
     """Match NCAAMMarketFirstModelV2._spread_bucket ('close'|'mid'|'big')."""
     try:
@@ -144,6 +184,8 @@ def fit_adaptive_learning_from_rows(
     by_market_side: Dict[str, Dict[str, Any]] = {}
     by_spread_bucket: Dict[str, Dict[str, Any]] = {}
     by_edge_bucket: Dict[str, Dict[str, Any]] = {}
+    by_spread_role: Dict[str, Dict[str, Any]] = {}
+    by_total_zone: Dict[str, Dict[str, Any]] = {}
     home_fav_7pt_acc = _init_acc()
     archetype_accs: Dict[str, Dict[str, Any]] = {}
     total_errors: List[float] = []
@@ -177,6 +219,13 @@ def fit_adaptive_learning_from_rows(
             sb_roi = classify_spread_bucket(bet_line)
             if sb_roi != "unknown":
                 _add_acc(by_spread_bucket.setdefault(sb_roi, _init_acc()), outcome, roi)
+            sr_key = classify_spread_role(market, side, bet_line)
+            if sr_key:
+                _add_acc(by_spread_role.setdefault(sr_key, _init_acc()), outcome, roi)
+        elif market == "TOTAL":
+            tz_key = classify_total_zone(market, side, bet_line)
+            if tz_key:
+                _add_acc(by_total_zone.setdefault(tz_key, _init_acc()), outcome, roi)
 
         if market == "MONEYLINE" and side == "home":
             try:
@@ -213,6 +262,8 @@ def fit_adaptive_learning_from_rows(
     ms_summary = {k: _finalize_acc(v) for k, v in sorted(by_market_side.items())}
     sb_summary = {k: _finalize_acc(v) for k, v in sorted(by_spread_bucket.items())}
     eb_summary = {k: _finalize_acc(v) for k, v in sorted(by_edge_bucket.items())}
+    sr_summary = {k: _finalize_acc(v) for k, v in sorted(by_spread_role.items())}
+    tz_summary = {k: _finalize_acc(v) for k, v in sorted(by_total_zone.items())}
 
     # Shrink empirical archetype bins toward Action Network baseline priors (w = n / (n + 35))
     merged_bins: Dict[str, Dict[str, Any]] = {}
@@ -281,6 +332,8 @@ def fit_adaptive_learning_from_rows(
         "by_market_side": ms_summary,
         "by_spread_bucket": sb_summary,
         "by_edge_bucket": eb_summary,
+        "by_spread_role": sr_summary,
+        "by_total_zone": tz_summary,
         "by_home_fav_7pt_ml": _finalize_acc(home_fav_7pt_acc),
         "learned_adjustments": {
             "total_bias_pts": total_bias_pts,

@@ -298,22 +298,56 @@ def compute_top6_quality_score(row: dict) -> float:
         _first_present(row.get("market_type"), row.get("market"), row.get("bet_type"))
     )
     side_text = str(_first_present(row.get("side"), row.get("selection"), row.get("pick")) or "").upper()
+    raw_line = _first_present(row.get("market_line"), row.get("bet_line"), row.get("line"))
     if mkt == "TOTAL":
         if "OVER" in side_text:
             score -= 0.015
         elif "UNDER" in side_text:
             score += 0.008
+        try:
+            if raw_line is not None:
+                tot_line = abs(float(raw_line))
+                if 140.0 <= tot_line < 152.0:
+                    score += 0.005
+                elif tot_line >= 152.0 and "OVER" in side_text:
+                    score -= 0.012
+        except Exception:
+            pass
     elif mkt == "SPREAD":
         try:
-            line_val = _first_present(row.get("market_line"), row.get("bet_line"), row.get("line"))
-            if line_val is not None:
-                abs_line = abs(float(line_val))
+            if raw_line is not None:
+                signed_line = float(raw_line)
+                abs_line = abs(signed_line)
                 if abs_line < 6.0:
                     score += 0.005
                 elif 14.0 <= abs_line < 22.0:
                     score -= 0.012
                 elif 6.0 <= abs_line < 14.0:
                     score -= 0.022
+
+                side_hint = str(row.get("side") or "").strip().lower()
+                is_away = None
+                if side_hint in ("away", "home"):
+                    is_away = side_hint == "away"
+                else:
+                    sel_low = str(_first_present(row.get("selection"), row.get("pick")) or "").strip().lower()
+                    away_team = str(row.get("away_team") or "").strip().lower()
+                    home_team = str(row.get("home_team") or "").strip().lower()
+                    if not away_team and not home_team:
+                        matchup_txt = str(row.get("matchup") or "").strip().lower()
+                        if " @ " in matchup_txt:
+                            away_team, home_team = [p.strip() for p in matchup_txt.split(" @ ", 1)]
+                        elif " vs " in matchup_txt:
+                            away_team, home_team = [p.strip() for p in matchup_txt.split(" vs ", 1)]
+                    if away_team and sel_low.startswith(away_team):
+                        is_away = True
+                    elif home_team and sel_low.startswith(home_team):
+                        is_away = False
+
+                if signed_line > 0:
+                    score += 0.007 if is_away else 0.005
+                elif signed_line < 0 and is_away:
+                    score -= 0.016
         except Exception:
             pass
 

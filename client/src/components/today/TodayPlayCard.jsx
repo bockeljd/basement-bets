@@ -72,7 +72,7 @@ const TodayPlayCard = ({
   const visualData = buildVisualModelData(rec, game, analysisLike);
   const liveInfo = getLiveGameStatus(game, rec, context);
   const modelSignals = getModelSignalData(rec, context, null, game);
-  const cardSignals = modelSignals.pills.slice(0, 2);
+  const cardSignals = modelSignals.pills.slice(0, 3);
   const liveBadgeText = liveInfo.isLive && liveInfo.trendLabel
     ? `${liveInfo.trendLabel}${liveInfo.liveWinProb != null ? ` (${Math.round(liveInfo.liveWinProb * 100)}%)` : ''}`
     : liveInfo.coverText;
