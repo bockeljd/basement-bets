@@ -1330,25 +1330,26 @@ class AnalyticsEngine:
 
         computed_total_in_play = 0.0
         ledger_total_in_play = 0.0
+        provider_totals_only = [x for x in provider_breakdown if x.get('account_id') is None]
         try:
-            computed_total_in_play = sum(float(x.get('computed_in_play') or 0) for x in provider_breakdown)
+            computed_total_in_play = round(sum(float(x.get('computed_in_play') or 0) for x in provider_totals_only), 2)
         except Exception:
             computed_total_in_play = 0.0
         try:
-            ledger_total_in_play = sum(float(x.get('ledger_in_play') or 0) for x in provider_breakdown)
+            ledger_total_in_play = round(sum(float(x.get('ledger_in_play') or 0) for x in provider_totals_only), 2)
         except Exception:
             ledger_total_in_play = 0.0
 
         return {
-            "total_deposited": total_deposits,
-            "total_withdrawn": total_withdrawals,
-            "total_in_play": total_equity,
-            "realized_profit": realized_profit,
-            "net_bet_profit": net_bet_profit,
+            "total_deposited": round(total_deposits, 2),
+            "total_withdrawn": round(total_withdrawals, 2),
+            "total_in_play": round(total_equity, 2),
+            "realized_profit": round(realized_profit, 2),
+            "net_bet_profit": round(net_bet_profit, 2),
             "ledger_total_in_play": float(ledger_total_in_play),
-            "ledger_total_delta": float(ledger_total_in_play) - float(total_equity),
+            "ledger_total_delta": round(float(ledger_total_in_play) - float(total_equity), 2),
             "computed_total_in_play": computed_total_in_play,
-            "computed_total_delta": float(computed_total_in_play) - float(total_equity),
+            "computed_total_delta": round(float(ledger_total_in_play) - float(computed_total_in_play), 2),
             "breakdown": provider_breakdown
         }
 

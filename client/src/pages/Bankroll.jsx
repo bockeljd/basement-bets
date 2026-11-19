@@ -341,12 +341,19 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
                 <th scope="col" className="py-3 px-4 text-right">Current</th>
                 <th scope="col" className="py-3 px-4 text-right">Deposits</th>
                 <th scope="col" className="py-3 px-4 text-right">Withdrawals</th>
-                <th scope="col" className="py-3 px-4 text-right">Realized P/L</th>
+                <th
+                  scope="col"
+                  title="Total Account P/L = Current Cash + Withdrawals − Deposits"
+                  className="py-3 px-4 text-right cursor-help"
+                >
+                  Total P/L
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {topRows.map(({ p, top, primary, secondary }) => {
                 const cur = Number((top.ledger_in_play ?? top.in_play) || 0);
+                const totalPl = cur + Number(top.withdrawn || 0) - Number(top.deposited || 0);
                 const isOpen = expandedBook === p;
 
                 return (
@@ -366,7 +373,9 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
                       <td className={`py-3 px-4 text-right font-black ${cur >= 0 ? 'text-green-300' : 'text-red-300'}`}>{fmt(cur)}</td>
                       <td className="py-3 px-4 text-right text-slate-300 font-mono">{fmt(top.deposited)}</td>
                       <td className="py-3 px-4 text-right text-slate-300 font-mono">{fmt(top.withdrawn)}</td>
-                      <td className={`py-3 px-4 text-right font-mono font-bold ${Number(top.net_profit || 0) >= 0 ? 'text-green-300' : 'text-red-300'}`}>{fmt(top.net_profit)}</td>
+                      <td className={`py-3 px-4 text-right font-mono font-bold ${totalPl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                        {totalPl >= 0 ? '+' : ''}{fmt(totalPl)}
+                      </td>
                     </tr>
 
                     {isOpen ? (

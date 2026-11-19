@@ -620,35 +620,58 @@ function App() {
 
                     {page === 'actuals' && (() => {
                         const allRows = Array.isArray(bets) ? bets : [];
+                        const normSt = (raw) => {
+                            const st = String(raw || '').trim().toUpperCase();
+                            if (st === 'WIN' || st === 'WON') return 'WON';
+                            if (st === 'LOSS' || st === 'LOST') return 'LOST';
+                            if (st === 'PUSH' || st === 'TIED' || st === 'TIE') return 'PUSH';
+                            if (st === 'CASHED_OUT' || st === 'CASHOUT') return 'CASHED_OUT';
+                            if (st === 'OPEN' || st === 'PENDING') return 'OPEN';
+                            return st;
+                        };
                         const actualBets = allRows.filter((b) => !['Deposit', 'Withdrawal', 'Other'].includes(b.bet_type) && String(b.category || '').toLowerCase() !== 'transaction');
-                        const wonCnt = actualBets.filter((b) => ['WON', 'WIN'].includes(String(b.status || '').toUpperCase())).length;
-                        const lostCnt = actualBets.filter((b) => ['LOST', 'LOSS'].includes(String(b.status || '').toUpperCase())).length;
-                        const settledBetsAll = actualBets.filter((b) => ['WON', 'WIN', 'LOST', 'LOSS', 'PUSH', 'CASHED_OUT'].includes(String(b.status || '').toUpperCase()));
-                        const settledWager = settledBetsAll.reduce((acc, b) => acc + (Number(b.wager ?? b.stake ?? 0) || 0), 0);
-                        const settledProfit = settledBetsAll.reduce((acc, b) => acc + (Number(b.profit || 0) || 0), 0);
-                        const openBets = actualBets.filter((b) => ['OPEN', 'PENDING'].includes(String(b.status || '').toUpperCase()));
+                        const settledBetsAll = actualBets.filter((b) => ['WON', 'LOST', 'PUSH', 'CASHED_OUT'].includes(normSt(b.status)));
+                        let wonCnt = 0, lostCnt = 0, pushCnt = 0, settledWager = 0, settledProfit = 0;
+                        settledBetsAll.forEach((b) => {
+                            const st = normSt(b.status);
+                            const w = Number(b.wager ?? b.stake ?? 0) || 0;
+                            const p = Number(b.profit ?? 0) || 0;
+                            settledWager += w;
+                            settledProfit += p;
+                            if (st === 'WON' || (st === 'CASHED_OUT' && p > 0)) wonCnt += 1;
+                            else if (st === 'LOST' || (st === 'CASHED_OUT' && p < 0)) lostCnt += 1;
+                            else pushCnt += 1;
+                        });
+                        const openBets = actualBets.filter((b) => normSt(b.status) === 'OPEN');
                         const openStake = openBets.reduce((acc, b) => acc + (Number(b.wager ?? b.stake ?? 0) || 0), 0);
                         const unrealizedToWin = openBets.reduce((acc, b) => {
                             const w = Number(b.wager ?? b.stake ?? 0) || 0;
+                            const pay = Number(b.payout ?? b.potential_payout ?? 0) || 0;
+                            if (pay > w && w > 0) return acc + (pay - w);
                             const o = Number(b.odds);
                             if (!w || !Number.isFinite(o) || o === 0) return acc;
                             return acc + (o > 0 ? w * (o / 100) : w * (100 / Math.abs(o)));
                         }, 0);
                         const settledDecided = wonCnt + lostCnt;
                         const winPct = settledDecided > 0 ? ((wonCnt / settledDecided) * 100).toFixed(1) : null;
-                        const realizedProfit = Number(financials?.realized_profit ?? settledProfit ?? 0);
+                        const realizedProfit = settledProfit;
                         const roiPct = settledWager > 0 ? ((settledProfit / settledWager) * 100).toFixed(1) : null;
                         const totalDeposited = Number(financials?.total_deposited || 0);
                         const totalWithdrawn = Number(financials?.total_withdrawn || 0);
                         const netCashFlow = totalWithdrawn - totalDeposited;
-                        const totalBankroll = Number(financials?.total_in_play || 0);
+                        const totalBankroll = Number(financials?.ledger_total_in_play ?? financials?.total_in_play ?? 0);
 
                         return (
                             <div className="mb-6 space-y-4">
                                 {/* Always-Visible Core Actuals KPI Strip */}
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                                     <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Realized Gains</div>
+                                        <div
+                                            title="Settled betting P/L across all graded bets (matches Performance All-Time & ROI)."
+                                            className="text-[10px] font-bold uppercase tracking-wider text-slate-400 cursor-help"
+                                        >
+                                            Realized Gains
+                                        </div>
                                         <div className={`mt-0.5 text-lg font-mono font-bold ${realizedProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                                             {realizedProfit >= 0 ? '+' : ''}{formatCurrency(realizedProfit)}
                                         </div>
@@ -657,7 +680,12 @@ function App() {
                                         </div>
                                     </div>
                                     <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unrealized (Open)</div>
+                                        <div
+                                            title="Total cash currently staked on open/pending bets and potential profit if they win."
+                                            className="text-[10px] font-bold uppercase tracking-wider text-slate-400 cursor-help"
+                                        >
+                                            Unrealized (Open)
+                                        </div>
                                         <div className="mt-0.5 text-lg font-mono font-bold text-sky-300">
                                             {formatCurrency(openStake)}
                                         </div>
@@ -668,7 +696,7 @@ function App() {
                                     <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
                                         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Record (W–L)</div>
                                         <div className="mt-0.5 text-lg font-mono font-bold text-white">
-                                            {wonCnt}–{lostCnt}
+                                            {wonCnt}–{lostCnt}{pushCnt > 0 ? `–${pushCnt}` : ''}
                                         </div>
                                         <div className="text-[11px] font-mono text-slate-400">
                                             {winPct ? `${winPct}% win rate` : 'No settled bets'}
@@ -901,7 +929,11 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
     const parseBetDate = (b) => {
         const s = b?.settled_at || b?.placed_at || b?.sort_date || b?.date || b?.created_at;
         if (!s) return null;
-        const d = new Date(String(s));
+        let iso = String(s).trim().replace(' ', 'T');
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(iso)) {
+            iso = `${iso}Z`;
+        }
+        const d = new Date(iso);
         return isNaN(d.getTime()) ? null : d;
     };
 
@@ -1037,13 +1069,15 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
             const key = `${sport}|||${bt}`;
             if (!map[key]) map[key] = { sport, bet_type: bt, bets: 0, wins: 0, losses: 0, push: 0, wager: 0, profit: 0, odds_sum: 0, odds_n: 0 };
             const r = map[key];
-            const st = (b.status || '').toUpperCase();
+            const st = normalizeStatus(b.status);
+            const w = Number(b.wager ?? b.stake ?? 0) || 0;
+            const p = Number(b.profit ?? 0) || 0;
             r.bets += 1;
-            if (st === 'WON') r.wins += 1;
-            else if (st === 'LOST') r.losses += 1;
+            if (st === 'WON' || (st === 'CASHED_OUT' && p > 0)) r.wins += 1;
+            else if (st === 'LOST' || (st === 'CASHED_OUT' && p < 0)) r.losses += 1;
             else r.push += 1;
-            r.wager += Number(b.wager || 0);
-            r.profit += Number(b.profit || 0);
+            r.wager += w;
+            r.profit += p;
 
             const o = (b.odds === null || b.odds === undefined || b.odds === '') ? null : Number(b.odds);
             if (o !== null && Number.isFinite(o)) {
