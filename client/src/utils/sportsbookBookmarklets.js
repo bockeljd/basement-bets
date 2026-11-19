@@ -83,18 +83,15 @@ export const buildFanDuelBookmarklet = (appOrigin, accountId = 'Main') => {
     }
     function readBalance(){
       try{
-        var hdrs=document.querySelectorAll('header,nav,[role="banner"]');
-        var sels=['[data-testid*="balance" i]','[data-test-id*="balance" i]','[data-testid*="wallet" i]','[class*="cash-balance" i]','[class*="wallet-balance" i]','[aria-label*="balance" i]'];
-        var bad=/bonus|promo|reward|crown|dk\\s*dollar|free|boost|bet\\s*\\$|get\\s*\\$|deposit|withdraw/i;
-        for(var h=0;h<hdrs.length;h++){
-          for(var i=0;i<sels.length;i++){
-            var els=hdrs[h].querySelectorAll(sels[i]);
-            for(var j=0;j<els.length;j++){
-              var txt=(els[j].innerText||'').trim();
-              if(!txt||txt.length>60||bad.test(txt))continue;
-              var m=txt.match(/\\$([0-9,]+\\.\\d{2})/);
-              if(m){return parseFloat(m[1].replace(/,/g,''));}
-            }
+        var sels=['[data-testid*="cash-balance" i]','[data-test-id*="cash-balance" i]','[class*="cash-balance" i]','[aria-label*="cash balance" i]'];
+        var bad=/bonus|promo|reward|crown|dk\\s*dollar|free|boost|bet\\s*\\$|get\\s*\\$|deposit|withdraw|total|combined/i;
+        for(var i=0;i<sels.length;i++){
+          var els=document.querySelectorAll(sels[i]);
+          for(var j=0;j<els.length;j++){
+            var txt=(els[j].innerText||'').trim();
+            if(!txt||txt.length>60||bad.test(txt))continue;
+            var m=txt.match(/\\$([0-9,]+\\.\\d{2})/);
+            if(m){return parseFloat(m[1].replace(/,/g,''));}
           }
         }
       }catch(e){}
@@ -181,18 +178,15 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
     if(document.body){document.body.appendChild(pill);}
     function readBalance(){
       try{
-        var hdrs=document.querySelectorAll('header,nav,[role="banner"]');
-        var sels=['[data-testid*="balance" i]','[data-test-id*="balance" i]','[data-testid*="wallet" i]','[class*="cash-balance" i]','[class*="wallet-balance" i]','[aria-label*="balance" i]'];
-        var bad=/bonus|promo|reward|crown|dk\\s*dollar|free|boost|bet\\s*\\$|get\\s*\\$|deposit|withdraw/i;
-        for(var h=0;h<hdrs.length;h++){
-          for(var i=0;i<sels.length;i++){
-            var els=hdrs[h].querySelectorAll(sels[i]);
-            for(var j=0;j<els.length;j++){
-              var txt=(els[j].innerText||'').trim();
-              if(!txt||txt.length>60||bad.test(txt))continue;
-              var m=txt.match(/\\$([0-9,]+\\.\\d{2})/);
-              if(m){return parseFloat(m[1].replace(/,/g,''));}
-            }
+        var sels=['[data-testid*="cash-balance" i]','[data-test-id*="cash-balance" i]','[class*="cash-balance" i]','[aria-label*="cash balance" i]'];
+        var bad=/bonus|promo|reward|crown|dk\\s*dollar|free|boost|bet\\s*\\$|get\\s*\\$|deposit|withdraw|total|combined/i;
+        for(var i=0;i<sels.length;i++){
+          var els=document.querySelectorAll(sels[i]);
+          for(var j=0;j<els.length;j++){
+            var txt=(els[j].innerText||'').trim();
+            if(!txt||txt.length>60||bad.test(txt))continue;
+            var m=txt.match(/\\$([0-9,]+\\.\\d{2})/);
+            if(m){return parseFloat(m[1].replace(/,/g,''));}
           }
         }
       }catch(e){}
@@ -230,7 +224,7 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
       alert('No DraftKings bets or transactions detected yet. Open My Bets or Financial Center -> Transactions and click again.');
       return;
     }
-    var payload=JSON.stringify({_bb_sb_bundle:1,provider:'DraftKings',account_id:accId,page_kind:isTxnPage?'transactions':'bets',transactions:txns,raw_text:rawText.slice(0,180000),balance:bal,source:'draftkings_bookmarklet'});
+    var payload=JSON.stringify({_bb_sb_bundle:1,provider:'DraftKings',account_id:accId,page_kind:isTxnPage?'transactions':'bets',transactions:txns,raw_text:rawText.slice(0,180000),balance:bal,cash_only_balance:bal!==null,source:'draftkings_bookmarklet'});
     ${encodeUtf8PayloadJs}
   })();`;
   return `javascript:${body.replace(/\n\s*/g, '')}`;

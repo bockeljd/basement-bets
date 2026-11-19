@@ -767,7 +767,12 @@ def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, A
         )
 
     balance_recorded = False
-    if page_kind != "transactions" and payload.get("balance") is not None:
+    allow_balance_write = page_kind != "transactions"
+    if provider == "DraftKings" and "bookmarklet" in source and not payload.get("cash_only_balance"):
+        # DraftKings combined header wallet includes Crown Cash / DK Dollars / Rewards;
+        # never overwrite pure Cash balance unless explicitly flagged cash_only_balance.
+        allow_balance_write = False
+    if allow_balance_write and payload.get("balance") is not None:
         balance_recorded = record_balance_snapshot(
             provider=provider,
             account_id=account_id,
