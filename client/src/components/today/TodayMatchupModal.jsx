@@ -148,6 +148,32 @@ const TodayMatchupModal = ({
   const liveInfo = getLiveGameStatus(game, liveTargetPick, effectiveContext);
   const modelSignals = getModelSignalData(topRec, analysisResult?.context, dbg, game);
   const fmtStat = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : '—');
+  const bookSpreadHome =
+    effectiveContext?.current_spread_home ??
+    (game?.home_spread != null ? Number(game.home_spread) : null);
+  const bookTotal =
+    effectiveContext?.current_total ??
+    (game?.total_line != null ? Number(game.total_line) : null);
+  const modelSpreadHome =
+    dbg.mu_spread_final ??
+    dbg.mu_spread_power ??
+    analysisResult?.outputs?.mu_spread ??
+    effectiveContext?.fair_spread_home ??
+    null;
+  const modelTotal =
+    dbg.mu_total_final ??
+    dbg.mu_total_power ??
+    analysisResult?.outputs?.mu_total ??
+    effectiveContext?.fair_total ??
+    null;
+  const spreadDiffHome =
+    bookSpreadHome != null && modelSpreadHome != null
+      ? Number(bookSpreadHome) - Number(modelSpreadHome)
+      : null;
+  const totalDiff =
+    bookTotal != null && modelTotal != null
+      ? Number(modelTotal) - Number(bookTotal)
+      : null;
   const rotationHome = analysisResult?.rotation_players?.home || [];
   const rotationAway = analysisResult?.rotation_players?.away || [];
   const ffDetail = analysisResult?.kenpom_data?.four_factors_detail || null;
@@ -487,14 +513,106 @@ const TodayMatchupModal = ({
                   />
                 )}
 
-                {/* 2. Source Projections (Overview) & Team Efficiency (Stats) */}
+                {/* 2. Explicit Sportsbook Line vs. Model Line + Source Projections (Overview) */}
+                {modalTab === 'overview' && (bookSpreadHome != null || bookTotal != null || modelSpreadHome != null || modelTotal != null) && (
+                  <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                        Sportsbook Line vs. Our Model
+                      </h3>
+                      <span className="text-[11px] text-slate-400">
+                        Spreads shown for {game.home_team} (negative = favored)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/80 p-3 space-y-1.5">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Point Spread
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Sportsbook Line</span>
+                          <span className="font-mono font-bold text-amber-200">
+                            {bookSpreadHome != null ? `${game.home_team} ${fmtSigned(bookSpreadHome, 1)}` : '—'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Our Model Line</span>
+                          <span className="font-mono font-bold text-sky-200">
+                            {modelSpreadHome != null ? `${game.home_team} ${fmtSigned(modelSpreadHome, 1)}` : '—'}
+                          </span>
+                        </div>
+                        {spreadDiffHome != null && (
+                          <div className="pt-1 border-t border-slate-800/80 text-[11px] text-slate-300">
+                            {Math.abs(spreadDiffHome) < 0.25 ? (
+                              <span>In line with sportsbook ({Math.abs(spreadDiffHome).toFixed(1)} pt diff)</span>
+                            ) : (
+                              <span>
+                                Model leans{' '}
+                                <strong className="text-emerald-300">
+                                  {spreadDiffHome > 0 ? game.home_team : game.away_team}
+                                </strong>{' '}
+                                by <span className="font-mono font-semibold">{Math.abs(spreadDiffHome).toFixed(1)} pts</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/80 p-3 space-y-1.5">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Game Total (Over / Under)
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Sportsbook Line</span>
+                          <span className="font-mono font-bold text-amber-200">
+                            {bookTotal != null ? Number(bookTotal).toFixed(1) : '—'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Our Model Line</span>
+                          <span className="font-mono font-bold text-sky-200">
+                            {modelTotal != null ? Number(modelTotal).toFixed(1) : '—'}
+                          </span>
+                        </div>
+                        {totalDiff != null && (
+                          <div className="pt-1 border-t border-slate-800/80 text-[11px] text-slate-300">
+                            {Math.abs(totalDiff) < 0.25 ? (
+                              <span>In line with sportsbook ({Math.abs(totalDiff).toFixed(1)} pt diff)</span>
+                            ) : (
+                              <span>
+                                Model leans{' '}
+                                <strong className="text-emerald-300">
+                                  {totalDiff > 0 ? 'Over' : 'Under'}
+                                </strong>{' '}
+                                by <span className="font-mono font-semibold">{Math.abs(totalDiff).toFixed(1)} pts</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                )}
+
                 {modalTab === 'overview' && (
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-sky-400">
-                      Model Breakdown
-                    </h3>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-sky-400">
+                        Model Breakdown
+                      </h3>
+                      <span className="text-[11px] text-slate-400">
+                        Each source modeled against {game.home_team} spread &amp; game total
+                      </span>
+                    </div>
                     <div className="space-y-1.5 text-xs">
                       {[
+                        {
+                          label: 'Sportsbook Line (Market)',
+                          spread: bookSpreadHome,
+                          total: bookTotal,
+                          score: null,
+                          isMarket: true,
+                        },
                         {
                           label: 'BartTorvik',
                           spread: analysisResult.torvik_view?.fair_spread_home ?? sig.torvik?.fair_spread_home,
@@ -516,24 +634,28 @@ const TodayMatchupModal = ({
                         },
                         {
                           label: 'Basement Bets Final',
-                          spread: dbg.mu_spread_final ?? dbg.mu_spread_power ?? analysisResult.outputs?.mu_spread ?? topRec?.fair_line,
-                          total: dbg.mu_total_final ?? dbg.mu_total_power ?? analysisResult.outputs?.mu_total,
+                          spread: modelSpreadHome ?? topRec?.fair_line,
+                          total: modelTotal,
                           score: null,
                           highlight: true,
                         },
                       ].map((row) => (
                         <div
                           key={row.label}
-                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg ${
-                            row.highlight ? 'bg-indigo-500/15 border border-indigo-500/30 font-semibold' : 'bg-slate-900/80'
+                          className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg ${
+                            row.isMarket
+                              ? 'bg-amber-500/10 border border-amber-500/30 font-semibold'
+                              : row.highlight
+                                ? 'bg-indigo-500/15 border border-indigo-500/30 font-semibold'
+                                : 'bg-slate-900/80'
                           }`}
                         >
-                          <span className="text-slate-200">{row.label}</span>
+                          <span className={row.isMarket ? 'text-amber-200' : 'text-slate-200'}>{row.label}</span>
                           {row.spread == null && row.total == null && row.emptyNote ? (
                             <span className="text-[11px] text-amber-300/90">{row.emptyNote}</span>
                           ) : (
-                            <span className="font-mono text-slate-300">
-                              Home {row.spread != null ? fmtSigned(row.spread, 1) : '—'} · Total{' '}
+                            <span className="font-mono text-slate-300 text-right">
+                              {game.home_team} {row.spread != null ? fmtSigned(row.spread, 1) : '—'} · Total{' '}
                               {row.total != null ? Number(row.total).toFixed(1) : '—'}
                               {row.score ? ` (${row.score})` : ''}
                             </span>
@@ -546,9 +668,14 @@ const TodayMatchupModal = ({
 
                 {modalTab === 'stats' && (
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                      Team Efficiency
-                    </h3>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                        Team Efficiency
+                      </h3>
+                      <span className="text-[11px] text-slate-400">
+                        Hover any metric for definition
+                      </span>
+                    </div>
                     <table className="w-full text-xs border-collapse">
                       <thead>
                         <tr className="border-b border-slate-800 text-slate-400">
@@ -559,17 +686,38 @@ const TodayMatchupModal = ({
                       </thead>
                       <tbody className="divide-y divide-slate-800/70 font-mono">
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Adj. Offense</td>
+                          <td className="py-1.5 font-sans text-slate-300">
+                            <span
+                              title="Adjusted Offensive Efficiency — points scored per 100 possessions, adjusted for opponent defense (higher is better)."
+                              className="cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2"
+                            >
+                              Adj. Offense
+                            </span>
+                          </td>
                           <td className="py-1.5 text-right">{fmtStat(awayStats.adj_off)}</td>
                           <td className="py-1.5 text-right">{fmtStat(homeStats.adj_off)}</td>
                         </tr>
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Adj. Defense</td>
+                          <td className="py-1.5 font-sans text-slate-300">
+                            <span
+                              title="Adjusted Defensive Efficiency — points allowed per 100 possessions, adjusted for opponent offense (lower is better)."
+                              className="cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2"
+                            >
+                              Adj. Defense
+                            </span>
+                          </td>
                           <td className="py-1.5 text-right">{fmtStat(awayStats.adj_def)}</td>
                           <td className="py-1.5 text-right">{fmtStat(homeStats.adj_def)}</td>
                         </tr>
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Tempo</td>
+                          <td className="py-1.5 font-sans text-slate-300">
+                            <span
+                              title="Adjusted Tempo — estimated possessions per 40 minutes (higher = faster pace, more total points)."
+                              className="cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2"
+                            >
+                              Tempo
+                            </span>
+                          </td>
                           <td className="py-1.5 text-right">{fmtStat(awayStats.adj_tempo ?? torvikStats.game_tempo)}</td>
                           <td className="py-1.5 text-right">{fmtStat(homeStats.adj_tempo ?? torvikStats.game_tempo)}</td>
                         </tr>
@@ -677,13 +825,14 @@ const TodayMatchupModal = ({
                         Four-Factors Style Matchup
                       </h3>
                       <span className="text-[11px] text-slate-400">
-                        {game.away_team} (left) vs. {game.home_team} (right)
+                        {game.away_team} (left) vs. {game.home_team} (right) · Hover metric for definition
                       </span>
                     </div>
                     <div className="space-y-2.5 text-xs">
                       {[
                         {
                           label: 'Shooting (eFG%)',
+                          tip: 'Effective Field Goal % — shooting accuracy weighting 3-pointers 1.5× vs. 2-pointers (higher is better).',
                           awayVal: ffDetail.away.off_efg,
                           homeVal: ffDetail.home.off_efg,
                           higherBetter: true,
@@ -691,6 +840,7 @@ const TodayMatchupModal = ({
                         },
                         {
                           label: 'Ball Security (TO%)',
+                          tip: 'Turnover Rate — percentage of possessions ending in a turnover (lower is better).',
                           awayVal: ffDetail.away.off_to,
                           homeVal: ffDetail.home.off_to,
                           higherBetter: false,
@@ -698,6 +848,7 @@ const TodayMatchupModal = ({
                         },
                         {
                           label: 'Off. Rebounding (OR%)',
+                          tip: 'Offensive Rebound % — percentage of missed shots recovered for second-chance points (higher is better).',
                           awayVal: ffDetail.away.off_or,
                           homeVal: ffDetail.home.off_or,
                           higherBetter: true,
@@ -705,6 +856,7 @@ const TodayMatchupModal = ({
                         },
                         {
                           label: 'Free-Throw Rate (FTR)',
+                          tip: 'Free-Throw Rate (FTA / FGA × 100) — how often a team gets to the free-throw line relative to shot attempts (D1 avg ~33; higher is better).',
                           awayVal: ffDetail.away.off_ftr,
                           homeVal: ffDetail.home.off_ftr,
                           higherBetter: true,
@@ -725,7 +877,12 @@ const TodayMatchupModal = ({
                                   {aNum.toFixed(1)}{row.unit}
                                 </span>
                                 <span className="font-semibold text-slate-300">
-                                  {row.label}{' '}
+                                  <span
+                                    title={row.tip}
+                                    className="cursor-help underline decoration-dotted decoration-slate-500 underline-offset-2"
+                                  >
+                                    {row.label}
+                                  </span>{' '}
                                   <span className="text-[10px] text-slate-400 font-normal">
                                     ({edgeLeader === 'Even' ? 'Even' : `Edge: ${edgeLeader}`})
                                   </span>
