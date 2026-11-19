@@ -585,11 +585,11 @@ async def get_dashboard(user: dict = Depends(get_current_user)):
 
     # All computations share the cached engine (60s TTL), no extra DB hits
     bets_all = engine.get_all_bets(user_id=user_id)
-    settled = [b for b in bets_all if (b.get('status') or '').upper() not in ('PENDING', 'OPEN', 'VOID')]
+    active_bets = [b for b in bets_all if (b.get('status') or '').upper() != 'VOID']
 
     return {
         "stats": engine.get_summary(user_id=user_id),
-        "bets": settled,
+        "bets": active_bets,
         "sport_breakdown": engine.get_breakdown("sport", user_id=user_id),
         "player_breakdown": engine.get_player_performance(user_id=user_id),
         "monthly_breakdown": engine.get_monthly_performance(user_id=user_id),
@@ -675,11 +675,11 @@ async def get_settled_bet_ledger(user: dict = Depends(get_current_user)):
 
     # All computations share the cached engine (60s TTL), no extra DB hits
     bets_all = engine.get_all_bets(user_id=user_id)
-    settled = [b for b in bets_all if (b.get('status') or '').upper() not in ('PENDING', 'OPEN', 'VOID')]
+    active_bets = [b for b in bets_all if (b.get('status') or '').upper() != 'VOID']
 
     return {
         "stats": engine.get_summary(user_id=user_id),
-        "bets": settled,
+        "bets": active_bets,
         "sport_breakdown": engine.get_breakdown("sport", user_id=user_id),
         "player_breakdown": engine.get_player_performance(user_id=user_id),
         "monthly_breakdown": engine.get_monthly_performance(user_id=user_id),
