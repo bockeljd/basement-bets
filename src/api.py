@@ -3665,7 +3665,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 mv = d.get('model_version') or ''
                 if is_act:
                     actionable_cached += 1
-                if mv != current_ver:
+                if mv and mv != current_ver:
                     has_stale_version = True
                 entry = {
                     'rec': d.get('rec_json'),
@@ -3679,7 +3679,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                     'context': _parse_ctx_json(d.get('context_json')),
                 }
                 picks[eid] = entry
-                if mv == current_ver:
+                if (not mv) or mv == current_ver:
                     fresh_cached_picks[eid] = entry
                 else:
                     stale_cached_picks[eid] = entry
