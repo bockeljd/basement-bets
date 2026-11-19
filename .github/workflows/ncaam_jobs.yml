@@ -76,6 +76,7 @@ jobs:
         if: ${{ !inputs.backfill_pending }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_REUSE_CONNECTION: "1"
         run: python3 src/scripts/build_daily_top_picks.py
 
       - name: Verify Daily Top Picks (today ET)

@@ -8,19 +8,46 @@ import re
 
 from src.config import settings
 
+import threading
+
 # Runtime Constant
 DB_TYPE = 'postgres'
+_THREAD_LOCAL_DB = threading.local()
 
 @contextmanager
 def get_db_connection():
     """
     Serverless-safe connection manager.
     Connects to the POOLED url (DATABASE_URL) for standard runtime queries.
-    Yields connection, ensures closure.
-    Does NOT maintain a global pool in app memory.
+    When DB_REUSE_CONNECTION=1 (batch worker jobs / backtests), reuses a single warm
+    thread-local connection to avoid hundreds of redundant TLS handshakes.
     """
     if not settings.DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set.")
+
+    reuse = os.getenv("DB_REUSE_CONNECTION", "").strip().lower() in ("1", "true", "yes")
+    if reuse:
+        conn = getattr(_THREAD_LOCAL_DB, "conn", None)
+        if conn is None or conn.closed:
+            conn = psycopg2.connect(
+                settings.DATABASE_URL,
+                cursor_factory=psycopg2.extras.DictCursor
+            )
+            _THREAD_LOCAL_DB.conn = conn
+        try:
+            yield conn
+        except Exception as e:
+            if conn and not conn.closed:
+                try:
+                    conn.rollback()
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    _THREAD_LOCAL_DB.conn = None
+            raise e
+        return
 
     conn = None
     try:

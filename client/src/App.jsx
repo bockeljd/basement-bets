@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import api from './api/axios';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
@@ -7,15 +7,16 @@ import {
 import { TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, DollarSign, Activity, BarChart3, LayoutDashboard, Search, X, PlusCircle, Trash, RefreshCw, AlertCircle, Filter, Table } from 'lucide-react';
 
 import Research from './pages/Research';
-import Picks from './pages/Picks';
-import Bankroll from './pages/Bankroll';
-import MarchMadness from './pages/MarchMadness';
-import MLB from './pages/MLB';
 import { PasteSlipContainer } from './components/PasteSlipContainer';
-import TransactionView from './components/TransactionView';
 import ManualAddBetModal from './components/ManualAddBetModal';
 import ActualsModelReconciliationCard from './components/ActualsModelReconciliationCard';
 import { decodeSportsbookHashImport } from './utils/sportsbookBookmarklets';
+
+const Picks = lazy(() => import('./pages/Picks'));
+const Bankroll = lazy(() => import('./pages/Bankroll'));
+const MarchMadness = lazy(() => import('./pages/MarchMadness'));
+const MLB = lazy(() => import('./pages/MLB'));
+const TransactionView = lazy(() => import('./components/TransactionView'));
 
 console.log("Basement Bets Frontend v1.6.5 Loaded at " + new Date().toISOString());
 
@@ -55,7 +56,8 @@ const LoginModal = ({ onSubmit, errorMessage }) => {
 };
 
 // Helpers
-const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).filter ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val) : (typeof val === 'number' ? `$${val.toFixed(2)}` : val);
+const _usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+const formatCurrency = (val) => (typeof val === 'number' && Number.isFinite(val) ? _usdFormatter.format(val) : (val ?? '—'));
 
 // Always show dates as MM/DD/YYYY (ET)
 const formatDateMDY = (s) => {
@@ -720,13 +722,19 @@ function App() {
                             formatDateMDY={formatDateMDY}
                         />
                     ) : page === 'model' ? (
-                        <Picks />
+                        <Suspense fallback={<div className="p-8 text-center text-sm text-slate-400">Loading model performance...</div>}>
+                            <Picks />
+                        </Suspense>
                     ) : page === 'march' ? (
-                        <MarchMadness />
+                        <Suspense fallback={<div className="p-8 text-center text-sm text-slate-400">Loading March Madness...</div>}>
+                            <MarchMadness />
+                        </Suspense>
                     ) : page === 'mlb' ? (
-                        <MLB />
+                        <Suspense fallback={<div className="p-8 text-center text-sm text-slate-400">Loading MLB...</div>}>
+                            <MLB />
+                        </Suspense>
                     ) : (
-                        <>
+                        <Suspense fallback={<div className="p-8 text-center text-sm text-slate-400">Loading view...</div>}>
                             {actualsTab === 'transactions' ? (
                                 <TransactionView
                                     bets={bets}
@@ -757,7 +765,7 @@ function App() {
                                     }}
                                 />
                             )}
-                        </>
+                        </Suspense>
                     )}
                 </div>
             </div>

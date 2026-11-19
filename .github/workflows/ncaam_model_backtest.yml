@@ -52,6 +52,7 @@ jobs:
       - name: Run backtest
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_REUSE_CONNECTION: "1"
           BACKTEST_DAYS: ${{ inputs.days }}
           BACKTEST_LIMIT: ${{ inputs.limit }}
           BACKTEST_MODE: ${{ inputs.mode }}
