@@ -645,6 +645,20 @@ class KenPomClient:
             'sos_spread_adj': sos_spread_adj,
             'four_factors_adj': four_factors_adj,
             'total_four_factors_adj': total_four_factors_adj,
+            'four_factors_detail': {
+                'home': {
+                    'off_efg': h_off_efg, 'def_efg': h_def_efg,
+                    'off_to': h_off_to, 'def_to': h_def_to,
+                    'off_or': _opt_float(home_rating.get('off_or')), 'def_or': _opt_float(home_rating.get('def_or')),
+                    'off_ftr': h_off_ftr, 'def_ftr': h_def_ftr,
+                },
+                'away': {
+                    'off_efg': a_off_efg, 'def_efg': a_def_efg,
+                    'off_to': a_off_to, 'def_to': a_def_to,
+                    'off_or': _opt_float(away_rating.get('off_or')), 'def_or': _opt_float(away_rating.get('def_or')),
+                    'off_ftr': a_off_ftr, 'def_ftr': a_def_ftr,
+                },
+            },
             'press_mismatch_adj': round(press_mismatch_adj, 2),
             'avg_ftr': round(avg_ftr_val, 2) if avg_ftr_val is not None else None,
             'home_conf': home_rating.get('conf'),

@@ -47,6 +47,16 @@ const TodayMatchupModal = ({
   const [ref3, setRef3] = useState('');
   const [refsSaving, setRefsSaving] = useState(false);
   const [refsMessage, setRefsMessage] = useState(null);
+  const [outPlayers, setOutPlayers] = useState({});
+
+  useEffect(() => {
+    setOutPlayers({});
+  }, [game?.id]);
+
+  const togglePlayerOut = (side, name) => {
+    const key = `${side}:${name}`;
+    setOutPlayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -136,6 +146,25 @@ const TodayMatchupModal = ({
   const liveInfo = getLiveGameStatus(game, liveTargetPick, effectiveContext);
   const modelSignals = getModelSignalData(topRec, analysisResult?.context, dbg, game);
   const fmtStat = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : '—');
+  const rotationHome = analysisResult?.rotation_players?.home || [];
+  const rotationAway = analysisResult?.rotation_players?.away || [];
+  const ffDetail = analysisResult?.kenpom_data?.four_factors_detail || null;
+  const homeOutPts = rotationHome.reduce(
+    (acc, p) => acc + (outPlayers[`home:${p.name}`] ? Number(p.est_impact_pts || 0) : 0),
+    0
+  );
+  const awayOutPts = rotationAway.reduce(
+    (acc, p) => acc + (outPlayers[`away:${p.name}`] ? Number(p.est_impact_pts || 0) : 0),
+    0
+  );
+  // Positive netOutShift hurts home (moves home spread higher / less negative); negative hurts away
+  const netOutShiftHome = Number((homeOutPts - awayOutPts).toFixed(1));
+  const baseFairHome =
+    dbg.mu_spread_final ?? dbg.mu_spread_power ?? effectiveContext?.fair_spread_home ?? null;
+  const adjustedFairHome =
+    baseFairHome != null && Number.isFinite(Number(baseFairHome))
+      ? Number((Number(baseFairHome) + netOutShiftHome).toFixed(1))
+      : null;
 
   return (
     <dialog
@@ -628,6 +657,178 @@ const TodayMatchupModal = ({
                           </div>
                         </div>
                       )}
+                    </div>
+                  </section>
+                )}
+
+                {/* 2c. Four-Factors Visual Edge Breakdown (LangIndex-inspired) */}
+                {ffDetail?.home && ffDetail?.away && (
+                  <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-sky-300">
+                        Four-Factors Style Matchup
+                      </h3>
+                      <span className="text-[11px] text-slate-400">
+                        {game.away_team} (left) vs. {game.home_team} (right)
+                      </span>
+                    </div>
+                    <div className="space-y-2.5 text-xs">
+                      {[
+                        {
+                          label: 'Shooting (eFG%)',
+                          awayVal: ffDetail.away.off_efg,
+                          homeVal: ffDetail.home.off_efg,
+                          higherBetter: true,
+                          unit: '%',
+                        },
+                        {
+                          label: 'Ball Security (TO%)',
+                          awayVal: ffDetail.away.off_to,
+                          homeVal: ffDetail.home.off_to,
+                          higherBetter: false,
+                          unit: '%',
+                        },
+                        {
+                          label: 'Off. Rebounding (OR%)',
+                          awayVal: ffDetail.away.off_or,
+                          homeVal: ffDetail.home.off_or,
+                          higherBetter: true,
+                          unit: '%',
+                        },
+                        {
+                          label: 'Free-Throw Rate (FTR)',
+                          awayVal: ffDetail.away.off_ftr,
+                          homeVal: ffDetail.home.off_ftr,
+                          higherBetter: true,
+                          unit: '',
+                        },
+                      ]
+                        .filter((r) => r.awayVal != null && r.homeVal != null)
+                        .map((row) => {
+                          const aNum = Number(row.awayVal);
+                          const hNum = Number(row.homeVal);
+                          const diff = row.higherBetter ? hNum - aNum : aNum - hNum;
+                          const edgeLeader = Math.abs(diff) < 0.4 ? 'Even' : diff > 0 ? game.home_team : game.away_team;
+                          const barPct = Math.min(48, Math.max(4, Math.abs(diff) * 4));
+                          return (
+                            <div key={row.label} className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-mono text-slate-200">
+                                  {aNum.toFixed(1)}{row.unit}
+                                </span>
+                                <span className="font-semibold text-slate-300">
+                                  {row.label}{' '}
+                                  <span className="text-[10px] text-slate-400 font-normal">
+                                    ({edgeLeader === 'Even' ? 'Even' : `Edge: ${edgeLeader}`})
+                                  </span>
+                                </span>
+                                <span className="font-mono text-slate-200">
+                                  {hNum.toFixed(1)}{row.unit}
+                                </span>
+                              </div>
+                              <div className="relative h-2 rounded-full bg-slate-800 overflow-hidden">
+                                <div className="absolute inset-y-0 left-1/2 w-px bg-slate-600" aria-hidden="true" />
+                                {Math.abs(diff) >= 0.4 && (
+                                  <div
+                                    className={`absolute inset-y-0 rounded-full ${
+                                      diff > 0 ? 'bg-emerald-400/80' : 'bg-sky-400/80'
+                                    }`}
+                                    style={
+                                      diff > 0
+                                        ? { left: '50%', width: `${barPct}%` }
+                                        : { right: '50%', width: `${barPct}%` }
+                                    }
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    <details className="rounded-lg border border-slate-800/90 bg-slate-900/50 px-3 py-2 text-[11px] text-slate-300">
+                      <summary className="cursor-pointer font-semibold text-slate-300 hover:text-white">
+                        Metric guide (Four Factors &amp; 1H)
+                      </summary>
+                      <p className="mt-2 leading-relaxed text-slate-400">
+                        <strong className="text-slate-200">eFG%</strong> weights 3-pointers 1.5×;{' '}
+                        <strong className="text-slate-200">TO%</strong> is turnovers per 100 possessions (lower is better);{' '}
+                        <strong className="text-slate-200">OR%</strong> is second-chance rebounding rate;{' '}
+                        <strong className="text-slate-200">FTR</strong> measures free-throw trips per field-goal attempt.{' '}
+                        <strong className="text-slate-200">1H</strong> markets remove late-game intentional fouling noise.
+                      </p>
+                    </details>
+                  </section>
+                )}
+
+                {/* 2d. 1-Click Player Availability Simulator (LangIndex-inspired) */}
+                {(rotationAway.length > 0 || rotationHome.length > 0) && (
+                  <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                          Player Availability Simulator
+                        </h3>
+                        <p className="text-[11px] text-slate-400">
+                          Check any late scratch OUT to recalculate the fair spread live.
+                        </p>
+                      </div>
+                      {(homeOutPts > 0 || awayOutPts > 0) && (
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/35 text-[11px] font-mono font-bold text-amber-200">
+                            Adj Fair Home: {adjustedFairHome != null ? fmtSigned(adjustedFairHome, 1) : '—'} (
+                            {fmtSigned(netOutShiftHome, 1)} pts)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setOutPlayers({})}
+                            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 cursor-pointer"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      {[
+                        { side: 'away', team: game.away_team, players: rotationAway },
+                        { side: 'home', team: game.home_team, players: rotationHome },
+                      ].map((grp) => (
+                        <div key={grp.side} className="rounded-lg border border-slate-800/80 bg-slate-900/60 p-2.5 space-y-1">
+                          <div className="text-[11px] font-bold text-slate-300 pb-1 border-b border-slate-800">
+                            {grp.team}
+                          </div>
+                          {grp.players.length === 0 ? (
+                            <p className="text-[11px] text-slate-500 py-1">No rotation data yet.</p>
+                          ) : (
+                            grp.players.map((p) => {
+                              const checked = Boolean(outPlayers[`${grp.side}:${p.name}`]);
+                              return (
+                                <label
+                                  key={p.name}
+                                  className={`flex items-center justify-between gap-2 min-h-[44px] px-2 rounded-lg cursor-pointer transition-colors ${
+                                    checked ? 'bg-rose-950/40 text-rose-200 line-through' : 'hover:bg-slate-800/60 text-slate-200'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-2.5 min-w-0">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => togglePlayerOut(grp.side, p.name)}
+                                      className="w-4 h-4 accent-rose-500 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400 shrink-0"
+                                    />
+                                    <span className="truncate font-medium">{p.name}</span>
+                                  </span>
+                                  <span className="font-mono text-[11px] text-slate-400 shrink-0">
+                                    {p.min_pct != null ? `${p.min_pct}% min · ` : ''}
+                                    -{p.est_impact_pts}pt
+                                  </span>
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </section>
                 )}

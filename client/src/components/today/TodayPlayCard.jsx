@@ -47,13 +47,17 @@ const TodayPlayCard = ({
   const evDecimal = getRecEv(rec);
   const betType = String(rec?.bet_type || rec?.market_type || 'BET').toUpperCase();
   const marketLabel =
-    betType === 'TOTAL'
-      ? 'Over / Under'
-      : betType === 'MONEYLINE' || betType === 'ML' || betType === 'H2H'
-        ? 'Moneyline'
-        : betType === 'SPREAD'
-          ? 'Spread'
-          : betType;
+    betType === 'TOTAL_1H'
+      ? '1H Over / Under'
+      : betType === 'SPREAD_1H'
+        ? '1H Spread'
+        : betType === 'TOTAL'
+          ? 'Over / Under'
+          : betType === 'MONEYLINE' || betType === 'ML' || betType === 'H2H'
+            ? 'Moneyline'
+            : betType === 'SPREAD'
+              ? 'Spread'
+              : betType;
   const confTitle =
     conf.tier === 'HIGH' ? 'High Confidence' : conf.tier === 'MEDIUM' ? 'Medium Confidence' : 'Low Confidence';
   const winProb = rec?.calibrated_win_prob ?? rec?.win_prob;
@@ -85,18 +89,19 @@ const TodayPlayCard = ({
   const matchupLabel = `${game?.away_team || 'Away'} at ${game?.home_team || 'Home'}`;
 
   const isMoneyline = betType === 'ML' || betType === 'MONEYLINE' || betType === 'H2H';
+  const isSpreadType = betType === 'SPREAD' || betType === 'SPREAD_1H';
   const marketDisplay =
     isMoneyline
       ? fmtOdds(rec?.price)
       : rec?.market_line !== null && rec?.market_line !== undefined
-        ? `${betType === 'SPREAD' ? fmtSigned(rec.market_line, 1) : rec.market_line}`
+        ? `${isSpreadType ? fmtSigned(rec.market_line, 1) : rec.market_line}`
         : '—';
 
   const fairDisplay =
     isMoneyline
       ? fmtPct(winProb, 1)
       : rec?.fair_line !== null && rec?.fair_line !== undefined
-        ? `${betType === 'SPREAD' ? fmtSigned(rec.fair_line, 1) : Number(rec.fair_line).toFixed(1)}`
+        ? `${isSpreadType ? fmtSigned(rec.fair_line, 1) : Number(rec.fair_line).toFixed(1)}`
         : '—';
 
   return (

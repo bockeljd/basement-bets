@@ -2132,9 +2132,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
             edge_points_side = None
             win_prob = r.get('win_prob')
 
-            if r['market'] == 'SPREAD':
+            if r['market'] in ('SPREAD', 'SPREAD_1H'):
+                is_1h_sp = (r['market'] == 'SPREAD_1H')
                 market_home = market_snapshot.get('spread_home')
-                fair_home = mu_spread_final
+                fair_home = (mu_spread_final * 0.48) if (is_1h_sp and mu_spread_final is not None) else mu_spread_final
 
                 # Convert to the side being bet (home vs away).
                 # `r['side']` is usually 'home'/'away' (not a team name).
@@ -2152,20 +2153,28 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     # Points you are getting vs model fair (positive = better for bettor)
                     edge_points_side = round(float(market_line_side) - float(fair_line_side), 1)
 
-            elif r['market'] == 'TOTAL':
+            elif r['market'] in ('TOTAL', 'TOTAL_1H'):
+                is_1h_tot = (r['market'] == 'TOTAL_1H')
                 market_total = r.get('line') if r.get('line') is not None else market_snapshot.get('total')
-                fair_total = mu_total_final
+                fair_total = (mu_total_final * 0.472) if (is_1h_tot and mu_total_final is not None) else mu_total_final
                 market_line_side = market_total
                 fair_line_side = fair_total
                 if (market_line_side is not None) and (fair_line_side is not None):
-                    # For totals, interpret edge points as difference in line (direction depends on OVER/UNDER)
-                    edge_points_side = round(float(fair_line_side) - float(market_line_side), 1)
+                    side_up = str(r.get('side') or '').upper()
+                    edge_points_side = round(
+                        (float(market_line_side) - float(fair_line_side))
+                        if side_up == 'UNDER'
+                        else (float(fair_line_side) - float(market_line_side)),
+                        1,
+                    )
 
             # Build a human-friendly selection label.
-            # IMPORTANT: For SPREAD, include the sign (+/-) so underdogs aren't displayed as favorites.
+            # IMPORTANT: For SPREAD / SPREAD_1H, include the sign (+/-) so underdogs aren't displayed as favorites.
             sel = None
-            if r['market'] == 'SPREAD':
+            if r['market'] in ('SPREAD', 'SPREAD_1H'):
                 team = r.get('team') or (event['home_team'] if r.get('side') == 'home' else event['away_team'])
+                if r['market'] == 'SPREAD_1H' and '1H' not in str(team):
+                    team = f"{team} 1H"
                 if r.get('line') is not None:
                     try:
                         v = float(r.get('line'))
@@ -2175,9 +2184,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         sel = team + f" {r.get('line')}"
                 else:
                     sel = team
-            elif r['market'] == 'TOTAL':
+            elif r['market'] in ('TOTAL', 'TOTAL_1H'):
                 side = str(r.get('side') or '').upper()
-                sel = side + (f" {r['line']}" if r.get('line') is not None else "")
+                prefix = '1H ' if r['market'] == 'TOTAL_1H' else ''
+                sel = f"{prefix}{side}" + (f" {r['line']}" if r.get('line') is not None else "")
             else:
                 sel = str(r.get('side') or '')
 
@@ -2624,8 +2634,38 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # Persist prediction-time context for calibration.
 
 
+        def _summarize_rotation(players_list):
+            out_p = []
+            for p in (players_list or []):
+                if not isinstance(p, dict):
+                    continue
+                name = str(p.get('player_name') or '').strip()
+                if not name:
+                    continue
+                m = p.get('metrics') if isinstance(p.get('metrics'), dict) else {}
+                min_pct = _safe_float(m.get('min_pct') or m.get('Min%') or m.get('min'))
+                ortg = _safe_float(m.get('ortg') or m.get('ORtg'))
+                usg = _safe_float(m.get('usg') or m.get('Poss%'))
+                # Estimate spread impact (pts) if player sits: scaled by minutes share & efficiency above avg
+                min_share = (min_pct / 100.0) if (min_pct is not None and min_pct > 1.5) else (min_pct or 0.45)
+                eff_bonus = max(0.0, ((ortg or 104.0) - 98.0) / 14.0)
+                est_pts = round(max(0.3, min(3.2, (min_share * 2.4) + (eff_bonus * min_share))), 1)
+                out_p.append({
+                    'name': name,
+                    'min_pct': round(min_pct, 1) if min_pct is not None else None,
+                    'ortg': round(ortg, 1) if ortg is not None else None,
+                    'usg': round(usg, 1) if usg is not None else None,
+                    'est_impact_pts': est_pts,
+                })
+            out_p.sort(key=lambda x: (x['min_pct'] or 0.0, x['est_impact_pts']), reverse=True)
+            return out_p[:7]
+
         res = {
             "id": best_prediction_id or None,
+            "rotation_players": {
+                "home": _summarize_rotation(kp_players_home),
+                "away": _summarize_rotation(kp_players_away),
+            },
             "event_id": event_id,
             "home_team": event['home_team'],
             "away_team": event['away_team'],
@@ -4317,7 +4357,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         # --- First-Half (1H) Markets (SPREAD_1H & TOTAL_1H) ---
         # Eliminates late-game intentional fouling variance in NCAAM.
-        raw_snaps_list = (snap.get('_raw_snaps') or []) if isinstance(snap, dict) else []
+        raw_snaps_list = [
+            s for s in ((snap.get('_raw_snaps') or []) if isinstance(snap, dict) else [])
+            if not str(s.get('book') or '').strip().lower().startswith('action_book_')
+        ]
         if raw_snaps_list and mu_s is not None and sig_s is not None:
             try:
                 sp1h_home = [s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'SPREAD_1H' and str(s.get('side') or '').upper() == 'HOME' and s.get('line_value') is not None]
