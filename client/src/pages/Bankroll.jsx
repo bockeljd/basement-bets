@@ -100,15 +100,28 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
         </div>
       )}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-        <div className="p-6 border-b border-slate-800">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold flex items-center gap-2">
-              <DollarSign className="text-green-400" /> Sportsbook Financials
+        <div className="p-5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2 text-white">
+              <DollarSign className="text-emerald-400" size={18} /> Bankroll, Deposits &amp; Withdrawals
             </h3>
-            <div className="text-[11px] text-slate-500">Statement view (click a row to expand)</div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Click any sportsbook to view accounts or update cash balance.
+            </p>
           </div>
-          <div className="mt-2 text-[10px] text-gray-600 uppercase tracking-widest opacity-70">
-            Baseline balances from latest snapshots; ledger includes deposits/withdrawals and open/pending wagers.
+          <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+            <span className="text-slate-300">
+              Deposited: <strong className="text-white">{fmt(normalizedFinancials.total_deposited)}</strong>
+            </span>
+            <span className="text-slate-300">
+              Withdrawn: <strong className="text-white">{fmt(normalizedFinancials.total_withdrawn)}</strong>
+            </span>
+            <span className="text-slate-300">
+              Net In:{' '}
+              <strong className="text-sky-300">
+                {fmt(Number(normalizedFinancials.total_deposited || 0) - Number(normalizedFinancials.total_withdrawn || 0))}
+              </strong>
+            </span>
           </div>
         </div>
 

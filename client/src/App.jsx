@@ -618,46 +618,77 @@ function App() {
                     </header>
 
                     {page === 'actuals' && (() => {
-                        const actualBets = Array.isArray(bets)
-                            ? bets.filter((b) => !['Deposit', 'Withdrawal', 'Other'].includes(b.bet_type))
-                            : [];
-                        const wonCnt = actualBets.filter((b) => String(b.status || '').toUpperCase() === 'WON').length;
-                        const lostCnt = actualBets.filter((b) => String(b.status || '').toUpperCase() === 'LOST').length;
+                        const allRows = Array.isArray(bets) ? bets : [];
+                        const actualBets = allRows.filter((b) => !['Deposit', 'Withdrawal', 'Other'].includes(b.bet_type) && String(b.category || '').toLowerCase() !== 'transaction');
+                        const wonCnt = actualBets.filter((b) => ['WON', 'WIN'].includes(String(b.status || '').toUpperCase())).length;
+                        const lostCnt = actualBets.filter((b) => ['LOST', 'LOSS'].includes(String(b.status || '').toUpperCase())).length;
+                        const settledBetsAll = actualBets.filter((b) => ['WON', 'WIN', 'LOST', 'LOSS', 'PUSH', 'CASHED_OUT'].includes(String(b.status || '').toUpperCase()));
+                        const settledWager = settledBetsAll.reduce((acc, b) => acc + (Number(b.wager ?? b.stake ?? 0) || 0), 0);
+                        const settledProfit = settledBetsAll.reduce((acc, b) => acc + (Number(b.profit || 0) || 0), 0);
                         const openBets = actualBets.filter((b) => ['OPEN', 'PENDING'].includes(String(b.status || '').toUpperCase()));
-                        const openStake = openBets.reduce((acc, b) => acc + (Number(b.wager || 0) || 0), 0);
+                        const openStake = openBets.reduce((acc, b) => acc + (Number(b.wager ?? b.stake ?? 0) || 0), 0);
+                        const unrealizedToWin = openBets.reduce((acc, b) => {
+                            const w = Number(b.wager ?? b.stake ?? 0) || 0;
+                            const o = Number(b.odds);
+                            if (!w || !Number.isFinite(o) || o === 0) return acc;
+                            return acc + (o > 0 ? w * (o / 100) : w * (100 / Math.abs(o)));
+                        }, 0);
                         const settledDecided = wonCnt + lostCnt;
                         const winPct = settledDecided > 0 ? ((wonCnt / settledDecided) * 100).toFixed(1) : null;
-                        const netProfit = Number(financials?.realized_profit || 0);
+                        const realizedProfit = Number(financials?.realized_profit ?? settledProfit ?? 0);
+                        const roiPct = settledWager > 0 ? ((settledProfit / settledWager) * 100).toFixed(1) : null;
+                        const totalDeposited = Number(financials?.total_deposited || 0);
+                        const totalWithdrawn = Number(financials?.total_withdrawn || 0);
+                        const netDeposited = totalDeposited - totalWithdrawn;
                         const totalBankroll = Number(financials?.total_in_play || 0);
 
                         return (
                             <div className="mb-6 space-y-4">
-                                {/* Compact Actuals KPI Strip */}
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net Profit</div>
-                                        <div className={`mt-0.5 text-lg font-mono font-bold ${netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                                            {netProfit >= 0 ? '+' : ''}{formatCurrency(netProfit)}
+                                {/* Always-Visible Core Actuals KPI Strip */}
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Realized Gains</div>
+                                        <div className={`mt-0.5 text-lg font-mono font-bold ${realizedProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                            {realizedProfit >= 0 ? '+' : ''}{formatCurrency(realizedProfit)}
+                                        </div>
+                                        <div className="text-[11px] font-mono text-slate-400">
+                                            {roiPct != null ? `${Number(roiPct) >= 0 ? '+' : ''}${roiPct}% ROI` : 'ROI —'}
                                         </div>
                                     </div>
-                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Bankroll</div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unrealized (Open)</div>
+                                        <div className="mt-0.5 text-lg font-mono font-bold text-sky-300">
+                                            {formatCurrency(openStake)}
+                                        </div>
+                                        <div className="text-[11px] font-mono text-slate-400">
+                                            {openBets.length} open{unrealizedToWin > 0 ? ` · +${formatCurrency(unrealizedToWin)} to win` : ''}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Record (W–L)</div>
+                                        <div className="mt-0.5 text-lg font-mono font-bold text-white">
+                                            {wonCnt}–{lostCnt}
+                                        </div>
+                                        <div className="text-[11px] font-mono text-slate-400">
+                                            {winPct ? `${winPct}% win rate` : 'No settled bets'}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Deposits / Withdrawals</div>
+                                        <div className="mt-0.5 text-lg font-mono font-bold text-slate-100">
+                                            {formatCurrency(netDeposited)} <span className="text-[11px] font-normal text-slate-400">net</span>
+                                        </div>
+                                        <div className="text-[11px] font-mono text-slate-400 truncate">
+                                            In {formatCurrency(totalDeposited)} · Out {formatCurrency(totalWithdrawn)}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3 col-span-2 md:col-span-1">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash Bankroll</div>
                                         <div className="mt-0.5 text-lg font-mono font-bold text-white">
                                             {formatCurrency(totalBankroll)}
                                         </div>
-                                    </div>
-                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Settled Record</div>
-                                        <div className="mt-0.5 text-lg font-mono font-bold text-slate-100">
-                                            {wonCnt}–{lostCnt}
-                                            {winPct && <span className="ml-1.5 text-xs font-normal text-slate-400">({winPct}%)</span>}
-                                        </div>
-                                    </div>
-                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Open Bets</div>
-                                        <div className="mt-0.5 text-lg font-mono font-bold text-sky-300">
-                                            {openBets.length}
-                                            {openStake > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">({formatCurrency(openStake)})</span>}
+                                        <div className="text-[11px] font-mono text-slate-400">
+                                            Equity {formatCurrency(totalBankroll + openStake)}
                                         </div>
                                     </div>
                                 </div>
@@ -1264,282 +1295,82 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                 </div>
             )}
 
-            <ActualsModelReconciliationCard />
-
-            {/* Scatter: Win% vs ROI by sport + bet type */}
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
-                <div className="flex items-center justify-between gap-4 mb-4">
-                    <h3 className="text-xl font-bold flex items-center gap-2">
-                        <BarChart3 className="text-blue-400" /> Win% vs ROI (by sport + bet type)
+            {/* Simplified By Sport & Market Breakdown (no dropdowns, no cluttered scatter chart) */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200">
+                        Performance by Sport &amp; Bet Type
                     </h3>
-                    <div className="text-xs text-slate-500">Click a dot to filter Transactions</div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 mb-3">
-                    <div className="text-xs text-slate-500">Window</div>
-                    <select
-                        className="bg-slate-950/40 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
-                        value={segmentWindow}
-                        onChange={(e) => setSegmentWindow(e.target.value)}
-                    >
-                        <option value="30d">Last 30 days</option>
-                        <option value="90d">Last 90 days</option>
-                        <option value="all">All-time</option>
-                    </select>
-
-                    <div className="ml-2 text-xs text-slate-500">Color</div>
-                    <select
-                        className="bg-slate-950/40 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
-                        value={scatterColorMode}
-                        onChange={(e) => setScatterColorMode(e.target.value)}
-                    >
-                        <option value="profit">Profit sign</option>
-                        <option value="sport">Sport</option>
-                    </select>
-
-                    <div className="ml-2 text-xs text-slate-500">Bubble</div>
-                    <select
-                        className="bg-slate-950/40 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
-                        value={scatterBubbleMode}
-                        onChange={(e) => setScatterBubbleMode(e.target.value)}
-                    >
-                        <option value="bets"># Bets</option>
-                        <option value="wager">$ Wager</option>
-                    </select>
-
-                    <div className="ml-2 text-xs text-slate-500">Min Bets</div>
-                    <input
-                        type="number"
-                        min={1}
-                        max={999}
-                        value={minSegmentBets}
-                        onChange={(e) => setMinSegmentBets(Math.max(1, parseInt(e.target.value || '1', 10)))}
-                        className="w-20 bg-slate-950/40 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200"
-                    />
-                    <button
-                        type="button"
-                        onClick={() => setMinSegmentBets(10)}
-                        className={`px-2 py-1 text-xs rounded border ${minSegmentBets >= 10 ? 'bg-blue-600/20 text-blue-300 border-blue-500/30' : 'bg-slate-900/40 text-slate-300 border-slate-700'}`}
-                    >
-                        N≥10
-                    </button>
+                    <div className="inline-flex gap-1 p-0.5 rounded-lg bg-slate-950 border border-slate-800">
+                        {[
+                            { id: '30d', label: '30d' },
+                            { id: '90d', label: '90d' },
+                            { id: 'all', label: 'All-time' },
+                        ].map((w) => (
+                            <button
+                                key={w.id}
+                                type="button"
+                                onClick={() => setSegmentWindow(w.id)}
+                                className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer ${
+                                    segmentWindow === w.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                            >
+                                {w.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {(segmentAgg.rows || []).length === 0 ? (
-                    <div className="text-slate-500 text-sm">No segments meet the filter yet (try lowering min bets).</div>
+                    <div className="text-slate-500 text-xs py-3">No settled bets in this window yet.</div>
                 ) : (
-                    <div className="h-[440px] bg-slate-800/20 rounded-xl border border-slate-800/50 p-4">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                <XAxis
-                                    type="number"
-                                    dataKey="roi"
-                                    name="ROI"
-                                    unit="%"
-                                    stroke="#94a3b8"
-                                    fontSize={10}
-                                    domain={['auto', 'auto']}
-                                    label={{ value: 'ROI (%)', position: 'bottom', fill: '#64748b', fontSize: 10 }}
-                                    tickFormatter={(val) => `${val}%`}
-                                />
-                                <YAxis
-                                    type="number"
-                                    dataKey="actual_win_rate"
-                                    name="Win Rate"
-                                    unit="%"
-                                    stroke="#94a3b8"
-                                    fontSize={10}
-                                    domain={[0, 100]}
-                                    label={{ value: 'Win% (settled)', angle: -90, position: 'left', fill: '#64748b', fontSize: 10 }}
-                                />
-                                <ZAxis type="number" dataKey={scatterBubbleMode === 'wager' ? 'wager' : 'bets'} range={[60, 360]} name="Volume" />
-                                <Tooltip
-                                    cursor={{ strokeDasharray: '3 3' }}
-                                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '8px' }}
-                                    itemStyle={{ color: '#fff' }}
-                                    content={({ active, payload }) => {
-                                        if (active && payload && payload.length) {
-                                            const d = payload[0].payload;
-                                            return (
-                                                <div className="bg-slate-900 border border-slate-700 p-3 rounded-lg shadow-xl">
-                                                    <p className="font-bold text-blue-400 mb-1">{d.sport} - {d.bet_type}</p>
-                                                    <div className="grid grid-cols-2 gap-x-4 text-[10px]">
-                                                        <span className="text-slate-400">Bets:</span> <span className="text-white text-right">{d.bets}</span>
-                                                        <span className="text-slate-400">Record:</span> <span className="text-white text-right">{d.wins}-{d.losses}{d.push ? `-${d.push}` : ''}</span>
-                                                        <span className="text-slate-400">Net Profit:</span> <span className={d.profit >= 0 ? 'text-green-400 text-right' : 'text-red-400 text-right'}>{formatCurrency(d.profit)}</span>
-                                                        <span className="text-slate-400">Wager:</span> <span className="text-white text-right">{formatCurrency(d.wager)}</span>
-                                                        <span className="text-slate-400">ROI:</span> <span className="text-white text-right">{d.roi}%</span>
-                                                        <span className="text-slate-400">Win%:</span> <span className="text-white text-right">{d.actual_win_rate}%</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-                                        return null;
-                                    }}
-                                />
-                                <ReferenceLine x={0} stroke="#475569" strokeWidth={1} />
-                                <ReferenceLine y={50} stroke="#1f2937" strokeWidth={1} strokeDasharray="4 4" />
-
-                                <Scatter
-                                    name="Segments"
-                                    data={segmentAgg.rows}
-                                    onClick={(d) => {
-                                        const payload = d?.payload || d;
-                                        const sport = payload?.sport;
-                                        const betType = payload?.bet_type;
-                                        if (sport && betType && typeof onOpenTransactions === 'function') {
-                                            onOpenTransactions({ sport, type: betType });
-                                        }
-                                    }}
-                                >
-                                    {(segmentAgg.rows || []).map((entry, index) => {
-                                        const sportColors = {
-                                            NFL: '#60a5fa',
-                                            NBA: '#a78bfa',
-                                            NCAAM: '#f97316',
-                                            NCAAF: '#fbbf24',
-                                            MLB: '#22c55e',
-                                            NHL: '#38bdf8',
-                                            UNKNOWN: '#94a3b8'
-                                        };
-                                        const fill = scatterColorMode === 'sport'
-                                            ? (sportColors[String(entry.sport || 'UNKNOWN').toUpperCase()] || '#94a3b8')
-                                            : (entry.profit >= 0 ? '#10b981' : '#ef4444');
-                                        const stroke = fill;
-                                        return (
-                                            <Cell
-                                                key={`cell-${index}`}
-                                                fill={fill}
-                                                fillOpacity={0.55}
-                                                stroke={stroke}
-                                            />
-                                        );
-                                    })}
-                                </Scatter>
-                            </ScatterChart>
-                        </ResponsiveContainer>
-                    </div>
-                )}
-
-                <div className="text-[10px] text-slate-500 text-center mt-2 italic">
-                    Breakeven line at ROI=0%. Dotted line at Win%=50% (context only).
-                </div>
-
-                {/* What's driving results */}
-                <div className="mt-6">
-                    <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-black text-slate-200 uppercase tracking-widest">What's driving results (last 30d vs prior 30d)</h4>
-                        <div className="text-xs text-slate-500">Sorted by last 30d ROI (then 30d volume)</div>
-                    </div>
-
-                    {/* Top winners / losers */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-                        {(() => {
-                            const rows = (segmentAgg.driving || []).slice().filter(r => (r.bets_30d || 0) >= Math.max(3, Math.min(10, minSegmentBets)));
-                            const winners = rows.slice().sort((a, b) => Number(b.profit_30d || 0) - Number(a.profit_30d || 0)).slice(0, 10);
-                            const losers = rows.slice().sort((a, b) => Number(a.profit_30d || 0) - Number(b.profit_30d || 0)).slice(0, 10);
-                            const Card = ({ title, data }) => (
-                                <div className="bg-slate-800/20 border border-slate-800 rounded-xl p-4">
-                                    <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-2">{title}</div>
-                                    <div className="space-y-2">
-                                        {data.length === 0 ? (
-                                            <div className="text-xs text-slate-500">No segments meet the min-N.</div>
-                                        ) : data.map((r, i) => (
-                                            <div key={i} className="flex items-center justify-between text-sm">
-                                                <div className="text-slate-200 font-bold truncate pr-3">{r.sport} - <span className="text-slate-400 font-normal">{r.bet_type}</span></div>
-                                                <div className={`font-mono font-bold ${Number(r.profit_30d || 0) >= 0 ? 'text-green-300' : 'text-red-300'}`}>{formatCurrency(Number(r.profit_30d || 0))}</div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                            return (
-                                <>
-                                    <Card title="Top winners (30d net P/L)" data={winners} />
-                                    <Card title="Top losers (30d net P/L)" data={losers} />
-                                </>
-                            );
-                        })()}
-                    </div>
-
-                    {/* Biggest changes */}
-                    <div className="bg-slate-800/20 border border-slate-800 rounded-xl p-4 mb-4">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-2">Biggest 30-Day Swings (min bets)</div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {(() => {
-                                const rows = (segmentAgg.driving || [])
-                                    .filter(r => r.roi_delta !== null && r.roi_delta !== undefined)
-                                    .filter(r => (r.bets_30d || 0) >= Math.max(3, minSegmentBets));
-                                const top = rows.slice().sort((a, b) => Math.abs(Number(b.roi_delta || 0)) - Math.abs(Number(a.roi_delta || 0))).slice(0, 9);
-                                return top.map((r, i) => (
-                                    <div key={i} className="bg-slate-900/30 border border-slate-800 rounded-xl p-3">
-                                        <div className="text-slate-200 font-bold text-sm truncate">{r.sport} - <span className="text-slate-400 font-normal">{r.bet_type}</span></div>
-                                        <div className={`mt-1 font-mono font-black ${(Number(r.roi_delta || 0) >= 0) ? 'text-green-300' : 'text-red-300'}`}>{Number(r.roi_delta) >= 0 ? '+' : ''}{Number(r.roi_delta).toFixed(1)}%</div>
-                                        <div className="text-[10px] text-slate-500">ROI 30d: {r.roi_30d === null ? '-' : `${Number(r.roi_30d).toFixed(1)}%`} • prev: {r.roi_prev30d === null ? '-' : `${Number(r.roi_prev30d).toFixed(1)}%`} • N={r.bets_30d || 0}</div>
-                                    </div>
-                                ));
-                            })()}
-                        </div>
-                    </div>
-
-                    <div className="overflow-x-auto border border-slate-800 rounded-xl" role="region" aria-label="Sportsbook performance breakdown by sport and bet type" tabIndex={0}>
-                        <table className="min-w-full text-left text-sm">
-                            <caption className="sr-only">Sportsbook performance by sport and bet type showing wager counts, average odds, stake, profit per bet, overall ROI, win rate, and 30-day trend</caption>
-                            <thead className="bg-slate-900/60 border-b border-slate-800">
-                                <tr className="text-[10px] uppercase tracking-wider text-slate-500">
-                                    <th scope="col" className="py-2 px-3">Segment</th>
-                                    <th scope="col" className="py-2 px-3 text-right">Bets (all)</th>
-                                    <th scope="col" className="py-2 px-3 text-right">Avg odds</th>
-                                    <th scope="col" className="py-2 px-3 text-right">Avg stake</th>
-                                    <th scope="col" className="py-2 px-3 text-right">Avg Profit / Bet</th>
-                                    <th scope="col" className="py-2 px-3 text-right">ROI (all)</th>
-                                    <th scope="col" className="py-2 px-3 text-right">Win Rate</th>
-                                    <th scope="col" className="py-2 px-3 text-right">Profit (30d)</th>
-                                    <th scope="col" className="py-2 px-3 text-right">ROI (30d)</th>
-                                    <th scope="col" className="py-2 px-3 text-right">30-Day Trend</th>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr className="border-b border-slate-800 text-slate-400">
+                                    <th className="py-2 pr-3 font-medium">Sport · Type</th>
+                                    <th className="py-2 pr-3 text-right font-medium">W–L</th>
+                                    <th className="py-2 pr-3 text-right font-medium">Win%</th>
+                                    <th className="py-2 pr-3 text-right font-medium">Wagered</th>
+                                    <th className="py-2 pr-3 text-right font-medium">ROI</th>
+                                    <th className="py-2 text-right font-medium">Realized P/L</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60">
-                                {(segmentAgg.driving || [])
+                                {(segmentAgg.rows || [])
                                     .slice()
-                                    .sort((a, b) => {
-                                        // sort by last 30d ROI desc, then by sample size desc
-                                        const ar = (a.roi_30d === null || a.roi_30d === undefined) ? -Infinity : Number(a.roi_30d);
-                                        const br = (b.roi_30d === null || b.roi_30d === undefined) ? -Infinity : Number(b.roi_30d);
-                                        if (br !== ar) return br - ar;
-                                        const an = Number(a.bets_30d || 0);
-                                        const bn = Number(b.bets_30d || 0);
-                                        if (bn !== an) return bn - an;
-                                        return Number(b.profit_30d || 0) - Number(a.profit_30d || 0);
-                                    })
-                                    .slice(0, 25)
-                                    .map((r, i) => {
-                                        const roiDelta = r.roi_delta;
-                                        const roiDeltaCls = roiDelta === null ? 'text-slate-500' : roiDelta >= 0 ? 'text-green-400' : 'text-red-400';
-                                        return (
-                                            <tr key={i} className="hover:bg-slate-800/30">
-                                                <td className="py-2 px-3 text-slate-200 font-bold">{r.sport} - <span className="text-slate-400 font-normal">{r.bet_type}</span></td>
-                                                <td className="py-2 px-3 text-right text-slate-300 font-mono">{r.bets}</td>
-                                                <td className="py-2 px-3 text-right text-slate-300 font-mono">{r.avg_odds === null ? '-' : (r.avg_odds > 0 ? `+${r.avg_odds}` : String(r.avg_odds))}</td>
-                                                <td className="py-2 px-3 text-right text-slate-300 font-mono">{formatCurrency(r.avg_stake || 0)}</td>
-                                                <td className={`py-2 px-3 text-right font-mono ${(r.profit_per_bet || 0) >= 0 ? 'text-green-300' : 'text-red-300'}`}>{formatCurrency(r.profit_per_bet || 0)}</td>
-                                                <td className={`py-2 px-3 text-right font-mono ${Number(r.roi || 0) >= 0 ? 'text-green-300' : 'text-red-300'}`}>{r.roi.toFixed(1)}%</td>
-                                                <td className="py-2 px-3 text-right text-slate-300 font-mono">{Number(r.actual_win_rate || 0).toFixed(1)}%</td>
-                                                <td className={`py-2 px-3 text-right font-mono ${Number(r.profit_30d || 0) >= 0 ? 'text-green-300' : 'text-red-300'}`}>{r.profit_30d === null ? '-' : formatCurrency(r.profit_30d)}</td>
-                                                <td className="py-2 px-3 text-right text-slate-300 font-mono">{r.roi_30d === null ? '-' : `${Number(r.roi_30d).toFixed(1)}%`}</td>
-                                                <td className={`py-2 px-3 text-right font-mono ${roiDeltaCls}`}>{roiDelta === null ? '-' : `${roiDelta >= 0 ? '+' : ''}${roiDelta.toFixed(1)}%`}</td>
-                                            </tr>
-                                        );
-                                    })}
+                                    .sort((a, b) => Number(b.profit || 0) - Number(a.profit || 0))
+                                    .slice(0, 15)
+                                    .map((r, i) => (
+                                        <tr
+                                            key={i}
+                                            onClick={() => onOpenTransactions?.({ sport: r.sport, type: r.bet_type })}
+                                            className="hover:bg-slate-800/35 cursor-pointer"
+                                        >
+                                            <td className="py-2 pr-3 text-slate-100 font-semibold">
+                                                {r.sport} <span className="text-slate-400 font-normal">· {r.bet_type}</span>
+                                            </td>
+                                            <td className="py-2 pr-3 text-right font-mono text-slate-200">
+                                                {r.wins}–{r.losses}
+                                            </td>
+                                            <td className="py-2 pr-3 text-right font-mono text-slate-300">
+                                                {Number(r.actual_win_rate || 0).toFixed(1)}%
+                                            </td>
+                                            <td className="py-2 pr-3 text-right font-mono text-slate-400">
+                                                {formatCurrency(r.wager || 0)}
+                                            </td>
+                                            <td className={`py-2 pr-3 text-right font-mono font-bold ${Number(r.roi || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                {Number(r.roi || 0) >= 0 ? '+' : ''}{Number(r.roi || 0).toFixed(1)}%
+                                            </td>
+                                            <td className={`py-2 text-right font-mono font-bold ${Number(r.profit || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                {Number(r.profit || 0) >= 0 ? '+' : ''}{formatCurrency(r.profit || 0)}
+                                            </td>
+                                        </tr>
+                                    ))}
                             </tbody>
                         </table>
                     </div>
-
-                    <div className="mt-2 text-[10px] text-slate-600">
-                        Compares the last 30 days' return to the prior 30 days for each sport and bet type.
-                    </div>
-                </div>
+                )}
             </div>
         </div>
     );
