@@ -53,9 +53,7 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
 
   const fmtCaptured = (ts) => {
     if (!ts) return 'none';
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return String(ts).slice(0, 10);
-    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return formatSyncDateLabel(ts);
   };
 
   const handleSaveSnapshot = async (e) => {

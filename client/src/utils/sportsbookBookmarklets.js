@@ -218,7 +218,29 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
     ${extractTxnsJs}
     var txns=extractPageTransactions('DraftKings');
     var isTxnPage=/transaction|financial|statement|history|wallet|cashier/i.test(location.href);
-    var bal=isTxnPage?null:readBalance();
+    function readTxnTableBalance(){
+      try{
+        var tables=document.querySelectorAll('table');
+        for(var t=0;t<tables.length;t++){
+          var ths=tables[t].querySelectorAll('thead th,tr:first-child th');
+          var balIdx=-1;
+          for(var h=0;h<ths.length;h++){
+            if(/\\bbalance\\b/i.test((ths[h].innerText||'').trim())){balIdx=h;break;}
+          }
+          if(balIdx===-1)continue;
+          var rows=tables[t].querySelectorAll('tbody tr');
+          for(var r=0;r<rows.length;r++){
+            var tds=rows[r].querySelectorAll('td');
+            if(tds.length>balIdx){
+              var m=(tds[balIdx].innerText||'').match(/\\$([0-9,]+\\.\\d{2})/);
+              if(m)return parseFloat(m[1].replace(/,/g,''));
+            }
+          }
+        }
+      }catch(e){}
+      return null;
+    }
+    var bal=isTxnPage?readTxnTableBalance():readBalance();
     if(pill.parentNode){pill.parentNode.removeChild(pill);}
     if(!rawText||rawText.length<40){
       alert('No DraftKings bets or transactions detected yet. Open My Bets or Financial Center -> Transactions and click again.');

@@ -22,7 +22,12 @@ const parseSyncTimestampMs = (ts) => {
         const dt = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
         return Number.isNaN(dt.getTime()) ? null : { ms: dt.getTime(), dateOnly: true, y, m, d };
     }
-    const dt = new Date(raw);
+    // Naive ISO/Postgres timestamps (no Z or ±HH:MM offset) are stored in UTC — treat them as UTC
+    let iso = raw.replace(' ', 'T');
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(iso)) {
+        iso = `${iso}Z`;
+    }
+    const dt = new Date(iso);
     if (Number.isNaN(dt.getTime())) return null;
     return { ms: dt.getTime(), dateOnly: false };
 };
@@ -47,6 +52,7 @@ export const formatSyncDateLabel = (ts) => {
         year: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
+        timeZoneName: 'short',
     });
 };
 
