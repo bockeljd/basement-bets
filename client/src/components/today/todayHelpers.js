@@ -741,7 +741,8 @@ export const explainPickPlainly = (rec, game) => {
  */
 export const buildVisualModelData = (rec, game, analysis) => {
   const betTypeRaw = String(rec?.bet_type || rec?.market || '').toUpperCase();
-  const isTotal = betTypeRaw === 'TOTAL' || /\b(OVER|UNDER)\b/i.test(String(rec?.selection || ''));
+  const isFirstHalf = betTypeRaw === 'SPREAD_1H' || betTypeRaw === 'TOTAL_1H';
+  const isTotal = betTypeRaw === 'TOTAL' || betTypeRaw === 'TOTAL_1H' || /\b(OVER|UNDER)\b/i.test(String(rec?.selection || ''));
   const home = game?.home_team || 'Home';
   const away = game?.away_team || 'Away';
   const sel = String(rec?.selection || '');
@@ -757,7 +758,7 @@ export const buildVisualModelData = (rec, game, analysis) => {
   if (mode === 'TOTAL') {
     if (bookLine == null) bookLine = toNum(ctx.current_total ?? game?.total_line);
     if (fairLine == null) fairLine = toNum(ctx.fair_total ?? analysis?.fair_total);
-    sideLabel = 'Combined Points';
+    sideLabel = isFirstHalf ? '1H Combined Points' : 'Combined Points';
   } else {
     pickedHome =
       sel.toLowerCase().includes(home.toLowerCase()) ||
@@ -770,7 +771,9 @@ export const buildVisualModelData = (rec, game, analysis) => {
       const hFair = toNum(ctx.fair_spread_home ?? analysis?.fair_spread_home);
       fairLine = pickedHome ? hFair : -hFair;
     }
-    sideLabel = pickedHome ? `${home} Spread` : `${away} Spread`;
+    sideLabel = pickedHome
+      ? `${home} ${isFirstHalf ? '1H ' : ''}Spread`
+      : `${away} ${isFirstHalf ? '1H ' : ''}Spread`;
   }
 
   if (bookLine == null || fairLine == null || betTypeRaw === 'ML' || betTypeRaw === 'MONEYLINE') {
@@ -784,12 +787,14 @@ export const buildVisualModelData = (rec, game, analysis) => {
   };
 
   const sources = [];
-  const tvLine = toSide(mode === 'TOTAL' ? sig.torvik?.fair_total : sig.torvik?.fair_spread_home);
-  const hsLine = toSide(mode === 'TOTAL' ? sig.haslametrics?.fair_total : sig.haslametrics?.fair_spread_home);
-  const kpLine = toSide(mode === 'TOTAL' ? sig.kenpom?.fair_total : sig.kenpom?.fair_spread_home);
-  if (tvLine != null) sources.push({ id: 'torvik', label: 'BartTorvik', line: Number(tvLine.toFixed(1)), color: '#0ea5e9' });
-  if (hsLine != null) sources.push({ id: 'hasla', label: 'Haslametrics', line: Number(hsLine.toFixed(1)), color: '#8b5cf6' });
-  if (kpLine != null) sources.push({ id: 'kenpom', label: 'KenPom', line: Number(kpLine.toFixed(1)), color: '#10b981' });
+  if (!isFirstHalf) {
+    const tvLine = toSide(mode === 'TOTAL' ? sig.torvik?.fair_total : sig.torvik?.fair_spread_home);
+    const hsLine = toSide(mode === 'TOTAL' ? sig.haslametrics?.fair_total : sig.haslametrics?.fair_spread_home);
+    const kpLine = toSide(mode === 'TOTAL' ? sig.kenpom?.fair_total : sig.kenpom?.fair_spread_home);
+    if (tvLine != null) sources.push({ id: 'torvik', label: 'BartTorvik', line: Number(tvLine.toFixed(1)), color: '#0ea5e9' });
+    if (hsLine != null) sources.push({ id: 'hasla', label: 'Haslametrics', line: Number(hsLine.toFixed(1)), color: '#8b5cf6' });
+    if (kpLine != null) sources.push({ id: 'kenpom', label: 'KenPom', line: Number(kpLine.toFixed(1)), color: '#10b981' });
+  }
 
   const allVals = [bookLine, fairLine, ...sources.map((s) => s.line)];
   const rawMin = Math.min(...allVals);
