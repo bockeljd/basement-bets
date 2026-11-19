@@ -198,6 +198,7 @@ class DraftKingsTextParser:
             # 1. Identify Lines by Content
             status = "PENDING"
             status_idx = -1
+            has_open_signal = False
             wager = 0.0
             paid = 0.0
             has_paid = False
@@ -241,6 +242,16 @@ class DraftKingsTextParser:
                                 odds = int(pick)
                             except Exception:
                                 odds = int(odds_matches[-1])
+
+                # Detect explicit OPEN/live slip markers so stray LOST/WON tab words never misgrade open bets
+                if (
+                    re.fullmatch(r'OPEN(?:\s*\(.*\))?', l_up)
+                    or 'TO WIN:' in l_up
+                    or 'EST. PAYOUT' in l_up
+                    or 'POTENTIAL PAYOUT' in l_up
+                    or re.search(r'\bCASH\s+OUT\s+\$', l_up)
+                ):
+                    has_open_signal = True
 
                 # Status (word-boundary matches; prefer explicit badge / latest settled token, never substring match)
                 st_tok = None
@@ -565,6 +576,7 @@ class DraftKingsTextParser:
                     noise_caps = {
                         'WAGER', 'PAID', 'PAYOUT', 'FINAL', 'SCORE', 'LIVE', 'TOTAL', 'SPREAD',
                         'WON', 'LOST', 'CASHED', 'OUT', 'BOOST', 'UNDER', 'OVER', 'VIEW', 'PICKS',
+                        'VIEW PICKS', 'HIDE PICKS', 'OPEN', 'SETTLED', 'CASH OUT', 'TO WIN', 'MY BETS',
                         'OT'
                     }
                     for ln in lines:
@@ -600,7 +612,7 @@ class DraftKingsTextParser:
                     noise = {
                         'WAGER', 'PAID', 'PAYOUT', 'FINAL', 'SCORE', 'LIVE', 'TOTAL', 'SPREAD',
                         'WON', 'LOST', 'CASHED', 'OUT', 'BOOST', 'UNDER', 'OVER',
-                        'INCLUDES', 'POTENTIAL'
+                        'INCLUDES', 'POTENTIAL', 'OPEN', 'VIEW', 'PICKS', 'VIEW PICKS', 'SETTLED', 'CASH'
                     }
                     cleaned = []
                     for t in tokens:
@@ -610,7 +622,7 @@ class DraftKingsTextParser:
                         # Strip promo prefix inside the token
                         if tt.upper().startswith('BOOST '):
                             tt = tt[6:].strip()
-                        if tt and tt not in noise:
+                        if tt and tt not in noise and not all(w in noise for w in tt.upper().split()):
                             cleaned.append(tt)
                     # De-dupe while preserving order
                     uniq = []
@@ -688,6 +700,11 @@ class DraftKingsTextParser:
                     profit = sign * float(pm.group(2))
                 except Exception:
                     profit = None
+
+            # If explicit OPEN slip markers exist and there is no Paid: line, the bet is still OPEN (never LOST)
+            if has_open_signal and not has_paid:
+                status = "PENDING"
+                profit = 0.0
 
             # If explicit Paid/Payout amount is present, use it as ground truth against false WON labels!
             status_up = status.upper()
