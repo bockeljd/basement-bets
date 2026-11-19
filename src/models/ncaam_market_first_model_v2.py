@@ -44,7 +44,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.3.0-calibrated"
+    VERSION = "2.3.1-calibrated"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -520,16 +520,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
                  pass
 
             if days_rest <= 1: 
-                print(f"[FATIGUE] {team_name}: Back-to-back (-1.5)")
-                return -1.5  # Back-to-back
+                print(f"[FATIGUE] {team_name}: Back-to-back (-0.75)")
+                return -0.75  # Back-to-back
             
             if len(rows) > 1:
                 two_games_ago = rows[1]['start_time']
                 if isinstance(two_games_ago, str):
                     two_games_ago = datetime.fromisoformat(two_games_ago)
                 if (current_game_date - two_games_ago).days <= 6:
-                    print(f"[FATIGUE] {team_name}: 3rd game in 6 days (-2.5)")
-                    return -2.5  # 3rd game in 6 days
+                    print(f"[FATIGUE] {team_name}: 3rd game in 6 days (-1.0)")
+                    return -1.0  # 3rd game in 6 days
                     
         except Exception as e:
             print(f"[MODEL] Fatigue calc error for {team_name}: {e}")
@@ -1734,7 +1734,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         event_id = event.get('id')
         h_fatigue = self._calculate_fatigue_penalty(event['home_team'], event_id, game_date) or 0.0
         a_fatigue = self._calculate_fatigue_penalty(event['away_team'], event_id, game_date) or 0.0
-        fatigue_adj = h_fatigue - a_fatigue
+        fatigue_adj = max(-1.0, min(1.0, h_fatigue - a_fatigue))
         mu_spread_final += fatigue_adj
 
         # -- Automated Player-Level Injury Impact (bounded) --
@@ -3096,7 +3096,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         min_n = self.PUBLISH_MIN_N_TORVIK_OK if torvik_ok else self.PUBLISH_MIN_N_TORVIK_MISSING
         side_lower = str(rec.get("side") or "").strip().lower()
         tags = [str(t or "").strip().lower() for t in (rec.get("movement_tags") or [])]
-        has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags)
+        has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags) or ("lagging_book_edge" in tags)
         is_early = bool(rec.get("_is_early_season"))
         min_games = rec.get("_min_rec_games")
         low_sample = min_games is not None and int(min_games) < 6
@@ -3223,8 +3223,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         self._winprob_calibration = load_winprob_calibration(
             "winprob_calibration_ncaam",
             "winprob_calibration_ncaam.json",
-            min_obs=60,
-            min_max_pcal=0.52,
+            min_obs=150,
+            min_max_pcal=0.55,
             min_season_start=season_start_date_for_game(),
         )
         return self._winprob_calibration
@@ -3241,10 +3241,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return 1.0
         cal = self._load_winprob_calibration()
         try:
-            blend_w = float(os.getenv('NCAAM_WINPROB_CAL_BLEND', '0.65'))
+            default_blend = '0.25' if is_early_season else '0.35'
+            blend_w = float(os.getenv('NCAAM_WINPROB_CAL_BLEND', default_blend))
             blend_w = max(0.0, min(1.0, blend_w))
         except Exception:
-            blend_w = 0.65
+            blend_w = 0.25 if is_early_season else 0.35
         return interpolate_pava_prob(
             p_val,
             cal,
@@ -3908,6 +3909,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 agree_count=g_agree_sp,
             )
 
+            # Top-down lagging-book line-shopping edge (best book beats market consensus by >= 1.0 pt)
+            home_book_edge_pts = round(float(line_home_bet) - float(market_line_s), 2)
+            away_book_edge_pts = round(float(line_away_bet) - (-float(market_line_s)), 2)
+
             cand_home = {
                 "market": "SPREAD",
                 "side": "home",
@@ -3922,6 +3927,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_home, 4)),
                 "book": best_home.get('book') or book_consensus,
                 "edge_points": float(round(edge_pts_home, 2)),
+                "market_line_edge_pts": home_book_edge_pts,
+                "movement_tags": (["lagging_book_edge"] if home_book_edge_pts >= 1.0 else []),
                 "sharp_book": snap.get("_sharp_spread_book"),
                 "sharp_line": self._sharp_line_for_side("SPREAD", "home", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
                 "sharp_edge_pts": self._compute_sharp_edge_pts("SPREAD", "home", line_home_bet, snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
@@ -3957,6 +3964,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "kelly": float(round(kelly_away, 4)),
                 "book": (best_away or {}).get('book') or book_consensus,
                 "edge_points": float(round(edge_pts_away, 2)),
+                "market_line_edge_pts": away_book_edge_pts,
+                "movement_tags": (["lagging_book_edge"] if away_book_edge_pts >= 1.0 else []),
                 "sharp_book": snap.get("_sharp_spread_book"),
                 "sharp_line": self._sharp_line_for_side("SPREAD", "away", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
                 "sharp_edge_pts": self._compute_sharp_edge_pts("SPREAD", "away", line_away_bet, snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
@@ -4011,6 +4020,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             # Soft-adjust: inflate uncertainty + degrade EV
                             ev_raw = float(best.get('ev') or 0.0)
                             ev_adj = ev_raw - float(ev_penalty or 0.0)
+                            merged_tags = list(dict.fromkeys(list(best.get('movement_tags') or []) + list(reasons or [])))
                             out = {**best,
                                    'steam_blocked': False,
                                    'sanity_score': score,
@@ -4018,7 +4028,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                    'sigma_mult': float(sigma_mult or 1.0),
                                    'ev_raw': float(round(ev_raw, 4)),
                                    'ev_penalty': float(round(ev_penalty or 0.0, 4)),
-                                   'movement_tags': reasons}
+                                   'movement_tags': merged_tags}
 
                             # Recompute win_prob, ev, kelly, and bounds with inflated sigma (movement/disagreement => more uncertainty)
                             try:
@@ -4219,6 +4229,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         else:
                             ev_raw = float(best.get('ev') or 0.0)
                             ev_adj = ev_raw - float(ev_penalty or 0.0)
+                            merged_tags = list(dict.fromkeys(list(best.get('movement_tags') or []) + list(reasons or [])))
                             out = {**best,
                                    'steam_blocked': False,
                                    'sanity_score': score,
@@ -4226,7 +4237,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                    'sigma_mult': float(sigma_mult or 1.0),
                                    'ev_raw': float(round(ev_raw, 4)),
                                    'ev_penalty': float(round(ev_penalty or 0.0, 4)),
-                                   'movement_tags': reasons}
+                                   'movement_tags': merged_tags}
 
                             try:
                                 out_side = str(out.get('side') or '').lower()
