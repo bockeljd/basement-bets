@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, CheckCircle2, AlertCircle } from 'lucide-react';
+import { DollarSign, CheckCircle2, AlertCircle, PlusCircle, X } from 'lucide-react';
 import api from '../api/axios';
 import { formatSyncDateLabel, getAccountLastSync } from '../components/TransactionView';
 
@@ -8,6 +8,16 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
   const [editingAcc, setEditingAcc] = useState(null); // { provider, accountId, value }
   const [savingBalance, setSavingBalance] = useState(false);
   const [balanceMsg, setBalanceMsg] = useState(null);
+  const [showTxnForm, setShowTxnForm] = useState(false);
+  const [savingTxn, setSavingTxn] = useState(false);
+  const [txnForm, setTxnForm] = useState(() => ({
+    type: 'Deposit',
+    provider: 'DraftKings',
+    account_id: 'Main',
+    amount: '',
+    date: new Date().toISOString().slice(0, 10),
+    description: '',
+  }));
 
   const normalizedFinancials = financials || {};
 
@@ -83,6 +93,43 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
     }
   };
 
+  const handleSaveTxn = async (e) => {
+    e.preventDefault();
+    const amt = Number(txnForm.amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setBalanceMsg({ tone: 'err', text: 'Enter a valid positive amount.' });
+      return;
+    }
+    setSavingTxn(true);
+    setBalanceMsg(null);
+    try {
+      await api.post('/api/transactions/manual', {
+        provider: txnForm.provider,
+        account_id: txnForm.account_id,
+        type: txnForm.type,
+        amount: amt,
+        date: txnForm.date || new Date().toISOString().slice(0, 10),
+        description: txnForm.description.trim() || `Manual ${txnForm.type}`,
+      });
+      setBalanceMsg({
+        tone: 'ok',
+        text: `Logged ${txnForm.type} of ${fmt(amt)} on ${txnForm.provider} (${txnForm.account_id === 'User2' ? 'Secondary' : 'Primary'}).`,
+      });
+      setTxnForm((prev) => ({ ...prev, amount: '', description: '' }));
+      setShowTxnForm(false);
+      if (typeof window !== 'undefined' && typeof window.__BB_RELOAD_DASHBOARD__ === 'function') {
+        await window.__BB_RELOAD_DASHBOARD__();
+      }
+    } catch (err) {
+      setBalanceMsg({
+        tone: 'err',
+        text: err.response?.data?.detail || err.message || 'Failed to log transaction.',
+      });
+    } finally {
+      setSavingTxn(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {balanceMsg && (
@@ -100,7 +147,7 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
         </div>
       )}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-        <div className="p-5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+        <div className="p-5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold flex items-center gap-2 text-white">
               <DollarSign className="text-emerald-400" size={18} /> Bankroll, Deposits &amp; Withdrawals
@@ -127,8 +174,127 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
                 );
               })()}
             </span>
+            <button
+              type="button"
+              onClick={() => setShowTxnForm((v) => !v)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 font-sans font-semibold text-xs cursor-pointer transition-colors"
+            >
+              {showTxnForm ? <X size={14} aria-hidden="true" /> : <PlusCircle size={14} aria-hidden="true" />}
+              <span>{showTxnForm ? 'Close' : 'Log Deposit / Withdrawal'}</span>
+            </button>
           </div>
         </div>
+
+        {showTxnForm && (
+          <form onSubmit={handleSaveTxn} className="p-4 border-b border-slate-800 bg-slate-950/70 space-y-3">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
+                {['Deposit', 'Withdrawal'].map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTxnForm((f) => ({ ...f, type: t }))}
+                    className={`px-3 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                      txnForm.type === t
+                        ? t === 'Withdrawal'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-sky-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+
+              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
+                {['DraftKings', 'FanDuel', 'Other'].map((bk) => (
+                  <button
+                    key={bk}
+                    type="button"
+                    onClick={() => setTxnForm((f) => ({ ...f, provider: bk }))}
+                    className={`px-3 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                      txnForm.provider === bk ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {bk}
+                  </button>
+                ))}
+              </div>
+
+              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
+                {[
+                  { id: 'Main', label: 'Primary' },
+                  { id: 'User2', label: 'Secondary' },
+                ].map((acc) => (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    onClick={() => setTxnForm((f) => ({ ...f, account_id: acc.id }))}
+                    className={`px-3 py-1 rounded-md font-semibold cursor-pointer transition-colors ${
+                      txnForm.account_id === acc.id ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {acc.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs">
+              <div>
+                <label htmlFor="txn-amount" className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                  Amount ($)
+                </label>
+                <input
+                  id="txn-amount"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  placeholder="250.00"
+                  value={txnForm.amount}
+                  onChange={(e) => setTxnForm((f) => ({ ...f, amount: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label htmlFor="txn-date" className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                  Date
+                </label>
+                <input
+                  id="txn-date"
+                  type="date"
+                  value={txnForm.date}
+                  onChange={(e) => setTxnForm((f) => ({ ...f, date: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label htmlFor="txn-note" className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                  Note (optional)
+                </label>
+                <input
+                  id="txn-note"
+                  type="text"
+                  placeholder="e.g. PayPal cashout"
+                  value={txnForm.description}
+                  onChange={(e) => setTxnForm((f) => ({ ...f, description: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  disabled={savingTxn}
+                  className="w-full px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold cursor-pointer transition-colors"
+                >
+                  {savingTxn ? 'Saving…' : `Save ${txnForm.type}`}
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
 
         <div className="overflow-x-auto" role="region" aria-label="Sportsbook financials statement" tabIndex={0}>
           <table className="w-full text-left text-sm">

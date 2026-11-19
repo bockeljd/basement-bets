@@ -15,6 +15,31 @@ const encodeUtf8PayloadJs = `
   if (!w) { window.location.href = dest; }
 `;
 
+const extractTxnsJs = `
+  function extractPageTransactions(prov){
+    var out=[];var seen={};
+    var dateRe=/(\\b\\d{4}-\\d{2}-\\d{2}\\b|\\b\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}\\b|\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{2,4}\\b)/i;
+    var amtRe=/([+-]?\\s*\\$\\s*[0-9,]+(?:\\.\\d{2})?)/;
+    var skipRe=/\\b(wager|bet placed|payout|winnings|bonus|promo|crown|free bet|profit boost)\\b/i;
+    var nodes=document.querySelectorAll('tr,[role="row"],[data-testid*="transaction" i],[class*="transaction" i],[class*="history" i] li');
+    nodes.forEach(function(el){
+      var t=(el.innerText||'').replace(/\\s+/g,' ').trim();
+      if(!t||t.length<12||t.length>320||skipRe.test(t))return;
+      var tl=t.toLowerCase();
+      var typ=tl.indexOf('withdraw')!==-1?'Withdrawal':(tl.indexOf('deposit')!==-1?'Deposit':null);
+      if(!typ)return;
+      var dm=t.match(dateRe);var am=t.match(amtRe);
+      if(!dm||!am)return;
+      var val=parseFloat(am[1].replace(/[^0-9.]/g,''));
+      if(!val||val<1)return;
+      var k=typ+'|'+dm[1]+'|'+val.toFixed(2);
+      if(seen[k])return;seen[k]=true;
+      out.push({provider:prov,account_id:accId,type:typ,date:dm[1],amount:typ==='Withdrawal'?-val:val,description:prov+' '+typ+' (Browser Sync)'});
+    });
+    return out;
+  }
+`;
+
 /**
  * Build a 1-click Chrome bookmarklet for FanDuel (`sportsbook.fanduel.com`).
  * Tries same-origin / sbapi fetch first using active login/token, then falls back to
@@ -109,11 +134,14 @@ export const buildFanDuelBookmarklet = (appOrigin, accountId = 'Main') => {
         };
       });
       if(pill.parentNode){pill.parentNode.removeChild(pill);}
-      if(!apiBets.length&&rawText.indexOf('BET ID:')===-1){
-        alert('No FanDuel bets detected on this page yet. Open My Bets (Open or Settled), scroll down slightly, and click this bookmark again.');
+      ${extractTxnsJs}
+      var txns=extractPageTransactions('FanDuel');
+      var isTxnPage=/transaction|history|wallet|cashier|statement/i.test(location.href);
+      if(!apiBets.length&&!txns.length&&!isTxnPage&&rawText.indexOf('BET ID:')===-1){
+        alert('No FanDuel bets or transactions detected on this page yet. Open My Bets or Transaction History, scroll down slightly, and click this bookmark again.');
         return;
       }
-      var payload=JSON.stringify({_bb_sb_bundle:1,provider:'FanDuel',account_id:accId,api_bets:apiBets,raw_text:apiBets.length?'':rawText.slice(0,180000),balance:bal,source:'fanduel_bookmarklet'});
+      var payload=JSON.stringify({_bb_sb_bundle:1,provider:'FanDuel',account_id:accId,api_bets:apiBets,transactions:txns,raw_text:(apiBets.length&&!isTxnPage)?'':rawText.slice(0,180000),balance:bal,source:'fanduel_bookmarklet'});
       ${encodeUtf8PayloadJs}
     }).catch(function(err){
       if(pill.parentNode){pill.parentNode.removeChild(pill);}
@@ -187,13 +215,15 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
       if(hasOutcome&&hasMoney){seen[t]=true;cards.push(t);}
     });
     var rawText=cards.length?cards.join('\\n\\n'):(root.innerText||'');
+    ${extractTxnsJs}
+    var txns=extractPageTransactions('DraftKings');
     var bal=readBalance();
     if(pill.parentNode){pill.parentNode.removeChild(pill);}
     if(!rawText||rawText.length<40){
-      alert('No DraftKings bets detected yet. Make sure you are on My Bets (Open or Settled) and click again.');
+      alert('No DraftKings bets or transactions detected yet. Open My Bets or Financial Center -> Transactions and click again.');
       return;
     }
-    var payload=JSON.stringify({_bb_sb_bundle:1,provider:'DraftKings',account_id:accId,raw_text:rawText.slice(0,180000),balance:bal,source:'draftkings_bookmarklet'});
+    var payload=JSON.stringify({_bb_sb_bundle:1,provider:'DraftKings',account_id:accId,transactions:txns,raw_text:rawText.slice(0,180000),balance:bal,source:'draftkings_bookmarklet'});
     ${encodeUtf8PayloadJs}
   })();`;
   return `javascript:${body.replace(/\n\s*/g, '')}`;

@@ -405,10 +405,11 @@ function App() {
                 const res = await api.post('/api/sync/browser-payload', payloadObj);
                 sessionStorage.removeItem('pending_sb_import');
                 const d = res.data || {};
+                const txnPart = d.transactions_saved > 0 ? ` • ${d.transactions_saved} deposits/withdrawals saved` : '';
                 const balPart = d.balance_snapshot_saved ? ' • wallet balance saved' : '';
                 setSbImportBanner({
                     tone: 'ok',
-                    text: `${d.provider || 'Sportsbook'} synced: ${d.bets_saved ?? 0} bets saved (${d.bets_inserted ?? 0} new, ${d.bets_updated ?? 0} updated)${balPart}.`,
+                    text: `${d.provider || 'Sportsbook'} synced: ${d.bets_saved ?? 0} bets saved (${d.bets_inserted ?? 0} new, ${d.bets_updated ?? 0} updated)${txnPart}${balPart}.`,
                 });
                 setPage('actuals');
                 setActualsTab('transactions');

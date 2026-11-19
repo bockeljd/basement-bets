@@ -612,6 +612,66 @@ def record_sync_run(
         return False
 
 
+def extract_transactions_from_raw_text(raw_text: str, provider: str) -> List[Dict[str, Any]]:
+    """
+    Fallback text parser for DraftKings Financial Center / FanDuel Transaction History
+    page dumps sent by Chrome bookmarklets. Extracts Deposit & Withdrawal rows cleanly.
+    """
+    if not raw_text:
+        return []
+    lines = [ln.strip() for ln in str(raw_text).splitlines() if ln.strip()]
+    if not lines:
+        return []
+
+    date_re = re.compile(
+        r"(\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{2,4}\b)",
+        re.IGNORECASE,
+    )
+    amt_re = re.compile(r"([+-]?\s*\$\s*[0-9,]+(?:\.\d{2})?)")
+    skip_re = re.compile(r"\b(wager|bet placed|payout|winnings|bonus|promo|crown|free bet|profit boost|entry fee|contest)\b", re.IGNORECASE)
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    n = len(lines)
+    i = 0
+    while i < n:
+        ln = lines[i]
+        low = ln.lower()
+        txn_type = None
+        if "withdraw" in low and not skip_re.search(ln):
+            txn_type = "Withdrawal"
+        elif "deposit" in low and not skip_re.search(ln):
+            txn_type = "Deposit"
+
+        if not txn_type:
+            i += 1
+            continue
+
+        # Inspect current line + next 3 lines for date and dollar amount
+        window = " | ".join(lines[i : min(n, i + 4)])
+        m_amt = amt_re.search(ln) or amt_re.search(window)
+        m_date = date_re.search(ln) or date_re.search(window)
+        if m_amt and m_date:
+            amt = parse_money_value(m_amt.group(1))
+            if amt is not None and abs(amt) >= 1.0:
+                dt = normalize_date_str(m_date.group(1))
+                key = (txn_type, dt, round(abs(amt), 2))
+                if key not in seen:
+                    seen.add(key)
+                    out.append({
+                        "provider": provider,
+                        "type": txn_type,
+                        "date": dt,
+                        "amount": abs(amt) if txn_type == "Deposit" else -abs(amt),
+                        "description": f"{provider} {txn_type} (Browser Sync)",
+                    })
+                i += 2
+                continue
+        i += 1
+
+    return out
+
+
 def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
     Process payloads sent by Chrome Bookmarklets or local browser capture tools.
@@ -663,9 +723,11 @@ def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, A
         source=source,
     )
 
-    txns = payload.get("transactions")
+    txns = list(payload.get("transactions") or []) if isinstance(payload.get("transactions"), list) else []
+    if not txns and raw_text:
+        txns = extract_transactions_from_raw_text(raw_text, provider)
     txn_saved = 0
-    if isinstance(txns, list) and txns:
+    if txns:
         txn_saved = ingest_statement_transactions(
             txns,
             user_id=user_id,

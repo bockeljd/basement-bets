@@ -305,8 +305,8 @@ export default function SportsbookSyncHub({ onSyncComplete, initialMethod = 'boo
                 Drag either button below to your Chrome Bookmarks Bar (
                 <kbd className="px-1 py-0.5 bg-slate-900 rounded border border-slate-700 text-[10px]">Cmd+Shift+B</kbd>).
               </li>
-              <li>Log into DraftKings or FanDuel in Chrome and open <strong>My Bets</strong> (Open or Settled).</li>
-              <li>Click the bookmark once &mdash; your bets &amp; current wallet balance sync back here automatically.</li>
+              <li>Log into DraftKings or FanDuel in Chrome and open <strong>My Bets</strong> (or <strong>Financial Center / Transaction History</strong> for deposits &amp; withdrawals).</li>
+              <li>Click the bookmark once &mdash; your bets, deposits/withdrawals &amp; current wallet balance sync back here automatically.</li>
             </ol>
           </div>
 
