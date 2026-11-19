@@ -20,6 +20,9 @@ class DraftKingsTextParser:
         lines = [ln.strip() for ln in (content or '').replace('\r\n', '\n').split('\n') if ln.strip()]
         if not lines:
             return []
+        raw_low = (content or '').lower()
+        if 'transaction history' in raw_low and not re.search(r'DK\d{10,}', content or ''):
+            return []
 
         def infer_date(buf: List[str]) -> str:
             """Infer the bet's placed_at timestamp.

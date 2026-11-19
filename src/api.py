@@ -1464,6 +1464,21 @@ async def cleanup_bad_sync(request: Request, user: dict = Depends(get_current_us
             )
             deduped_txns = int(res_dup.rowcount or 0)
 
+            # Delete any phantom bets accidentally parsed from Transaction History pages
+            res_phantom = _exec(
+                conn,
+                """
+                DELETE FROM bets
+                WHERE (user_id = %s OR user_id IS NULL)
+                  AND (
+                    LOWER(COALESCE(selection, '')) = 'transaction history'
+                    OR LOWER(COALESCE(description, '')) LIKE '%%transaction history%%'
+                  )
+                """,
+                (uid,),
+            )
+            phantom_bets_removed = int(res_phantom.rowcount or 0)
+
             # Revert any bookmarklet balance snapshot from the last 24h if a prior snapshot exists
             snaps = _exec(
                 conn,
@@ -1503,6 +1518,7 @@ async def cleanup_bad_sync(request: Request, user: dict = Depends(get_current_us
             "status": "ok",
             "deduped_txns": deduped_txns,
             "browser_txns_removed": browser_txns_removed,
+            "phantom_bets_removed": phantom_bets_removed,
             "reverted_snapshots": reverted_snapshots,
         }
     except Exception as e:
