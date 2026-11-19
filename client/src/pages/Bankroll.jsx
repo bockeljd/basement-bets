@@ -117,10 +117,15 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
               Withdrawn: <strong className="text-white">{fmt(normalizedFinancials.total_withdrawn)}</strong>
             </span>
             <span className="text-slate-300">
-              Net In:{' '}
-              <strong className="text-sky-300">
-                {fmt(Number(normalizedFinancials.total_deposited || 0) - Number(normalizedFinancials.total_withdrawn || 0))}
-              </strong>
+              Net:{' '}
+              {(() => {
+                const netCash = Number(normalizedFinancials.total_withdrawn || 0) - Number(normalizedFinancials.total_deposited || 0);
+                return (
+                  <strong className={netCash >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                    {netCash >= 0 ? '+' : ''}{fmt(netCash)}
+                  </strong>
+                );
+              })()}
             </span>
           </div>
         </div>

@@ -639,7 +639,7 @@ function App() {
                         const roiPct = settledWager > 0 ? ((settledProfit / settledWager) * 100).toFixed(1) : null;
                         const totalDeposited = Number(financials?.total_deposited || 0);
                         const totalWithdrawn = Number(financials?.total_withdrawn || 0);
-                        const netDeposited = totalDeposited - totalWithdrawn;
+                        const netCashFlow = totalWithdrawn - totalDeposited;
                         const totalBankroll = Number(financials?.total_in_play || 0);
 
                         return (
@@ -675,8 +675,8 @@ function App() {
                                     </div>
                                     <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
                                         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Deposits / Withdrawals</div>
-                                        <div className="mt-0.5 text-lg font-mono font-bold text-slate-100">
-                                            {formatCurrency(netDeposited)} <span className="text-[11px] font-normal text-slate-400">net</span>
+                                        <div className={`mt-0.5 text-lg font-mono font-bold ${netCashFlow >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                            {netCashFlow >= 0 ? '+' : ''}{formatCurrency(netCashFlow)} <span className="text-[11px] font-normal text-slate-400">net</span>
                                         </div>
                                         <div className="text-[11px] font-mono text-slate-400 truncate">
                                             In {formatCurrency(totalDeposited)} · Out {formatCurrency(totalWithdrawn)}
