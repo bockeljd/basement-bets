@@ -59,7 +59,7 @@ class OddsFetcherService:
                 url = f"https://api.actionnetwork.com/web/v2/scoreboard/ncaab"
                 params = {
                     "bookIds": "15,30,79,2988,75,123,71,68,69",
-                    "periods": "event",
+                    "periods": "event,firsthalf",
                     "date": date_str,
                     "division": "D1",
                 }
@@ -95,10 +95,10 @@ class OddsFetcherService:
     }
 
     @staticmethod
-    def _extract_market_dict(market_obj: Any) -> Optional[Dict[str, Any]]:
+    def _extract_market_dict(market_obj: Any, period: str = 'event') -> Optional[Dict[str, Any]]:
         if not isinstance(market_obj, dict):
             return None
-        ev = market_obj.get('event') or {}
+        ev = market_obj.get(period) or {}
         if not isinstance(ev, dict):
             return None
 
@@ -161,22 +161,26 @@ class OddsFetcherService:
             odds_list = game.get('odds', [])
             valid_odd = odds_list[0] if odds_list else {}
 
-            # v2: betting data is under game['markets'][<book_id>]['event'][moneyline/spread/total]
+            # v2: betting data is under game['markets'][<book_id>]['event'|'firsthalf'][moneyline/spread/total]
             mk = game.get('markets') or {}
             book_lines: Dict[str, Dict[str, Any]] = {}
+            book_lines_1h: Dict[str, Dict[str, Any]] = {}
             open_lines: Optional[Dict[str, Any]] = None
 
             if isinstance(mk, dict):
                 for raw_bid, mobj in mk.items():
                     bid = str(raw_bid).strip()
-                    extracted = self._extract_market_dict(mobj)
-                    if not extracted:
-                        continue
-                    if bid == '30':
-                        open_lines = extracted
-                    else:
+                    extracted = self._extract_market_dict(mobj, period='event')
+                    if extracted:
+                        if bid == '30':
+                            open_lines = extracted
+                        else:
+                            bname = self.ACTION_BOOK_NAMES.get(bid, f"action_book_{bid}")
+                            book_lines[bname] = extracted
+                    extracted_1h = self._extract_market_dict(mobj, period='firsthalf')
+                    if extracted_1h and bid != '30':
                         bname = self.ACTION_BOOK_NAMES.get(bid, f"action_book_{bid}")
-                        book_lines[bname] = extracted
+                        book_lines_1h[bname] = extracted_1h
 
             # Prefer consensus ('15') for top-level backward-compatible fields, else any live book
             cons_extracted = book_lines.get('consensus')
@@ -212,6 +216,7 @@ class OddsFetcherService:
                 'over_odds': over_odds if over_odds is not None else valid_odd.get('over'),
                 'under_odds': under_odds if under_odds is not None else valid_odd.get('under'),
                 'book_lines': book_lines,
+                'book_lines_1h': book_lines_1h,
                 'open_lines': open_lines,
             }
         except Exception:

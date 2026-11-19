@@ -429,9 +429,12 @@ class OddsAdapter:
         if not event_id:
             return []
 
-        def _append_book_snaps(book_name: str, payload: Dict, out: List[Dict]):
+        def _append_book_snaps(book_name: str, payload: Dict, out: List[Dict], mkt_suffix: str = ""):
             if not isinstance(payload, dict):
                 return
+            sp_mkt = f"SPREAD{mkt_suffix}"
+            tot_mkt = f"TOTAL{mkt_suffix}"
+            ml_mkt = f"MONEYLINE{mkt_suffix}"
             hs = payload.get('home_spread')
             if hs is not None:
                 try:
@@ -442,7 +445,7 @@ class OddsAdapter:
                     if payload.get('home_spread_odds') is not None:
                         out.append({
                             "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                            "market_type": "SPREAD", "side": "HOME", "line_value": hs_f,
+                            "market_type": sp_mkt, "side": "HOME", "line_value": hs_f,
                             "price": payload.get('home_spread_odds'), "captured_at": captured_at,
                         })
                     if payload.get('away_spread_odds') is not None:
@@ -453,7 +456,7 @@ class OddsAdapter:
                             away_line_f = -hs_f
                         out.append({
                             "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                            "market_type": "SPREAD", "side": "AWAY", "line_value": away_line_f,
+                            "market_type": sp_mkt, "side": "AWAY", "line_value": away_line_f,
                             "price": payload.get('away_spread_odds'), "captured_at": captured_at,
                         })
             tot = payload.get('total_score')
@@ -461,27 +464,28 @@ class OddsAdapter:
                 if payload.get('over_odds') is not None:
                     out.append({
                         "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                        "market_type": "TOTAL", "side": "OVER", "line_value": tot,
+                        "market_type": tot_mkt, "side": "OVER", "line_value": tot,
                         "price": payload.get('over_odds'), "captured_at": captured_at,
                     })
                 if payload.get('under_odds') is not None:
                     out.append({
                         "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                        "market_type": "TOTAL", "side": "UNDER", "line_value": tot,
+                        "market_type": tot_mkt, "side": "UNDER", "line_value": tot,
                         "price": payload.get('under_odds'), "captured_at": captured_at,
                     })
-            if payload.get('home_money_line') is not None:
-                out.append({
-                    "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                    "market_type": "MONEYLINE", "side": "HOME", "line_value": None,
-                    "price": payload.get('home_money_line'), "captured_at": captured_at,
-                })
-            if payload.get('away_money_line') is not None:
-                out.append({
-                    "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                    "market_type": "MONEYLINE", "side": "AWAY", "line_value": None,
-                    "price": payload.get('away_money_line'), "captured_at": captured_at,
-                })
+            if not mkt_suffix:
+                if payload.get('home_money_line') is not None:
+                    out.append({
+                        "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                        "market_type": ml_mkt, "side": "HOME", "line_value": None,
+                        "price": payload.get('home_money_line'), "captured_at": captured_at,
+                    })
+                if payload.get('away_money_line') is not None:
+                    out.append({
+                        "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
+                        "market_type": ml_mkt, "side": "AWAY", "line_value": None,
+                        "price": payload.get('away_money_line'), "captured_at": captured_at,
+                    })
 
         snaps = []
         book_lines = event.get('book_lines')
@@ -494,6 +498,14 @@ class OddsAdapter:
                 _append_book_snaps('consensus', event, snaps)
         else:
             _append_book_snaps('consensus', event, snaps)
+
+        # First-half (1H) lines from Action Network v2 (SPREAD_1H / TOTAL_1H)
+        book_lines_1h = event.get('book_lines_1h')
+        if isinstance(book_lines_1h, dict) and book_lines_1h:
+            for bname, bpayload in book_lines_1h.items():
+                if str(bname or '').strip().lower() in ('action_open', 'open'):
+                    continue
+                _append_book_snaps(str(bname), bpayload, snaps, mkt_suffix="_1H")
 
         open_lines = event.get('open_lines')
         if isinstance(open_lines, dict) and open_lines:

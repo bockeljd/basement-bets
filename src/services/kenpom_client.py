@@ -559,11 +559,20 @@ class KenPomClient:
         a_def_ftr = _opt_float(away_rating.get('def_ftr'))
 
         four_factors_adj = 0.0
+        press_mismatch_adj = 0.0
+        press_transition_total_adj = 0.0
         if None not in (h_off_efg, h_def_efg, a_off_efg, a_def_efg):
             efg_diff = ((h_off_efg - a_def_efg) - (a_off_efg - h_def_efg)) * 0.5
             to_diff = 0.0
             if None not in (h_off_to, h_def_to, a_off_to, a_def_to):
                 to_diff = ((a_off_to + h_def_to) - (h_off_to + a_def_to)) * 0.5
+                # Asymmetric Turnover-Press vs. Sloppy Ball-Handling mismatch
+                if h_def_to >= 20.5 and a_off_to >= 19.5:
+                    press_mismatch_adj += min(0.6, ((h_def_to - 20.0) + (a_off_to - 19.0)) * 0.12)
+                    press_transition_total_adj += 0.45
+                if a_def_to >= 20.5 and h_off_to >= 19.5:
+                    press_mismatch_adj -= min(0.6, ((a_def_to - 20.0) + (h_off_to - 19.0)) * 0.12)
+                    press_transition_total_adj += 0.45
             h_off_or = _opt_float(home_rating.get('off_or'))
             h_def_or = _opt_float(home_rating.get('def_or'))
             a_off_or = _opt_float(away_rating.get('off_or'))
@@ -574,21 +583,24 @@ class KenPomClient:
             ftr_diff = 0.0
             if None not in (h_off_ftr, h_def_ftr, a_off_ftr, a_def_ftr):
                 ftr_diff = ((h_off_ftr + a_def_ftr) - (a_off_ftr + h_def_ftr)) * 0.5
-            raw_ff = (efg_diff * 0.12) + (to_diff * 0.08) + (or_diff * 0.06) + (ftr_diff * 0.04)
-            four_factors_adj = round(max(-1.2, min(1.2, raw_ff)), 2)
+            raw_ff = (efg_diff * 0.12) + (to_diff * 0.08) + (or_diff * 0.06) + (ftr_diff * 0.04) + press_mismatch_adj
+            four_factors_adj = round(max(-1.4, min(1.4, raw_ff)), 2)
 
         # Four Factors total scoring adjustment (FT rate, eFG%, turnover rate vs D1 averages)
         tot_ff_terms = []
+        avg_ftr_val = None
         if None not in (h_off_ftr, a_def_ftr, a_off_ftr, h_def_ftr):
-            avg_ftr = (h_off_ftr + a_def_ftr + a_off_ftr + h_def_ftr) / 4.0
-            tot_ff_terms.append((avg_ftr - 33.0) * 0.08)
+            avg_ftr_val = (h_off_ftr + a_def_ftr + a_off_ftr + h_def_ftr) / 4.0
+            tot_ff_terms.append((avg_ftr_val - 33.0) * 0.08)
         if None not in (h_off_efg, a_def_efg, a_off_efg, h_def_efg):
             avg_efg = (h_off_efg + a_def_efg + a_off_efg + h_def_efg) / 4.0
             tot_ff_terms.append((avg_efg - 50.5) * 0.14)
         if None not in (h_off_to, a_def_to, a_off_to, h_def_to):
             avg_to = (h_off_to + a_def_to + a_off_to + h_def_to) / 4.0
             tot_ff_terms.append(-((avg_to - 17.5) * 0.10))
-        total_four_factors_adj = round(max(-1.5, min(1.5, sum(tot_ff_terms))), 2) if tot_ff_terms else 0.0
+        if press_transition_total_adj > 0.0:
+            tot_ff_terms.append(press_transition_total_adj)
+        total_four_factors_adj = round(max(-1.6, min(1.6, sum(tot_ff_terms))), 2) if tot_ff_terms else 0.0
 
         # Experience & Effective Height matchup edge
         h_exp = _opt_float(home_rating.get('experience'))
@@ -633,6 +645,10 @@ class KenPomClient:
             'sos_spread_adj': sos_spread_adj,
             'four_factors_adj': four_factors_adj,
             'total_four_factors_adj': total_four_factors_adj,
+            'press_mismatch_adj': round(press_mismatch_adj, 2),
+            'avg_ftr': round(avg_ftr_val, 2) if avg_ftr_val is not None else None,
+            'home_conf': home_rating.get('conf'),
+            'away_conf': away_rating.get('conf'),
             'exp_height_adj': exp_height_adj,
             'home_continuity': h_cont,
             'away_continuity': a_cont,

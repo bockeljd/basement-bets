@@ -20,17 +20,17 @@ on:
         required: false
         default: ""
       w_kenpom:
-        description: "Override: NCAAM_W_KENPOM"
+        description: "Override: NCAAM_W_KENPOM (blank = dynamic)"
         required: false
-        default: "0.20"
+        default: ""
       cap_spread:
-        description: "Override: NCAAM_CAP_SPREAD"
+        description: "Override: NCAAM_CAP_SPREAD (blank = dynamic)"
         required: false
-        default: "2.0"
+        default: ""
       cap_total:
-        description: "Override: NCAAM_CAP_TOTAL"
+        description: "Override: NCAAM_CAP_TOTAL (blank = dynamic)"
         required: false
-        default: "3.0"
+        default: ""
 
 jobs:
   backtest:
@@ -61,7 +61,11 @@ jobs:
           NCAAM_CAP_SPREAD: ${{ inputs.cap_spread }}
           NCAAM_CAP_TOTAL: ${{ inputs.cap_total }}
         run: |
-          # Important: keep this in unbuffered mode so logs stream
+          # Only export override env vars when explicitly provided (blank = production dynamic weights/caps)
+          [ -n "${NCAAM_W_BASE}" ] || unset NCAAM_W_BASE
+          [ -n "${NCAAM_W_KENPOM}" ] || unset NCAAM_W_KENPOM
+          [ -n "${NCAAM_CAP_SPREAD}" ] || unset NCAAM_CAP_SPREAD
+          [ -n "${NCAAM_CAP_TOTAL}" ] || unset NCAAM_CAP_TOTAL
           python3 -u src/scripts/backtest_ncaam_model.py
 
       - name: Upload backtest output

@@ -17,6 +17,31 @@ def _et_date(d: datetime) -> str:
         return d.strftime('%Y-%m-%d')
 
 
+def _best_book_line_before(conn, event_id: str, market_type: str, side: str, cutoff: datetime):
+    """Fetch the best bettable retail line & price across all live books before tipoff."""
+    rows = _exec(conn, """
+        SELECT DISTINCT ON (book) book, line_value, price, captured_at
+        FROM odds_snapshots
+        WHERE event_id=%s AND market_type=%s AND side=%s
+          AND COALESCE(book, '') NOT IN ('action_open', 'open', '')
+          AND line_value IS NOT NULL
+          AND captured_at <= %s
+        ORDER BY book, captured_at DESC
+    """, (event_id, market_type, side, cutoff)).fetchall()
+    if not rows:
+        return None
+    cands = [dict(r) for r in rows]
+    if market_type == 'SPREAD':
+        best = max(cands, key=lambda x: (float(x['line_value']), float(x.get('price') or -110)))
+    elif market_type == 'TOTAL' and side == 'OVER':
+        best = min(cands, key=lambda x: (float(x['line_value']), -float(x.get('price') or -110)))
+    elif market_type == 'TOTAL' and side == 'UNDER':
+        best = max(cands, key=lambda x: (float(x['line_value']), float(x.get('price') or -110)))
+    else:
+        best = max(cands, key=lambda x: float(x.get('price') or -110))
+    return best
+
+
 def _latest_line_before(conn, event_id: str, market_type: str, side: str, cutoff: datetime):
     # Use captured_at if exists; fallback to latest.
     row = _exec(conn, """
@@ -431,11 +456,16 @@ def main():
 
             cutoff = st - timedelta(minutes=10)  # approximate "bet-time/close"
 
-            # Pull bet-time consensus lines (per-side)
+            # Pull bet-time consensus lines + best multi-book retail lines (matching live production)
             s_home = _latest_line_before(conn, event_id, 'SPREAD', 'HOME', cutoff)
             s_away = _latest_line_before(conn, event_id, 'SPREAD', 'AWAY', cutoff)
             t_over = _latest_line_before(conn, event_id, 'TOTAL', 'OVER', cutoff)
             t_under = _latest_line_before(conn, event_id, 'TOTAL', 'UNDER', cutoff)
+
+            best_sh = _best_book_line_before(conn, event_id, 'SPREAD', 'HOME', cutoff) or s_home
+            best_sa = _best_book_line_before(conn, event_id, 'SPREAD', 'AWAY', cutoff) or s_away
+            best_to = _best_book_line_before(conn, event_id, 'TOTAL', 'OVER', cutoff) or t_over
+            best_tu = _best_book_line_before(conn, event_id, 'TOTAL', 'UNDER', cutoff) or t_under
 
             # Need both spread_home + total for the model to run
             if not s_home or not t_over:
@@ -448,11 +478,11 @@ def main():
                 'spread_price_home': float(s_home.get('price') or -110),
                 'total': float(t_over['line_value']),
                 'total_over_price': float(t_over.get('price') or -110),
-                # best-price placeholders (use same bet-time snapshot for fairness)
-                '_best_spread_home': {'line_value': float(s_home['line_value']), 'price': float(s_home.get('price') or -110), 'book': 'bt'},
-                '_best_spread_away': {'line_value': float(s_away['line_value']), 'price': float(s_away.get('price') or -110), 'book': 'bt'} if s_away else None,
-                '_best_total_over': {'line_value': float(t_over['line_value']), 'price': float(t_over.get('price') or -110), 'book': 'bt'},
-                '_best_total_under': {'line_value': float(t_under['line_value']), 'price': float(t_under.get('price') or -110), 'book': 'bt'} if t_under else None,
+                # Real multi-book best-line shopping (matches live production 1:1)
+                '_best_spread_home': {'line_value': float(best_sh['line_value']), 'price': float(best_sh.get('price') or -110), 'book': best_sh.get('book') or 'bt'},
+                '_best_spread_away': {'line_value': float(best_sa['line_value']), 'price': float(best_sa.get('price') or -110), 'book': best_sa.get('book') or 'bt'} if best_sa else None,
+                '_best_total_over': {'line_value': float(best_to['line_value']), 'price': float(best_to.get('price') or -110), 'book': best_to.get('book') or 'bt'},
+                '_best_total_under': {'line_value': float(best_tu['line_value']), 'price': float(best_tu.get('price') or -110), 'book': best_tu.get('book') or 'bt'} if best_tu else None,
                 '_raw_snaps': []
             }
 
