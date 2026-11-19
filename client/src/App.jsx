@@ -644,14 +644,6 @@ function App() {
                         });
                         const openBets = actualBets.filter((b) => normSt(b.status) === 'OPEN');
                         const openStake = openBets.reduce((acc, b) => acc + (Number(b.wager ?? b.stake ?? 0) || 0), 0);
-                        const unrealizedToWin = openBets.reduce((acc, b) => {
-                            const w = Number(b.wager ?? b.stake ?? 0) || 0;
-                            const pay = Number(b.payout ?? b.potential_payout ?? 0) || 0;
-                            if (pay > w && w > 0) return acc + (pay - w);
-                            const o = Number(b.odds);
-                            if (!w || !Number.isFinite(o) || o === 0) return acc;
-                            return acc + (o > 0 ? w * (o / 100) : w * (100 / Math.abs(o)));
-                        }, 0);
                         const settledDecided = wonCnt + lostCnt;
                         const winPct = settledDecided > 0 ? ((wonCnt / settledDecided) * 100).toFixed(1) : null;
                         const realizedProfit = settledProfit;
@@ -664,7 +656,7 @@ function App() {
                         return (
                             <div className="mb-6 space-y-4">
                                 {/* Always-Visible Core Actuals KPI Strip */}
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                                     <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
                                         <div
                                             title="Settled betting P/L across all graded bets (matches Performance All-Time & ROI)."
@@ -677,20 +669,6 @@ function App() {
                                         </div>
                                         <div className="text-[11px] font-mono text-slate-400">
                                             {roiPct != null ? `${Number(roiPct) >= 0 ? '+' : ''}${roiPct}% ROI` : 'ROI —'}
-                                        </div>
-                                    </div>
-                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
-                                        <div
-                                            title="Total cash currently staked on open/pending bets and potential profit if they win."
-                                            className="text-[10px] font-bold uppercase tracking-wider text-slate-400 cursor-help"
-                                        >
-                                            Unrealized (Open)
-                                        </div>
-                                        <div className="mt-0.5 text-lg font-mono font-bold text-sky-300">
-                                            {formatCurrency(openStake)}
-                                        </div>
-                                        <div className="text-[11px] font-mono text-slate-400">
-                                            {openBets.length} open{unrealizedToWin > 0 ? ` · +${formatCurrency(unrealizedToWin)} to win` : ''}
                                         </div>
                                     </div>
                                     <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
@@ -711,13 +689,15 @@ function App() {
                                             In {formatCurrency(totalDeposited)} · Out {formatCurrency(totalWithdrawn)}
                                         </div>
                                     </div>
-                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3 col-span-2 md:col-span-1">
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-3.5 py-3">
                                         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash Bankroll</div>
                                         <div className="mt-0.5 text-lg font-mono font-bold text-white">
                                             {formatCurrency(totalBankroll)}
                                         </div>
-                                        <div className="text-[11px] font-mono text-slate-400">
-                                            Equity {formatCurrency(totalBankroll + openStake)}
+                                        <div className="text-[11px] font-mono text-slate-400 truncate">
+                                            {openBets.length > 0
+                                                ? `In play ${formatCurrency(openStake)} (${openBets.length} open) · Equity ${formatCurrency(totalBankroll + openStake)}`
+                                                : `Equity ${formatCurrency(totalBankroll)}`}
                                         </div>
                                     </div>
                                 </div>

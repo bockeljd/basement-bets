@@ -54,6 +54,7 @@ jobs:
         run: |
           if [ "${GRADING_BACKFILL_PENDING}" = "1" ]; then
             python3 src/scripts/grade_predictions.py --backfill-pending --max-grade-rows 5000
+            python3 src/scripts/grade_open_mlb_bets.py
           else
             python3 src/scripts/grade_predictions.py
           fi
