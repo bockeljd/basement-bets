@@ -858,35 +858,132 @@ function App() {
 }
 
 function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, edgeBreakdown, bets, reconciliation, onOpenTransactions }) {
-    // Performance tab is focused on actual betting performance + breakdowns.
+    // Performance tab is focused on actual DraftKings & FanDuel betting performance + breakdowns.
 
     // Scatter / drivers controls
-    const [minSegmentBets, setMinSegmentBets] = useState(5);
+    const [minSegmentBets, setMinSegmentBets] = useState(1);
     const [segmentWindow, setSegmentWindow] = useState('30d'); // 30d | 90d | all
     const [scatterColorMode, setScatterColorMode] = useState('profit'); // profit | sport
     const [scatterBubbleMode, setScatterBubbleMode] = useState('bets'); // bets | wager
 
-    const settledBets = React.useMemo(() => {
-        const xs = (bets || []);
-        return xs.filter(b => {
-            const prov = (b.provider || '').toLowerCase();
-            if (!(prov.includes('fanduel') || prov.includes('draftkings'))) return false;
-            const st = (b.status || '').toUpperCase();
-            if (!['WON', 'LOST', 'PUSH'].includes(st)) return false;
-            if (b.category && String(b.category).toLowerCase() === 'transaction') return false;
-            // Guard: ignore rows that look like deposits/withdrawals in bet table
-            const bt = (b.bet_type || '').toLowerCase();
-            if (bt === 'deposit' || bt === 'withdrawal') return false;
-            return true;
-        });
-    }, [bets]);
-
     const parseBetDate = (b) => {
-        const s = b?.sort_date || b?.date;
+        const s = b?.settled_at || b?.placed_at || b?.sort_date || b?.date || b?.created_at;
         if (!s) return null;
         const d = new Date(String(s));
         return isNaN(d.getTime()) ? null : d;
     };
+
+    const normalizeStatus = (raw) => {
+        const st = String(raw || '').trim().toUpperCase();
+        if (st === 'WIN' || st === 'WON') return 'WON';
+        if (st === 'LOSS' || st === 'LOST') return 'LOST';
+        if (st === 'PUSH' || st === 'TIED' || st === 'TIE') return 'PUSH';
+        if (st === 'CASHED_OUT' || st === 'CASHOUT') return 'CASHED_OUT';
+        if (st === 'OPEN' || st === 'PENDING') return 'OPEN';
+        return st;
+    };
+
+    const normalizeBook = (b) => {
+        const raw = String(b?.provider || b?.sportsbook || '').toLowerCase();
+        if (raw.includes('draftkings') || raw === 'dk') return 'DraftKings';
+        if (raw.includes('fanduel') || raw === 'fd') return 'FanDuel';
+        return null;
+    };
+
+    const dkFdBets = React.useMemo(() => {
+        return (bets || [])
+            .filter((b) => {
+                if (!normalizeBook(b)) return false;
+                if (b.category && String(b.category).toLowerCase() === 'transaction') return false;
+                const bt = String(b.bet_type || '').toLowerCase();
+                if (bt === 'deposit' || bt === 'withdrawal' || bt === 'other') return false;
+                return true;
+            })
+            .sort((a, b) => {
+                const da = parseBetDate(a)?.getTime() || 0;
+                const db = parseBetDate(b)?.getTime() || 0;
+                return db - da;
+            });
+    }, [bets]);
+
+    const settledBets = React.useMemo(() => {
+        return dkFdBets.filter((b) => {
+            const st = normalizeStatus(b.status);
+            return ['WON', 'LOST', 'PUSH', 'CASHED_OUT'].includes(st);
+        });
+    }, [dkFdBets]);
+
+    // Live period stats computed directly from latest synced DK & FanDuel settled bets
+    const livePeriodStats = React.useMemo(() => {
+        if (!settledBets.length) return periodStats || {};
+        const now = new Date();
+        const msDay = 24 * 60 * 60 * 1000;
+        const ytdStart = new Date(now.getFullYear(), 0, 1);
+
+        const summarize = (list) => {
+            let wins = 0, losses = 0, pushes = 0, wager = 0, net_profit = 0;
+            list.forEach((b) => {
+                const st = normalizeStatus(b.status);
+                const w = Number(b.wager ?? b.stake ?? 0) || 0;
+                const p = Number(b.profit ?? 0) || 0;
+                wager += w;
+                net_profit += p;
+                if (st === 'WON' || (st === 'CASHED_OUT' && p > 0)) wins += 1;
+                else if (st === 'LOST' || (st === 'CASHED_OUT' && p < 0)) losses += 1;
+                else pushes += 1;
+            });
+            const decided = wins + losses;
+            return {
+                bets: list.length,
+                wins,
+                losses,
+                pushes,
+                wager,
+                net_profit,
+                roi: wager > 0 ? (net_profit / wager) * 100 : 0,
+                actual_win_rate: decided > 0 ? (wins / decided) * 100 : 0,
+            };
+        };
+
+        return {
+            '7d': summarize(settledBets.filter((b) => { const d = parseBetDate(b); return d && d >= new Date(now.getTime() - 7 * msDay); })),
+            '30d': summarize(settledBets.filter((b) => { const d = parseBetDate(b); return d && d >= new Date(now.getTime() - 30 * msDay); })),
+            'ytd': summarize(settledBets.filter((b) => { const d = parseBetDate(b); return d && d >= ytdStart; })),
+            'all': summarize(settledBets),
+        };
+    }, [settledBets, periodStats]);
+
+    // Per-sportsbook summary (DraftKings vs FanDuel)
+    const bookSummary = React.useMemo(() => {
+        return ['DraftKings', 'FanDuel'].map((bookName) => {
+            const bookAll = dkFdBets.filter((b) => normalizeBook(b) === bookName);
+            const bookSettled = settledBets.filter((b) => normalizeBook(b) === bookName);
+            const bookOpen = bookAll.filter((b) => normalizeStatus(b.status) === 'OPEN');
+            let wins = 0, losses = 0, wager = 0, profit = 0;
+            bookSettled.forEach((b) => {
+                const st = normalizeStatus(b.status);
+                const w = Number(b.wager ?? b.stake ?? 0) || 0;
+                const p = Number(b.profit ?? 0) || 0;
+                wager += w;
+                profit += p;
+                if (st === 'WON' || (st === 'CASHED_OUT' && p > 0)) wins += 1;
+                else if (st === 'LOST' || (st === 'CASHED_OUT' && p < 0)) losses += 1;
+            });
+            const latestDate = bookAll.length > 0 ? parseBetDate(bookAll[0]) : null;
+            return {
+                book: bookName,
+                wins,
+                losses,
+                openCount: bookOpen.length,
+                wager,
+                profit,
+                roi: wager > 0 ? (profit / wager) * 100 : 0,
+                latestDateStr: latestDate ? latestDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—',
+            };
+        });
+    }, [dkFdBets, settledBets]);
+
+    const recentDkFdBets = React.useMemo(() => dkFdBets.slice(0, 10), [dkFdBets]);
 
     const segmentAgg = React.useMemo(() => {
         const now = new Date();
@@ -994,58 +1091,97 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
     }, [settledBets, minSegmentBets, segmentWindow]);
 
     // Charts-only view (no daily picks feed here).
-    if (!timeSeries || timeSeries.length === 0) {
+    if ((!timeSeries || timeSeries.length === 0) && settledBets.length === 0 && dkFdBets.length === 0) {
         return (
             <div className="space-y-6">
                 <ActualsModelReconciliationCard />
                 <div className="bg-slate-900 border border-slate-800 p-10 rounded-xl text-center">
-                    <p className="text-gray-400">No performance data available yet. Settle some bets to see your equity curve!</p>
+                    <p className="text-gray-400">No DraftKings or FanDuel bets synced yet. Use the Sync DK &amp; FanDuel tab to pull your latest slips.</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Financial Overview tiles removed for Performance tab (focus on betting performance) */}
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* DraftKings vs FanDuel Live Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {bookSummary.map((bs) => {
+                    const isDk = bs.book === 'DraftKings';
+                    return (
+                        <div
+                            key={bs.book}
+                            className={`rounded-xl border p-4 bg-slate-900/80 ${isDk ? 'border-emerald-500/35' : 'border-blue-500/35'}`}
+                        >
+                            <div className="flex items-center justify-between gap-2 mb-3">
+                                <span className={`text-sm font-bold ${isDk ? 'text-emerald-300' : 'text-blue-300'}`}>
+                                    {bs.book}
+                                </span>
+                                <span className="text-[11px] text-slate-400">
+                                    Latest bet: <strong className="text-slate-200">{bs.latestDateStr}</strong>
+                                    {bs.openCount > 0 ? ` · ${bs.openCount} open` : ''}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-3 text-xs">
+                                <div>
+                                    <div className="text-slate-400">Net Profit</div>
+                                    <div className={`font-mono font-bold text-base ${bs.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {bs.profit >= 0 ? '+' : ''}{formatCurrency(bs.profit)}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-slate-400">ROI</div>
+                                    <div className={`font-mono font-bold text-base ${bs.roi >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {bs.roi >= 0 ? '+' : ''}{bs.roi.toFixed(1)}%
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-slate-400">Record</div>
+                                    <div className="font-mono font-bold text-base text-white">
+                                        {bs.wins}–{bs.losses}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
 
-            {/* Sportsbook financials moved to Transactions tab */}
-
-            {/* Drawdown tiles removed (keep Performance tab focused on betting performance + curves) */}
-
-            {/* Betting performance windows (settled bets) */}
+            {/* Betting performance windows (computed live from latest synced DK & FD settled bets) */}
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl backdrop-blur-sm">
-                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    <TrendingUp className="text-blue-400" /> Betting Performance
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                    <TrendingUp className="text-blue-400" size={18} /> Betting Performance (DraftKings &amp; FanDuel)
                 </h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {(['7d', '30d', 'ytd', 'all']).map((k) => {
-                        const w = periodStats?.[k];
+                        const w = livePeriodStats?.[k];
                         if (!w) return null;
                         const profit = Number(w.net_profit || 0);
                         const roi = Number(w.roi || 0);
                         return (
-                            <div key={k} className="bg-slate-800/40 border border-slate-700 rounded-xl p-4">
-                                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-2">
+                            <div key={k} className="bg-slate-800/40 border border-slate-700/80 rounded-xl p-3.5">
+                                <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-2">
                                     {k === '7d' ? 'Last 7 days' : k === '30d' ? 'Last 30 days' : k === 'ytd' ? 'YTD' : 'All-time'}
                                 </div>
-                                <div className="grid grid-cols-2 gap-3 text-sm">
-                                    <div>
-                                        <div className="text-slate-400 text-xs">Net Profit</div>
-                                        <div className={`font-black text-lg ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCurrency(profit)}</div>
+                                <div className="space-y-1 text-xs">
+                                    <div className="flex items-baseline justify-between">
+                                        <span className="text-slate-400">Profit</span>
+                                        <span className={`font-mono font-bold text-sm ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            {profit >= 0 ? '+' : ''}{formatCurrency(profit)}
+                                        </span>
                                     </div>
-                                    <div>
-                                        <div className="text-slate-400 text-xs">ROI</div>
-                                        <div className={`font-black text-lg ${roi >= 0 ? 'text-green-400' : 'text-red-400'}`}>{roi.toFixed(1)}%</div>
+                                    <div className="flex items-baseline justify-between">
+                                        <span className="text-slate-400">ROI</span>
+                                        <span className={`font-mono font-bold ${roi >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            {roi >= 0 ? '+' : ''}{roi.toFixed(1)}%
+                                        </span>
                                     </div>
-                                    <div>
-                                        <div className="text-slate-400 text-xs">Record</div>
-                                        <div className="text-white font-bold">{w.wins}-{w.losses}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-slate-400 text-xs">Win%</div>
-                                        <div className="text-white font-bold">{Number(w.actual_win_rate || 0).toFixed(1)}%</div>
+                                    <div className="flex items-baseline justify-between">
+                                        <span className="text-slate-400">Record</span>
+                                        <span className="font-mono font-bold text-white">
+                                            {w.wins}–{w.losses} ({Number(w.actual_win_rate || 0).toFixed(0)}%)
+                                        </span>
                                     </div>
                                 </div>
                             </div>
@@ -1053,6 +1189,80 @@ function PerformanceView({ timeSeries, inPlaySeries, financials, periodStats, ed
                     })}
                 </div>
             </div>
+
+            {/* Latest 10 Synced DraftKings & FanDuel Bets */}
+            {recentDkFdBets.length > 0 && (
+                <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl">
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200">
+                            Latest DraftKings &amp; FanDuel Bets
+                        </h3>
+                        <button
+                            type="button"
+                            onClick={() => onOpenTransactions?.({})}
+                            className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
+                        >
+                            View all bets
+                        </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr className="border-b border-slate-800 text-slate-400">
+                                    <th className="py-2 pr-3 font-medium">Date</th>
+                                    <th className="py-2 pr-3 font-medium">Book</th>
+                                    <th className="py-2 pr-3 font-medium">Pick</th>
+                                    <th className="py-2 pr-3 font-medium text-right">Stake</th>
+                                    <th className="py-2 pr-3 font-medium text-right">Result</th>
+                                    <th className="py-2 font-medium text-right">P/L</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/70">
+                                {recentDkFdBets.map((b, idx) => {
+                                    const book = normalizeBook(b);
+                                    const st = normalizeStatus(b.status);
+                                    const dt = parseBetDate(b);
+                                    const stake = Number(b.wager ?? b.stake ?? 0) || 0;
+                                    const profit = Number(b.profit ?? 0) || 0;
+                                    return (
+                                        <tr key={b.id || idx} className="hover:bg-slate-800/30">
+                                            <td className="py-2 pr-3 font-mono text-slate-400 whitespace-nowrap">
+                                                {dt ? dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                                            </td>
+                                            <td className="py-2 pr-3 whitespace-nowrap">
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${book === 'DraftKings' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-blue-500/15 text-blue-300'}`}>
+                                                    {book === 'DraftKings' ? 'DK' : 'FD'}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-3 text-slate-100 max-w-[260px] truncate" title={b.description || b.selection || b.event_name || ''}>
+                                                {b.selection || b.description || b.event_name || 'Bet'}
+                                            </td>
+                                            <td className="py-2 pr-3 text-right font-mono text-slate-300 whitespace-nowrap">
+                                                {formatCurrency(stake)}
+                                            </td>
+                                            <td className="py-2 pr-3 text-right whitespace-nowrap">
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                    st === 'WON' ? 'bg-emerald-500/15 text-emerald-300'
+                                                        : st === 'LOST' ? 'bg-rose-500/15 text-rose-300'
+                                                            : st === 'OPEN' ? 'bg-sky-500/15 text-sky-300'
+                                                                : 'bg-slate-800 text-slate-300'
+                                                }`}>
+                                                    {st}
+                                                </span>
+                                            </td>
+                                            <td className={`py-2 text-right font-mono font-bold whitespace-nowrap ${
+                                                st === 'OPEN' ? 'text-slate-400' : profit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                            }`}>
+                                                {st === 'OPEN' ? '—' : `${profit >= 0 ? '+' : ''}${formatCurrency(profit)}`}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             <ActualsModelReconciliationCard />
 
