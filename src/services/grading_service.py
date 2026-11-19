@@ -349,18 +349,24 @@ class GradingService:
             for ev in missing_events:
                 ev_dt = _parse_dt_utc(ev.get('start_time'))
                 for eg in espn_games:
-                    if not (
+                    direct_match = (
                         match_team_names(ev.get('home_team'), eg.get('home_team'), is_mlb=False)
                         and match_team_names(ev.get('away_team'), eg.get('away_team'), is_mlb=False)
-                    ):
+                    )
+                    swapped_match = (
+                        not direct_match
+                        and match_team_names(ev.get('home_team'), eg.get('away_team'), is_mlb=False)
+                        and match_team_names(ev.get('away_team'), eg.get('home_team'), is_mlb=False)
+                    )
+                    if not (direct_match or swapped_match):
                         continue
                     eg_dt = _parse_dt_utc(eg.get('start_time'))
                     if ev_dt and eg_dt and abs((ev_dt - eg_dt).total_seconds()) > 36 * 3600:
                         continue
                     upsert_game_result({
                         "event_id": ev['id'],
-                        "home_score": int(eg['home_score']),
-                        "away_score": int(eg['away_score']),
+                        "home_score": int(eg['away_score'] if swapped_match else eg['home_score']),
+                        "away_score": int(eg['home_score'] if swapped_match else eg['away_score']),
                         "final": True,
                         "period": "FINAL",
                     })

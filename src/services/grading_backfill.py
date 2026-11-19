@@ -831,6 +831,7 @@ def void_stale_postponed_predictions(
         lg = str(row.get("league") or "NCAAM").upper().strip()
         st = _parse_dt_utc(row.get("start_time"))
         found_final = None
+        found_swapped = False
         if st and lg in ESPN_LEAGUE_PATHS:
             for delta in (0, -1, 1):
                 ymd = (st + dt.timedelta(days=delta)).strftime("%Y%m%d")
@@ -843,6 +844,15 @@ def void_stale_postponed_predictions(
                         row.get("away_team"), g.get("away_team"), is_mlb=is_mlb
                     ):
                         found_final = g
+                        found_swapped = False
+                        break
+                    if (
+                        not is_mlb
+                        and match_team_names(row.get("home_team"), g.get("away_team"), is_mlb=False)
+                        and match_team_names(row.get("away_team"), g.get("home_team"), is_mlb=False)
+                    ):
+                        found_final = g
+                        found_swapped = True
                         break
                 if found_final:
                     break
@@ -850,8 +860,8 @@ def void_stale_postponed_predictions(
         if found_final:
             upsert_game_result({
                 "event_id": row["event_id"],
-                "home_score": int(found_final["home_score"]),
-                "away_score": int(found_final["away_score"]),
+                "home_score": int(found_final["away_score"] if found_swapped else found_final["home_score"]),
+                "away_score": int(found_final["home_score"] if found_swapped else found_final["away_score"]),
                 "final": True,
                 "period": "FINAL",
             })

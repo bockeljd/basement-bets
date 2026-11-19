@@ -50,6 +50,8 @@ class EspnClient(IngestionEngine):
             
         url = f"{self.BASE_URL}/{path}/scoreboard"
         params = {'limit': 1000} # Get all games
+        if str(league).upper() == 'NCAAM':
+            params['groups'] = 50 # All Division I games (not just Top 25)
         if date:
             params['dates'] = date
             

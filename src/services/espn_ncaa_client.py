@@ -345,8 +345,14 @@ class ESPNNCAAClient:
                 matching_db_ids = [
                     row["id"]
                     for row in db_events
-                    if _team_names_match(matcher, row["home_team"], h_team)
-                    and _team_names_match(matcher, row["away_team"], a_team)
+                    if (
+                        _team_names_match(matcher, row["home_team"], h_team)
+                        and _team_names_match(matcher, row["away_team"], a_team)
+                    )
+                    or (
+                        _team_names_match(matcher, row["home_team"], a_team)
+                        and _team_names_match(matcher, row["away_team"], h_team)
+                    )
                 ]
                 if not matching_db_ids:
                     continue
@@ -378,8 +384,8 @@ class ESPNNCAAClient:
                             )
                             neutral_synced += 1
                         conn.commit()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"[ESPN] Warning persisting neutral_site/venue for {eid_espn}: {exc}")
 
                 summary = self.get_event_summary(str(eid_espn))
                 officials = self.extract_officials_from_summary(summary)

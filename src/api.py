@@ -2689,6 +2689,8 @@ def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
                     away_variants = variants
                     away_score = score_val
 
+            venue_obj = comp.get("venue") or {}
+            venue_addr = venue_obj.get("address") or {}
             games.append({
                 "espn_id": str(ev.get("id") or ""),
                 "home_variants": home_variants,
@@ -2700,6 +2702,10 @@ def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
                 "period": status_obj.get("period"),
                 "clock": status_obj.get("displayClock"),
                 "status_detail": status_type.get("shortDetail") or status_type.get("detail") or "",
+                "neutral_site": bool(comp.get("neutralSite", False)),
+                "venue": venue_obj.get("fullName"),
+                "venue_city": venue_addr.get("city"),
+                "venue_state": venue_addr.get("state"),
             })
         _LIVE_SCOREBOARD_CACHE[yyyymmdd] = (now, games)
     except Exception:
@@ -2911,6 +2917,7 @@ def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date
 
     for item in items:
         matched = None
+        swapped = False
         item_id = str(item.get("id") or "")
         if item_id.startswith("espn:ncaam:"):
             matched = by_espn_id.get(item_id.split(":")[-1])
@@ -2918,6 +2925,10 @@ def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date
             hk = _norm_live_team_key(item.get("home_team"))
             ak = _norm_live_team_key(item.get("away_team"))
             matched = by_pair.get((hk, ak))
+            if not matched:
+                matched = by_pair.get((ak, hk))
+                if matched:
+                    swapped = True
 
         if not matched:
             continue
@@ -2926,16 +2937,25 @@ def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date
         item["status_detail"] = matched.get("status_detail") or ""
         item["clock"] = matched.get("clock")
         item["period"] = matched.get("period")
+        if matched.get("neutral_site") and not item.get("neutral_site"):
+            item["neutral_site"] = True
+        if matched.get("venue") and not item.get("venue"):
+            item["venue"] = matched.get("venue")
+        if matched.get("venue_city") and not item.get("venue_city"):
+            item["venue_city"] = matched.get("venue_city")
+        if matched.get("venue_state") and not item.get("venue_state"):
+            item["venue_state"] = matched.get("venue_state")
         if matched["live_status"] in ("IN_PROGRESS", "HALFTIME"):
             item["status"] = matched["live_status"]
         elif matched["live_status"] == "FINAL":
             item["status"] = "FINAL"
 
         # Prefer live/final ESPN score when DB doesn't have a final score yet
+        # (flip scores when neutral-site home/away orientation differs between providers)
         if matched["home_score"] is not None and matched["away_score"] is not None:
             if not item.get("final"):
-                item["home_score"] = matched["home_score"]
-                item["away_score"] = matched["away_score"]
+                item["home_score"] = matched["away_score"] if swapped else matched["home_score"]
+                item["away_score"] = matched["home_score"] if swapped else matched["away_score"]
             if matched.get("final"):
                 item["final"] = True
 
