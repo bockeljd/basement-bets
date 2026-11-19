@@ -702,6 +702,42 @@ def extract_transactions_from_raw_text(raw_text: str, provider: str) -> List[Dic
     return out
 
 
+def extract_latest_dk_txn_balance(raw_text: str) -> Optional[float]:
+    """
+    Extract the authoritative pure-Cash balance from the top (newest) row of a
+    DraftKings Transaction History dump (Date | Categories | Description | Products | Amount | Balance).
+    """
+    if not raw_text:
+        return None
+    text = str(raw_text)
+    if "transaction history" not in text.lower() or "balance" not in text.lower():
+        return None
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # Find the Balance column header, then look in the first transaction block for [Amount, Balance]
+    start_idx = -1
+    for i, ln in enumerate(lines):
+        if ln.lower() in ("balance", "balance ⓘ", "balance i") or ("amount" in ln.lower() and "balance" in ln.lower()):
+            start_idx = i + 1
+            break
+    if start_idx == -1:
+        return None
+
+    money_re = re.compile(r"([+-]?\s*\$\s*[0-9,]+\.\d{2})")
+    found_amts = []
+    for ln in lines[start_idx : start_idx + 18]:
+        for m in money_re.finditer(ln):
+            val = parse_money_value(m.group(1))
+            if val is not None:
+                found_amts.append((m.group(1).strip(), val))
+        if len(found_amts) >= 2:
+            # First dollar amount is Amount (+$19.52 / -$10.00), second is Balance ($55.52)
+            bal_raw, bal_val = found_amts[1]
+            if not bal_raw.startswith("+") and not bal_raw.startswith("-") and bal_val >= 0:
+                return round(float(bal_val), 2)
+            break
+    return None
+
+
 def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """
     Process payloads sent by Chrome Bookmarklets or local browser capture tools.
@@ -767,17 +803,26 @@ def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, A
         )
 
     balance_recorded = False
-    allow_balance_write = (page_kind != "transactions") or bool(payload.get("cash_only_balance"))
-    if provider == "DraftKings" and "bookmarklet" in source and not payload.get("cash_only_balance"):
+    bal_to_record = payload.get("balance")
+    is_cash_only = bool(payload.get("cash_only_balance"))
+    # Server-side fallback: if DraftKings Transaction History raw_text was sent, extract top-row pure-Cash balance
+    if provider == "DraftKings" and raw_text and not is_cash_only:
+        dk_txn_bal = extract_latest_dk_txn_balance(raw_text)
+        if dk_txn_bal is not None:
+            bal_to_record = dk_txn_bal
+            is_cash_only = True
+
+    allow_balance_write = (page_kind != "transactions") or is_cash_only
+    if provider == "DraftKings" and "bookmarklet" in source and not is_cash_only:
         # DraftKings combined header wallet includes Crown Cash / DK Dollars / Rewards;
         # never overwrite pure Cash balance unless explicitly flagged cash_only_balance
         # (e.g. from the pure-Cash Balance column on Transaction History).
         allow_balance_write = False
-    if allow_balance_write and payload.get("balance") is not None:
+    if allow_balance_write and bal_to_record is not None:
         balance_recorded = record_balance_snapshot(
             provider=provider,
             account_id=account_id,
-            balance=payload.get("balance"),
+            balance=bal_to_record,
             user_id=user_id,
             source=source,
             note=f"Captured during {source}",

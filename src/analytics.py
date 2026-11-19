@@ -1123,8 +1123,11 @@ class AnalyticsEngine:
         except Exception:
             pass
 
-        # Compute "computed" balances from ledger + settled bet P/L (does NOT affect current/snapshot balance)
+        # Compute "computed" balances from ledger + settled bet P/L - open stakes (per provider & per account)
         bet_profit = defaultdict(float)
+        bet_profit_acc = defaultdict(float)
+        open_stake_prov = defaultdict(float)
+        open_stake_acc = defaultdict(float)
         bets = []
         try:
             bets = self.bets or []
@@ -1133,16 +1136,28 @@ class AnalyticsEngine:
             for b in bets:
                 prov = _norm_prov(b.get('provider', 'Unknown'))
                 acc_b = _norm_acc(b.get('account_id') or 'Main')
-                if (b.get('category') or '').lower() != 'transaction':
-                    _update_last_sync(prov, acc_b, b.get('created_at') or b.get('date_et') or b.get('date'))
-                st = str(b.get('status') or '').upper().strip()
-                if st in ('PENDING', 'OPEN', 'VOID'):
-                    continue
                 if (b.get('category') or '').lower() == 'transaction':
                     continue
-                bet_profit[prov] += float(b.get('profit') or 0)
+                if b.get('bet_type') in ('Deposit', 'Withdrawal', 'Other'):
+                    continue
+                _update_last_sync(prov, acc_b, b.get('created_at') or b.get('date_et') or b.get('date'))
+                st = str(b.get('status') or '').upper().strip()
+                if st in ('PENDING', 'OPEN'):
+                    w_open = float(b.get('wager') or b.get('stake') or 0.0)
+                    if w_open > 0:
+                        open_stake_prov[prov] += w_open
+                        open_stake_acc[(prov, acc_b)] += w_open
+                    continue
+                if st == 'VOID':
+                    continue
+                prof_v = float(b.get('profit') or 0)
+                bet_profit[prov] += prof_v
+                bet_profit_acc[(prov, acc_b)] += prof_v
         except Exception:
             bet_profit = defaultdict(float)
+            bet_profit_acc = defaultdict(float)
+            open_stake_prov = defaultdict(float)
+            open_stake_acc = defaultdict(float)
 
         for req_p in ('DraftKings', 'FanDuel'):
             _ = provider_stats[req_p]
@@ -1263,27 +1278,36 @@ class AnalyticsEngine:
                     prov_last_sync_entry = sync_entry
 
                 acc_stats = provider_account_stats.get((p, str(acc_id)), {'deposited': 0.0, 'withdrawn': 0.0})
+                acc_dep = float(acc_stats.get('deposited') or 0.0)
+                acc_wdr = float(acc_stats.get('withdrawn') or 0.0)
+                acc_bet_pl = float(bet_profit_acc.get((p, str(acc_id)), 0.0))
+                acc_open_st = float(open_stake_acc.get((p, str(acc_id)), 0.0))
+                acc_computed = acc_dep - acc_wdr + acc_bet_pl - acc_open_st
                 provider_breakdown.append({
                     "provider": p,
                     "account_id": acc_id,
-                    "deposited": float(acc_stats.get('deposited') or 0.0),
-                    "withdrawn": float(acc_stats.get('withdrawn') or 0.0),
-                    "net_profit": float(acc_stats.get('withdrawn') or 0.0) - float(acc_stats.get('deposited') or 0.0),
+                    "deposited": acc_dep,
+                    "withdrawn": acc_wdr,
+                    "net_profit": acc_wdr - acc_dep,
+                    "bet_profit": round(acc_bet_pl, 2),
+                    "open_stake": round(acc_open_st, 2),
                     "in_play": base_bal,
                     "captured_at": (snap or {}).get('captured_at') if has_snapshot else None,
                     "last_sync_at": _format_sync_iso(sync_entry),
                     "snapshot_source": (snap or {}).get('source') if has_snapshot else None,
                     "ledger_delta": float(ledger_delta),
                     "ledger_in_play": float(ledger_in_play),
-                    "computed_in_play": None,
-                    "computed_delta": None,
+                    "computed_in_play": round(acc_computed, 2),
+                    "computed_delta": round(float(ledger_in_play) - float(acc_computed), 2),
                 })
 
             # provider total row (still includes deposit/withdrawal/realized profit since those are provider-wide today)
             provider_balance = float(prov_total_in_play)
             ledger_in_play = float(prov_total_ledger_in_play)
             ledger_delta = float(prov_total_ledger_delta)
-            computed_balance = float(stats['deposited'] or 0) - float(stats['withdrawn'] or 0) + float(bet_profit.get(p) or 0)
+            prov_bet_pl = float(bet_profit.get(p) or 0.0)
+            prov_open_st = float(open_stake_prov.get(p) or 0.0)
+            computed_balance = float(stats['deposited'] or 0) - float(stats['withdrawn'] or 0) + prov_bet_pl - prov_open_st
 
             provider_breakdown.append({
                 "provider": p,
@@ -1291,13 +1315,15 @@ class AnalyticsEngine:
                 "deposited": stats['deposited'],
                 "withdrawn": stats['withdrawn'],
                 "net_profit": net,
+                "bet_profit": round(prov_bet_pl, 2),
+                "open_stake": round(prov_open_st, 2),
                 "in_play": provider_balance,
                 "captured_at": snap_captured.get(p),
                 "last_sync_at": _format_sync_iso(prov_last_sync_entry),
                 "ledger_delta": ledger_delta,
                 "ledger_in_play": ledger_in_play,
-                "computed_in_play": computed_balance,
-                "computed_delta": float(computed_balance) - float(provider_balance)
+                "computed_in_play": round(computed_balance, 2),
+                "computed_delta": round(float(ledger_in_play) - float(computed_balance), 2)
             })
 
         provider_breakdown.sort(key=lambda x: (x.get('provider') or '', '' if x.get('account_id') is None else str(x.get('account_id'))))

@@ -439,6 +439,35 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
                                     <div>Deposited <span className="font-mono text-slate-200">{fmt(Number(data?.deposited || 0))}</span></div>
                                     <div>Withdrawn <span className="font-mono text-slate-200">{fmt(Number(data?.withdrawn || 0))}</span></div>
                                   </div>
+                                  {data?.computed_in_play != null && (() => {
+                                    const expCash = Number(data.computed_in_play || 0);
+                                    const diffCash = Number(data.computed_delta ?? (currentVal - expCash));
+                                    const inSync = Math.abs(diffCash) <= 1.0;
+                                    const betPl = Number(data.bet_profit || 0);
+                                    const openSt = Number(data.open_stake || 0);
+                                    return (
+                                      <div className="pt-2 mt-1 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                        <span className="text-slate-400">
+                                          Audit: Bet P/L{' '}
+                                          <strong className={`font-mono ${betPl >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                            {betPl >= 0 ? '+' : ''}{fmt(betPl)}
+                                          </strong>
+                                          {openSt > 0 ? <> · Open <span className="font-mono text-sky-300">{fmt(openSt)}</span></> : null}
+                                          {' · '}Expected <strong className="font-mono text-slate-200">{fmt(expCash)}</strong>
+                                        </span>
+                                        <span
+                                          title="Actual Cash Balance minus Expected Cash (Deposits - Withdrawals + Bet P/L - Open Stakes)"
+                                          className={`px-2 py-0.5 rounded-full font-mono font-bold text-[10px] border cursor-help ${
+                                            inSync
+                                              ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                                              : 'bg-amber-500/15 border-amber-500/35 text-amber-200'
+                                          }`}
+                                        >
+                                          {inSync ? 'In Sync' : `Diff ${diffCash >= 0 ? '+' : ''}${fmt(diffCash)}`}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               );
                             })}
