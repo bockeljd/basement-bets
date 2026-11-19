@@ -3089,6 +3089,15 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
         FROM base_events
       ) t
       WHERE rn = 1
+    ),
+    board_snaps AS (
+      SELECT DISTINCT ON (event_id, market_type, side)
+             event_id, market_type, side, line_value, price
+      FROM odds_snapshots
+      WHERE event_id IN (SELECT id FROM dedup_events)
+        AND market_type IN ('SPREAD', 'TOTAL', 'MONEYLINE')
+        AND COALESCE(book, '') NOT IN ('action_open', 'open')
+      ORDER BY event_id, market_type, side, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
     )
     SELECT e.id, e.league as sport, e.home_team, e.away_team, e.start_time, e.status,
            e.neutral_site, e.venue, e.venue_city, e.venue_state,
@@ -3111,55 +3120,13 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
            ml_away.price as moneyline_away,
            gr.home_score, gr.away_score, gr.final
     FROM dedup_events e
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, line_value, price
-        FROM odds_snapshots
-        WHERE market_type = 'SPREAD' AND side = 'HOME'
-          AND COALESCE(book, '') NOT IN ('action_open', 'open')
-        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
-    ) s_home ON e.id = s_home.event_id
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, line_value, price
-        FROM odds_snapshots
-        WHERE market_type = 'SPREAD' AND side = 'AWAY'
-          AND COALESCE(book, '') NOT IN ('action_open', 'open')
-        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
-    ) s_away ON e.id = s_away.event_id
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, line_value, price
-        FROM odds_snapshots
-        WHERE market_type = 'TOTAL' AND side = 'OVER'
-          AND COALESCE(book, '') NOT IN ('action_open', 'open')
-        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
-    ) t_over ON e.id = t_over.event_id
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, line_value, price
-        FROM odds_snapshots
-        WHERE market_type = 'TOTAL' AND side = 'UNDER'
-          AND COALESCE(book, '') NOT IN ('action_open', 'open')
-        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
-    ) t_under ON e.id = t_under.event_id
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, price
-        FROM odds_snapshots
-        WHERE market_type = 'MONEYLINE' AND side = 'HOME'
-          AND COALESCE(book, '') NOT IN ('action_open', 'open')
-        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
-    ) ml_home ON e.id = ml_home.event_id
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, price
-        FROM odds_snapshots
-        WHERE market_type = 'MONEYLINE' AND side = 'AWAY'
-          AND COALESCE(book, '') NOT IN ('action_open', 'open')
-        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
-    ) ml_away ON e.id = ml_away.event_id
-    LEFT JOIN (
-        SELECT DISTINCT ON (event_id) event_id, price
-        FROM odds_snapshots
-        WHERE market_type = 'MONEYLINE' AND side = 'DRAW'
-          AND COALESCE(book, '') NOT IN ('action_open', 'open')
-        ORDER BY event_id, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END), captured_at DESC
-    ) ml_draw ON e.id = ml_draw.event_id
+    LEFT JOIN board_snaps s_home  ON e.id = s_home.event_id  AND s_home.market_type = 'SPREAD'    AND s_home.side = 'HOME'
+    LEFT JOIN board_snaps s_away  ON e.id = s_away.event_id  AND s_away.market_type = 'SPREAD'    AND s_away.side = 'AWAY'
+    LEFT JOIN board_snaps t_over  ON e.id = t_over.event_id  AND t_over.market_type = 'TOTAL'     AND t_over.side = 'OVER'
+    LEFT JOIN board_snaps t_under ON e.id = t_under.event_id AND t_under.market_type = 'TOTAL'    AND t_under.side = 'UNDER'
+    LEFT JOIN board_snaps ml_home ON e.id = ml_home.event_id AND ml_home.market_type = 'MONEYLINE' AND ml_home.side = 'HOME'
+    LEFT JOIN board_snaps ml_away ON e.id = ml_away.event_id AND ml_away.market_type = 'MONEYLINE' AND ml_away.side = 'AWAY'
+    LEFT JOIN board_snaps ml_draw ON e.id = ml_draw.event_id AND ml_draw.market_type = 'MONEYLINE' AND ml_draw.side = 'DRAW'
     LEFT JOIN game_results gr ON e.id = gr.event_id
     ORDER BY e.start_time ASC
     """
