@@ -494,7 +494,32 @@ def ingest_statement_transactions(
     default_account_id: str = "Main",
 ) -> int:
     """Idempotently save Deposits, Withdrawals, and Bonus/Adjustments."""
-    from src.database import insert_transaction
+    from src.database import insert_transaction, get_db_connection, _exec
+
+    existing_keys = set()
+    try:
+        with get_db_connection() as conn:
+            rows = _exec(
+                conn,
+                """
+                SELECT provider, COALESCE(account_id, 'Main') AS acc,
+                       LEFT(CAST(date AS TEXT), 10) AS dt,
+                       type, ROUND(ABS(CAST(amount AS NUMERIC)), 2) AS amt
+                FROM transactions
+                WHERE user_id = %s
+                """,
+                (str(user_id),),
+            ).fetchall()
+            for r in rows or []:
+                existing_keys.add((
+                    normalize_sync_provider(r["provider"]),
+                    normalize_account_id(r["acc"]),
+                    str(r["dt"] or "")[:10],
+                    str(r["type"] or "").strip().title(),
+                    float(r["amt"] or 0.0),
+                ))
+    except Exception:
+        pass
 
     count = 0
     for raw_txn in txns or []:
@@ -516,11 +541,16 @@ def ingest_statement_transactions(
             amt = abs(amt)
 
         date_str = normalize_date_str(raw_txn.get("date"))
+        dedupe_key = (provider, account_id, str(date_str or "")[:10], txn_type, round(abs(amt), 2))
+        if dedupe_key in existing_keys:
+            continue
+        existing_keys.add(dedupe_key)
+
         desc = str(raw_txn.get("description") or f"{provider} {txn_type}").strip()
         txn_id = str(raw_txn.get("txn_id") or raw_txn.get("id") or "").strip()
         if not txn_id:
             txn_id = stable_external_id(
-                provider, [account_id, date_str, txn_type, round(amt, 2), desc[:80]], prefix="txn"
+                provider, [account_id, str(date_str or "")[:10], txn_type, round(abs(amt), 2)], prefix="txn"
             )
 
         doc = {
@@ -682,16 +712,17 @@ def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, A
     )
     account_id = normalize_account_id(payload.get("account_id"), default="Main")
     source = str(payload.get("source") or f"{provider.lower()}_bookmarklet")
+    page_kind = str(payload.get("page_kind") or "bets").strip().lower()
 
     bets_to_ingest: List[Dict[str, Any]] = []
     api_bets = payload.get("api_bets") or payload.get("bets")
-    if isinstance(api_bets, list):
+    if page_kind != "transactions" and isinstance(api_bets, list):
         for b in api_bets:
             if isinstance(b, dict):
                 bets_to_ingest.append(b)
 
     raw_text = str(payload.get("raw_text") or "").strip()
-    if raw_text and not bets_to_ingest:
+    if page_kind != "transactions" and raw_text and not bets_to_ingest:
         if provider == "FanDuel":
             try:
                 from src.parsers.fanduel import FanDuelParser
@@ -736,7 +767,7 @@ def ingest_browser_payload(payload: Dict[str, Any], user_id: str) -> Dict[str, A
         )
 
     balance_recorded = False
-    if payload.get("balance") is not None:
+    if page_kind != "transactions" and payload.get("balance") is not None:
         balance_recorded = record_balance_snapshot(
             provider=provider,
             account_id=account_id,

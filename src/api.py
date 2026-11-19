@@ -1410,6 +1410,105 @@ and reconciliation against snapshots.
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/transactions/cleanup-sync")
+async def cleanup_bad_sync(request: Request, user: dict = Depends(get_current_user)):
+    """
+    1-click recovery for accidental bookmarklet transaction/balance overwrites:
+      1) Removes duplicate Deposit/Withdrawal rows (same provider, account, date, type, amount)
+         and removes browser-sync transaction rows if requested.
+      2) Reverts the most recent bookmarklet balance snapshot for DraftKings/FanDuel
+         when an earlier snapshot exists, restoring the prior balance.
+    """
+    from src.database import get_db_connection, _exec
+
+    uid = str((user or {}).get("sub") or "")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    remove_browser_txns = bool((body or {}).get("remove_browser_txns", False))
+
+    deduped_txns = 0
+    browser_txns_removed = 0
+    reverted_snapshots = 0
+
+    try:
+        with get_db_connection() as conn:
+            if remove_browser_txns:
+                res_b = _exec(
+                    conn,
+                    """
+                    DELETE FROM transactions
+                    WHERE user_id = %s
+                      AND description ILIKE '%%(Browser Sync)%%'
+                    """,
+                    (uid,),
+                )
+                browser_txns_removed = int(res_b.rowcount or 0)
+
+            res_dup = _exec(
+                conn,
+                """
+                DELETE FROM transactions a
+                USING transactions b
+                WHERE a.user_id = %s
+                  AND b.user_id = %s
+                  AND a.id > b.id
+                  AND a.provider = b.provider
+                  AND COALESCE(a.account_id, 'Main') = COALESCE(b.account_id, 'Main')
+                  AND LEFT(CAST(a.date AS TEXT), 10) = LEFT(CAST(b.date AS TEXT), 10)
+                  AND LOWER(TRIM(a.type)) = LOWER(TRIM(b.type))
+                  AND ROUND(ABS(CAST(a.amount AS NUMERIC)), 2) = ROUND(ABS(CAST(b.amount AS NUMERIC)), 2)
+                """,
+                (uid, uid),
+            )
+            deduped_txns = int(res_dup.rowcount or 0)
+
+            # Revert any bookmarklet balance snapshot from the last 24h if a prior snapshot exists
+            snaps = _exec(
+                conn,
+                """
+                SELECT id, provider, COALESCE(account_id, 'Main') AS acc, source, captured_at
+                FROM balance_snapshots
+                WHERE user_id = %s
+                  AND source IN ('draftkings_bookmarklet', 'fanduel_bookmarklet')
+                  AND captured_at >= NOW() - INTERVAL '24 hours'
+                ORDER BY captured_at DESC
+                """,
+                (uid,),
+            ).fetchall()
+
+            for s in snaps or []:
+                prior = _exec(
+                    conn,
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM balance_snapshots
+                    WHERE user_id = %s
+                      AND provider = %s
+                      AND COALESCE(account_id, 'Main') = %s
+                      AND id <> %s
+                      AND captured_at < %s
+                    """,
+                    (uid, s["provider"], s["acc"], s["id"], s["captured_at"]),
+                ).fetchone()
+                if prior and int(prior["cnt"] or 0) > 0:
+                    _exec(conn, "DELETE FROM balance_snapshots WHERE id = %s", (s["id"],))
+                    reverted_snapshots += 1
+
+            conn.commit()
+
+        invalidate_analytics_cache(uid)
+        return {
+            "status": "ok",
+            "deduped_txns": deduped_txns,
+            "browser_txns_removed": browser_txns_removed,
+            "reverted_snapshots": reverted_snapshots,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/ingest/odds/{league}")
 async def ingest_odds(league: str, request: Request):
     """

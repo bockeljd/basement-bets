@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, CheckCircle2, AlertCircle, PlusCircle, X } from 'lucide-react';
+import { DollarSign, CheckCircle2, AlertCircle, PlusCircle, X, RotateCcw } from 'lucide-react';
 import api from '../api/axios';
 import { formatSyncDateLabel, getAccountLastSync } from '../components/TransactionView';
 
@@ -10,6 +10,7 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
   const [balanceMsg, setBalanceMsg] = useState(null);
   const [showTxnForm, setShowTxnForm] = useState(false);
   const [savingTxn, setSavingTxn] = useState(false);
+  const [cleaningSync, setCleaningSync] = useState(false);
   const [txnForm, setTxnForm] = useState(() => ({
     type: 'Deposit',
     provider: 'DraftKings',
@@ -130,6 +131,33 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
     }
   };
 
+  const handleCleanupSync = async () => {
+    setCleaningSync(true);
+    setBalanceMsg(null);
+    try {
+      const res = await api.post('/api/transactions/cleanup-sync', { remove_browser_txns: true });
+      const d = res.data || {};
+      const parts = [];
+      if (d.reverted_snapshots > 0) parts.push(`restored ${d.reverted_snapshots} overwritten balance snapshot${d.reverted_snapshots === 1 ? '' : 's'}`);
+      if (d.browser_txns_removed > 0) parts.push(`removed ${d.browser_txns_removed} browser-sync txn${d.browser_txns_removed === 1 ? '' : 's'}`);
+      if (d.deduped_txns > 0) parts.push(`removed ${d.deduped_txns} duplicate txn${d.deduped_txns === 1 ? '' : 's'}`);
+      setBalanceMsg({
+        tone: 'ok',
+        text: parts.length ? `Cleanup complete: ${parts.join(' · ')}.` : 'No duplicate transactions or recent bookmarklet balance overwrites found.',
+      });
+      if (typeof window !== 'undefined' && typeof window.__BB_RELOAD_DASHBOARD__ === 'function') {
+        await window.__BB_RELOAD_DASHBOARD__();
+      }
+    } catch (err) {
+      setBalanceMsg({
+        tone: 'err',
+        text: err.response?.data?.detail || err.message || 'Cleanup failed.',
+      });
+    } finally {
+      setCleaningSync(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {balanceMsg && (
@@ -181,6 +209,16 @@ export default function Bankroll({ financials, bets, formatCurrency }) {
             >
               {showTxnForm ? <X size={14} aria-hidden="true" /> : <PlusCircle size={14} aria-hidden="true" />}
               <span>{showTxnForm ? 'Close' : 'Log Deposit / Withdrawal'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleCleanupSync}
+              disabled={cleaningSync}
+              title="Restore overwritten bookmarklet balance snapshot and remove duplicate transactions"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-200 font-sans font-semibold text-xs cursor-pointer transition-colors disabled:opacity-50"
+            >
+              <RotateCcw size={13} aria-hidden="true" />
+              <span>{cleaningSync ? 'Restoring…' : 'Revert Bad Sync'}</span>
             </button>
           </div>
         </div>
