@@ -192,32 +192,35 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
       }catch(e){}
       return null;
     }
+    var isTxnPage=/transaction|financial|statement|history|wallet|cashier/i.test(location.href)||/transaction history/i.test((document.body&&document.body.innerText||'').slice(0,1200));
     var root=document.querySelector('main')||document.body;
-    var cardSels=["[data-testid*='bet-card']","[data-test-id*='bet-card']","[class*='bet-card']","[class*='BetCard']","[data-testid*='bet']","[data-test-id*='bet']"];
-    var els=[];
-    cardSels.forEach(function(sel){
-      root.querySelectorAll(sel).forEach(function(el){
-        if(els.indexOf(el)===-1){els.push(el);}
+    var cards=[];
+    if(!isTxnPage){
+      var cardSels=["[data-testid*='bet-card']","[data-test-id*='bet-card']","[class*='bet-card']","[class*='BetCard']","[data-testid*='bet']","[data-test-id*='bet']"];
+      var els=[];
+      cardSels.forEach(function(sel){
+        root.querySelectorAll(sel).forEach(function(el){
+          if(els.indexOf(el)===-1){els.push(el);}
+        });
       });
-    });
-    var leafEls=els.filter(function(el){
-      return !els.some(function(other){return other!==el&&el.contains(other);});
-    });
-    var seen={};var cards=[];
-    (leafEls.length?leafEls:els).forEach(function(el){
-      var t=(el.innerText||'').trim();
-      if(!t||t.length<45||seen[t])return;
-      var dkIds=t.match(/DK\\d{10,}/g)||[];
-      if(dkIds.length>1)return;
-      var tl=t.toLowerCase();
-      var hasOutcome=/\\b(won|lost|void|push|cashed|open)\\b|to win|payout/.test(tl);
-      var hasMoney=/\\$|usd/.test(tl);
-      if(hasOutcome&&hasMoney){seen[t]=true;cards.push(t);}
-    });
-    var rawText=cards.length?cards.join('\\n\\n'):(root.innerText||'');
+      var leafEls=els.filter(function(el){
+        return !els.some(function(other){return other!==el&&el.contains(other);});
+      });
+      var seen={};
+      (leafEls.length?leafEls:els).forEach(function(el){
+        var t=(el.innerText||'').trim();
+        if(!t||t.length<45||seen[t])return;
+        var dkIds=t.match(/DK\\d{10,}/g)||[];
+        if(dkIds.length>1)return;
+        var tl=t.toLowerCase();
+        var hasOutcome=/\\b(won|lost|void|push|cashed|open)\\b|to win|payout/.test(tl);
+        var hasMoney=/\\$|usd/.test(tl);
+        if(hasOutcome&&hasMoney){seen[t]=true;cards.push(t);}
+      });
+    }
+    var rawText=(!isTxnPage&&cards.length)?cards.join('\\n\\n'):((document.body&&document.body.innerText)||root.innerText||'');
     ${extractTxnsJs}
     var txns=extractPageTransactions('DraftKings');
-    var isTxnPage=/transaction|financial|statement|history|wallet|cashier/i.test(location.href);
     function readTxnTableBalance(){
       try{
         var tables=document.querySelectorAll('table');
@@ -237,6 +240,8 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
             }
           }
         }
+        var m2=rawText.match(/[+-]\\s*\\$\\s*[0-9,]+\\.\\d{2}\\s+\\$([0-9,]+\\.\\d{2})/);
+        if(m2)return parseFloat(m2[1].replace(/,/g,''));
       }catch(e){}
       return null;
     }

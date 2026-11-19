@@ -706,35 +706,48 @@ def extract_latest_dk_txn_balance(raw_text: str) -> Optional[float]:
     """
     Extract the authoritative pure-Cash balance from the top (newest) row of a
     DraftKings Transaction History dump (Date | Categories | Description | Products | Amount | Balance).
+    Works both with full page text AND with row-only dumps where headers were omitted.
     """
     if not raw_text:
         return None
     text = str(raw_text)
-    if "transaction history" not in text.lower() or "balance" not in text.lower():
-        return None
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # Find the Balance column header, then look in the first transaction block for [Amount, Balance]
-    start_idx = -1
-    for i, ln in enumerate(lines):
-        if ln.lower() in ("balance", "balance ⓘ", "balance i") or ("amount" in ln.lower() and "balance" in ln.lower()):
-            start_idx = i + 1
-            break
-    if start_idx == -1:
+    low = text.lower()
+    is_dk_txn = (
+        "transaction history" in low
+        or "sportsbetting win payout" in low
+        or "sportsbook wager" in low
+        or "wagers and entry fees" in low
+    )
+    if not is_dk_txn:
         return None
 
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     money_re = re.compile(r"([+-]?\s*\$\s*[0-9,]+\.\d{2})")
-    found_amts = []
-    for ln in lines[start_idx : start_idx + 18]:
-        for m in money_re.finditer(ln):
-            val = parse_money_value(m.group(1))
-            if val is not None:
-                found_amts.append((m.group(1).strip(), val))
-        if len(found_amts) >= 2:
-            # First dollar amount is Amount (+$19.52 / -$10.00), second is Balance ($55.52)
-            bal_raw, bal_val = found_amts[1]
-            if not bal_raw.startswith("+") and not bal_raw.startswith("-") and bal_val >= 0:
-                return round(float(bal_val), 2)
+
+    # 1) Prefer starting right after the Balance column header if present
+    start_idx = 0
+    for i, ln in enumerate(lines):
+        ln_l = ln.lower()
+        if ln_l in ("balance", "balance ⓘ", "balance i") or ("amount" in ln_l and "balance" in ln_l):
+            start_idx = i + 1
             break
+
+    # Scan for the first [signed Amount (+$19.52 / -$10.00), unsigned Balance ($55.52)] pair
+    window_lines = lines[start_idx : start_idx + 40]
+    found = []
+    for ln in window_lines:
+        for m in money_re.finditer(ln):
+            raw_tok = m.group(1).strip()
+            val = parse_money_value(raw_tok)
+            if val is not None:
+                found.append((raw_tok, val))
+        for k in range(len(found) - 1):
+            amt_raw, _ = found[k]
+            bal_raw, bal_val = found[k + 1]
+            if (amt_raw.startswith("+") or amt_raw.startswith("-")) and not (
+                bal_raw.startswith("+") or bal_raw.startswith("-")
+            ) and bal_val >= 0:
+                return round(float(bal_val), 2)
     return None
 
 
