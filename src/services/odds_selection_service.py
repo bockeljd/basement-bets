@@ -27,6 +27,7 @@ class OddsSelectionService:
     DEFAULT_PRIORITY = 99
 
     EXCLUDED_LIVE_BOOKS = {"action_open", "open"}
+    PREFERRED_PLAYABLE_BOOKS = {"draftkings", "fanduel"}
     SHARP_BENCHMARK_BOOKS = {
         "pinnacle",
         "circa sports",
@@ -40,6 +41,11 @@ class OddsSelectionService:
     @classmethod
     def _is_live_book(cls, book_name: Optional[str]) -> bool:
         return str(book_name or "").strip().lower() not in cls.EXCLUDED_LIVE_BOOKS
+
+    @classmethod
+    def _is_preferred_playable_book(cls, book_name: Optional[str]) -> bool:
+        b = str(book_name or "").strip().lower()
+        return any(k in b for k in cls.PREFERRED_PLAYABLE_BOOKS)
 
     @classmethod
     def _is_sharp_benchmark(cls, book_name: Optional[str]) -> bool:
@@ -239,12 +245,15 @@ class OddsSelectionService:
         side: str,
         target_line: Optional[float] = None,
         exclude_sharp_benchmarks: bool = True,
+        prefer_dk_fd: bool = True,
     ) -> Optional[Dict]:
         """Find the best available price for a specific side (HOME/AWAY or OVER/UNDER).
 
         Deduplicates by book (keeping newest ``captured_at``), restricts SPREAD/TOTAL
         shopping to within 0.5 pts of ``target_line`` (or the median line), and ranks
         by most favorable line first then highest American price.
+        When ``prefer_dk_fd`` is True (default), DraftKings and FanDuel take strict
+        precedence whenever either book has posted odds for the market/side.
         When ``exclude_sharp_benchmarks`` is True, keeps sharp benchmark books (Pinnacle,
         LowVig, BetOnline, Circa, Bookmaker) out of bet-card recommendations whenever
         playable US retail books exist.
@@ -265,6 +274,10 @@ class OddsSelectionService:
         named_only = [s for s in filtered if self._is_named_retail_or_consensus(s.get('book'))]
         if named_only:
             filtered = named_only
+        if prefer_dk_fd:
+            dk_fd_only = [s for s in filtered if self._is_preferred_playable_book(s.get('book'))]
+            if dk_fd_only:
+                filtered = dk_fd_only
 
         # Keep latest snapshot per book so stale outlier prices never win line-shopping.
         latest_by_book: Dict[str, Dict] = {}

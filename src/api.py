@@ -5741,6 +5741,7 @@ async def get_ncaam_parlays_today(
             e.start_time,
             s_home.line_value AS home_spread,
             ml_home.price AS ml_home_price,
+            ml_home.book AS ml_home_book,
             p_latest.mu_final,
             p_latest.sigma,
             p_latest.pick AS pred_pick,
@@ -5755,11 +5756,12 @@ async def get_ncaam_parlays_today(
             LIMIT 1
           ) s_home ON TRUE
           JOIN LATERAL (
-            SELECT price
+            SELECT price, book
             FROM odds_snapshots
             WHERE event_id = e.id AND market_type = 'MONEYLINE' AND side = 'HOME'
               AND COALESCE(book, '') NOT IN ('action_open', 'open')
-            ORDER BY (CASE WHEN price IS NOT NULL THEN 0 ELSE 1 END), price DESC, captured_at DESC
+              AND price IS NOT NULL
+            ORDER BY (CASE WHEN LOWER(COALESCE(book,'')) LIKE '%%draftkings%%' OR LOWER(COALESCE(book,'')) LIKE '%%fanduel%%' THEN 0 ELSE 1 END), price DESC, captured_at DESC
             LIMIT 1
           ) ml_home ON TRUE
           LEFT JOIN LATERAL (
@@ -5827,7 +5829,10 @@ async def get_ncaam_parlays_today(
                     "event_id": eid,
                     "matchup": f"{away_team} @ {home_team}",
                     "team_pick": home_team,
+                    "market_type": "MONEYLINE",
+                    "side": "HOME",
                     "price": ml_price,
+                    "book": hr.get("ml_home_book") or "Consensus",
                     "win_prob": round(wp_cal, 4),
                     "ev_per_unit": round(ev_leg, 4),
                     "outcome": "PENDING",
@@ -5894,24 +5899,80 @@ async def get_ncaam_parlays_today(
             pr_sp = int(rj.get("price") or -110)
             if ev_sp < 0.025 or wp_sp < 0.535:
                 continue
+            sel_str = str(rj.get("selection") or rj.get("pick") or "").strip()
+            home_nm = str(srd.get("home_team") or "").strip()
+            sp_side = "HOME" if (home_nm and home_nm.lower() in sel_str.lower()) else "AWAY"
             norm_legs.append({
                 "event_id": eid,
+                "matchup": f"{srd.get('away_team')} @ {srd.get('home_team')}",
                 "away_team": srd.get("away_team"),
                 "home_team": srd.get("home_team"),
-                "start_time": srd.get("start_time"),
-                "pick": rj.get("selection") or rj.get("pick"),
-                "selection": rj.get("selection") or rj.get("pick"),
+                "start_time": str(srd.get("start_time") or ""),
+                "team_pick": sel_str,
+                "pick": sel_str,
+                "selection": sel_str,
                 "market_type": bt,
+                "side": sp_side,
                 "price": pr_sp,
                 "book": rj.get("book") or "Consensus",
                 "win_prob": wp_sp,
                 "ev": ev_sp,
+                "ev_per_unit": ev_sp,
                 "outcome": "PENDING",
                 "is_sweet_spot_7pt": False,
             })
             seen_sp_eids.add(eid)
     except Exception as sp_e:
         print(f"[parlays] spread leg enrichment skipped: {sp_e}")
+
+    # Attach latest DraftKings & FanDuel prices to every leg so DK/FD always take precedent
+    # and 2-leg parlays compute exact same-book DK or FD parlay odds.
+    try:
+        leg_eids = list({str(leg.get("event_id")) for leg in norm_legs if leg.get("event_id")})
+        if leg_eids:
+            with get_db_connection() as conn:
+                dk_fd_rows = _exec(
+                    conn,
+                    """
+                    SELECT DISTINCT ON (event_id, market_type, side,
+                      CASE WHEN LOWER(book) LIKE '%%draftkings%%' THEN 'DraftKings' ELSE 'FanDuel' END)
+                      event_id,
+                      market_type,
+                      side,
+                      CASE WHEN LOWER(book) LIKE '%%draftkings%%' THEN 'DraftKings' ELSE 'FanDuel' END AS canon_book,
+                      price
+                    FROM odds_snapshots
+                    WHERE event_id = ANY(%s)
+                      AND price IS NOT NULL
+                      AND (LOWER(COALESCE(book, '')) LIKE '%%draftkings%%' OR LOWER(COALESCE(book, '')) LIKE '%%fanduel%%')
+                    ORDER BY event_id, market_type, side,
+                      CASE WHEN LOWER(book) LIKE '%%draftkings%%' THEN 'DraftKings' ELSE 'FanDuel' END,
+                      captured_at DESC
+                    """,
+                    (leg_eids,),
+                ).fetchall()
+            dk_fd_map = {}
+            for r in (dk_fd_rows or []):
+                rd = dict(r)
+                k = (str(rd["event_id"]), str(rd["market_type"]).upper(), str(rd["side"]).upper())
+                dk_fd_map.setdefault(k, {})[rd["canon_book"]] = int(rd["price"])
+            for leg in norm_legs:
+                mkt_k = str(leg.get("market_type") or "MONEYLINE").upper()
+                if mkt_k == "ML":
+                    mkt_k = "MONEYLINE"
+                side_k = str(leg.get("side") or ("HOME" if leg.get("is_home_pick") else "AWAY")).upper()
+                prices_by_book = dk_fd_map.get((str(leg.get("event_id")), mkt_k, side_k), {})
+                leg["_dk_fd_prices"] = prices_by_book
+                if prices_by_book:
+                    best_bk, best_pr = max(prices_by_book.items(), key=lambda kv: dec_from_american(kv[1]))
+                    leg["price"] = int(best_pr)
+                    leg["book"] = best_bk
+                    leg["ev_per_unit"] = round(
+                        float(leg["win_prob"]) * (dec_from_american(best_pr) - 1.0) - (1.0 - float(leg["win_prob"])),
+                        4,
+                    )
+    except Exception as dkfd_e:
+        print(f"[parlays] DK/FD price enrichment skipped: {dkfd_e}")
 
     for i in range(len(norm_legs)):
         for j in range(i + 1, len(norm_legs)):
@@ -5939,7 +6000,37 @@ async def get_ncaam_parlays_today(
                 parlay_outcome = 'PENDING'
 
             p = float(a['win_prob']) * float(b['win_prob'])
-            dec = dec_from_american(a['price']) * dec_from_american(b['price'])
+
+            # Prefer exact same-book DraftKings or FanDuel parlay pricing whenever both legs exist on that book
+            a_books = a.get("_dk_fd_prices") or {}
+            b_books = b.get("_dk_fd_prices") or {}
+            shared_dk_fd = []
+            for bk_name in ("DraftKings", "FanDuel"):
+                if bk_name in a_books and bk_name in b_books:
+                    p1 = int(a_books[bk_name])
+                    p2 = int(b_books[bk_name])
+                    d_bk = dec_from_american(p1) * dec_from_american(p2)
+                    shared_dk_fd.append((d_bk, bk_name, p1, p2))
+
+            if shared_dk_fd:
+                shared_dk_fd.sort(key=lambda x: x[0], reverse=True)
+                dec, parlay_book, price_a, price_b = shared_dk_fd[0]
+                same_book = True
+                leg_a = {k: v for k, v in a.items() if k != "_dk_fd_prices"}
+                leg_b = {k: v for k, v in b.items() if k != "_dk_fd_prices"}
+                leg_a["price"] = price_a
+                leg_a["book"] = parlay_book
+                leg_b["price"] = price_b
+                leg_b["book"] = parlay_book
+            else:
+                dec = dec_from_american(a['price']) * dec_from_american(b['price'])
+                b1 = str(a.get("book") or "").strip()
+                b2 = str(b.get("book") or "").strip()
+                same_book = bool(b1 and b2 and b1.lower() == b2.lower() and b1.lower() != "consensus")
+                parlay_book = b1 if same_book else None
+                leg_a = {k: v for k, v in a.items() if k != "_dk_fd_prices"}
+                leg_b = {k: v for k, v in b.items() if k != "_dk_fd_prices"}
+
             amer = american_from_dec(dec)
             # EV approximation using independent p
             ev = p * (dec - 1.0) - (1.0 - p)
@@ -5955,19 +6046,16 @@ async def get_ncaam_parlays_today(
                 )
             except Exception:
                 parlay_sizing = {"units": 0.5, "bankroll_pct": 0.5, "kelly_fraction": 0.005, "sizing_tier": "Half-Unit Play"}
-            b1 = str(a.get("book") or "").strip()
-            b2 = str(b.get("book") or "").strip()
-            same_book = bool(b1 and b2 and b1.lower() == b2.lower() and b1.lower() != "consensus")
             combos.append({
-                "legs": [a, b],
+                "legs": [leg_a, leg_b],
                 "p_win": p,
                 "decimal_odds": dec,
                 "american_odds": amer,
                 "ev": ev,
                 "outcome": parlay_outcome,
                 "same_book": same_book,
-                "parlay_book": b1 if same_book else None,
-                "sweet_spot_legs": sum(1 for leg_item in (a, b) if leg_item.get("is_sweet_spot_7pt")),
+                "parlay_book": parlay_book,
+                "sweet_spot_legs": sum(1 for leg_item in (leg_a, leg_b) if leg_item.get("is_sweet_spot_7pt")),
                 "suggested_units": parlay_sizing["units"],
                 "bankroll_pct": parlay_sizing["bankroll_pct"],
                 "sizing_tier": parlay_sizing["sizing_tier"],
