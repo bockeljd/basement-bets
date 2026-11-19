@@ -58,7 +58,7 @@ def main():
     leagues = ['ncaab', 'nba']
     try:
         mlb_override = os.getenv('INGEST_MLB_ODDS', '').strip().lower()
-        in_mlb_window = datetime.datetime.now().month in (3, 4, 5, 6, 7, 8, 9, 10, 11)
+        in_mlb_window = datetime.datetime.now().month in (3, 4, 5, 6, 7, 8, 9, 10)
         if mlb_override in ('1', 'true', 'yes') or (mlb_override == '' and in_mlb_window):
             leagues.append('mlb')
     except Exception:

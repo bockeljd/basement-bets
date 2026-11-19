@@ -575,23 +575,27 @@ function App() {
                                     <span className="hidden sm:inline">Actuals</span>
                                     <span className="sm:hidden">Actuals</span>
                                 </button>
-                                {/* Bankroll moved under Actuals */}
-                                <button
-                                    onClick={() => setPage('march')}
-                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'march' ? 'bg-orange-600/80 text-white shadow-sm ring-1 ring-orange-400/30' : 'text-orange-400/70 hover:text-orange-200 hover:bg-orange-900/20'}`}
-                                >
-                                    <span className="text-[16px]">🏀</span>
-                                    <span className="hidden sm:inline">March Madness</span>
-                                    <span className="sm:hidden">March Madness</span>
-                                </button>
-                                <button
-                                    onClick={() => setPage('mlb')}
-                                    className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'mlb' ? 'bg-teal-700/60 text-white shadow-sm ring-1 ring-teal-400/30' : 'text-teal-400/70 hover:text-teal-200 hover:bg-teal-900/20'}`}
-                                >
-                                    <span className="text-[16px]">⚾</span>
-                                    <span className="hidden sm:inline">MLB</span>
-                                    <span className="sm:hidden">MLB</span>
-                                </button>
+                                {/* Seasonal top-nav tabs: only show March Madness (Feb–Apr) and MLB (Mar–Oct) in season */}
+                                {[1, 2, 3].includes(new Date().getMonth()) && (
+                                    <button
+                                        onClick={() => setPage('march')}
+                                        className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'march' ? 'bg-orange-600/80 text-white shadow-sm ring-1 ring-orange-400/30' : 'text-orange-400/70 hover:text-orange-200 hover:bg-orange-900/20'}`}
+                                    >
+                                        <span className="text-[16px]">🏀</span>
+                                        <span className="hidden sm:inline">March Madness</span>
+                                        <span className="sm:hidden">March Madness</span>
+                                    </button>
+                                )}
+                                {[2, 3, 4, 5, 6, 7, 8, 9].includes(new Date().getMonth()) && (
+                                    <button
+                                        onClick={() => setPage('mlb')}
+                                        className={`px-3 md:px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-semibold transition ${page === 'mlb' ? 'bg-teal-700/60 text-white shadow-sm ring-1 ring-teal-400/30' : 'text-teal-400/70 hover:text-teal-200 hover:bg-teal-900/20'}`}
+                                    >
+                                        <span className="text-[16px]">⚾</span>
+                                        <span className="hidden sm:inline">MLB</span>
+                                        <span className="sm:hidden">MLB</span>
+                                    </button>
+                                )}
                             </div>
 
                             <button
