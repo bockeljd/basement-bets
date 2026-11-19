@@ -1284,6 +1284,21 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if os.getenv('NCAAM_W_BASE') is None:
                 w_base = min(w_base + w_kp_target, 0.45)
 
+        # Early-season single-source outlier clamp (Nov/Dec):
+        # When all 3 independent rating feeds are available, clamp any single feed's spread diff
+        # to within +/-3.5 pts of the other two feeds' average so one noisy early-season rating
+        # (e.g. light-prior Haslametrics) cannot pull the ensemble off consensus.
+        if game_month in (11, 12) and kp_available and hasla_available:
+            def _clamp_vs_peers(val, peer_a, peer_b, max_dev=3.5):
+                peer_avg = (float(peer_a) + float(peer_b)) / 2.0
+                if abs(float(val) - peer_avg) > max_dev:
+                    return peer_avg + (max_dev if float(val) > peer_avg else -max_dev)
+                return float(val)
+            raw_dt, raw_dk, raw_dh = diff_torvik, diff_kenpom, diff_hasla
+            diff_torvik = _clamp_vs_peers(raw_dt, raw_dk, raw_dh)
+            diff_kenpom = _clamp_vs_peers(raw_dk, raw_dt, raw_dh)
+            diff_hasla = _clamp_vs_peers(raw_dh, raw_dt, raw_dk)
+
         # Multi-Source Conviction Boost: when independent rating sources agree Vegas is off,
         # scale ensemble weight up (up to 60% independent / 40% market) instead of hugging market.
         spread_sig_diffs = []
@@ -2859,7 +2874,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         fallback_win_prob=(0.50 + max(0.0, float(edge_prob or 0.0))),
                         ev_per_unit=float(ev),
                     )
-                    if (side == 'HOME' and is_home_fav_parlay_leg) or relax_gates or ml_conf_0_100 >= 55:
+                    if (side == 'HOME' and is_home_fav_parlay_leg and not is_neutral) or relax_gates or ml_conf_0_100 >= 55:
                         doc_ml = {
                             **{k: res.get(k) for k in ("event_id", "user_id", "analyzed_at", "model_version", "mu_market", "mu_torvik", "mu_final", "sigma", "inputs_json", "outputs_json", "narrative_json", "context_json")},
                             "id": str(uuid.uuid4()),

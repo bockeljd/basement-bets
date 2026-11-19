@@ -367,6 +367,8 @@ class GradingService:
                         "event_id": ev['id'],
                         "home_score": int(eg['away_score'] if swapped_match else eg['home_score']),
                         "away_score": int(eg['home_score'] if swapped_match else eg['away_score']),
+                        "home_score_1h": eg.get('away_score_1h') if swapped_match else eg.get('home_score_1h'),
+                        "away_score_1h": eg.get('home_score_1h') if swapped_match else eg.get('away_score_1h'),
                         "final": True,
                         "period": "FINAL",
                     })
@@ -555,7 +557,7 @@ class GradingService:
         SELECT m.id, m.event_id, m.market_type, m.pick, m.bet_line, m.book,
                m.selection, m.analyzed_at, m.narrative_json, m.ev_per_unit,
                e.league, e.home_team, e.away_team, e.start_time,
-               gr.home_score, gr.away_score, gr.final
+               gr.home_score, gr.away_score, gr.home_score_1h, gr.away_score_1h, gr.final
         FROM model_predictions m
         JOIN events e ON m.event_id = e.id
         LEFT JOIN game_results gr ON e.id = gr.event_id
@@ -670,6 +672,27 @@ class GradingService:
             return 'VOID'
         if not pick_u and not sel_u:
             return 'VOID'
+
+        raw_mkt = str(row.get('market_type') or '').strip().upper()
+        if raw_mkt in ('SPREAD_1H', 'TOTAL_1H'):
+            h1h = row.get('home_score_1h')
+            a1h = row.get('away_score_1h')
+            if h1h is None or a1h is None:
+                return 'PENDING'
+            base_mkt = 'SPREAD' if raw_mkt == 'SPREAD_1H' else 'TOTAL'
+            clean_pick = str(pick or '').replace(' 1H', '').replace('1H ', '').strip()
+            clean_sel = str(selection or '').replace(' 1H', '').replace('1H ', '').strip()
+            return grade_score_prediction(
+                market_type=base_mkt,
+                pick=clean_pick,
+                selection=clean_sel,
+                bet_line=row.get('bet_line'),
+                home_team=row.get('home_team'),
+                away_team=row.get('away_team'),
+                home_score=h1h,
+                away_score=a1h,
+                is_mlb=False,
+            )
 
         market, _ = infer_market_type_and_line(
             row.get('market_type'),

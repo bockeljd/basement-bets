@@ -332,6 +332,8 @@ def fetch_espn_scoreboard_finals(
         away_team = None
         home_score = None
         away_score = None
+        home_score_1h = None
+        away_score_1h = None
         for competitor in comp.get("competitors") or []:
             side = competitor.get("homeAway")
             team_name = (competitor.get("team") or {}).get("displayName")
@@ -340,12 +342,21 @@ def fetch_espn_scoreboard_finals(
                 score_val = int(float(raw_score)) if raw_score is not None else None
             except Exception:
                 score_val = None
+            ls = competitor.get("linescores") or []
+            s1h = None
+            if ls and isinstance(ls[0], dict) and ls[0].get("value") is not None:
+                try:
+                    s1h = int(round(float(ls[0]["value"])))
+                except Exception:
+                    s1h = None
             if side == "home":
                 home_team = team_name
                 home_score = score_val
+                home_score_1h = s1h
             elif side == "away":
                 away_team = team_name
                 away_score = score_val
+                away_score_1h = s1h
 
         if home_team and away_team and is_valid_final_score(home_score, away_score, league=lg):
             finals.append({
@@ -354,6 +365,8 @@ def fetch_espn_scoreboard_finals(
                 "away_team": away_team,
                 "home_score": home_score,
                 "away_score": away_score,
+                "home_score_1h": home_score_1h,
+                "away_score_1h": away_score_1h,
                 "start_time": comp.get("date") or ev.get("date"),
                 "completed": True,
             })

@@ -5752,6 +5752,68 @@ async def get_ncaam_parlays_today(
 
     # Enumerate all 2-leg combos (different events)
     combos = []
+    # Also include actionable +EV Spread legs from daily_top_picks so 2-leg parlays
+    # can pair a high-value Spread leg with a sweet-spot ML favorite (or two +EV Spreads).
+    try:
+        sp_date = target_date
+        if not sp_date:
+            with get_db_connection() as conn:
+                sp_date = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+        with get_db_connection() as conn:
+            sp_rows = _exec(
+                conn,
+                """
+                SELECT d.event_id, d.rec_json, e.away_team, e.home_team, e.start_time
+                FROM daily_top_picks d
+                JOIN events e ON e.id = d.event_id
+                WHERE d.league = 'NCAAM'
+                  AND d.date_et = %s
+                  AND d.is_actionable = TRUE
+                  AND d.rec_json IS NOT NULL
+                """,
+                (sp_date,),
+            ).fetchall()
+        seen_sp_eids = {leg.get("event_id") for leg in norm_legs if leg.get("event_id")}
+        for sr in (sp_rows or []):
+            srd = dict(sr)
+            eid = srd.get("event_id")
+            if not eid or eid in seen_sp_eids:
+                continue
+            rj = srd.get("rec_json")
+            if isinstance(rj, str):
+                try:
+                    rj = json.loads(rj)
+                except Exception:
+                    rj = None
+            if not isinstance(rj, dict):
+                continue
+            bt = str(rj.get("bet_type") or "").upper()
+            if bt not in ("SPREAD", "SPREAD_1H"):
+                continue
+            ev_sp = float(rj.get("ev") or 0.0)
+            wp_sp = float(rj.get("win_prob") or 0.0)
+            pr_sp = int(rj.get("price") or -110)
+            if ev_sp < 0.025 or wp_sp < 0.535:
+                continue
+            norm_legs.append({
+                "event_id": eid,
+                "away_team": srd.get("away_team"),
+                "home_team": srd.get("home_team"),
+                "start_time": srd.get("start_time"),
+                "pick": rj.get("selection") or rj.get("pick"),
+                "selection": rj.get("selection") or rj.get("pick"),
+                "market_type": bt,
+                "price": pr_sp,
+                "book": rj.get("book") or "Consensus",
+                "win_prob": wp_sp,
+                "ev": ev_sp,
+                "outcome": "PENDING",
+                "is_sweet_spot_7pt": False,
+            })
+            seen_sp_eids.add(eid)
+    except Exception as sp_e:
+        print(f"[parlays] spread leg enrichment skipped: {sp_e}")
+
     for i in range(len(norm_legs)):
         for j in range(i + 1, len(norm_legs)):
             a = norm_legs[i]
@@ -5794,6 +5856,9 @@ async def get_ncaam_parlays_today(
                 )
             except Exception:
                 parlay_sizing = {"units": 0.5, "bankroll_pct": 0.5, "kelly_fraction": 0.005, "sizing_tier": "Half-Unit Play"}
+            b1 = str(a.get("book") or "").strip()
+            b2 = str(b.get("book") or "").strip()
+            same_book = bool(b1 and b2 and b1.lower() == b2.lower() and b1.lower() != "consensus")
             combos.append({
                 "legs": [a, b],
                 "p_win": p,
@@ -5801,6 +5866,8 @@ async def get_ncaam_parlays_today(
                 "american_odds": amer,
                 "ev": ev,
                 "outcome": parlay_outcome,
+                "same_book": same_book,
+                "parlay_book": b1 if same_book else None,
                 "sweet_spot_legs": sum(1 for leg_item in (a, b) if leg_item.get("is_sweet_spot_7pt")),
                 "suggested_units": parlay_sizing["units"],
                 "bankroll_pct": parlay_sizing["bankroll_pct"],
@@ -5835,21 +5902,21 @@ async def get_ncaam_parlays_today(
                 break
         return accepted, used
 
-    # 1. High confidence shortlist (within band)
+    # 1. High confidence shortlist (within band; prefer same-book 1-click bettable parlays)
     if _strategy == 'home_fav':
         sorted_by_win = sorted(
             combos_in_band,
-            key=lambda x: (int(x.get('sweet_spot_legs') or 0), round(float(x['p_win']), 3), x['ev']),
+            key=lambda x: (1 if x.get('same_book') else 0, int(x.get('sweet_spot_legs') or 0), round(float(x['p_win']), 3), x['ev']),
             reverse=True,
         )
     else:
-        sorted_by_win = sorted(combos_in_band, key=lambda x: (x['p_win'], x['ev']), reverse=True)
+        sorted_by_win = sorted(combos_in_band, key=lambda x: (1 if x.get('same_book') else 0, x['p_win'], x['ev']), reverse=True)
     high_conf, used_eids = get_independent_combos(sorted_by_win, 5)
 
     # 2. Payout band shortlist (Value Matchups)
     # Priority 1: Target Plus Money (+100 or better) that share NO legs with top High Confidence parlays
     plus_money = [c for c in combos_in_band if (c.get('american_odds') or 0) >= 100]
-    sorted_plus_money = sorted(plus_money, key=lambda x: (x['ev'], x['p_win']), reverse=True)
+    sorted_plus_money = sorted(plus_money, key=lambda x: (1 if x.get('same_book') else 0, x['ev'], x['p_win']), reverse=True)
     payout_band, payout_eids = get_independent_combos(sorted_plus_money, 5, avoid_eids=used_eids)
     
     # Priority 2: Fill in with chalk parlays that are independent from BOTH high_conf and the plus_money ones we just added

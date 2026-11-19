@@ -519,6 +519,9 @@ def init_snapshots_db():
         "CREATE INDEX IF NOT EXISTS idx_snap_event ON odds_snapshots(event_id);",
         "CREATE INDEX IF NOT EXISTS idx_snap_captured ON odds_snapshots(captured_at DESC);",
         "CREATE INDEX IF NOT EXISTS idx_snap_created ON odds_snapshots(created_at DESC);",
+        "CREATE INDEX IF NOT EXISTS ix_odds_lookup ON odds_snapshots(event_id, market_type, side, captured_at DESC);",
+        "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS home_score_1h INTEGER;",
+        "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS away_score_1h INTEGER;",
     ]
 
     with get_admin_db_connection() as conn:
@@ -1060,18 +1063,35 @@ def store_odds_snapshots(snaps: list) -> int:
         return 0
 
 def upsert_game_result(res: dict):
+    payload = {
+        "event_id": res.get("event_id"),
+        "home_score": res.get("home_score"),
+        "away_score": res.get("away_score"),
+        "home_score_1h": res.get("home_score_1h"),
+        "away_score_1h": res.get("away_score_1h"),
+        "final": res.get("final"),
+        "period": res.get("period"),
+    }
     query = """
-    INSERT INTO game_results (event_id, home_score, away_score, final, period)
-    VALUES (:event_id, :home_score, :away_score, :final, :period)
+    INSERT INTO game_results (event_id, home_score, away_score, home_score_1h, away_score_1h, final, period)
+    VALUES (:event_id, :home_score, :away_score, :home_score_1h, :away_score_1h, :final, :period)
     ON CONFLICT (event_id) DO UPDATE SET
         home_score = EXCLUDED.home_score,
         away_score = EXCLUDED.away_score,
+        home_score_1h = COALESCE(EXCLUDED.home_score_1h, game_results.home_score_1h),
+        away_score_1h = COALESCE(EXCLUDED.away_score_1h, game_results.away_score_1h),
         final = EXCLUDED.final,
         period = EXCLUDED.period,
         updated_at = CURRENT_TIMESTAMP
     """
     with get_db_connection() as conn:
-        _exec(conn, query, res)
+        try:
+            _exec(conn, query, payload)
+        except Exception:
+            conn.rollback()
+            _exec(conn, "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS home_score_1h INTEGER;")
+            _exec(conn, "ALTER TABLE game_results ADD COLUMN IF NOT EXISTS away_score_1h INTEGER;")
+            _exec(conn, query, payload)
         conn.commit()
 
 def insert_model_prediction(doc: dict) -> bool:

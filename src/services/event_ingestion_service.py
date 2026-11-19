@@ -57,17 +57,58 @@ class EventIngestionService:
                     self._link_provider(conn, canonical_id, provider, provider_event_id)
                     self._update_event_status(conn, canonical_id, event_data)
                 else:
-                    # 3. Create New
-                    # For strict mode, if it's NCAAM, ID should be espn:ncaam:<pid> 
-                    # but if it's new, we might generate a UUID if pid is not enough.
-                    # User says: events.id = "espn:ncaam:<espn_event_id>"
-                    if league.upper() == 'NCAAM':
-                        canonical_id = f"espn:ncaam:{provider_event_id}"
+                    # 2b. Fuzzy matchup lookup within +/-24h (prevents duplicate espn:ncaam:* rows alongside action:ncaam:*)
+                    matched_existing = None
+                    try:
+                        from src.services.injury_service import _team_names_match
+                        from src.utils.team_matcher import TeamMatcher
+                        matcher = TeamMatcher()
+                        cand_rows = _exec(
+                            conn,
+                            """
+                            SELECT id, home_team, away_team
+                            FROM events
+                            WHERE league = :l
+                              AND start_time BETWEEN (:st::timestamptz - INTERVAL '24 hours') AND (:st::timestamptz + INTERVAL '24 hours')
+                            ORDER BY (CASE WHEN id LIKE 'action:%%' THEN 0 ELSE 1 END), start_time ASC
+                            """,
+                            {"l": league, "st": start_time},
+                        ).fetchall()
+                        h_in = event_data.get('home_team')
+                        a_in = event_data.get('away_team')
+                        for cr in (cand_rows or []):
+                            crd = dict(cr)
+                            direct = _team_names_match(matcher, crd.get('home_team'), h_in) and _team_names_match(matcher, crd.get('away_team'), a_in)
+                            swapped = (not direct) and _team_names_match(matcher, crd.get('home_team'), a_in) and _team_names_match(matcher, crd.get('away_team'), h_in)
+                            if direct or swapped:
+                                matched_existing = (crd['id'], swapped)
+                                break
+                    except Exception:
+                        matched_existing = None
+
+                    if matched_existing:
+                        canonical_id, was_swapped = matched_existing
+                        self._link_provider(conn, canonical_id, provider, provider_event_id)
+                        self._update_event_status(conn, canonical_id, event_data)
+                        if was_swapped and isinstance(event_data.get('result'), dict):
+                            r_orig = event_data['result']
+                            event_data = {
+                                **event_data,
+                                'result': {
+                                    **r_orig,
+                                    'home_score': r_orig.get('away_score'),
+                                    'away_score': r_orig.get('home_score'),
+                                },
+                            }
                     else:
-                        canonical_id = str(uuid.uuid4())
-                        
-                    self._create_event(conn, canonical_id, event_data)
-                    self._link_provider(conn, canonical_id, provider, provider_event_id)
+                        # 3. Create New
+                        if league.upper() == 'NCAAM':
+                            canonical_id = f"espn:ncaam:{provider_event_id}"
+                        else:
+                            canonical_id = str(uuid.uuid4())
+                            
+                        self._create_event(conn, canonical_id, event_data)
+                        self._link_provider(conn, canonical_id, provider, provider_event_id)
             
             # 4. Upsert Game Results
             if canonical_id and event_data.get('result'):
