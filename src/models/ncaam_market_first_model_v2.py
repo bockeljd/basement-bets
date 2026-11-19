@@ -2667,15 +2667,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 min_pct = _safe_float(m.get('min_pct') or m.get('Min%') or m.get('min'))
                 ortg = _safe_float(m.get('ortg') or m.get('ORtg'))
                 usg = _safe_float(m.get('usg') or m.get('Poss%'))
-                # Estimate spread impact (pts) if player sits: scaled by minutes share & efficiency above avg
+                porpag = _safe_float(m.get('porpag'))
+                # Estimate spread impact (pts) if player sits:
+                # Prefer BartTorvik PORPAG (points over replacement per game) blended with minutes share.
                 min_share = (min_pct / 100.0) if (min_pct is not None and min_pct > 1.5) else (min_pct or 0.45)
-                eff_bonus = max(0.0, ((ortg or 104.0) - 98.0) / 14.0)
-                est_pts = round(max(0.3, min(3.2, (min_share * 2.4) + (eff_bonus * min_share))), 1)
+                if porpag is not None:
+                    # Clamp replacement value so negative-PORPAG starters still carry modest rotation-disruption cost
+                    raw_pts = max(0.3, min(3.8, (max(0.0, porpag) * 0.65) + (min_share * 1.1)))
+                else:
+                    eff_bonus = max(0.0, ((ortg or 104.0) - 98.0) / 14.0)
+                    raw_pts = max(0.3, min(3.2, (min_share * 2.4) + (eff_bonus * min_share)))
+                est_pts = round(raw_pts, 1)
                 out_p.append({
                     'name': name,
                     'min_pct': round(min_pct, 1) if min_pct is not None else None,
                     'ortg': round(ortg, 1) if ortg is not None else None,
                     'usg': round(usg, 1) if usg is not None else None,
+                    'porpag': round(porpag, 2) if porpag is not None else None,
                     'est_impact_pts': est_pts,
                 })
             out_p.sort(key=lambda x: (x['min_pct'] or 0.0, x['est_impact_pts']), reverse=True)

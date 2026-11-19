@@ -347,6 +347,11 @@ class KenPomClient:
         return dict(row)
 
     def get_player_stats_for_team(self, team_name: str, limit: int = 40, conn=None) -> List[Dict]:
+        # Prefer BartTorvik full D1 rotation table (has full rosters + real Min%, ORtg, USG, PORPAG)
+        bt_rows = self._get_bt_player_stats_for_team(team_name, limit=limit, conn=conn)
+        if bt_rows:
+            return bt_rows
+
         matched = self.matcher.find_source_name(team_name, "kenpom_player_stats_daily", "team_name")
         if not matched:
             return []
@@ -356,6 +361,50 @@ class KenPomClient:
         else:
              with get_db_connection() as c:
                   return self._exec_player_stats(c, matched, limit)
+
+    def _get_bt_player_stats_for_team(self, team_name: str, limit: int = 40, conn=None) -> List[Dict]:
+        try:
+            matched = self.matcher.find_source_name(team_name, "bt_player_stats_daily", "team_text")
+            if not matched:
+                return []
+            if conn:
+                return self._exec_bt_player_stats(conn, matched, limit)
+            with get_db_connection() as c:
+                return self._exec_bt_player_stats(c, matched, limit)
+        except Exception:
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            return []
+
+    def _exec_bt_player_stats(self, conn, matched: str, limit: int) -> List[Dict]:
+        asof = self._latest_asof_date_internal(conn, 'bt_player_stats_daily')
+        if not asof:
+            return []
+        rows = _exec(conn, """
+            SELECT player_name, team_text, gp, min_pct, ortg, usg, porpag, bpm
+            FROM bt_player_stats_daily
+            WHERE asof_date=%s AND team_text=%s
+            ORDER BY min_pct DESC NULLS LAST
+            LIMIT %s
+        """, (asof, matched, int(limit))).fetchall()
+        out = []
+        for row in rows or []:
+            out.append({
+                "player_name": row["player_name"],
+                "team_name": row["team_text"],
+                "metrics": {
+                    "gp": row["gp"],
+                    "min_pct": row["min_pct"],
+                    "ortg": row["ortg"],
+                    "usg": row["usg"],
+                    "porpag": row["porpag"],
+                    "bpm": row["bpm"],
+                },
+            })
+        return out
 
     def _exec_player_stats(self, conn, matched, limit):
         asof = self._latest_asof_date_internal(conn, 'kenpom_player_stats_daily')

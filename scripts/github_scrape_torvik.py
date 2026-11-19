@@ -7,6 +7,8 @@ Persists to bt_team_metrics_daily table.
 """
 import os
 import sys
+import csv
+import io
 import json
 import psycopg2
 import psycopg2.extras
@@ -168,6 +170,137 @@ def save_to_database(teams: list):
     return count
 
 
+def fetch_player_stats(year: int = None):
+    """
+    Fetch full D1 rotation player stats from BartTorvik getadvstats.php CSV.
+    """
+    if year is None:
+        year = _default_torvik_year()
+    url = f"https://barttorvik.com/getadvstats.php?year={year}&csv=1"
+    print(f"[FETCH] Getting player rotation stats from {url}")
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        if resp.status_code != 200 or not resp.text:
+            print(f"[FETCH] Player CSV returned status {resp.status_code}")
+            return []
+        rows = list(csv.reader(io.StringIO(resp.text)))
+        parsed = []
+        for row in rows:
+            if len(row) < 7:
+                continue
+            player_name = str(row[0] or "").strip()
+            team_text = str(row[1] or "").strip()
+            if not player_name or not team_text or player_name.lower() == "player_name":
+                continue
+            try:
+                gp = int(float(row[3])) if row[3] else 0
+            except Exception:
+                gp = 0
+            try:
+                min_pct = float(row[4]) if row[4] else 0.0
+            except Exception:
+                min_pct = 0.0
+            if gp < 1 or min_pct < 12.0:
+                continue
+            def _f(idx):
+                try:
+                    return float(row[idx]) if len(row) > idx and row[idx] != "" else None
+                except Exception:
+                    return None
+            parsed.append({
+                "player_name": player_name,
+                "team_text": team_text,
+                "gp": gp,
+                "min_pct": round(min_pct, 1),
+                "ortg": _f(5),
+                "usg": _f(6),
+                "porpag": _f(28),
+                "bpm": _f(50),
+            })
+        print(f"[FETCH] Parsed {len(parsed)} rotation players (min% >= 12.0)")
+        return parsed
+    except Exception as e:
+        print(f"[FETCH] Player stats error: {e}")
+        return []
+
+
+def save_player_stats_to_database(players: list):
+    """Batch upsert D1 rotation player stats into bt_player_stats_daily."""
+    if not players:
+        print("[DB] No player stats to save")
+        return 0
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    now_ts = datetime.now()
+
+    # Deduplicate by (team_text, player_name) keeping highest min_pct
+    dedup = {}
+    for p in players:
+        key = (p["team_text"], p["player_name"])
+        if key not in dedup or p["min_pct"] > dedup[key]["min_pct"]:
+            dedup[key] = p
+    values = [
+        (
+            today,
+            p["team_text"],
+            p["player_name"],
+            p["gp"],
+            p["min_pct"],
+            p["ortg"],
+            p["usg"],
+            p["porpag"],
+            p["bpm"],
+            now_ts,
+        )
+        for p in dedup.values()
+    ]
+
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS bt_player_stats_daily (
+                asof_date DATE NOT NULL,
+                team_text TEXT NOT NULL,
+                player_name TEXT NOT NULL,
+                gp INTEGER,
+                min_pct REAL,
+                ortg REAL,
+                usg REAL,
+                porpag REAL,
+                bpm REAL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (asof_date, team_text, player_name)
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS ix_bt_player_stats_team_date
+            ON bt_player_stats_daily (team_text, asof_date DESC);
+        """)
+        psycopg2.extras.execute_values(
+            cur,
+            """
+            INSERT INTO bt_player_stats_daily
+                (asof_date, team_text, player_name, gp, min_pct, ortg, usg, porpag, bpm, updated_at)
+            VALUES %s
+            ON CONFLICT (asof_date, team_text, player_name) DO UPDATE SET
+                gp = EXCLUDED.gp,
+                min_pct = EXCLUDED.min_pct,
+                ortg = EXCLUDED.ortg,
+                usg = EXCLUDED.usg,
+                porpag = EXCLUDED.porpag,
+                bpm = EXCLUDED.bpm,
+                updated_at = EXCLUDED.updated_at
+            """,
+            values,
+            page_size=500,
+        )
+        conn.commit()
+    return len(values)
+
+
 def main():
     global DATABASE_URL
     
@@ -189,17 +322,23 @@ def main():
     
     print("[OK] Database URL configured")
     
+    year = _default_torvik_year()
     # Fetch from team_results.json
-    teams = fetch_team_results(year=_default_torvik_year())
+    teams = fetch_team_results(year=year)
     
     if not teams:
         print("[WARNING] Could not fetch team data")
         print("[INFO] Model will use cached data")
-        sys.exit(0)  # Exit success
-    
-    # Save to database
-    saved = save_to_database(teams)
-    print(f"[DB] Saved {saved} team records")
+    else:
+        # Save to database
+        saved = save_to_database(teams)
+        print(f"[DB] Saved {saved} team records")
+
+    # Fetch and save full D1 rotation player stats
+    players = fetch_player_stats(year=year)
+    if players:
+        saved_p = save_player_stats_to_database(players)
+        print(f"[DB] Saved {saved_p} rotation player records")
     
     print("\n" + "=" * 50)
     print("✅ Complete!")
