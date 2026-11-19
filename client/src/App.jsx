@@ -17,6 +17,7 @@ const Bankroll = lazy(() => import('./pages/Bankroll'));
 const MarchMadness = lazy(() => import('./pages/MarchMadness'));
 const MLB = lazy(() => import('./pages/MLB'));
 const TransactionView = lazy(() => import('./components/TransactionView'));
+const SportsbookSyncHub = lazy(() => import('./components/SportsbookSyncHub'));
 
 console.log("Basement Bets Frontend v1.6.5 Loaded at " + new Date().toISOString());
 
@@ -616,30 +617,101 @@ function App() {
                         </div>
                     </header>
 
-                    {page === 'actuals' && (
-                        <div className="mb-6 flex justify-end">
-                            <div className="inline-flex gap-1 p-1 rounded-2xl bg-slate-900/40 border border-slate-700/40">
-                                <button
-                                    onClick={() => setActualsTab('transactions')}
-                                    className={`px-3 py-2 rounded-xl text-sm font-semibold transition ${actualsTab === 'transactions' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                                >
-                                    Transactions
-                                </button>
-                                <button
-                                    onClick={() => setActualsTab('performance')}
-                                    className={`px-3 py-2 rounded-xl text-sm font-semibold transition ${actualsTab === 'performance' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                                >
-                                    Performance
-                                </button>
-                                <button
-                                    onClick={() => setActualsTab('bankroll')}
-                                    className={`px-3 py-2 rounded-xl text-sm font-semibold transition ${actualsTab === 'bankroll' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
-                                >
-                                    Bankroll
-                                </button>
+                    {page === 'actuals' && (() => {
+                        const actualBets = Array.isArray(bets)
+                            ? bets.filter((b) => !['Deposit', 'Withdrawal', 'Other'].includes(b.bet_type))
+                            : [];
+                        const wonCnt = actualBets.filter((b) => String(b.status || '').toUpperCase() === 'WON').length;
+                        const lostCnt = actualBets.filter((b) => String(b.status || '').toUpperCase() === 'LOST').length;
+                        const openBets = actualBets.filter((b) => ['OPEN', 'PENDING'].includes(String(b.status || '').toUpperCase()));
+                        const openStake = openBets.reduce((acc, b) => acc + (Number(b.wager || 0) || 0), 0);
+                        const settledDecided = wonCnt + lostCnt;
+                        const winPct = settledDecided > 0 ? ((wonCnt / settledDecided) * 100).toFixed(1) : null;
+                        const netProfit = Number(financials?.realized_profit || 0);
+                        const totalBankroll = Number(financials?.total_in_play || 0);
+
+                        return (
+                            <div className="mb-6 space-y-4">
+                                {/* Compact Actuals KPI Strip */}
+                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net Profit</div>
+                                        <div className={`mt-0.5 text-lg font-mono font-bold ${netProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                            {netProfit >= 0 ? '+' : ''}{formatCurrency(netProfit)}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Bankroll</div>
+                                        <div className="mt-0.5 text-lg font-mono font-bold text-white">
+                                            {formatCurrency(totalBankroll)}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Settled Record</div>
+                                        <div className="mt-0.5 text-lg font-mono font-bold text-slate-100">
+                                            {wonCnt}–{lostCnt}
+                                            {winPct && <span className="ml-1.5 text-xs font-normal text-slate-400">({winPct}%)</span>}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-900/75 px-4 py-3">
+                                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Open Bets</div>
+                                        <div className="mt-0.5 text-lg font-mono font-bold text-sky-300">
+                                            {openBets.length}
+                                            {openStake > 0 && <span className="ml-1.5 text-xs font-normal text-slate-400">({formatCurrency(openStake)})</span>}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Clean Single-Row Actuals Tabs + Quick Sync CTA */}
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div className="inline-flex flex-wrap gap-1 p-1 rounded-2xl bg-slate-900/60 border border-slate-700/50" role="tablist" aria-label="Actuals sections">
+                                        {[
+                                            { id: 'sync', label: 'Sync DK & FanDuel' },
+                                            { id: 'transactions', label: 'My Bets' },
+                                            { id: 'performance', label: 'Performance' },
+                                            { id: 'bankroll', label: 'Bankroll' },
+                                        ].map((t) => (
+                                            <button
+                                                key={t.id}
+                                                type="button"
+                                                role="tab"
+                                                aria-selected={actualsTab === t.id}
+                                                onClick={() => setActualsTab(t.id)}
+                                                className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
+                                                    actualsTab === t.id
+                                                        ? t.id === 'sync'
+                                                            ? 'bg-emerald-600 text-white shadow-sm'
+                                                            : 'bg-slate-800 text-white shadow-sm ring-1 ring-white/10'
+                                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                                                }`}
+                                            >
+                                                {t.label}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                        {actualsTab !== 'sync' && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setActualsTab('sync')}
+                                                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition cursor-pointer"
+                                            >
+                                                Sync DK / FanDuel
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => { setAddBetMode('slip'); setShowAddBet(true); }}
+                                            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer"
+                                        >
+                                            + Paste Slip
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
 
 
                     {/* Content */}
@@ -739,7 +811,15 @@ function App() {
                         </Suspense>
                     ) : (
                         <Suspense fallback={<div className="p-8 text-center text-sm text-slate-400">Loading view...</div>}>
-                            {actualsTab === 'transactions' ? (
+                            {actualsTab === 'sync' ? (
+                                <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg">
+                                    <SportsbookSyncHub
+                                        onSyncComplete={() => {
+                                            window.location.reload();
+                                        }}
+                                    />
+                                </div>
+                            ) : actualsTab === 'transactions' ? (
                                 <TransactionView
                                     bets={bets}
                                     setBets={setBets}

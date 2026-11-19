@@ -311,8 +311,18 @@ export default function SportsbookSyncHub({ onSyncComplete, initialMethod = 'boo
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="p-3 rounded-lg bg-slate-900/70 border border-blue-500/30 space-y-2">
-              <div className="text-xs font-bold text-blue-300">FanDuel Open + Settled + Balance</div>
+            <div className="p-3.5 rounded-xl bg-slate-900/75 border border-blue-500/35 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-bold text-blue-300">FanDuel (Open + Settled + Balance)</div>
+                <a
+                  href="https://sportsbook.fanduel.com/my-bets"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] font-semibold text-blue-400 hover:text-blue-200 underline"
+                >
+                  Open My Bets ↗
+                </a>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <a
                   ref={setFdLinkEl}
@@ -326,7 +336,7 @@ export default function SportsbookSyncHub({ onSyncComplete, initialMethod = 'boo
                 <button
                   type="button"
                   onClick={() => copyText(fdBookmarklet, 'FanDuel bookmarklet URL copied. Paste it as a new Chrome bookmark URL.')}
-                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs border border-slate-700"
+                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs border border-slate-700 cursor-pointer"
                 >
                   <Copy className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Copy URL</span>
@@ -334,8 +344,18 @@ export default function SportsbookSyncHub({ onSyncComplete, initialMethod = 'boo
               </div>
             </div>
 
-            <div className="p-3 rounded-lg bg-slate-900/70 border border-emerald-500/30 space-y-2">
-              <div className="text-xs font-bold text-emerald-300">DraftKings Open + Settled + Balance</div>
+            <div className="p-3.5 rounded-xl bg-slate-900/75 border border-emerald-500/35 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-bold text-emerald-300">DraftKings (Open + Settled + Balance)</div>
+                <a
+                  href="https://sportsbook.draftkings.com/mybets"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-200 underline"
+                >
+                  Open My Bets ↗
+                </a>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <a
                   ref={setDkLinkEl}
@@ -349,7 +369,7 @@ export default function SportsbookSyncHub({ onSyncComplete, initialMethod = 'boo
                 <button
                   type="button"
                   onClick={() => copyText(dkBookmarklet, 'DraftKings bookmarklet URL copied. Paste it as a new Chrome bookmark URL.')}
-                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs border border-slate-700"
+                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs border border-slate-700 cursor-pointer"
                 >
                   <Copy className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Copy URL</span>
