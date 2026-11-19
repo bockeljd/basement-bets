@@ -317,6 +317,10 @@ def _collect_tune_records(model: NCAAMMarketFirstModelV2, games: list[dict], now
                         "league": "NCAAM",
                         "sport": "NCAAM",
                         "start_time": st,
+                        "neutral_site": bool(g.get("neutral_site", False)),
+                        "venue": g.get("venue"),
+                        "venue_city": g.get("venue_city"),
+                        "venue_state": g.get("venue_state"),
                     },
                     relax_gates=False,
                     persist=False,
@@ -367,6 +371,8 @@ def main():
         # Pull completed games
         rows = _exec(conn, """
             SELECT e.id, e.home_team, e.away_team, e.start_time,
+                   COALESCE(e.neutral_site, FALSE) AS neutral_site,
+                   e.venue, e.venue_city, e.venue_state,
                    r.home_score, r.away_score
             FROM events e
             JOIN game_results r ON r.event_id = e.id
@@ -459,6 +465,10 @@ def main():
                     'league': 'NCAAM',
                     'sport': 'NCAAM',
                     'start_time': st,
+                    'neutral_site': bool(g.get('neutral_site', False)),
+                    'venue': g.get('venue'),
+                    'venue_city': g.get('venue_city'),
+                    'venue_state': g.get('venue_state'),
                 }, relax_gates=False, persist=False)
                 dbg = (res.get('debug') or {})
             except Exception:

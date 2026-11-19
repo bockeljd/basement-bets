@@ -114,6 +114,12 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python3 src/scripts/run_settlement.py
 
+      - name: Backfill Season Neutral-Site Metadata
+        if: ${{ inputs.backfill_pending }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 src/scripts/backfill_ncaam_neutral_sites.py --days 25
+
       - name: Grade Predictions
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
