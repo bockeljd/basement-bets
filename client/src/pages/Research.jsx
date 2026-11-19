@@ -42,7 +42,8 @@ import {
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
 
-const LEAGUES = ['NCAAM', 'MLB', 'NFL', 'EPL'];
+const IS_MLB_SEASON = [2, 3, 4, 5, 6, 7, 8, 9].includes(new Date().getMonth());
+const LEAGUES = IS_MLB_SEASON ? ['NCAAM', 'MLB', 'NFL', 'EPL'] : ['NCAAM', 'NFL', 'EPL'];
 
 const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true }) => {
   const [edges, setEdges] = useState([]);
@@ -125,7 +126,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
           : Promise.resolve({ data: { predictions: [] } }),
       ]);
 
-      setEdges(dedupeBoardGames(Array.isArray(boardRes.data) ? boardRes.data : []));
+      const dedupedBoard = dedupeBoardGames(Array.isArray(boardRes.data) ? boardRes.data : []);
+      setEdges(dedupedBoard);
       setDataHealth(healthRes?.data?.items || []);
 
       const mProfiles = {};
@@ -156,9 +158,11 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
           const k = makeMatchupKey(String(ev.day_et || '').slice(0, 10), ev.away_team, ev.home_team);
           if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
         });
-      } else if (leagueFilter === 'MLB' && Array.isArray(mlbRes?.data?.predictions)) {
+      } else if (leagueFilter === 'MLB' && dedupedBoard.length > 0 && Array.isArray(mlbRes?.data?.predictions)) {
         const latestPreds = new Map();
-        mlbRes.data.predictions.forEach((p) => {
+        mlbRes.data.predictions
+          .filter((p) => !p.day_et || String(p.day_et).slice(0, 10) === selectedDate)
+          .forEach((p) => {
           const key = `${p.away_team || ''}_${p.home_team || ''}_${String(p.market_type || '').toUpperCase()}`;
           const prev = latestPreds.get(key);
           const prevT = prev?.analyzed_at ? new Date(prev.analyzed_at).getTime() : 0;
