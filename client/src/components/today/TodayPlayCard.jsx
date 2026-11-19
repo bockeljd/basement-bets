@@ -63,12 +63,7 @@ const TodayPlayCard = ({
   const winProb = rec?.calibrated_win_prob ?? rec?.win_prob;
   const sizeInfo = getRecommendedBetSize(rec, bankroll);
   const sizeText = sizeInfo ? sizeInfo.detailedLabel : conf.tier === 'HIGH' ? '1.5u · 1.5%' : '1u · 1%';
-  const tags = Array.isArray(rec?.movement_tags) ? rec.movement_tags.slice(0, 2) : [];
-  const reasons = buildWhyPickReasons(rec, game).filter(
-    (r) => r.label !== 'Model vs Market' && r.label !== 'Independent Ratings'
-  );
-  const primaryReason = reasons[0]?.text || null;
-  const extraReasons = reasons.slice(1);
+  const tags = Array.isArray(rec?.movement_tags) ? rec.movement_tags.slice(0, 1) : [];
   const injImpact = rec?.signals?.injuries_impact;
 
   const analysisLike = context ? { context } : null;
@@ -76,7 +71,7 @@ const TodayPlayCard = ({
   const visualData = buildVisualModelData(rec, game, analysisLike);
   const liveInfo = getLiveGameStatus(game, rec, context);
   const modelSignals = getModelSignalData(rec, context, null, game);
-  const cardSignals = modelSignals.pills.slice(0, 3);
+  const cardSignals = modelSignals.pills.slice(0, 2);
   const liveBadgeText = liveInfo.isLive && liveInfo.trendLabel
     ? `${liveInfo.trendLabel}${liveInfo.liveWinProb != null ? ` (${Math.round(liveInfo.liveWinProb * 100)}%)` : ''}`
     : liveInfo.coverText;
@@ -285,21 +280,13 @@ const TodayPlayCard = ({
         </div>
       </div>
 
-      {/* Concise 1-sentence main reason */}
-      {primaryReason && (
-        <div className="rounded-xl border border-indigo-500/20 bg-slate-950/60 px-3 py-2 flex items-start gap-2 text-xs text-slate-200 leading-relaxed">
-          <Sparkles size={13} className="text-indigo-400 shrink-0 mt-0.5" aria-hidden="true" />
-          <span>{primaryReason}</span>
-        </div>
-      )}
-
-      {/* Key signal tags */}
+      {/* Key signal tags (max 2–3 short pills, no icon clutter) */}
       {(cardSignals.length > 0 || tags.length > 0 || injImpact) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {cardSignals.map((pill) => (
             <span
               key={pill.id}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${TONE_BADGES[pill.tone] || TONE_BADGES.slate}`}
+              className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${TONE_BADGES[pill.tone] || TONE_BADGES.slate}`}
             >
               {pill.label}
             </span>
@@ -309,48 +296,29 @@ const TodayPlayCard = ({
             return (
               <span
                 key={rawTag}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${TONE_BADGES[norm.tone] || TONE_BADGES.slate}`}
+                className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${TONE_BADGES[norm.tone] || TONE_BADGES.slate}`}
               >
-                <TrendingUp size={10} aria-hidden="true" />
                 {norm.label}
               </span>
             );
           })}
           {injImpact && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-500/35 bg-amber-500/10 text-amber-300 text-[11px] font-semibold">
-              <AlertTriangle size={10} aria-hidden="true" />
               Injury {fmtSigned(injImpact.spread_adj || 0, 1)} pts
             </span>
           )}
         </div>
       )}
 
-      {/* Secondary chart & extra reasons behind native disclosure */}
-      {(visualData || projectedScore || extraReasons.length > 0) && (
-        <details className="today-card-details rounded-xl border border-slate-800/80 bg-slate-950/45 px-3 py-2 text-xs">
-          <summary className="font-semibold text-slate-300 hover:text-white py-0.5">
-            See model comparison chart{extraReasons.length > 0 ? ` & extra reasons (${extraReasons.length})` : ''}
-          </summary>
-          <div className="pt-2.5 space-y-2.5">
-            <ModelVisualComparison
-              visualData={visualData}
-              projectedScore={projectedScore}
-              compact
-            />
-            {extraReasons.length > 0 && (
-              <div className="rounded-lg border border-slate-800 bg-slate-950/85 p-3 space-y-2">
-                {extraReasons.map((item, idx) => (
-                  <div key={idx} className="flex flex-col gap-0.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-300">
-                      {item.label}
-                    </span>
-                    <p className="text-slate-200 leading-relaxed">{item.text}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </details>
+      {/* Inline model comparison chart (no dropdown) */}
+      {visualData && (
+        <div className="rounded-xl border border-slate-800/80 bg-slate-950/45 px-3 py-2.5">
+          <ModelVisualComparison
+            visualData={visualData}
+            projectedScore={projectedScore}
+            compact
+          />
+        </div>
       )}
 
       {/* Footer actions */}

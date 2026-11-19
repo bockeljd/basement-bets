@@ -48,9 +48,11 @@ const TodayMatchupModal = ({
   const [refsSaving, setRefsSaving] = useState(false);
   const [refsMessage, setRefsMessage] = useState(null);
   const [outPlayers, setOutPlayers] = useState({});
+  const [modalTab, setModalTab] = useState('overview'); // 'overview' | 'stats' | 'lineup'
 
   useEffect(() => {
     setOutPlayers({});
+    setModalTab('overview');
   }, [game?.id]);
 
   const togglePlayerOut = (side, name) => {
@@ -384,8 +386,35 @@ const TodayMatchupModal = ({
               </div>
             ) : (
               <>
-                {/* 1. Primary Recommendation / Pass Status */}
-                {topRec ? (
+                {/* Clean visual tab bar inside Details modal (replaces long scroll & dropdowns) */}
+                <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-800 pb-3" role="tablist" aria-label="Matchup details sections">
+                  {[
+                    { id: 'overview', label: 'Overview & Lines' },
+                    { id: 'stats', label: 'Stats & Four Factors' },
+                    { id: 'lineup', label: 'Lineup, Splits & Refs' },
+                  ].map((tab) => {
+                    const active = modalTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setModalTab(tab.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 1. Primary Recommendation / Pass Status (Overview) */}
+                {modalTab === 'overview' && (topRec ? (
                   <section className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-950/45 to-slate-950 p-4 space-y-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -399,23 +428,21 @@ const TodayMatchupModal = ({
                         <p className="text-xs text-slate-300 mt-0.5">
                           {topRec.book || 'Consensus'} · Our Line {topRec.fair_line ?? '—'} vs Sportsbook {topRec.market_line ?? '—'} ·{' '}
                           <strong className="text-emerald-300">
-                            {fmtPct(topRec.calibrated_win_prob ?? topRec.win_prob, 1)} Win Chance
+                            {fmtPct(topRec.calibrated_win_prob ?? topRec.win_prob, 1)} Win
                           </strong>{' '}
-                          (+{Number((topEv || 0) * 100).toFixed(1)}% profit edge)
+                          (+{Number((topEv || 0) * 100).toFixed(1)}% EV)
                         </p>
                         {sizeInfo && (
                           <div className="mt-2 inline-flex flex-wrap items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-400/35 text-xs text-indigo-100">
-                            <span className="font-bold text-indigo-300">Suggested Bet Size:</span>
+                            <span className="font-bold text-indigo-300">Size:</span>
                             <span className="font-mono font-bold text-white">{sizeInfo.detailedLabel}</span>
-                            <span className="text-slate-400">·</span>
-                            <span className="text-indigo-200">{sizeInfo.tierLabel}</span>
                           </div>
                         )}
                       </div>
 
                       <div className="flex items-center gap-2">
                         <span className={`px-2.5 py-1 rounded-full border text-xs font-bold ${conf.badgeCls}`}>
-                          {conf.tier} CONFIDENCE
+                          {conf.tier}
                         </span>
                         <button
                           type="button"
@@ -439,53 +466,32 @@ const TodayMatchupModal = ({
                         </button>
                       </div>
                     </div>
-
-                    {Array.isArray(topRec.movement_tags) && topRec.movement_tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {topRec.movement_tags.map((t) => {
-                          const meta = normalizeMovementTag(t);
-                          return (
-                            <span
-                              key={t}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-[11px] font-semibold text-slate-200"
-                            >
-                              <TrendingUp size={10} className="text-emerald-400" aria-hidden="true" />
-                              {meta.label}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {(analysisResult.headline || topRec.narrative) && (
-                      <p className="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-2.5">
-                        {topRec.narrative || analysisResult.headline}
-                      </p>
-                    )}
                   </section>
                 ) : (
                   <section className="rounded-xl border border-slate-700/80 bg-slate-950/75 p-4 space-y-1">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      No Bet Recommended Right Now
+                      No Bet Recommended
                     </h3>
-                    <p className="text-xs text-slate-200">
+                    <p className="text-xs text-slate-300">
                       {safeReasonText(analysisResult.block_reason || analysisResult.headline) ||
-                        'The sportsbook line is too close to our fair line right now, or safety checks flagged extra risk.'}
+                        'Sportsbook line matches fair value.'}
                     </p>
                   </section>
+                ))}
+
+                {/* Visual Sportsbook vs. Model Comparison + Projected Final Score (Overview) */}
+                {modalTab === 'overview' && (
+                  <ModelVisualComparison
+                    visualData={visualData}
+                    projectedScore={projectedScore}
+                  />
                 )}
 
-                {/* Visual Sportsbook vs. Model Comparison + Projected Final Score */}
-                <ModelVisualComparison
-                  visualData={visualData}
-                  projectedScore={projectedScore}
-                />
-
-                {/* 2. Source Projections & Team Efficiency */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 2. Source Projections (Overview) & Team Efficiency (Stats) */}
+                {modalTab === 'overview' && (
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-sky-400">
-                      Our Line vs. Rating Sources
+                      Model Breakdown
                     </h3>
                     <div className="space-y-1.5 text-xs">
                       {[
@@ -506,7 +512,7 @@ const TodayMatchupModal = ({
                           spread: sig.kenpom?.fair_spread_home,
                           total: sig.kenpom?.fair_total,
                           score: null,
-                          emptyNote: 'Off — needs 2026-27 KenPom data',
+                          emptyNote: 'Updating',
                         },
                         {
                           label: 'Basement Bets Final',
@@ -536,10 +542,12 @@ const TodayMatchupModal = ({
                       ))}
                     </div>
                   </section>
+                )}
 
+                {modalTab === 'stats' && (
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                      Team Strength Comparison
+                      Team Efficiency
                     </h3>
                     <table className="w-full text-xs border-collapse">
                       <thead>
@@ -551,27 +559,27 @@ const TodayMatchupModal = ({
                       </thead>
                       <tbody className="divide-y divide-slate-800/70 font-mono">
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Offense (Pts / 100 poss.)</td>
+                          <td className="py-1.5 font-sans text-slate-300">Adj. Offense</td>
                           <td className="py-1.5 text-right">{fmtStat(awayStats.adj_off)}</td>
                           <td className="py-1.5 text-right">{fmtStat(homeStats.adj_off)}</td>
                         </tr>
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Defense (Allowed / 100 poss.)</td>
+                          <td className="py-1.5 font-sans text-slate-300">Adj. Defense</td>
                           <td className="py-1.5 text-right">{fmtStat(awayStats.adj_def)}</td>
                           <td className="py-1.5 text-right">{fmtStat(homeStats.adj_def)}</td>
                         </tr>
                         <tr>
-                          <td className="py-1.5 font-sans text-slate-300">Game Pace (Poss. / 40m)</td>
+                          <td className="py-1.5 font-sans text-slate-300">Tempo</td>
                           <td className="py-1.5 text-right">{fmtStat(awayStats.adj_tempo ?? torvikStats.game_tempo)}</td>
                           <td className="py-1.5 text-right">{fmtStat(homeStats.adj_tempo ?? torvikStats.game_tempo)}</td>
                         </tr>
                       </tbody>
                     </table>
                   </section>
-                </div>
+                )}
 
-                {/* 2b. Backend Model Weighting & Situational Adjustments */}
-                {(modelSignals.modelPct != null ||
+                {/* 2b. Backend Model Weighting & Situational Adjustments (Overview) */}
+                {modalTab === 'overview' && (modelSignals.modelPct != null ||
                   modelSignals.sosMomShift ||
                   modelSignals.restSpotShift ||
                   modelSignals.shootingShift ||
@@ -661,8 +669,8 @@ const TodayMatchupModal = ({
                   </section>
                 )}
 
-                {/* 2c. Four-Factors Visual Edge Breakdown (LangIndex-inspired) */}
-                {ffDetail?.home && ffDetail?.away && (
+                {/* 2c. Four-Factors Visual Edge Breakdown (Stats tab, no dropdowns) */}
+                {modalTab === 'stats' && ffDetail?.home && ffDetail?.away && (
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-sky-300">
@@ -745,23 +753,11 @@ const TodayMatchupModal = ({
                           );
                         })}
                     </div>
-                    <details className="rounded-lg border border-slate-800/90 bg-slate-900/50 px-3 py-2 text-[11px] text-slate-300">
-                      <summary className="cursor-pointer font-semibold text-slate-300 hover:text-white">
-                        Metric guide (Four Factors &amp; 1H)
-                      </summary>
-                      <p className="mt-2 leading-relaxed text-slate-400">
-                        <strong className="text-slate-200">eFG%</strong> weights 3-pointers 1.5×;{' '}
-                        <strong className="text-slate-200">TO%</strong> is turnovers per 100 possessions (lower is better);{' '}
-                        <strong className="text-slate-200">OR%</strong> is second-chance rebounding rate;{' '}
-                        <strong className="text-slate-200">FTR</strong> measures free-throw trips per field-goal attempt.{' '}
-                        <strong className="text-slate-200">1H</strong> markets remove late-game intentional fouling noise.
-                      </p>
-                    </details>
                   </section>
                 )}
 
-                {/* 2d. 1-Click Player Availability Simulator (LangIndex-inspired) */}
-                {(rotationAway.length > 0 || rotationHome.length > 0) && (
+                {/* 2d. 1-Click Player Availability Simulator (Lineup tab) */}
+                {modalTab === 'lineup' && (rotationAway.length > 0 || rotationHome.length > 0) && (
                   <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
@@ -833,8 +829,8 @@ const TodayMatchupModal = ({
                   </section>
                 )}
 
-                {/* 3. Injuries & Public Splits */}
-                {(injImpact || rawInjuries.length > 0 || splits) && (
+                {/* 3. Injuries & Public Splits (Lineup tab) */}
+                {modalTab === 'lineup' && (injImpact || rawInjuries.length > 0 || splits) && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {(injImpact || rawInjuries.length > 0) && (
                       <section className="rounded-xl border border-amber-500/30 bg-amber-950/15 p-4 space-y-2">
@@ -919,99 +915,54 @@ const TodayMatchupModal = ({
                   </div>
                 )}
 
-                {/* 4. Collapsible Advanced History & Referee Override */}
-                <details className="today-card-details rounded-xl border border-slate-800 bg-slate-950/65 px-4 py-3">
-                  <summary className="text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white py-0.5">
-                    Advanced: Referee Crew Override &amp; Matchup History
-                  </summary>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3">
-                    <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2">
-                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-purple-300">
-                        <ShieldCheck size={13} aria-hidden="true" />
-                        <span>Similar Matchup History</span>
-                      </h3>
-                      {correlationResult ? (() => {
-                        const archObj = correlationResult.archetype;
-                        const archLabel = typeof archObj === 'string'
-                          ? archObj
-                          : archObj?.key || [archObj?.pace_bin, archObj?.eff_bin, archObj?.spread_bucket].filter(Boolean).join(' · ') || 'Standard';
-                        const corrData = correlationResult.correlations || correlationResult;
-                        const overHome = corrData?.pairs?.over_home_cover;
-                        return (
-                          <div className="text-xs text-slate-300 space-y-1">
-                            <p>
-                              Matchup style: <strong className="text-white">{archLabel}</strong>
-                              {corrData?.n != null ? ` (based on ${corrData.n} past games)` : ''}
-                            </p>
-                            {corrData?.status === 'valid' && overHome ? (
-                              <p className="text-emerald-300">
-                                Over + Home Cover hit rate:{' '}
-                                <strong>{fmtPct(overHome.p_joint ?? overHome.p_ab, 1)}</strong>
-                                {overHome.lift != null ? ` (${Number(overHome.lift).toFixed(2)}x more likely than average)` : ''}
-                              </p>
-                            ) : (
-                              <p className="text-slate-400">
-                                {correlationResult.status === 'no_spread'
-                                  ? 'Waiting on a live sportsbook spread to match similar past games.'
-                                  : 'Building sample size — not enough similar past games yet for parlay trends.'}
-                              </p>
-                            )}
+                {/* 4. Referee Crew Override (Lineup tab, no dropdown) */}
+                {modalTab === 'lineup' && (
+                  <section className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-2.5">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Referee Crew
+                    </h3>
+                    <form onSubmit={handleSaveRefs} className="space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { id: 'ref-input-1', label: 'Ref 1', value: ref1, setter: setRef1 },
+                          { id: 'ref-input-2', label: 'Ref 2', value: ref2, setter: setRef2 },
+                          { id: 'ref-input-3', label: 'Ref 3', value: ref3, setter: setRef3 },
+                        ].map((f) => (
+                          <div key={f.id}>
+                            <label htmlFor={f.id} className="block text-[10px] text-slate-400 mb-1">
+                              {f.label}
+                            </label>
+                            <input
+                              id={f.id}
+                              type="text"
+                              value={f.value}
+                              onChange={(e) => f.setter(e.target.value)}
+                              placeholder="Name"
+                              className="w-full px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-100"
+                            />
                           </div>
-                        );
-                      })() : (
-                        <p className="text-xs text-slate-400">
-                          Not enough past games with a similar style to show historical trends yet.
-                        </p>
-                      )}
-                    </section>
-
-                    <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-2.5">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                        Referee Crew Override
-                      </h3>
-                      <form onSubmit={handleSaveRefs} className="space-y-2">
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { id: 'ref-input-1', label: 'Ref 1', value: ref1, setter: setRef1 },
-                            { id: 'ref-input-2', label: 'Ref 2', value: ref2, setter: setRef2 },
-                            { id: 'ref-input-3', label: 'Ref 3', value: ref3, setter: setRef3 },
-                          ].map((f) => (
-                            <div key={f.id}>
-                              <label htmlFor={f.id} className="block text-[10px] text-slate-400 mb-1">
-                                {f.label}
-                              </label>
-                              <input
-                                id={f.id}
-                                type="text"
-                                value={f.value}
-                                onChange={(e) => f.setter(e.target.value)}
-                                placeholder="Name"
-                                className="w-full px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-100"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="submit"
-                            disabled={refsSaving}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer disabled:opacity-50"
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="submit"
+                          disabled={refsSaving}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-100 cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw size={12} className={refsSaving ? 'animate-spin' : ''} aria-hidden="true" />
+                          <span>{refsSaving ? 'Re-running...' : 'Save & Re-run'}</span>
+                        </button>
+                        {refsMessage && (
+                          <span
+                            className={`text-xs ${refsMessage.type === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
                           >
-                            <RefreshCw size={12} className={refsSaving ? 'animate-spin' : ''} aria-hidden="true" />
-                            <span>{refsSaving ? 'Re-running...' : 'Save & Re-run'}</span>
-                          </button>
-                          {refsMessage && (
-                            <span
-                              className={`text-xs ${refsMessage.type === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
-                            >
-                              {refsMessage.text}
-                            </span>
-                          )}
-                        </div>
-                      </form>
-                    </section>
-                  </div>
-                </details>
+                            {refsMessage.text}
+                          </span>
+                        )}
+                      </div>
+                    </form>
+                  </section>
+                )}
               </>
             )}
           </div>
