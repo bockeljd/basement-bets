@@ -378,6 +378,9 @@ def _upsert_bet_by_external_id_or_v2(doc: Dict[str, Any]) -> Tuple[Optional[int]
             ).fetchone()
             if row:
                 bet_id = int(row["id"] if isinstance(row, dict) else row[0])
+                new_sel = str(doc.get("selection") or "").strip()
+                new_desc = str(doc.get("description") or "").strip()
+                is_placeholder_sel = not new_sel or new_sel.lower() in ("home", "away", "open", "live") or "legs hidden" in new_sel.lower()
                 _exec(
                     conn,
                     """
@@ -386,6 +389,8 @@ def _upsert_bet_by_external_id_or_v2(doc: Dict[str, Any]) -> Tuple[Optional[int]
                         status = %s,
                         odds = COALESCE(%s, odds),
                         closing_odds = COALESCE(%s, closing_odds),
+                        selection = CASE WHEN %s THEN COALESCE(NULLIF(%s, ''), selection) ELSE selection END,
+                        description = CASE WHEN %s THEN COALESCE(NULLIF(%s, ''), description) ELSE description END,
                         event_text = COALESCE(%s, event_text),
                         raw_text = COALESCE(NULLIF(%s, ''), raw_text),
                         source = COALESCE(%s, source),
@@ -397,6 +402,10 @@ def _upsert_bet_by_external_id_or_v2(doc: Dict[str, Any]) -> Tuple[Optional[int]
                         doc["status"],
                         doc["odds"],
                         doc["closing_odds"],
+                        not is_placeholder_sel,
+                        new_sel,
+                        not is_placeholder_sel,
+                        new_desc,
                         doc.get("event_text"),
                         doc.get("raw_text"),
                         doc.get("source"),

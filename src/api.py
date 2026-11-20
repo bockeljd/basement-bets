@@ -5990,6 +5990,89 @@ async def get_ncaam_parlays_today(
     except Exception as dkfd_e:
         print(f"[parlays] DK/FD price enrichment skipped: {dkfd_e}")
 
+    def _combine_two_leg_outcome(oa_raw: str, ob_raw: str) -> str:
+        oa = str(oa_raw or "").upper()
+        ob = str(ob_raw or "").upper()
+        if oa in ("PENDING", "") or ob in ("PENDING", ""):
+            return "PENDING"
+        if oa == "LOST" or ob == "LOST":
+            return "LOST"
+        if oa == "WON" and ob == "WON":
+            return "WON"
+        if oa == "PUSH" and ob == "PUSH":
+            return "PUSH"
+        if oa == "VOID" or ob == "VOID":
+            return "VOID"
+        if (oa == "WON" and ob == "PUSH") or (oa == "PUSH" and ob == "WON"):
+            return "WON (partial)"
+        return "PENDING"
+
+    def _grade_parlay_legs_from_results(target_legs: list) -> None:
+        if not target_legs:
+            return
+        pending_eids = list({
+            str(lg.get("event_id"))
+            for lg in target_legs
+            if lg.get("event_id") and str(lg.get("outcome") or "PENDING").upper() in ("PENDING", "")
+        })
+        if not pending_eids:
+            return
+        try:
+            import re as _re
+            with get_db_connection() as conn:
+                gr_rows = _exec(
+                    conn,
+                    """
+                    SELECT e.id AS event_id, e.home_team, e.away_team,
+                           g.home_score, g.away_score, g.home_score_1h, g.away_score_1h, g.final
+                    FROM events e
+                    JOIN game_results g ON g.event_id = e.id
+                    WHERE e.id = ANY(%s)
+                      AND COALESCE(g.final, FALSE) = TRUE
+                      AND g.home_score IS NOT NULL
+                      AND g.away_score IS NOT NULL
+                    """,
+                    (pending_eids,),
+                ).fetchall()
+            gr_map = {str(r["event_id"]): dict(r) for r in (gr_rows or [])}
+            for lg in target_legs:
+                if str(lg.get("outcome") or "PENDING").upper() not in ("PENDING", ""):
+                    continue
+                gr = gr_map.get(str(lg.get("event_id")))
+                if not gr:
+                    continue
+                hs = float(gr["home_score"])
+                as_ = float(gr["away_score"])
+                h_team = str(gr.get("home_team") or "").strip().lower()
+                a_team = str(gr.get("away_team") or "").strip().lower()
+                pick_str = str(lg.get("team_pick") or lg.get("selection") or lg.get("pick") or "").strip()
+                pick_low = pick_str.lower()
+                mkt = str(lg.get("market_type") or "MONEYLINE").upper()
+                is_home = bool(lg.get("is_home_pick")) or (
+                    str(lg.get("side") or "").upper() == "HOME"
+                ) or (h_team and h_team in pick_low and (not a_team or a_team not in pick_low))
+
+                if "1H" in mkt:
+                    if gr.get("home_score_1h") is None or gr.get("away_score_1h") is None:
+                        continue
+                    hs = float(gr["home_score_1h"])
+                    as_ = float(gr["away_score_1h"])
+
+                if "SPREAD" in mkt:
+                    m_ln = _re.search(r"([+-]\d+(?:\.\d+)?)\s*$", pick_str)
+                    if not m_ln:
+                        continue
+                    ln_val = float(m_ln.group(1))
+                    margin = ((hs - as_) if is_home else (as_ - hs)) + ln_val
+                    lg["outcome"] = "PUSH" if margin == 0 else ("WON" if margin > 0 else "LOST")
+                else:
+                    diff = (hs - as_) if is_home else (as_ - hs)
+                    lg["outcome"] = "PUSH" if diff == 0 else ("WON" if diff > 0 else "LOST")
+        except Exception as gr_e:
+            print(f"[parlays] leg grading from game_results skipped: {gr_e}")
+
+    _grade_parlay_legs_from_results(norm_legs)
+
     for i in range(len(norm_legs)):
         for j in range(i + 1, len(norm_legs)):
             a = norm_legs[i]
@@ -5997,23 +6080,7 @@ async def get_ncaam_parlays_today(
             if not a.get('event_id') or a.get('event_id') == b.get('event_id'):
                 continue
 
-            parlay_outcome = None
-            oa = str(a.get('outcome') or '').upper()
-            ob = str(b.get('outcome') or '').upper()
-            if oa in ('PENDING', '') or ob in ('PENDING', ''):
-                parlay_outcome = 'PENDING'
-            elif oa == 'LOST' or ob == 'LOST':
-                parlay_outcome = 'LOST'
-            elif oa == 'WON' and ob == 'WON':
-                parlay_outcome = 'WON'
-            elif oa == 'PUSH' and ob == 'PUSH':
-                parlay_outcome = 'PUSH'
-            elif oa == 'VOID' or ob == 'VOID':
-                parlay_outcome = 'VOID'
-            elif (oa == 'WON' and ob == 'PUSH') or (oa == 'PUSH' and ob == 'WON'):
-                parlay_outcome = 'WON (partial)' 
-            else:
-                parlay_outcome = 'PENDING'
+            parlay_outcome = _combine_two_leg_outcome(a.get('outcome'), b.get('outcome'))
 
             p = float(a['win_prob']) * float(b['win_prob'])
 
@@ -6180,6 +6247,12 @@ async def get_ncaam_parlays_today(
                     if isinstance(pj, str):
                         pj = json.loads(pj)
                     if isinstance(pj, dict):
+                        if isinstance(pj.get("legs"), list) and len(pj["legs"]) == 2:
+                            _grade_parlay_legs_from_results(pj["legs"])
+                            pj["outcome"] = _combine_two_leg_outcome(
+                                pj["legs"][0].get("outcome"),
+                                pj["legs"][1].get("outcome"),
+                            )
                         pj["is_locked"] = True
                         pj["locked_at"] = str(existing_locked.get("locked_at") or "")
                         pj["is_official_daily"] = True
@@ -6343,11 +6416,31 @@ async def ncaam_parlay_performance_report(days: int = 30):
             e1.home_team AS home1,
             e2.away_team AS away2,
             e2.home_team AS home2,
-            m1.outcome AS o1,
-            m2.outcome AS o2
+            COALESCE(
+              m1.outcome,
+              CASE
+                WHEN COALESCE(g1.final, FALSE) = TRUE AND g1.home_score IS NOT NULL AND g1.away_score IS NOT NULL THEN
+                  CASE WHEN g1.home_score > g1.away_score THEN 'WON'
+                       WHEN g1.home_score < g1.away_score THEN 'LOST'
+                       ELSE 'PUSH' END
+                ELSE NULL
+              END
+            ) AS o1,
+            COALESCE(
+              m2.outcome,
+              CASE
+                WHEN COALESCE(g2.final, FALSE) = TRUE AND g2.home_score IS NOT NULL AND g2.away_score IS NOT NULL THEN
+                  CASE WHEN g2.home_score > g2.away_score THEN 'WON'
+                       WHEN g2.home_score < g2.away_score THEN 'LOST'
+                       ELSE 'PUSH' END
+                ELSE NULL
+              END
+            ) AS o2
           FROM recommended_parlays p
           JOIN events e1 ON e1.id=p.event_id_1
           JOIN events e2 ON e2.id=p.event_id_2
+          LEFT JOIN game_results g1 ON g1.event_id=p.event_id_1
+          LEFT JOIN game_results g2 ON g2.event_id=p.event_id_2
           LEFT JOIN LATERAL (
             SELECT outcome
             FROM model_predictions
