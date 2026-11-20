@@ -2546,10 +2546,22 @@ async def trigger_policy_refresh(request: Request, authorized: bool = Depends(ve
         print(f"[Job] Policy Refresh Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/jobs/ncaam_top6_cutoffs")
+def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
+    from src.database import _exec, get_db_connection
+    from src.services.ncaam_publisher import publish_slate
+    with get_db_connection() as conn:
+        due = _exec(conn, """SELECT 1 FROM recommended_slates s
+            WHERE s.id='NCAAM:'||(NOW() AT TIME ZONE 'America/New_York')::date::text||':cached'
+              AND EXISTS (SELECT 1 FROM jsonb_array_elements(to_jsonb(s)->'rolling_board'->'provisional') p
+                          WHERE (p->>'locks_at')::timestamptz <= NOW())""").fetchone()
+    return publish_slate() if due else {"status": "no_cutoffs_due"}
+
+
 @app.api_route("/api/jobs/lock_morning_slate", methods=["GET", "POST"])
 async def trigger_lock_morning_slate(request: Request, authorized: bool = Depends(verify_cron_secret)):
     """
-    Cron Job: Lock the morning slate for 'Yesterday' card stabilization.
+    Open or refresh the rolling Top 6 board.
     """
     job_key = "lock_morning_slate"
     from src.services.job_service import JobContext, JobLockedException
@@ -4762,7 +4774,7 @@ _NCAAM_SLATES = """(SELECT DISTINCT ON (date_et) * FROM recommended_slates
 
 @app.get("/api/ncaam/publication-status")
 def ncaam_publication_status(date: str):
-    """Report the committed morning slate independently of the mutable game board."""
+    """Report provisional candidates and immutable per-game publications."""
     from src.database import get_db_connection, _exec
     try:
         day = datetime.strptime(date, "%Y-%m-%d").date()
@@ -4776,17 +4788,28 @@ def ncaam_publication_status(date: str):
         """, (day,)).fetchone()
         evaluation = dict(cache)
         slate = _exec(conn, """
-            SELECT id,created_at FROM recommended_slates
+            SELECT id,created_at,to_jsonb(recommended_slates)->'rolling_board' AS board FROM recommended_slates
             WHERE league='NCAAM' AND source='cached' AND date_et=%s
             ORDER BY created_at,id LIMIT 1
         """, (day.isoformat(),)).fetchone()
         if slate:
             picks = _exec(conn, """
                 SELECT i.rank,i.event_id,i.prediction_id,i.selection,i.bet_line,i.bet_price,
-                       e.home_team,e.away_team
+                       e.home_team,e.away_team,to_jsonb(i)->'snapshot'->>'locked_at' AS locked_at,
+                       to_jsonb(i)->'snapshot'->>'locks_at' AS locks_at,to_jsonb(i)->'snapshot'->'referees' AS referees,
+                       to_jsonb(i)->'snapshot'->>'computed_at' AS computed_at,
+                       to_jsonb(i)->'snapshot'->>'quote_captured_at' AS quote_captured_at
                 FROM recommended_slate_items i LEFT JOIN events e ON e.id=i.event_id
                 WHERE i.slate_id=%s AND i.rank BETWEEN 1 AND 6 ORDER BY i.rank
             """, (slate['id'],)).fetchall()
+            from zoneinfo import ZoneInfo
+            board = slate['board']
+            if board is not None:
+                active = board.get('open') and day == datetime.now(ZoneInfo("America/New_York")).date()
+                return {"day": day, "evaluation": evaluation, **board,
+                        "status": "rolling" if active else ("locked" if picks else "no_eligible_picks"),
+                        "locked_at": max((r["locked_at"] for r in picks if r["locked_at"]), default=None),
+                        "picks": [dict(r) for r in picks]}
             return {"day": day, "evaluation": evaluation, "status": "locked" if picks else "no_eligible_picks",
                     "locked_at": slate['created_at'], "picks": [dict(row) for row in picks]}
         run = _exec(conn, """

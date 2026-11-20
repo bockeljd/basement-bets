@@ -273,7 +273,7 @@ def evaluate_ncaam_candidates(days, cutoff, season_start, min_obs):
             JOIN events e ON e.id=i.event_id
             JOIN model_predictions m ON m.id=i.prediction_id
             WHERE s.id='NCAAM:'||s.date_et||':cached' AND s.league='NCAAM'
-              AND i.rank BETWEEN 1 AND 6 AND s.created_at <= e.start_time - interval '10 minutes'
+              AND i.rank BETWEEN 1 AND 6 AND i.created_at < e.start_time AND (to_jsonb(i)->'snapshot'->>'locks_at')::timestamptz <= e.start_time - interval '30 minutes'
               AND s.created_at >= %s AND s.date_et >= %s AND e.start_time < %s
               AND to_jsonb(i)->'snapshot'->>'model_version'=%s
             ORDER BY i.event_id,i.market_type,s.created_at,i.rank,i.prediction_id

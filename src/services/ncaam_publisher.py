@@ -1,4 +1,6 @@
-"""Freeze the daily pregame NCAAM recommendations in one transaction."""
+"""Refresh provisional Top 6 slots and commit eligible picks at their game cutoffs."""
+from datetime import datetime, timedelta
+
 from src.database import _exec, get_db_connection, ensure_recommended_slates_tables
 from src.utils.model_performance import rank_top6_items
 from psycopg2.extras import Json
@@ -6,7 +8,7 @@ from psycopg2.extras import Json
 
 def _slate_items(conn, slate_id):
     rows = _exec(conn, """
-        SELECT i.rank,i.selection,i.bet_price,i.bet_line,i.market_type,
+        SELECT i.rank,i.event_id,i.selection,i.bet_price,i.bet_line,i.market_type,
                e.home_team,e.away_team,e.start_time,i.snapshot->>'book' AS book,
                i.snapshot->>'edge' AS edge,i.snapshot->>'confidence' AS confidence
         FROM recommended_slate_items i LEFT JOIN events e ON e.id=i.event_id
@@ -24,10 +26,10 @@ def publish_slate(date_et=None):
         slate_id = f"NCAAM:{day}:cached"
         _exec(conn, "SELECT pg_advisory_xact_lock(hashtext(%s))", (slate_id,))
         existing = _exec(conn, """
-            SELECT id FROM recommended_slates WHERE league='NCAAM' AND date_et=%s
+            SELECT id,rolling_board FROM recommended_slates WHERE league='NCAAM' AND date_et=%s
             AND source='cached' ORDER BY created_at,id LIMIT 1
         """, (day,)).fetchone()
-        if existing:
+        if existing and existing["rolling_board"] is None:
             items = _slate_items(conn, existing[0])
             conn.commit()
             return {"status": "already_locked", "slate_id": existing[0], "items": items}
@@ -35,7 +37,7 @@ def publish_slate(date_et=None):
             raise ValueError("Only today's pregame slate can be published")
         rows = _exec(conn, """
             SELECT d.event_id,d.is_actionable,d.rec_json,d.computed_at,d.model_version,
-                   e.start_time,p.id,p.market_type,p.selection,p.bet_line,p.bet_price,p.book,
+                   e.start_time,e.home_team,e.away_team,p.id,p.market_type,p.selection,p.bet_line,p.bet_price,p.book,
                    quote.captured_at,quote.price AS current_price,quote.line_value AS current_line,
                    opposite.price AS opposite_price,opposite.line_value AS opposite_line,
                    opposite.captured_at AS opposite_at
@@ -62,39 +64,77 @@ def publish_slate(date_et=None):
                 AND (e.start_time AT TIME ZONE 'America/New_York')::date=%s::date
             ORDER BY d.event_id
         """, (day, day)).fetchall()
-        if not rows:
+        if not rows and not existing:
             raise RuntimeError("NCAAM daily cache unavailable")
         now = _exec(conn, "SELECT clock_timestamp()").fetchone()[0]
-        candidates = []
-        for row in rows:
-            rec = row['rec_json'] or {}
-            if row['start_time'] <= now or not row['is_actionable'] or rec.get('top6_eligible') is False:
+        previous = existing["rolling_board"] if existing else {}
+        if not existing:
+            _exec(conn, """INSERT INTO recommended_slates(id,league,date_et,source,rolling_board)
+                VALUES (%s,'NCAAM',%s,'cached','{}')""", (slate_id, day))
+        locked = _slate_items(conn, slate_id)
+        seen = {item["event_id"] for item in locked}
+        passes = dict(previous.get("passes", {}))
+        current = {row["event_id"]: row for row in rows}
+        for item in sorted(previous.get("provisional", []), key=lambda p: (p["locks_at"], p["rank"])):
+            eid = item["event_id"]
+            cutoff = datetime.fromisoformat(item["locks_at"])
+            if now < cutoff or eid in seen:
                 continue
-            if not row['id']:
-                raise RuntimeError(f"Missing persisted prediction for {row['event_id']}")
-            if (not row['captured_at'] or row['current_price'] != row['bet_price']
-                    or row['current_line'] != row['bet_line']):
+            row = current.get(eid)
+            if not row or row["start_time"] - timedelta(minutes=30) != cutoff:
                 continue
-            candidates.append({**rec, **dict(row)})
-        items = rank_top6_items(candidates, limit=6)
-        _exec(conn, """INSERT INTO recommended_slates(id,league,date_et,source)
-            VALUES (%s,'NCAAM',%s,'cached')""", (slate_id, day))
-        for item in items:
-            snapshot = {**item['rec_json'], 'model_version': item['model_version'],
-                        'book': item['book'], 'computed_at': item['computed_at'].isoformat()}
-            snapshot['quote_captured_at'] = item['captured_at'].isoformat()
-            opposite_line = item['bet_line']
-            if item['market_type'].startswith('SPREAD') and opposite_line is not None:
-                opposite_line = -opposite_line
-            if item['opposite_price'] and item['opposite_line'] == opposite_line:
-                snapshot['opposite_price'] = item['opposite_price']
-                snapshot['opposite_captured_at'] = item['opposite_at'].isoformat()
+            reason = None
+            if now >= row["start_time"]:
+                reason = "Missed pregame lock"
+            elif cutoff - datetime.fromisoformat(item["computed_at"]) > timedelta(minutes=90):
+                reason = "Model forecast stale at cutoff"
+            elif row["computed_at"] <= cutoff and (
+                not row["is_actionable"] or row["id"] != item["id"]
+                or row["computed_at"] > datetime.fromisoformat(item["computed_at"])
+            ):
+                reason = "Forecast changed before cutoff"
+            quote = _exec(conn, """SELECT price,line_value,captured_at FROM odds_snapshots
+                WHERE event_id=%s AND book=%s AND market_type=%s AND side=%s
+                  AND captured_at BETWEEN %s - interval '90 minutes' AND %s
+                ORDER BY captured_at DESC,id DESC LIMIT 1""",
+                (eid,item["book"],item["market_type"],item["side"].upper(),cutoff,cutoff)).fetchone()
+            if not quote or quote["price"] != item["bet_price"] or quote["line_value"] != item["bet_line"]:
+                reason = "Price changed or stale at cutoff"
+            if reason:
+                passes[eid] = reason
+                continue
+            snapshot = {**item, "locked_at": now.isoformat(),
+                        "quote_captured_at": quote["captured_at"].isoformat()}
             _exec(conn, """INSERT INTO recommended_slate_items
                 (slate_id,prediction_id,rank,event_id,selection,bet_price,bet_line,market_type,snapshot)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (slate_id,item['id'],item['rank'],item['event_id'],item['selection'],
-                 item['bet_price'],item['bet_line'],item['market_type'],Json(snapshot)))
-        published = _slate_items(conn, slate_id)
+                (slate_id,item["id"],len(seen)+1,eid,item["selection"],item["bet_price"],
+                 item["bet_line"],item["market_type"],Json(snapshot)))
+            seen.add(eid)
+
+        candidates = []
+        for row in rows:
+            rec = row["rec_json"] or {}
+            cutoff = row["start_time"] - timedelta(minutes=30)
+            if now >= cutoff or row["event_id"] in seen or not row["is_actionable"] or rec.get("top6_eligible") is False:
+                continue
+            if not row["id"] or not row["captured_at"] or now-row["computed_at"] > timedelta(minutes=90):
+                continue
+            if row["current_price"] != row["bet_price"] or row["current_line"] != row["bet_line"]:
+                continue
+            item = {**rec, **{k: row[k] for k in ("home_team","away_team","model_version","event_id","id",
+                        "selection","book","bet_price","bet_line","market_type")}, "locks_at": cutoff.isoformat(),
+                    "computed_at": row["computed_at"].isoformat(), "quote_captured_at": row["captured_at"].isoformat(),
+                    "referees": (rec.get("signals") or {}).get("referees")}
+            opposite_line = -item["bet_line"] if item["market_type"].startswith("SPREAD") else item["bet_line"]
+            if row["opposite_price"] and row["opposite_line"] == opposite_line:
+                item.update(opposite_price=row["opposite_price"], opposite_captured_at=row["opposite_at"].isoformat())
+            candidates.append(item)
+        provisional = rank_top6_items(candidates, limit=6-len(seen)) if len(seen)<6 else []
+        board = {"provisional": provisional, "passes": passes, "updated_at": now.isoformat(),
+                 "open": len(seen)<6 and any(r["start_time"]-timedelta(minutes=30)>now for r in rows)}
+        _exec(conn,"UPDATE recommended_slates SET rolling_board=%s WHERE id=%s",(Json(board),slate_id))
+        items = _slate_items(conn, slate_id)
         conn.commit()
-        return {"status": "published" if published else "no_eligible_picks",
-                "slate_id": slate_id, "items": published}
+        return {"status": "rolling" if board["open"] else ("locked" if items else "no_eligible_picks"),
+                "slate_id": slate_id, "items": items, **board}

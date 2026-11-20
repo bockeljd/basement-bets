@@ -59,6 +59,10 @@
             "schedule": "0 7 * * *"
         },
         {
+            "path": "/api/jobs/ncaam_top6_cutoffs",
+            "schedule": "* * * * *"
+        },
+        {
             "path": "/api/jobs/lock_morning_slate",
             "schedule": "0 13 * * *"
         },

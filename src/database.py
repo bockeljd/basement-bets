@@ -1268,6 +1268,8 @@ def ensure_recommended_slates_tables():
       PRIMARY KEY(slate_id, prediction_id)
     );
 
+    ALTER TABLE recommended_slates ADD COLUMN IF NOT EXISTS rolling_board JSONB;
+
     -- Forward-compatible metadata so we can re-link / audit slates even if prediction ids drift.
     ALTER TABLE recommended_slate_items ADD COLUMN IF NOT EXISTS event_id TEXT;
     ALTER TABLE recommended_slate_items ADD COLUMN IF NOT EXISTS selection TEXT;
@@ -3399,7 +3401,7 @@ def upsert_referee_assignment(event_id: str, referee_1: str = None, referee_2: s
 def get_referee_assignment(event_id: str) -> dict:
     """Get referee crew and their foul rate for an event."""
     query = """
-    SELECT referee_1, referee_2, referee_3, crew_avg_fouls
+    SELECT referee_1, referee_2, referee_3, crew_avg_fouls, fetched_at AT TIME ZONE 'UTC' AS fetched_at
     FROM referee_assignments
     WHERE event_id = %s
     """

@@ -58,7 +58,7 @@ def score_published(rows):
 def published_holdout(days):
     with get_db_connection() as conn:
         rows = _exec(conn, """SELECT i.market_type,i.bet_price,to_jsonb(i)->'snapshot' AS snapshot,
-                m.outcome,e.start_time,s.created_at AS published_at
+                m.outcome,e.start_time,i.created_at AS published_at
             FROM recommended_slates s JOIN recommended_slate_items i ON i.slate_id=s.id
             JOIN events e ON e.id=i.event_id LEFT JOIN model_predictions m ON m.id=i.prediction_id
             WHERE s.league='NCAAM' AND s.source='cached' AND s.id='NCAAM:'||s.date_et||':cached'

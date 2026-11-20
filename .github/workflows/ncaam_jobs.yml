@@ -79,6 +79,12 @@ jobs:
           DB_REUSE_CONNECTION: "1"
         run: python3 src/scripts/build_daily_top_picks.py
 
+      - name: Refresh rolling Top 6
+        if: ${{ !inputs.backfill_pending }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 -c "from src.services.ncaam_publisher import publish_slate; print(publish_slate()['status'])"
+
       - name: Verify Daily Top Picks (today ET)
         if: ${{ !inputs.backfill_pending }}
         env:

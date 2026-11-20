@@ -76,27 +76,34 @@ def test_postgres_publisher_freezes_first_six_and_retries(monkeypatch):
                     VALUES (%s,'TOTAL','OVER',%s,-110,'DraftKings')""",
                     (event_id, 145 if index == 0 else 140))
             conn.commit()
-        # Reject the second insert to exercise a mid-publication rollback.
+        initial = publish_slate()
+        assert initial["status"] == "rolling"
+        assert not initial["items"]
+        assert [p["event_id"] for p in initial["provisional"]] == [f"event_{i}" for i in range(1,7)]
+        # Advance the fixtures across their cutoff. The offered quote was observed pre-cutoff.
         with db.get_db_connection() as conn:
+            cutoff = db._exec(conn, "SELECT NOW()-interval '1 minute'").fetchone()[0]
+            for p in initial["provisional"]:
+                p["locks_at"] = cutoff.isoformat()
+                p["computed_at"] = (cutoff-timedelta(minutes=5)).isoformat()
+            board = {"provisional": initial["provisional"]}
+            db._exec(conn, "UPDATE recommended_slates SET rolling_board=%s",(Json(board),))
+            db._exec(conn, "UPDATE events SET start_time=%s",(cutoff+timedelta(minutes=30),))
+            db._exec(conn, "UPDATE odds_snapshots SET captured_at=%s",(cutoff-timedelta(minutes=3),))
+            db._exec(conn, "UPDATE odds_snapshots SET price=-125 WHERE event_id='event_2'")
             db._exec(conn, "ALTER TABLE recommended_slate_items ADD CONSTRAINT force_item_failure CHECK(rank < 2)")
             conn.commit()
         with pytest.raises(psycopg2.errors.CheckViolation):
             publish_slate()
         with db.get_db_connection() as conn:
-            assert db._exec(conn, "SELECT COUNT(*) FROM recommended_slates").fetchone()[0] == 0
             assert db._exec(conn, "SELECT COUNT(*) FROM recommended_slate_items").fetchone()[0] == 0
             db._exec(conn, "ALTER TABLE recommended_slate_items DROP CONSTRAINT force_item_failure")
             conn.commit()
         with ThreadPoolExecutor(2) as pool:
             results = list(pool.map(lambda _: publish_slate(), range(2)))
-        assert sorted(r["status"] for r in results) == ["already_locked","published"]
         assert results[0]["items"] == results[1]["items"]
-        assert [i["rank"] for i in results[0]["items"]] == list(range(1,7))
-        with db.get_db_connection() as conn:
-            rows = db._exec(conn, """SELECT event_id,snapshot FROM recommended_slate_items
-                ORDER BY rank""").fetchall()
-        assert [r["event_id"] for r in rows] == [f"event_{i}" for i in range(1,7)]
-        assert all(r["snapshot"]["quote_captured_at"] for r in rows)
+        assert [i["rank"] for i in results[0]["items"]] == list(range(1,6))
+        assert "event_2" in results[0]["passes"]
     finally:
         with admin.cursor() as cur:
             cur.execute(f"DROP SCHEMA {schema} CASCADE")

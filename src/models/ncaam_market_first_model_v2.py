@@ -1917,6 +1917,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     crew_fouls = ra.get('crew_avg_fouls')
                     ref_summary = {
                         "officials": refs,
+                        "fetched_at": str(ra["fetched_at"]) if ra.get("fetched_at") else None,
                         "crew_avg_fouls": float(crew_fouls) if crew_fouls is not None else None,
                     }
         except Exception:
