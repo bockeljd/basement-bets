@@ -1,18 +1,33 @@
 name: NCAAM Top 6 cutoff checks
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
   workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   check-cutoffs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Record eligible picks due at their 30-minute cutoff
+      - name: Record eligible picks due at their 30-minute cutoff & watchdog stale odds
         env:
           BASE_URL: ${{ secrets.BASEMENT_BETS_URL }}
           CRON_SECRET: ${{ secrets.BASEMENT_CRON_SECRET }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl --fail-with-body --silent --show-error --max-time 55 --retry 1 \
-            -H "Authorization: Bearer ${CRON_SECRET}" "${BASE_URL%/}/api/jobs/ncaam_top6_cutoffs"
+          resp="$(curl --fail-with-body --silent --show-error --max-time 55 --retry 1 \
+            -H "Authorization: Bearer ${CRON_SECRET}" "${BASE_URL%/}/api/jobs/ncaam_top6_cutoffs")"
+          echo "Cutoff check response: ${resp}"
+          if echo "${resp}" | grep -q '"stale_refresh_needed": *true'; then
+            active="$(gh run list --workflow=ncaam_jobs.yml --repo "${GITHUB_REPOSITORY}" --limit 3 --json status --jq '[.[] | select(.status=="in_progress" or .status=="queued")] | length')"
+            if [ "${active:-0}" = "0" ]; then
+              echo "Odds/model cache >45m old with upcoming pre-cutoff games — auto-dispatching ncaam_jobs.yml..."
+              gh workflow run ncaam_jobs.yml --repo "${GITHUB_REPOSITORY}"
+            else
+              echo "ncaam_jobs.yml already running/queued (${active} active)."
+            fi
+          fi

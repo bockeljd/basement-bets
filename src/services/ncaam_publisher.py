@@ -47,14 +47,14 @@ def publish_slate(date_et=None):
                 AND p.analyzed_at <= NOW() AND p.analyzed_at < e.start_time
             LEFT JOIN LATERAL (
                 SELECT o.captured_at,o.price,o.line_value FROM odds_snapshots o
-                WHERE o.event_id=p.event_id AND o.book=p.book AND o.market_type=p.market_type
+                WHERE o.event_id=p.event_id AND LOWER(COALESCE(o.book,''))=LOWER(COALESCE(p.book,'')) AND o.market_type=p.market_type
                     AND o.side=upper(d.rec_json->>'side')
                     AND o.captured_at BETWEEN NOW()-interval '90 minutes' AND NOW()
                 ORDER BY o.captured_at DESC,o.id DESC LIMIT 1
             ) quote ON TRUE
             LEFT JOIN LATERAL (
                 SELECT o.price,o.line_value,o.captured_at FROM odds_snapshots o
-                WHERE o.event_id=p.event_id AND o.book=p.book AND o.market_type=p.market_type
+                WHERE o.event_id=p.event_id AND LOWER(COALESCE(o.book,''))=LOWER(COALESCE(p.book,'')) AND o.market_type=p.market_type
                     AND o.side=CASE upper(d.rec_json->>'side') WHEN 'HOME' THEN 'AWAY'
                         WHEN 'AWAY' THEN 'HOME' WHEN 'OVER' THEN 'UNDER' WHEN 'UNDER' THEN 'OVER' END
                     AND o.captured_at BETWEEN NOW()-interval '90 minutes' AND NOW()
@@ -94,12 +94,14 @@ def publish_slate(date_et=None):
             ):
                 reason = "Forecast changed before cutoff"
             quote = _exec(conn, """SELECT price,line_value,captured_at FROM odds_snapshots
-                WHERE event_id=%s AND book=%s AND market_type=%s AND side=%s
+                WHERE event_id=%s AND LOWER(COALESCE(book,''))=LOWER(COALESCE(%s,'')) AND market_type=%s AND side=%s
                   AND captured_at BETWEEN %s - interval '90 minutes' AND %s
                 ORDER BY captured_at DESC,id DESC LIMIT 1""",
                 (eid,item["book"],item["market_type"],item["side"].upper(),cutoff,cutoff)).fetchone()
-            if not quote or quote["price"] != item["bet_price"] or quote["line_value"] != item["bet_line"]:
-                reason = "Price changed or stale at cutoff"
+            if not quote:
+                reason = "Odds stale at cutoff (>90m old)"
+            elif quote["price"] != item["bet_price"] or quote["line_value"] != item["bet_line"]:
+                reason = "Price changed at cutoff"
             if reason:
                 passes[eid] = reason
                 continue
@@ -113,14 +115,24 @@ def publish_slate(date_et=None):
             seen.add(eid)
 
         candidates = []
+        stale_holds = {}
         for row in rows:
             rec = row["rec_json"] or {}
             cutoff = row["start_time"] - timedelta(minutes=30)
             if now >= cutoff or row["event_id"] in seen or not row["is_actionable"] or rec.get("top6_eligible") is False:
                 continue
-            if not row["id"] or not row["captured_at"] or now-row["computed_at"] > timedelta(minutes=90):
+            matchup_label = f"{row['away_team']} @ {row['home_team']}"
+            if not row["id"]:
+                stale_holds[row["event_id"]] = f"{matchup_label} · Model prediction awaiting persistence"
+                continue
+            if now - row["computed_at"] > timedelta(minutes=90):
+                stale_holds[row["event_id"]] = f"{matchup_label} · Model forecast stale (>90m old)"
+                continue
+            if not row["captured_at"]:
+                stale_holds[row["event_id"]] = f"{matchup_label} · Book odds stale (>90m since last quote for {row['book']})"
                 continue
             if row["current_price"] != row["bet_price"] or row["current_line"] != row["bet_line"]:
+                stale_holds[row["event_id"]] = f"{matchup_label} · Line moved since last model run — awaiting re-score"
                 continue
             item = {**rec, **{k: row[k] for k in ("home_team","away_team","model_version","event_id","id",
                         "selection","book","bet_price","bet_line","market_type")}, "locks_at": cutoff.isoformat(),
@@ -131,10 +143,14 @@ def publish_slate(date_et=None):
                 item.update(opposite_price=row["opposite_price"], opposite_captured_at=row["opposite_at"].isoformat())
             candidates.append(item)
         provisional = rank_top6_items(candidates, limit=6-len(seen)) if len(seen)<6 else []
-        board = {"provisional": provisional, "passes": passes, "updated_at": now.isoformat(),
+        board = {"provisional": provisional, "passes": passes, "stale_holds": stale_holds, "updated_at": now.isoformat(),
                  "open": len(seen)<6 and any(r["start_time"]-timedelta(minutes=30)>now for r in rows)}
         _exec(conn,"UPDATE recommended_slates SET rolling_board=%s WHERE id=%s",(Json(board),slate_id))
         items = _slate_items(conn, slate_id)
         conn.commit()
-        return {"status": "rolling" if board["open"] else ("locked" if items else "no_eligible_picks"),
+        if board["open"]:
+            status = "stale_odds" if (not provisional and not items and stale_holds) else "rolling"
+        else:
+            status = "locked" if items else ("stale_odds" if stale_holds else "no_eligible_picks")
+        return {"status": status,
                 "slate_id": slate_id, "items": items, **board}

@@ -449,6 +449,12 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       let loops = 0;
       let totalOk = 0;
       let eventsTotal = 0;
+      setRescoreProgress('Refreshing live sportsbook odds...');
+      try {
+        await api.post('/api/jobs/ingest_odds');
+      } catch {
+        // continue with existing odds if cron auth is required on ingest_odds
+      }
       while (!done && loops < 10) {
         loops += 1;
         const res = await api.post('/api/jobs/build_daily_top_picks', null, {
@@ -469,6 +475,11 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         if (eventsTotal > 0) {
           setRescoreProgress(`Re-scoring ${Math.min(offset, eventsTotal)}/${eventsTotal}...`);
         }
+      }
+      try {
+        await api.post('/api/jobs/lock_morning_slate');
+      } catch {
+        // best-effort rolling Top 6 refresh
       }
       setToast({
         tone: 'ok',
@@ -606,6 +617,18 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       const tags = Array.isArray(p.rec?.movement_tags) ? p.rec.movement_tags : [];
       return tags.includes('sharp_backing') || tags.includes('rlm_confirmed');
     }).length;
+    let staleOddsCount = 0;
+    let trueNoBetCount = 0;
+    gamesForLeague.forEach((game) => {
+      const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
+      if (!meta || meta.isActionable) return;
+      const rLow = String(meta.reason || '').toLowerCase();
+      if (meta.odds_status === 'stale_odds' || rLow.includes('stale') || rLow.includes('no line') || rLow.includes('waiting')) {
+        staleOddsCount += 1;
+      } else {
+        trueNoBetCount += 1;
+      }
+    });
 
     return {
       actionablePlays: plays,
@@ -616,6 +639,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         sharpCount,
         liveCount,
         liveTrendingWinCount,
+        staleOddsCount,
+        trueNoBetCount,
       },
     };
   }, [edges, leagueFilter, rowTopPicks, rowTopPicksByKey, selectedDate]);
@@ -1188,15 +1213,25 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
               ))}
             </div>
           ) : filteredTopPlays.length === 0 ? (
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-3">
+            <div
+              className={`rounded-2xl border p-8 text-center space-y-3 ${
+                actionablePlays.length === 0 && slateSummary.staleOddsCount > 0
+                  ? 'border-amber-500/40 bg-amber-950/15'
+                  : 'border-slate-800 bg-slate-900/60'
+              }`}
+            >
               <h3 className="text-base font-bold text-slate-200">
                 {actionablePlays.length === 0
-                  ? 'No Bets Passed Our Safety Checks Yet'
+                  ? slateSummary.staleOddsCount > 0
+                    ? `Stale / Missing Odds on ${slateSummary.staleOddsCount} Game${slateSummary.staleOddsCount === 1 ? '' : 's'} (Not a True No-Bet)`
+                    : 'True No-Bet — No Games Passed Our Edge & Safety Checks Yet'
                   : 'No Bets Match This Filter'}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
                 {actionablePlays.length === 0
-                  ? 'None of today’s games cleared our minimum edge and safety rules yet. Check the Close Calls below, browse All Games to see our line on every game, or recalculate picks under Data & Tools.'
+                  ? slateSummary.staleOddsCount > 0
+                    ? `${slateSummary.staleOddsCount} game${slateSummary.staleOddsCount === 1 ? ' is' : 's are'} waiting on a fresh sportsbook line snapshot (${slateSummary.trueNoBetCount} evaluated as true no-bet). Click Refresh Odds & Recalculate below to pull live lines and re-score before tip-off.`
+                    : `All ${slateSummary.trueNoBetCount || slateSummary.totalGames} games have fresh lines and were evaluated as a true pass (no edge cleared our minimum thresholds). Check Close Calls below or browse All Games.`
                   : 'Switch back to All bets or browse All Games to inspect every matchup.'}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">

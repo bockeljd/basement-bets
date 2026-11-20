@@ -61,7 +61,8 @@ def main() -> int:
     # 2b. Completed D1 boxscore game logs (3PT% shooting regression & Top-25 letdown spots)
     game_logs_saved = 0
     try:
-        game_logs_saved = espn_client.sync_completed_game_logs(days_back=3)
+        days_back = int(os.getenv("ENRICH_GAME_LOGS_DAYS_BACK", "1"))
+        game_logs_saved = espn_client.sync_completed_game_logs(days_back=days_back)
     except Exception as exc:
         print(f"[enrich] ESPN completed game logs sync warning: {exc}")
 

@@ -3,10 +3,11 @@ name: NCAAM Frequent Jobs
 
 on:
   schedule:
-    # 15m peak pre-tip slate (21:00-03:59 UTC / 4pm-11pm EST), 30m daytime, hourly overnight ($0 free)
-    - cron: '*/15 21-23,0-3 * * *'
-    - cron: '*/30 12-20 * * *'
-    - cron: '0 4-11 * * *'
+    # Jittered off-minute crons avoid GitHub's :00/:15/:30/:45 queue throttling ($0 free)
+    # 15m cadence across active daytime & evening slate (15:00-03:59 UTC / 10am-11pm EST)
+    - cron: '7,22,37,52 15-23,0-3 * * *'
+    - cron: '12,42 11-14 * * *'
+    - cron: '17 4-10 * * *'
   workflow_dispatch:
     inputs:
       backfill_pending:
@@ -17,29 +18,25 @@ on:
 
 concurrency:
   group: ncaam-frequent-jobs
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   run-jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      DB_REUSE_CONNECTION: "1"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           
       - name: Install Dependencies
         run: |
           pip install -r requirements-worker.txt
-          
-      - name: Ingest Results
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        run: python3 src/scripts/ingest_results.py
 
       - name: Ingest Odds
         if: ${{ !inputs.backfill_pending }}
@@ -83,15 +80,15 @@ jobs:
         if: ${{ !inputs.backfill_pending }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python3 -c "from src.services.ncaam_publisher import publish_slate; print(publish_slate()['status'])"
+        run: python3 -c "import json; from src.services.ncaam_publisher import publish_slate; res = publish_slate(); print('[TOP6_PUBLISH]', json.dumps(res, default=str))"
 
-      - name: Verify Daily Top Picks (today ET)
+      - name: Verify Daily Top Picks & Live Top 6 (today ET)
         if: ${{ !inputs.backfill_pending }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python3 - <<'PY'
-          from datetime import datetime
+          import json
           import psycopg2
           import psycopg2.extras
           import os
@@ -104,17 +101,47 @@ jobs:
           cur.execute("SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text")
           today = cur.fetchone()[0]
 
-          cur.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN is_actionable THEN 1 ELSE 0 END) AS n_action FROM daily_top_picks WHERE date_et=%s AND league='NCAAM'", (today,))
+          cur.execute("""
+            SELECT COUNT(*) AS n,
+                   SUM(CASE WHEN is_actionable THEN 1 ELSE 0 END) AS n_action,
+                   SUM(CASE WHEN NOT is_actionable AND (LOWER(COALESCE(reason,'')) LIKE '%%no line%%' OR LOWER(COALESCE(reason,'')) LIKE '%%waiting%%' OR LOWER(COALESCE(reason,'')) LIKE '%%stale%%') THEN 1 ELSE 0 END) AS n_stale,
+                   SUM(CASE WHEN NOT is_actionable AND LOWER(COALESCE(reason,'')) NOT LIKE '%%no line%%' AND LOWER(COALESCE(reason,'')) NOT LIKE '%%waiting%%' AND LOWER(COALESCE(reason,'')) NOT LIKE '%%stale%%' THEN 1 ELSE 0 END) AS n_true_pass,
+                   MAX(computed_at)::text AS latest_computed_at
+            FROM daily_top_picks
+            WHERE date_et=%s AND league='NCAAM'
+          """, (today,))
           row = cur.fetchone()
           n = int(row['n'] or 0)
           n_action = int(row['n_action'] or 0)
+          n_stale = int(row['n_stale'] or 0)
+          n_true_pass = int(row['n_true_pass'] or 0)
 
-          print(f"daily_top_picks for {today}: total={n} actionable={n_action}")
+          print(f"daily_top_picks for {today}: total={n} actionable={n_action} true_no_bet={n_true_pass} stale_or_missing_odds={n_stale} latest_computed_at={row['latest_computed_at']}")
 
-          # fail hard if we wrote nothing at all (usually means wrong DB or script didn't run)
+          cur.execute("""
+            SELECT d.event_id, e.away_team, e.home_team, e.start_time::text AS start_time,
+                   d.is_actionable, d.reason, d.rec_json
+            FROM daily_top_picks d
+            JOIN events e ON e.id = d.event_id
+            WHERE d.date_et=%s AND d.league='NCAAM'
+            ORDER BY d.is_actionable DESC, e.start_time ASC
+          """, (today,))
+          for r in cur.fetchall():
+            rec = r['rec_json'] if isinstance(r['rec_json'], dict) else (json.loads(r['rec_json']) if r['rec_json'] else {})
+            if r['is_actionable']:
+              print(f"  [ACTIONABLE] {r['away_team']} @ {r['home_team']} ({r['start_time']}) -> {rec.get('selection')} ({rec.get('price')}) book={rec.get('book')} ev={rec.get('edge')} top6_eligible={rec.get('top6_eligible')}")
+            else:
+              print(f"  [PASS/HOLD]  {r['away_team']} @ {r['home_team']} ({r['start_time']}) -> reason={r['reason']}")
+
           if n == 0:
             raise SystemExit(2)
           PY
+
+      - name: Ingest Results
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python3 src/scripts/ingest_results.py
           
       - name: Run Settlement
         env:

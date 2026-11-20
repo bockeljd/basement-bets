@@ -27,24 +27,41 @@ export default function SlatePublication({ day }) {
   const labels = {
     rolling: "Provisional picks update until 30 minutes before each tip",
     locked: `Locked at ${time}`,
-    no_eligible_picks: `Completed at ${time} · No eligible picks`,
+    stale_odds: "Held — odds or model cache stale (>90m old), awaiting refresh (not a true no-bet)",
+    no_eligible_picks: `Completed${time ? ` at ${time}` : ''} · True No-Bet (all fresh lines evaluated, zero eligible edges)`,
     unpublished: day < getTodayEtStr() ? 'No recorded publication' : 'Awaiting publication',
     locking: 'Locking recommendations',
     unconfirmed: 'Publication unconfirmed',
     unavailable: 'Publication status unavailable',
   };
+  const isStale = slate?.status === 'stale_odds' || Object.keys(slate?.stale_holds || {}).length > 0;
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-sm text-slate-200" aria-live="polite">
+    <div
+      className={`rounded-xl border p-3 text-sm text-slate-200 ${
+        isStale ? 'border-amber-500/45 bg-amber-950/20' : 'border-slate-700 bg-slate-900'
+      }`}
+      aria-live="polite"
+    >
       <strong>NCAAM Top 6</strong> · {labels[slate?.status] || 'Checking publication'}
       {slate?.evaluation && (
         <p className="mt-1 text-xs text-slate-400">
           {slate.evaluation.cached_games} cached game records · {slate.evaluation.actionable_games} actionable
-          {slate.evaluation.latest_computed_at && ` · Latest cache update ${fmtTimeEt(slate.evaluation.latest_computed_at)} ET`}
+          {slate.evaluation.true_no_bet_games != null && ` · ${slate.evaluation.true_no_bet_games} true no-bet`}
+          {Number(slate.evaluation.stale_or_missing_odds_games || 0) > 0 && (
+            <span className="text-amber-300 font-semibold">
+              {` · ${slate.evaluation.stale_or_missing_odds_games} waiting on fresh odds`}
+            </span>
+          )}
+          {slate.evaluation.latest_computed_at && ` · Latest cache ${fmtTimeEt(slate.evaluation.latest_computed_at)} ET`}
+          {slate.evaluation.latest_odds_at && ` · Latest odds ${fmtTimeEt(slate.evaluation.latest_odds_at)} ET`}
         </p>
       )}
       {slate?.status === 'rolling' && slate.provisional?.map(p => (
         <p key={p.event_id}>Provisional · {p.away_team} @ {p.home_team} · {p.selection} ({fmtOdds(p.bet_price)})
           {' · Locks '}{fmtTimeEt(p.locks_at)} ET · Crew {p.referees?.officials?.join(', ') || 'unconfirmed'}</p>
+      ))}
+      {Object.entries(slate?.stale_holds || {}).map(([event, reason]) => (
+        <p key={event} className="text-amber-300 text-xs mt-1">Stale Hold · {reason}</p>
       ))}
       {Object.entries(slate?.passes || {}).map(([event, reason]) => <p key={event}>Pass · {event} · {reason}</p>)}
       {slate?.picks?.length > 0 && (

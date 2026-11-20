@@ -2555,7 +2555,35 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
             WHERE s.id='NCAAM:'||(NOW() AT TIME ZONE 'America/New_York')::date::text||':cached'
               AND EXISTS (SELECT 1 FROM jsonb_array_elements(to_jsonb(s)->'rolling_board'->'provisional') p
                           WHERE (p->>'locks_at')::timestamptz <= NOW())""").fetchone()
-    return publish_slate() if due else {"status": "no_cutoffs_due"}
+        stale_check = _exec(conn, """
+            SELECT COUNT(*) FILTER (WHERE e.start_time > NOW() + interval '30 minutes') AS upcoming_pre_cutoff,
+                   MAX(d.computed_at) AS latest_computed_at,
+                   (SELECT MAX(o.captured_at) FROM odds_snapshots o JOIN events eo ON eo.id = o.event_id
+                    WHERE eo.league = 'NCAAM'
+                      AND (eo.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date) AS latest_odds_at
+            FROM events e
+            LEFT JOIN daily_top_picks d ON d.event_id = e.id AND d.league = 'NCAAM'
+                AND d.date_et = (NOW() AT TIME ZONE 'America/New_York')::date::text
+            WHERE e.league = 'NCAAM'
+              AND (e.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date
+        """).fetchone()
+        stale_refresh_needed = False
+        if stale_check and int(stale_check.get("upcoming_pre_cutoff") or 0) > 0:
+            lc = stale_check.get("latest_computed_at")
+            lo = stale_check.get("latest_odds_at")
+            now_utc = datetime.now(timezone.utc)
+            if lc is None or lo is None:
+                stale_refresh_needed = True
+            else:
+                if getattr(lc, "tzinfo", None) is None:
+                    lc = lc.replace(tzinfo=timezone.utc)
+                if getattr(lo, "tzinfo", None) is None:
+                    lo = lo.replace(tzinfo=timezone.utc)
+                if (now_utc - lc) > timedelta(minutes=45) or (now_utc - lo) > timedelta(minutes=45):
+                    stale_refresh_needed = True
+    res = publish_slate() if due else {"status": "no_cutoffs_due"}
+    res["stale_refresh_needed"] = stale_refresh_needed
+    return res
 
 
 @app.api_route("/api/jobs/lock_morning_slate", methods=["GET", "POST"])
@@ -3719,6 +3747,9 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                 return 'No clear betting edge'
             if ('Object of type' in txt and 'serializable' in txt) or ('Traceback' in txt) or len(txt) > 140:
                 return 'Analysis unavailable — click Details to retry'
+            low = txt.lower()
+            if 'market data waiting' in low or 'no line' in low or 'stale' in low:
+                return 'Stale / missing sportsbook odds — awaiting line refresh'
             if txt.startswith('Sanity block'):
                 return 'Held for safety — model & book odds need closer match'
             if txt.startswith('Steam move'):
@@ -3726,6 +3757,14 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             if txt == 'No Edge Detected':
                 return 'Line matches fair value — pass'
             return txt
+
+        def _classify_no_bet_status(raw_reason, is_act):
+            if is_act:
+                return 'actionable'
+            low = str(raw_reason or '').strip().lower()
+            if 'market data waiting' in low or 'no line' in low or 'stale' in low or 'unavailable' in low:
+                return 'stale_odds'
+            return 'true_no_bet'
 
         def _parse_ctx_json(val):
             if isinstance(val, dict):
@@ -3759,6 +3798,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
                     'locked': False,
                     'source': 'cached',
                     'is_actionable': is_act,
+                    'odds_status': _classify_no_bet_status(d.get('reason'), is_act),
                     'reason': None if is_act else _clean_no_bet_reason(d.get('reason')),
                     'model_version': mv,
                     'context': _parse_ctx_json(d.get('context_json')),
@@ -4782,10 +4822,28 @@ def ncaam_publication_status(date: str):
         raise HTTPException(status_code=422, detail="Expected YYYY-MM-DD")
     with get_db_connection() as conn:
         cache = _exec(conn, """
-            SELECT count(*) AS cached_games, max(computed_at) AS latest_computed_at,
-                   count(*) FILTER (WHERE is_actionable) AS actionable_games
-            FROM daily_top_picks WHERE league='NCAAM' AND date_et=%s
-        """, (day,)).fetchone()
+            SELECT count(*) AS cached_games,
+                   max(d.computed_at) AS latest_computed_at,
+                   count(*) FILTER (WHERE d.is_actionable) AS actionable_games,
+                   count(*) FILTER (
+                     WHERE NOT d.is_actionable
+                       AND (LOWER(COALESCE(d.reason, '')) LIKE '%%no line%%'
+                            OR LOWER(COALESCE(d.reason, '')) LIKE '%%market data waiting%%'
+                            OR LOWER(COALESCE(d.reason, '')) LIKE '%%stale%%')
+                   ) AS stale_or_missing_odds_games,
+                   count(*) FILTER (
+                     WHERE NOT d.is_actionable
+                       AND LOWER(COALESCE(d.reason, '')) NOT LIKE '%%no line%%'
+                       AND LOWER(COALESCE(d.reason, '')) NOT LIKE '%%market data waiting%%'
+                       AND LOWER(COALESCE(d.reason, '')) NOT LIKE '%%stale%%'
+                   ) AS true_no_bet_games,
+                   (SELECT max(o.captured_at)
+                    FROM odds_snapshots o
+                    JOIN events eo ON eo.id = o.event_id
+                    WHERE eo.league = 'NCAAM'
+                      AND (eo.start_time AT TIME ZONE 'America/New_York')::date = %s) AS latest_odds_at
+            FROM daily_top_picks d WHERE d.league='NCAAM' AND d.date_et=%s
+        """, (day, day)).fetchone()
         evaluation = dict(cache)
         slate = _exec(conn, """
             SELECT id,created_at,to_jsonb(recommended_slates)->'rolling_board' AS board FROM recommended_slates
@@ -4805,9 +4863,16 @@ def ncaam_publication_status(date: str):
             from zoneinfo import ZoneInfo
             board = slate['board']
             if board is not None:
-                active = board.get('open') and day == datetime.now(ZoneInfo("America/New_York")).date()
+                is_today = day == datetime.now(ZoneInfo("America/New_York")).date()
+                active = board.get('open') and is_today
+                stale_holds = board.get('stale_holds') or {}
+                provisional_list = board.get('provisional') or []
+                if active:
+                    status_val = "stale_odds" if (not provisional_list and not picks and stale_holds) else "rolling"
+                else:
+                    status_val = "locked" if picks else ("stale_odds" if stale_holds else "no_eligible_picks")
                 return {"day": day, "evaluation": evaluation, **board,
-                        "status": "rolling" if active else ("locked" if picks else "no_eligible_picks"),
+                        "status": status_val,
                         "locked_at": max((r["locked_at"] for r in picks if r["locked_at"]), default=None),
                         "picks": [dict(r) for r in picks]}
             return {"day": day, "evaluation": evaluation, "status": "locked" if picks else "no_eligible_picks",
