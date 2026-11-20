@@ -19,7 +19,7 @@ import random
 import statistics
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock
 
@@ -83,7 +83,7 @@ def build_offline_model(
     model._calculate_shooting_regression = lambda *a, **kw: 0.0
     model._calculate_situational_spots = lambda *a, **kw: 0.0
     model._calculate_fatigue_penalty = lambda *a, **kw: 0.0
-    model._apply_referee_signal = lambda eid, tot: tot
+    model._apply_referee_signal = lambda eid, tot, avg_ftr=None: tot
     model._get_archetype_stats = lambda key: {"n": 80, "mean": 0.02, "sd": 0.90}
     model._load_adaptive_learning = lambda: {}
     if winprob_cal is not None:
@@ -285,17 +285,19 @@ def run_model_on_games(
 
             sp = g["mkt_spread_home"]
             tot = g["mkt_total"]
+            captured_at = g["start_time"] - timedelta(minutes=20)
             snap = {
+                "_quote_as_of": captured_at,
                 "spread_home": sp,
                 "spread_price_home": -110,
                 "total": tot,
                 "total_over_price": -110,
                 "book_spread": "Consensus",
                 "book_total": "Consensus",
-                "_best_spread_home": {"line_value": sp, "price": -110, "book": "DK"},
-                "_best_spread_away": {"line_value": -sp, "price": -110, "book": "FD"},
-                "_best_total_over": {"line_value": tot, "price": -110, "book": "DK"},
-                "_best_total_under": {"line_value": tot, "price": -110, "book": "FD"},
+                "_best_spread_home": {"line_value": sp, "price": -110, "book": "DK", "captured_at": captured_at},
+                "_best_spread_away": {"line_value": -sp, "price": -110, "book": "FD", "captured_at": captured_at},
+                "_best_total_over": {"line_value": tot, "price": -110, "book": "DK", "captured_at": captured_at},
+                "_best_total_under": {"line_value": tot, "price": -110, "book": "FD", "captured_at": captured_at},
                 "_market_consensus": {
                     "open_spread_home": sp - g.get("spread_move", 0.0),
                     "current_spread_home": sp,
@@ -773,7 +775,9 @@ def main() -> None:
                 "home": {"sos": 60, "mom": 0.0, "inc": 0.05},
                 "away": {"sos": 70, "mom": 0.0, "inc": 0.05},
             }
+            captured_at = g["start_time"] - timedelta(minutes=20)
             snap = {
+                "_quote_as_of": captured_at,
                 "spread_home": sp,
                 "spread_price_home": -110,
                 "total": g["mkt_total"],
@@ -782,10 +786,10 @@ def main() -> None:
                 "moneyline_price_away": 210,
                 "book_spread": "Consensus",
                 "book_total": "Consensus",
-                "_best_spread_home": {"line_value": sp, "price": -110, "book": "DK"},
-                "_best_spread_away": {"line_value": -sp, "price": -110, "book": "FD"},
-                "_best_total_over": {"line_value": g["mkt_total"], "price": -110, "book": "DK"},
-                "_best_total_under": {"line_value": g["mkt_total"], "price": -110, "book": "FD"},
+                "_best_spread_home": {"line_value": sp, "price": -110, "book": "DK", "captured_at": captured_at},
+                "_best_spread_away": {"line_value": -sp, "price": -110, "book": "FD", "captured_at": captured_at},
+                "_best_total_over": {"line_value": g["mkt_total"], "price": -110, "book": "DK", "captured_at": captured_at},
+                "_best_total_under": {"line_value": g["mkt_total"], "price": -110, "book": "FD", "captured_at": captured_at},
                 "_market_consensus": {
                     "open_spread_home": sp - g.get("spread_move", 0.0),
                     "current_spread_home": sp,

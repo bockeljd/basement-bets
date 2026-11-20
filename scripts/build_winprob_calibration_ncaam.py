@@ -256,6 +256,68 @@ def _fetch_obs_for_window(
     return obs
 
 
+def evaluate_ncaam_candidates(days, cutoff, season_start, min_obs):
+    """Evaluate each market independently. A candidate never replaces the shared live curve."""
+    from collections import defaultdict
+    from datetime import timedelta
+    from math import log
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.utils.model_calibration import interpolate_pava_prob
+
+    with get_db_connection() as conn:
+        rows = _exec(conn, """
+            SELECT DISTINCT ON (i.event_id,i.market_type)
+                   i.market_type,to_jsonb(i)->'snapshot' AS snapshot,i.bet_price,m.outcome,s.date_et
+            FROM recommended_slates s
+            JOIN recommended_slate_items i ON i.slate_id=s.id
+            JOIN events e ON e.id=i.event_id
+            JOIN model_predictions m ON m.id=i.prediction_id
+            WHERE s.id='NCAAM:'||s.date_et||':cached' AND s.league='NCAAM'
+              AND i.rank BETWEEN 1 AND 6 AND s.created_at <= e.start_time - interval '10 minutes'
+              AND s.created_at >= %s AND s.date_et >= %s AND e.start_time < %s
+              AND to_jsonb(i)->'snapshot'->>'model_version'=%s
+            ORDER BY i.event_id,i.market_type,s.created_at,i.rank,i.prediction_id
+        """, (cutoff-timedelta(days=days), season_start or '0001-01-01', cutoff,
+              NCAAMMarketFirstModelV2.VERSION)).fetchall()
+
+    groups = defaultdict(list)
+    for row in rows:
+        outcome = norm_result(row["outcome"])
+        snap = row["snapshot"]
+        try:
+            raw, issued = float(snap["raw_win_prob"]), float(snap["win_prob"])
+            prices = [int(row["bet_price"]), int(snap["opposite_price"])]
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if not (outcome in ("W", "L") and 0 < raw < 1 and 0 < issued < 1
+                and all(abs(x) >= 100 for x in prices) and -250 <= prices[0] <= 185):
+            continue
+        implied = [100/(100+x) if x > 0 else -x/(100-x) for x in prices]
+        groups[row["market_type"]].append((row["date_et"], raw, issued, implied[0]/sum(implied), int(outcome=="W")))
+
+    report = {}
+    for market, records in groups.items():
+        records.sort()
+        split_day = records[int(len(records)*0.8)][0]
+        train = [Obs(p=r[1], y=r[4]) for r in records if r[0] < split_day]
+        holdout = [r for r in records if r[0] >= split_day]
+        result = {"train": len(train), "holdout": len(holdout), "holdout_start": split_day}
+        report[market] = result
+        if len(train) < max(150, min_obs) or len(holdout) < 50:
+            continue
+        curve = fit_calibration_artifact(train, days)
+        scores = defaultdict(list)
+        for day, raw, issued, market_p, y in holdout:
+            blend = float(os.environ.get("NCAAM_WINPROB_CAL_BLEND", 0.25 if day[5:7] in ("11","12") else 0.35))
+            candidate = interpolate_pava_prob(raw, curve, blend_weight=blend)
+            for label, p in (("candidate", candidate), ("issued", issued), ("market", market_p), ("raw", raw)):
+                scores[label].append(((p-y)**2, -log(p if y else 1-p)))
+        result["scores"] = {k: {"brier": sum(a for a,b in v)/len(v),
+                                "log_loss": sum(b for a,b in v)/len(v)} for k,v in scores.items()}
+    print(f"[calibration:NCAAM] Frozen rows={len(rows)}. Market-specific candidate evaluation: {json.dumps(report)}")
+    return report
+
+
 def main(
     days: int = 30,
     out_path: str | None = None,
@@ -284,6 +346,10 @@ def main(
     obs: List[Obs] = []
     used_days = int(days)
     training_cutoff = datetime.now(timezone.utc)
+    if lg == "NCAAM":
+        evaluate_ncaam_candidates(max(windows), training_cutoff, season_start, int(min_obs))
+        return None
+
     for w in windows:
         candidate = _fetch_obs_for_window(days=w, league=lg, season_start=season_start, training_cutoff=training_cutoff)
         if len(candidate) > len(obs):

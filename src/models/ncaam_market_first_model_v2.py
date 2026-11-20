@@ -44,7 +44,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.4.0-calibrated"
+    VERSION = "2.4.1-calibrated"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -2805,8 +2805,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             # mu_spread_final is home-perspective margin mean.
             if ml_price_home is not None and ml_price_away is not None:
                 prob_home_raw = 1.0 - self._normal_cdf(0.0, -float(mu_spread_final), float(sigma_spread))
-                prob_home = self._calibrate_win_prob(prob_home_raw, is_early_season=is_early_season)
-                prob_away = self._calibrate_win_prob(1.0 - prob_home_raw, is_early_season=is_early_season)
+                prob_home, prob_away = self._moneyline_probabilities(prob_home_raw, is_early_season)
 
                 ev_home = float(ev_per_unit(prob_home, int(ml_price_home)) or 0.0)
                 ev_away = float(ev_per_unit(prob_away, int(ml_price_away)) or 0.0)
@@ -3342,6 +3341,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         )
         return self._winprob_calibration
 
+    def _moneyline_probabilities(self, home_raw: float, is_early_season: bool):
+        home = self._calibrate_win_prob(home_raw, is_early_season=is_early_season)
+        away = self._calibrate_win_prob(1.0 - home_raw, is_early_season=is_early_season)
+        home_prob = home / (home + away) if home + away > 0 else home_raw
+        return home_prob, 1.0 - home_prob
+
     def _calibrate_win_prob(self, p: float, is_early_season: bool = False) -> float:
         """Calibrate raw win probability using empirical-weighted PAVA mapping."""
         try:
@@ -3466,15 +3471,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
         side = str(side).lower().strip()
         is_early = game_month in (11, 12) or (min_rec_games is not None and int(min_rec_games) < 6)
 
-        def _push_prob(line_v: float) -> float:
-            try:
-                if float(line_v) % 1 != 0:
-                    return 0.0
-                key_numbers = {2, 3, 4, 5, 6, 7, 10, 14}
-                return 0.05 if abs(float(line_v)) in key_numbers else 0.03
-            except Exception:
-                return 0.0
-
         z_10 = -1.2815515655446004
         z_90 = 1.2815515655446004
         for z_val in (z_10, z_90):
@@ -3483,16 +3479,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if mkt == 'SPREAD':
                 # Home cover probability using same convention as main path
                 prob_home_raw = 1.0 - self._normal_cdf(-float(line), -float(mu_true), float(sigma))
-                push_prob = _push_prob(float(line))
-                p_home = prob_home_raw - (push_prob / 2)
-                p_away = (1.0 - prob_home_raw) - (push_prob / 2)
-                p = p_home if side == 'home' else p_away
+                p = prob_home_raw if side == 'home' else 1.0 - prob_home_raw
             else:
                 prob_over_raw = 1.0 - self._normal_cdf(float(line), float(mu_true), float(sigma))
-                push_prob = _push_prob(float(line))
-                p_over = prob_over_raw - (push_prob / 2)
-                p_under = (1.0 - prob_over_raw) - (push_prob / 2)
-                p = p_over if side == 'over' else p_under
+                p = prob_over_raw if side == 'over' else 1.0 - prob_over_raw
 
             probs.append(self._calibrate_win_prob(p, is_early_season=is_early))
 
@@ -3612,7 +3602,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         if rec.get("win_prob") is not None and rec.get("price") is not None:
                             old_wp = float(rec["win_prob"])
                             new_wp = self._clamp_prob(old_wp + 0.003)
-                            new_ev = float(self._calculate_ev(new_wp, rec["price"]))
+                            new_ev = float(self._calculate_ev(new_wp, rec["price"], self._push_probability(rec.get("line"))))
                             rec["win_prob"] = round(new_wp, 3)
                             if rec.get("win_prob_lb10") is not None:
                                 rec["win_prob_lb10"] = round(self._clamp_prob(float(rec["win_prob_lb10"]) + (new_wp - old_wp)), 3)
@@ -3645,7 +3635,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         split_gap = float(opp_money) - float(opp_bets)
                         wp_drop = min(0.020, 0.012 + max(0.0, (split_gap - 20.0) * 0.0002))
                         new_wp = self._clamp_prob(old_wp - wp_drop)
-                        new_ev = float(self._calculate_ev(new_wp, rec["price"]))
+                        new_ev = float(self._calculate_ev(new_wp, rec["price"], self._push_probability(rec.get("line"))))
                         penalty = max(0.0, round(old_ev - new_ev, 4))
                         rec["win_prob"] = round(new_wp, 3)
                         if rec.get("win_prob_lb10") is not None:
@@ -3738,18 +3728,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 torvik_ok = False
         except Exception:
             torvik_ok = False
-
-        # Helper: Push probability for whole-number lines
-        def get_push_prob(line, sigma):
-            """Estimate push probability for whole-number lines."""
-            if line is None:
-                return 0.0
-            if line % 1 != 0:
-                return 0.0
-            key_numbers = {2, 3, 4, 5, 6, 7, 10, 14}
-            if abs(line) in key_numbers:
-                return 0.05
-            return 0.03
 
         def _spread_cover_prob_home(mu_home: float, sigma: float, line_home: float) -> float:
             """No-push conditional P(Home covers) given home-perspective mu and home spread line."""
@@ -4004,13 +3982,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             prob_home = _spread_cover_prob_home(mu_s, sig_s, line_home_bet)
             prob_home_cal = self._calibrate_win_prob(prob_home, is_early_season=g_is_early)
-            push_prob_home = get_push_prob(float(line_home_bet), float(sig_s))
+            push_prob_home = self._push_probability(float(line_home_bet))
             ev_home = self._calculate_ev(prob_home_cal, price_home_bet, push_prob=push_prob_home)
             kelly_home = self._calculate_kelly(prob_home_cal, price_home_bet)
 
             prob_away = 1.0 - _spread_cover_prob_home(mu_s, sig_s, -float(line_away_bet))
             prob_away_cal = self._calibrate_win_prob(prob_away, is_early_season=g_is_early)
-            push_prob_away = get_push_prob(float(line_away_bet), float(sig_s))
+            push_prob_away = self._push_probability(float(line_away_bet))
             ev_away = self._calculate_ev(prob_away_cal, price_away_bet, push_prob=push_prob_away)
             kelly_away = self._calculate_kelly(prob_away_cal, price_away_bet)
 
@@ -4169,7 +4147,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                     else:
                                         p_raw_adj = 1.0 - _spread_cover_prob_home(mu_s, sig_s_adj, -float(out['line']))
                                     p_cal_adj = self._calibrate_win_prob(p_raw_adj, is_early_season=g_is_early)
-                                    push_p_adj = get_push_prob(float(out['line']), sig_s_adj)
+                                    push_p_adj = self._push_probability(float(out['line']))
                                     ev_recomp = float(self._calculate_ev(p_cal_adj, int(out['price']), push_prob=push_p_adj))
                                     ev_adj = min(ev_raw, ev_recomp) - float(ev_penalty or 0.0)
                                     out['raw_win_prob'] = p_raw_adj
@@ -4237,8 +4215,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             prob_over_raw = 1.0 - self._normal_cdf(line_over_bet, mu_t, sig_t)
             prob_under_raw = self._normal_cdf(line_under_bet, mu_t, sig_t)
-            push_prob_over = get_push_prob(line_over_bet, sig_t)
-            push_prob_under = get_push_prob(line_under_bet, sig_t)
+            push_prob_over = self._push_probability(line_over_bet)
+            push_prob_under = self._push_probability(line_under_bet)
 
             prob_over_cal = self._calibrate_win_prob(prob_over_raw, is_early_season=g_is_early)
             prob_under_cal = self._calibrate_win_prob(prob_under_raw, is_early_season=g_is_early)
@@ -4385,7 +4363,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                     else:
                                         p_raw_adj = self._normal_cdf(float(out['line']), float(mu_t), sig_t_adj)
                                     p_cal_adj = self._calibrate_win_prob(p_raw_adj, is_early_season=g_is_early)
-                                    push_p_adj = get_push_prob(float(out['line']), sig_t_adj)
+                                    push_p_adj = self._push_probability(float(out['line']))
                                     ev_recomp = float(self._calculate_ev(p_cal_adj, int(out['price']), push_prob=push_p_adj))
                                     ev_adj = min(ev_raw, ev_recomp) - float(ev_penalty or 0.0)
                                     out['raw_win_prob'] = p_raw_adj
@@ -4442,7 +4420,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             ph = _clean_main_price(bh.get('price'), default=-110)
                             raw_h1 = _spread_cover_prob_home(mu_1h_s, sig_1h_s, lh)
                             prob_h1 = self._calibrate_win_prob(raw_h1, is_early_season=g_is_early)
-                            ev_h1 = self._calculate_ev(prob_h1, ph, push_prob=get_push_prob(lh, sig_1h_s))
+                            ev_h1 = self._calculate_ev(prob_h1, ph, push_prob=self._push_probability(lh))
                             edge_h1 = lh - mu_1h_s
                             if ev_h1 >= 0.03 and prob_h1 >= 0.54 and edge_h1 >= 1.2:
                                 best_1h_cands.append({
@@ -4464,7 +4442,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             pa = _clean_main_price(ba.get('price'), default=-110)
                             raw_a1 = 1.0 - _spread_cover_prob_home(mu_1h_s, sig_1h_s, -la)
                             prob_a1 = self._calibrate_win_prob(raw_a1, is_early_season=g_is_early)
-                            ev_a1 = self._calculate_ev(prob_a1, pa, push_prob=get_push_prob(la, sig_1h_s))
+                            ev_a1 = self._calculate_ev(prob_a1, pa, push_prob=self._push_probability(la))
                             edge_a1 = la - (-mu_1h_s)
                             if ev_a1 >= 0.03 and prob_a1 >= 0.54 and edge_a1 >= 1.2:
                                 best_1h_cands.append({
@@ -4502,7 +4480,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             pu = _clean_main_price(bu.get('price'), default=-110)
                             raw_u1 = self._normal_cdf(lu, mu_1h_t, sig_1h_t)
                             prob_u1 = self._calibrate_win_prob(raw_u1, is_early_season=g_is_early)
-                            ev_u1 = self._calculate_ev(prob_u1, pu, push_prob=get_push_prob(lu, sig_1h_t))
+                            ev_u1 = self._calculate_ev(prob_u1, pu, push_prob=self._push_probability(lu))
                             edge_u1 = lu - mu_1h_t
                             if ev_u1 >= 0.038 and prob_u1 >= 0.545 and edge_u1 >= 1.5:
                                 best_1h_tot.append({
@@ -4524,7 +4502,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             po = _clean_main_price(bo.get('price'), default=-110)
                             raw_o1 = 1.0 - self._normal_cdf(lo, mu_1h_t, sig_1h_t)
                             prob_o1 = self._calibrate_win_prob(raw_o1, is_early_season=g_is_early)
-                            ev_o1 = self._calculate_ev(prob_o1, po, push_prob=get_push_prob(lo, sig_1h_t))
+                            ev_o1 = self._calculate_ev(prob_o1, po, push_prob=self._push_probability(lo))
                             edge_o1 = mu_1h_t - lo
                             if ev_o1 >= 0.045 and prob_o1 >= 0.55 and edge_o1 >= 1.8:
                                 best_1h_tot.append({
@@ -4611,6 +4589,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # Back-compat wrapper.
         from src.utils.ev import clamp_prob
         return float(clamp_prob(win_prob, default=0.5))
+
+    @staticmethod
+    def _push_probability(line):
+        if line is None or float(line) % 1:
+            return 0.0
+        return 0.05 if abs(float(line)) in {2, 3, 4, 5, 6, 7, 10, 14} else 0.03
 
     def _calculate_ev(self, win_prob, price, push_prob: float = 0.0):
         """Estimated Value (ROI) per 1u risked (scaling action by 1 - push_prob on whole numbers)."""
