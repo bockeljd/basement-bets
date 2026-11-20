@@ -161,7 +161,7 @@ function ParlayColumn({ title, icon: Icon, color, combos, loading, bankroll = nu
         <div className="text-xs text-slate-500 p-4 text-center">Loading…</div>
       ) : combos.length === 0 ? (
         <div className="text-xs text-slate-500 bg-slate-950/50 rounded-xl p-4 text-center border border-slate-800/50 font-medium">
-          No matching 2-leg parlays right now
+          No matching parlays right now
         </div>
       ) : (
         combos.map((c, i) => <ComboCard key={i} c={c} color={color} bankroll={bankroll} onAddBet={onAddBet} />)
@@ -217,10 +217,10 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-bold text-slate-100">
-            2-Team Moneyline Parlays{displayDate ? ` (${displayDate})` : ''}
+            Recommended Parlays{displayDate ? ` (${displayDate})` : ''}
           </h3>
           <p className="text-xs text-slate-400">
-            Pairs strong Moneyline legs — including non-neutral ~7-pt Home Favorites (-4.5 to -9.5 spread, -165 to +140 combined odds) so mid-spread favorites avoid backdoor covers.
+            Combines our strongest DraftKings &amp; FanDuel picks — including home favorites around -4.5 to -9.5 on the moneyline so late fouls don’t ruin a spread cover.
           </p>
         </div>
         <button
@@ -244,12 +244,12 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
         <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 space-y-4">
           <div className="space-y-1">
             <h4 className="text-sm font-bold text-white">
-              No 2-Leg Parlays Qualified for {displayDate || 'This Slate'}
+              No Parlays Qualified for {displayDate || 'Today'}
             </h4>
             <p className="text-xs text-slate-300 leading-relaxed">
               {legsConsidered === 0
-                ? 'Zero Moneyline picks met our quality rules on this date — our edges came strictly from Spreads or Totals.'
-                : `Only ${legsConsidered} Moneyline pick qualified — at least 2 from separate games are required to build a 2-leg parlay.`}
+                ? 'No picks met our parlay rules today.'
+                : `Only ${legsConsidered} pick qualified — at least 2 from separate games are needed to build a parlay.`}
             </p>
           </div>
 
@@ -294,7 +294,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
-                    Official Daily 2-Leg Parlay
+                    Official Daily Parlay
                   </span>
                   {officialParlay.is_locked ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[10px] font-bold">

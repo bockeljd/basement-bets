@@ -28,17 +28,17 @@ export default function SlatePublication({ day }) {
   const hasLockedPicks = (slate?.picks?.length || 0) > 0;
   const labels = {
     rolling: hasProvisional
-      ? `${slate.provisional.length} provisional pick${slate.provisional.length === 1 ? '' : 's'} (lock 30m before tip)`
+      ? `${slate.provisional.length} pick${slate.provisional.length === 1 ? '' : 's'} ready (lock 30 min before tip)`
       : hasLockedPicks
-        ? `${slate.picks.length} locked · Monitoring remaining pre-cutoff games`
-        : "0 Recommended Bets Right Now · Monitoring line movement until 30m before tip",
+        ? `${slate.picks.length} locked · Watching remaining games`
+        : "0 Recommended Bets Right Now · Checking live odds until 30 min before each tip",
     locked: `Locked at ${time}`,
-    stale_odds: "Held — odds or model cache stale (>90m old), awaiting refresh (not a true no-bet)",
-    no_eligible_picks: `Completed${time ? ` at ${time}` : ''} · True No-Bet (all fresh lines evaluated, zero eligible edges)`,
-    unpublished: day < getTodayEtStr() ? 'No recorded publication' : 'Awaiting publication',
-    locking: 'Locking recommendations',
-    unconfirmed: 'Publication unconfirmed',
-    unavailable: 'Publication status unavailable',
+    stale_odds: "Paused — odds are older than 90 min, refreshing before lock",
+    no_eligible_picks: `Done${time ? ` at ${time}` : ''} · No bets qualified today (all games checked)`,
+    unpublished: day < getTodayEtStr() ? 'No picks recorded for this day' : 'Waiting for today’s first check',
+    locking: 'Locking picks',
+    unconfirmed: 'Status not confirmed yet',
+    unavailable: 'Status unavailable',
   };
   const isStale =
     slate?.status === 'stale_odds' ||
@@ -55,28 +55,28 @@ export default function SlatePublication({ day }) {
       }`}
       aria-live="polite"
     >
-      <strong>NCAAM Top 6</strong> · {labels[slate?.status] || 'Checking publication'}
+      <strong>NCAAM Top 6</strong> · {labels[slate?.status] || 'Checking today’s games'}
       {slate?.evaluation && (
         <p className="mt-1 text-xs text-slate-400">
           {linedEvaluated > 0
-            ? `${linedEvaluated} lined games evaluated (${slate.evaluation.actionable_games} actionable · ${slate.evaluation.true_no_bet_games} true no-bet)`
-            : `${slate.evaluation.cached_games} cached game records · ${slate.evaluation.actionable_games} actionable`}
-          {unlinedGames > 0 && ` · ${unlinedGames} unlined (non-D1 / no book odds)`}
+            ? `${linedEvaluated} games checked (${slate.evaluation.actionable_games} bets · ${slate.evaluation.true_no_bet_games} passed)`
+            : `${slate.evaluation.cached_games} games checked · ${slate.evaluation.actionable_games} bets`}
+          {unlinedGames > 0 && ` · ${unlinedGames} without sportsbook odds`}
           {(staleGames > 0 || isStale) && (
             <span className="text-amber-300 font-semibold">
-              {staleGames > 0 ? ` · ${staleGames} held on stale odds (>90m)` : ' · Odds feed >90m old'}
+              {staleGames > 0 ? ` · ${staleGames} waiting on fresh odds (>90 min)` : ' · Odds >90 min old'}
             </span>
           )}
-          {slate.evaluation.latest_computed_at && ` · Latest cache ${fmtTimeEt(slate.evaluation.latest_computed_at)} ET`}
-          {slate.evaluation.latest_odds_at && ` · Latest odds ${fmtTimeEt(slate.evaluation.latest_odds_at)} ET`}
+          {slate.evaluation.latest_computed_at && ` · Model ${fmtTimeEt(slate.evaluation.latest_computed_at)} ET`}
+          {slate.evaluation.latest_odds_at && ` · Odds ${fmtTimeEt(slate.evaluation.latest_odds_at)} ET`}
         </p>
       )}
       {slate?.status === 'rolling' && slate.provisional?.map(p => (
-        <p key={p.event_id}>Provisional · {p.away_team} @ {p.home_team} · {p.selection} ({fmtOdds(p.bet_price)})
-          {' · Locks '}{fmtTimeEt(p.locks_at)} ET · Crew {p.referees?.officials?.join(', ') || 'unconfirmed'}</p>
+        <p key={p.event_id}>Up Next · {p.away_team} @ {p.home_team} · {p.selection} ({fmtOdds(p.bet_price)})
+          {' · Locks '}{fmtTimeEt(p.locks_at)} ET · Refs {p.referees?.officials?.join(', ') || 'TBD'}</p>
       ))}
       {Object.entries(slate?.stale_holds || {}).map(([event, reason]) => (
-        <p key={event} className="text-amber-300 text-xs mt-1">Stale Hold · {reason}</p>
+        <p key={event} className="text-amber-300 text-xs mt-1">Waiting on fresh odds · {reason}</p>
       ))}
       {Object.entries(slate?.passes || {}).map(([event, reason]) => <p key={event}>Pass · {event} · {reason}</p>)}
       {slate?.picks?.length > 0 && (

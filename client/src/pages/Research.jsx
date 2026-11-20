@@ -740,7 +740,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       { id: 'board', label: `All Games (${slateSummary.totalGames})` },
     ];
     if (leagueFilter === 'NCAAM') {
-      base.push({ id: 'parlays', label: '2-Leg Parlays' });
+      base.push({ id: 'parlays', label: 'Parlays' });
     }
     return base;
   }, [actionablePlays.length, slateSummary.totalGames, leagueFilter]);
@@ -1227,15 +1227,15 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
               <h3 className="text-base font-bold text-slate-200">
                 {actionablePlays.length === 0
                   ? slateSummary.staleOddsCount > 0
-                    ? `Stale Odds Hold on ${slateSummary.staleOddsCount} Game${slateSummary.staleOddsCount === 1 ? '' : 's'} (Not a True No-Bet)`
-                    : `True No-Bet Right Now — All ${slateSummary.trueNoBetCount || slateSummary.totalGames} Lined Games Evaluated`
+                    ? `Waiting on Fresh Odds for ${slateSummary.staleOddsCount} Game${slateSummary.staleOddsCount === 1 ? '' : 's'}`
+                    : `No Bets Today Yet — Checked All ${slateSummary.trueNoBetCount || slateSummary.totalGames} Games With Odds`
                   : 'No Bets Match This Filter'}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
                 {actionablePlays.length === 0
                   ? slateSummary.staleOddsCount > 0
                     ? `${slateSummary.staleOddsCount} game${slateSummary.staleOddsCount === 1 ? ' has' : 's have'} odds older than 90 minutes. Click Recalculate Picks below to refresh lines before tip-off.`
-                    : `All ${slateSummary.trueNoBetCount || slateSummary.totalGames} lined games have fresh sportsbook odds and were evaluated as a true pass (no edge cleared our minimum thresholds${slateSummary.unlinedCount > 0 ? `; ${slateSummary.unlinedCount} non-D1/exhibition games have no sportsbook lines posted` : ''}). Check Close Calls below or browse All Games.`
+                    : `All ${slateSummary.trueNoBetCount || slateSummary.totalGames} games with sportsbook odds have been checked and none have a strong enough edge right now${slateSummary.unlinedCount > 0 ? ` (${slateSummary.unlinedCount} games don't have sportsbook odds posted)` : ''}. Check Close Calls below or browse All Games.`
                   : 'Switch back to All bets or browse All Games to inspect every matchup.'}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
