@@ -27,7 +27,7 @@ export default function SlatePublication({ day }) {
   const labels = {
     locked: `Locked at ${time}`,
     no_eligible_picks: `Completed at ${time} · No eligible picks`,
-    unpublished: 'Awaiting publication',
+    unpublished: day < getTodayEtStr() ? 'No recorded publication' : 'Awaiting publication',
     locking: 'Locking recommendations',
     unconfirmed: 'Publication unconfirmed',
     unavailable: 'Publication status unavailable',
@@ -35,6 +35,12 @@ export default function SlatePublication({ day }) {
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-sm text-slate-200" aria-live="polite">
       <strong>Published morning Top 6</strong> · {labels[slate?.status] || 'Checking publication'}
+      {slate?.evaluation && (
+        <p className="mt-1 text-xs text-slate-400">
+          {slate.evaluation.cached_games} cached game records · {slate.evaluation.actionable_games} actionable
+          {slate.evaluation.latest_computed_at && ` · Latest cache update ${fmtTimeEt(slate.evaluation.latest_computed_at)} ET`}
+        </p>
+      )}
       {slate?.picks?.length > 0 && (
         <ol className="mt-2 list-decimal pl-5">
           {slate.picks.map(p => (

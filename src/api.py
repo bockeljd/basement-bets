@@ -4769,6 +4769,12 @@ def ncaam_publication_status(date: str):
     except ValueError:
         raise HTTPException(status_code=422, detail="Expected YYYY-MM-DD")
     with get_db_connection() as conn:
+        cache = _exec(conn, """
+            SELECT count(*) AS cached_games, max(computed_at) AS latest_computed_at,
+                   count(*) FILTER (WHERE is_actionable) AS actionable_games
+            FROM daily_top_picks WHERE league='NCAAM' AND date_et=%s
+        """, (day,)).fetchone()
+        evaluation = dict(cache)
         slate = _exec(conn, """
             SELECT id,created_at FROM recommended_slates
             WHERE league='NCAAM' AND source='cached' AND date_et=%s
@@ -4781,7 +4787,7 @@ def ncaam_publication_status(date: str):
                 FROM recommended_slate_items i LEFT JOIN events e ON e.id=i.event_id
                 WHERE i.slate_id=%s AND i.rank BETWEEN 1 AND 6 ORDER BY i.rank
             """, (slate['id'],)).fetchall()
-            return {"day": day, "status": "locked" if picks else "no_eligible_picks",
+            return {"day": day, "evaluation": evaluation, "status": "locked" if picks else "no_eligible_picks",
                     "locked_at": slate['created_at'], "picks": [dict(row) for row in picks]}
         run = _exec(conn, """
             SELECT status,started_at FROM job_runs WHERE job_name='lock_morning_slate'
@@ -4794,7 +4800,7 @@ def ncaam_publication_status(date: str):
             state = "locking"
         else:
             state = "unconfirmed"
-    return {"day": day, "status": state, "locked_at": None, "picks": []}
+    return {"day": day, "evaluation": evaluation, "status": state, "locked_at": None, "picks": []}
 
 
 @app.get("/api/ncaam/top6/rank-performance")
