@@ -174,8 +174,16 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
     var pill=document.createElement('div');
     pill.id='bb-sb-sync';
     pill.style.cssText='position:fixed;top:16px;right:16px;z-index:2147483647;background:#0f172a;color:#6ee7b7;border:1px solid #10b981;padding:12px 16px;border-radius:10px;font:600 13px/1.4 system-ui,sans-serif;box-shadow:0 10px 25px rgba(0,0,0,0.45);';
-    pill.textContent='Basement Bets: Extracting DraftKings bets & balance...';
+    pill.textContent='Basement Bets: Expanding parlay legs & extracting DraftKings bets...';
     if(document.body){document.body.appendChild(pill);}
+    try{
+      var expanders=document.querySelectorAll('button,[role="button"],a,span,div');
+      for(var xi=0;xi<expanders.length;xi++){
+        var xt=(expanders[xi].children.length===0?(expanders[xi].innerText||''):'').trim();
+        if(/^(view|show)\\s+picks$/i.test(xt)){try{expanders[xi].click();}catch(e){}}
+      }
+    }catch(e){}
+    setTimeout(function(){
     function readBalance(){
       try{
         var sels=['[data-testid*="cash-balance" i]','[data-test-id*="cash-balance" i]','[class*="cash-balance" i]','[aria-label*="cash balance" i]'];
@@ -253,6 +261,7 @@ export const buildDraftKingsBookmarklet = (appOrigin, accountId = 'Main') => {
     }
     var payload=JSON.stringify({_bb_sb_bundle:1,provider:'DraftKings',account_id:accId,page_kind:isTxnPage?'transactions':'bets',transactions:txns,raw_text:rawText.slice(0,180000),balance:bal,cash_only_balance:bal!==null,source:'draftkings_bookmarklet'});
     ${encodeUtf8PayloadJs}
+    },1200);
   })();`;
   return `javascript:${body.replace(/\n\s*/g, '')}`;
 };

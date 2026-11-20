@@ -570,7 +570,12 @@ class DraftKingsTextParser:
                     selection = f"{selection_parts[0]} {selection_parts[1]}"
                 else:
                     selection = selection_parts[0]
-            
+
+            # Collapsed parlays ("View Picks" not expanded) have no leg detail; never surface UI words as the pick
+            if re.search(r'parlay|sgp', str(bet_type or ''), re.IGNORECASE) and re.fullmatch(
+                r'(?i)(home|away|open|live|view picks|hide picks)?', str(selection or '').strip()
+            ):
+                selection = f"{bet_type} (legs hidden - expand 'View Picks' and re-sync)"
             # Construct Matchup from detected Teams if implicit
             if not matchup:
                 # Prefer last two explicit team lines (DK often lists away then home as ALLCAPS lines)

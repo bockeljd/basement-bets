@@ -5,8 +5,20 @@ class AnalyticsEngine:
     def __init__(self, user_id=None):
         self.user_id = user_id
         self.bets = fetch_all_bets(user_id=user_id)
+        self._drop_phantom_bets()
         self._normalize_bets()
         self._add_sortable_dates()
+
+    def _drop_phantom_bets(self):
+        """Hide junk rows accidentally parsed from Transaction History / statement pages."""
+        def _is_phantom(b):
+            sel = str(b.get('selection') or '').strip().lower()
+            desc = str(b.get('description') or '').strip().lower()
+            return sel == 'transaction history' or 'transaction history' in desc
+        try:
+            self.bets = [b for b in (self.bets or []) if not _is_phantom(b)]
+        except Exception:
+            pass
     
     def _add_sortable_dates(self):
         """Adds ISO-formatted sort_date field for proper date sorting.
