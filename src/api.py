@@ -6137,74 +6137,141 @@ async def get_ncaam_parlays_today(
 
     # Optional: persist the single recommended parlay so performance/grading can track it.
     # (UI can call with persist=1; duplicates are avoided via unique key.)
+    # Official Daily Parlay persistence & lock (locks 10m before first leg tip-off or when persist=1)
+    official_daily_parlay = None
     try:
-        if persist and (high_conf or payout_band):
+        if _strategy != 'home_fav':
             from src.database import get_admin_db_connection
             import hashlib
+            from datetime import timezone as _tz, timedelta as _td
 
-            # prefer the highest confidence combo; fallback to best EV in band
-            chosen = (high_conf[0] if high_conf else payout_band[0])
-            eids = sorted([str(chosen['legs'][0].get('event_id') or ''), str(chosen['legs'][1].get('event_id') or '')])
-            pair_key = "|".join(eids)
-            # Unique ID for this parlay on this ET date
-            ukey = hashlib.sha256(("NCAAM|ML2|" + pair_key).encode()).hexdigest()
+            date_et_val = str(resolved_date_et or "")
+            if not date_et_val:
+                try:
+                    with get_db_connection() as conn:
+                        date_et_val = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+                except Exception:
+                    date_et_val = datetime.utcnow().date().isoformat()
 
-            # Create table if missing
-            ddl = """
-              CREATE TABLE IF NOT EXISTS recommended_parlays (
-                id TEXT PRIMARY KEY,
-                league TEXT NOT NULL,
-                date_et TEXT NOT NULL,
-                kind TEXT NOT NULL, -- e.g. 'ML2'
-                bucket TEXT,        -- e.g. 'high_confidence' | 'payout_band'
-                american_odds INTEGER,
-                p_win REAL,
-                ev REAL,
-                event_id_1 TEXT,
-                event_id_2 TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                UNIQUE(league, date_et, kind, event_id_1, event_id_2)
-              );
-            """
-            with get_admin_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(ddl)
-                conn.commit()
-
-            # Determine ET date
-            date_et = None
+            # 1) Check if an Official Daily Parlay is already locked for this date_et
+            existing_locked = None
             try:
                 with get_db_connection() as conn:
-                    date_et = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
+                    row_lk = _exec(
+                        conn,
+                        """
+                        SELECT parlay_json, locked_at, american_odds, p_win, ev, bucket
+                        FROM recommended_parlays
+                        WHERE league = 'NCAAM' AND date_et = %s AND kind = 'ML2'
+                          AND locked_at IS NOT NULL AND parlay_json IS NOT NULL
+                        ORDER BY locked_at ASC
+                        LIMIT 1
+                        """,
+                        (date_et_val,),
+                    ).fetchone()
+                    if row_lk:
+                        existing_locked = dict(row_lk)
             except Exception:
-                date_et = None
-            if not date_et:
-                date_et = datetime.utcnow().date().isoformat()
+                existing_locked = None
 
-            bucket = 'high_confidence' if high_conf else 'payout_band'
-            # Incorporate ET date into id so the same event-pair can be recommended again on another day.
-            pid = hashlib.sha256((str(date_et) + "|" + ukey).encode()).hexdigest()
+            if existing_locked and existing_locked.get("parlay_json"):
+                try:
+                    pj = existing_locked["parlay_json"]
+                    if isinstance(pj, str):
+                        pj = json.loads(pj)
+                    if isinstance(pj, dict):
+                        pj["is_locked"] = True
+                        pj["locked_at"] = str(existing_locked.get("locked_at") or "")
+                        pj["is_official_daily"] = True
+                        official_daily_parlay = pj
+                except Exception:
+                    official_daily_parlay = None
 
-            with get_db_connection() as conn:
-                _exec(conn, """
-                  INSERT INTO recommended_parlays (id, league, date_et, kind, bucket, american_odds, p_win, ev, event_id_1, event_id_2)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                  ON CONFLICT (league, date_et, kind, event_id_1, event_id_2) DO UPDATE SET
-                    american_odds=EXCLUDED.american_odds,
-                    p_win=EXCLUDED.p_win,
-                    ev=EXCLUDED.ev,
-                    bucket=EXCLUDED.bucket
-                """, (
-                    pid, 'NCAAM', str(date_et), 'ML2', bucket,
-                    int(chosen.get('american_odds') or 0),
-                    float(chosen.get('p_win') or 0.0),
-                    float(chosen.get('ev') or 0.0),
-                    eids[0], eids[1],
-                ))
-                conn.commit()
+            # 2) If not yet locked, evaluate today's top candidate and lock if <= 10m before first leg tip-off (or persist=1)
+            if official_daily_parlay is None and (high_conf or payout_band):
+                chosen = (high_conf[0] if high_conf else payout_band[0])
+                # Find earliest leg tip-off time
+                earliest_tip = None
+                for lg in (chosen.get("legs") or []):
+                    st_raw = str(lg.get("start_time") or "").strip()
+                    if not st_raw:
+                        continue
+                    try:
+                        st_dt = datetime.fromisoformat(st_raw.replace("Z", "+00:00"))
+                        if st_dt.tzinfo is None:
+                            st_dt = st_dt.replace(tzinfo=_tz.utc)
+                        if earliest_tip is None or st_dt < earliest_tip:
+                            earliest_tip = st_dt
+                    except Exception:
+                        continue
+
+                now_utc = datetime.now(_tz.utc)
+                should_lock = bool(persist) or (
+                    earliest_tip is not None and earliest_tip <= (now_utc + _td(minutes=10))
+                )
+
+                official_daily_parlay = {
+                    **chosen,
+                    "is_official_daily": True,
+                    "is_locked": bool(should_lock),
+                    "locked_at": (now_utc.isoformat() if should_lock else None),
+                    "locks_at": ((earliest_tip - _td(minutes=10)).isoformat() if earliest_tip else None),
+                }
+
+                if should_lock:
+                    eids = sorted([str(chosen['legs'][0].get('event_id') or ''), str(chosen['legs'][1].get('event_id') or '')])
+                    pair_key = "|".join(eids)
+                    ukey = hashlib.sha256(("NCAAM|ML2|" + pair_key).encode()).hexdigest()
+                    bucket = 'high_confidence' if high_conf else 'payout_band'
+                    pid = hashlib.sha256((str(date_et_val) + "|" + ukey).encode()).hexdigest()
+
+                    ddl = """
+                      CREATE TABLE IF NOT EXISTS recommended_parlays (
+                        id TEXT PRIMARY KEY,
+                        league TEXT NOT NULL,
+                        date_et TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        bucket TEXT,
+                        american_odds INTEGER,
+                        p_win REAL,
+                        ev REAL,
+                        event_id_1 TEXT,
+                        event_id_2 TEXT,
+                        parlay_json TEXT,
+                        locked_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        UNIQUE(league, date_et, kind, event_id_1, event_id_2)
+                      );
+                    """
+                    try:
+                        with get_admin_db_connection() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute(ddl)
+                                cur.execute("ALTER TABLE recommended_parlays ADD COLUMN IF NOT EXISTS parlay_json TEXT;")
+                                cur.execute("ALTER TABLE recommended_parlays ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;")
+                            conn.commit()
+                    except Exception:
+                        pass
+
+                    with get_db_connection() as conn:
+                        _exec(conn, """
+                          INSERT INTO recommended_parlays (id, league, date_et, kind, bucket, american_odds, p_win, ev, event_id_1, event_id_2, parlay_json, locked_at)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                          ON CONFLICT (league, date_et, kind, event_id_1, event_id_2) DO UPDATE SET
+                            parlay_json = COALESCE(recommended_parlays.parlay_json, EXCLUDED.parlay_json),
+                            locked_at = COALESCE(recommended_parlays.locked_at, EXCLUDED.locked_at)
+                        """, (
+                            pid, 'NCAAM', str(date_et_val), 'ML2', bucket,
+                            int(chosen.get('american_odds') or 0),
+                            float(chosen.get('p_win') or 0.0),
+                            float(chosen.get('ev') or 0.0),
+                            eids[0], eids[1],
+                            json.dumps(official_daily_parlay, default=str),
+                        ))
+                        conn.commit()
     except Exception as e:
         try:
-            print(f"[parlays] persist failed: {e}")
+            print(f"[parlays] official daily lock/persist failed: {e}")
         except Exception:
             pass
 
@@ -6219,6 +6286,7 @@ async def get_ncaam_parlays_today(
             "odds_lo": int(parlay_odds_lo),
             "odds_hi": int(parlay_odds_hi),
         },
+        "official_daily_parlay": official_daily_parlay,
         "high_confidence": high_conf,
         "payout_band": payout_band,
     }

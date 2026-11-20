@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
-import { Zap, Target, Home, TrendingUp, Percent, RefreshCw, PlusCircle } from 'lucide-react';
+import { Zap, Target, Home, TrendingUp, Percent, RefreshCw, PlusCircle, Lock, Clock } from 'lucide-react';
 import { getRecommendedBetSize } from './today/todayHelpers';
 
 const fmtPct = (x) => {
@@ -203,11 +203,12 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
-  const highConf = (allData?.high_confidence || []).slice(0, 2);
-  const valuePick = (allData?.payout_band || []).slice(0, 2);
-  const homeFav = (homeFavData?.high_confidence || []).slice(0, 2);
+  const officialParlay = allData?.official_daily_parlay || null;
+  const highConf = (allData?.high_confidence || []).slice(0, 5);
+  const valuePick = (allData?.payout_band || []).slice(0, 5);
+  const homeFav = (homeFavData?.high_confidence || []).slice(0, 5);
   const legsConsidered = Number(allData?.legs_considered ?? 0);
-  const hasAnyCombos = highConf.length > 0 || valuePick.length > 0 || homeFav.length > 0;
+  const hasAnyCombos = Boolean(officialParlay) || highConf.length > 0 || valuePick.length > 0 || homeFav.length > 0;
   const displayDate = allData?.date_et || date || '';
 
   return (
@@ -287,34 +288,67 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <ParlayColumn
-            title="Highest Win Chance"
-            icon={Zap}
-            color="amber"
-            combos={highConf}
-            loading={loading}
-            bankroll={bankroll}
-            onAddBet={onAddBet}
-          />
-          <ParlayColumn
-            title="Best Payout Value"
-            icon={Target}
-            color="purple"
-            combos={valuePick}
-            loading={loading}
-            bankroll={bankroll}
-            onAddBet={onAddBet}
-          />
-          <ParlayColumn
-            title="Home Favorites (~7pt ML)"
-            icon={Home}
-            color="orange"
-            combos={homeFav}
-            loading={loading}
-            bankroll={bankroll}
-            onAddBet={onAddBet}
-          />
+        <div className="space-y-5">
+          {officialParlay && (
+            <section className="rounded-2xl border border-emerald-500/35 bg-emerald-950/15 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                    Official Daily 2-Leg Parlay
+                  </span>
+                  {officialParlay.is_locked ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[10px] font-bold">
+                      <Lock size={10} aria-hidden="true" />
+                      <span>
+                        LOCKED{officialParlay.locked_at ? ` · ${fmtTime(officialParlay.locked_at)} ET` : ''}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/35 text-amber-200 text-[10px] font-bold">
+                      <Clock size={10} aria-hidden="true" />
+                      <span>
+                        Locks 10m before tip{officialParlay.locks_at ? ` (${fmtTime(officialParlay.locks_at)} ET)` : ''}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Pinned daily pick graded in Model Performance · All other qualifying parlays shown below
+                </span>
+              </div>
+              <ComboCard c={officialParlay} color="amber" bankroll={bankroll} onAddBet={onAddBet} />
+            </section>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <ParlayColumn
+              title="Highest Win Chance"
+              icon={Zap}
+              color="amber"
+              combos={highConf}
+              loading={loading}
+              bankroll={bankroll}
+              onAddBet={onAddBet}
+            />
+            <ParlayColumn
+              title="Best Payout Value"
+              icon={Target}
+              color="purple"
+              combos={valuePick}
+              loading={loading}
+              bankroll={bankroll}
+              onAddBet={onAddBet}
+            />
+            <ParlayColumn
+              title="Home Favorites (~7pt ML)"
+              icon={Home}
+              color="orange"
+              combos={homeFav}
+              loading={loading}
+              bankroll={bankroll}
+              onAddBet={onAddBet}
+            />
+          </div>
         </div>
       )}
     </div>
