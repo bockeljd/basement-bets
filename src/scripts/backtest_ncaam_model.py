@@ -17,9 +17,26 @@ def _et_date(d: datetime) -> str:
         return d.strftime('%Y-%m-%d')
 
 
+_HAS_ODDS_CREATED_AT = None
+
+
+def _odds_has_created_at(conn) -> bool:
+    global _HAS_ODDS_CREATED_AT
+    if _HAS_ODDS_CREATED_AT is None:
+        row = _exec(conn, """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'odds_snapshots' AND column_name = 'created_at'
+            LIMIT 1
+        """).fetchone()
+        _HAS_ODDS_CREATED_AT = bool(row)
+    return _HAS_ODDS_CREATED_AT
+
+
 def _best_book_line_before(conn, event_id: str, market_type: str, side: str, cutoff: datetime):
     """Fetch the best bettable retail line & price across all live books before tipoff."""
-    rows = _exec(conn, """
+    created_filter = "AND created_at <= %s" if _odds_has_created_at(conn) else ""
+    params = (event_id, market_type, side, cutoff, cutoff, cutoff) if created_filter else (event_id, market_type, side, cutoff, cutoff)
+    rows = _exec(conn, f"""
         SELECT DISTINCT ON (book) book, line_value, price, captured_at
         FROM odds_snapshots
         WHERE event_id=%s AND market_type=%s AND side=%s
@@ -27,9 +44,9 @@ def _best_book_line_before(conn, event_id: str, market_type: str, side: str, cut
           AND lower(book) !~ '^action_book_' AND price IS NOT NULL
           AND line_value IS NOT NULL
           AND captured_at BETWEEN %s - interval '90 minutes' AND %s
-          AND created_at <= %s
+          {created_filter}
         ORDER BY book, captured_at DESC
-    """, (event_id, market_type, side, cutoff, cutoff, cutoff)).fetchall()
+    """, params).fetchall()
     if not rows:
         return None
     cands = [dict(r) for r in rows]
@@ -46,16 +63,18 @@ def _best_book_line_before(conn, event_id: str, market_type: str, side: str, cut
 
 def _latest_line_before(conn, event_id: str, market_type: str, side: str, cutoff: datetime):
     # Only observations already ingested by the historical cutoff are available.
-    row = _exec(conn, """
+    created_filter = "AND created_at <= %s" if _odds_has_created_at(conn) else ""
+    params = (event_id, market_type, side, cutoff, cutoff, cutoff) if created_filter else (event_id, market_type, side, cutoff, cutoff)
+    row = _exec(conn, f"""
         SELECT line_value, price, captured_at
         FROM odds_snapshots
         WHERE event_id=%s AND market_type=%s AND side=%s
           AND COALESCE(book, '') NOT IN ('action_open', 'open')
           AND captured_at BETWEEN %s - interval '90 minutes' AND %s
-          AND created_at <= %s
+          {created_filter}
         ORDER BY captured_at DESC, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END) ASC
         LIMIT 1
-    """, (event_id, market_type, side, cutoff, cutoff, cutoff)).fetchone()
+    """, params).fetchone()
     return dict(row) if row else None
 
 
