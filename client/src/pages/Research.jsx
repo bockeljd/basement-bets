@@ -66,8 +66,10 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
   const [degradedAsOf, setDegradedAsOf] = useState(null);
 
   // Top plays controls
-  const [pickTypeFilter, setPickTypeFilter] = useState('all'); // all | spread | total | high_conf | soon
+  const [pickTypeFilter, setPickTypeFilter] = useState('all'); // all | spread | total | ml | first_half | high_conf | soon
   const [pickViewMode, setPickViewMode] = useState('top6'); // top6 | all
+  const [boardInitialFilter, setBoardInitialFilter] = useState('all'); // all | live | picks | nobet | final
+  const [boardFilterSignal, setBoardFilterSignal] = useState(0);
 
   // Modals, popover & rescore state
   const [selectedGame, setSelectedGame] = useState(null);
@@ -665,8 +667,10 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
     const nowMs = Date.now();
     return scopedTopPlays.filter(({ game, rec, conf }) => {
       const mkt = String(rec?.bet_type || rec?.market_type || '').toUpperCase();
-      if (pickTypeFilter === 'spread') return mkt === 'SPREAD';
-      if (pickTypeFilter === 'total') return mkt === 'TOTAL';
+      if (pickTypeFilter === 'spread') return mkt === 'SPREAD' || mkt === 'SPREAD_1H';
+      if (pickTypeFilter === 'total') return mkt === 'TOTAL' || mkt === 'TOTAL_1H';
+      if (pickTypeFilter === 'ml') return mkt === 'MONEYLINE' || mkt === 'ML';
+      if (pickTypeFilter === 'first_half') return mkt === 'SPREAD_1H' || mkt === 'TOTAL_1H';
       if (pickTypeFilter === 'high_conf') return conf.tier === 'HIGH';
       if (pickTypeFilter === 'soon') {
         const st = game?.start_time ? new Date(game.start_time).getTime() : 0;
@@ -680,12 +684,16 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
     const nowMs = Date.now();
     let spread = 0;
     let total = 0;
+    let ml = 0;
+    let first_half = 0;
     let high_conf = 0;
     let soon = 0;
     scopedTopPlays.forEach(({ game, rec, conf }) => {
       const mkt = String(rec?.bet_type || rec?.market_type || '').toUpperCase();
-      if (mkt === 'SPREAD') spread += 1;
-      else if (mkt === 'TOTAL') total += 1;
+      if (mkt === 'SPREAD' || mkt === 'SPREAD_1H') spread += 1;
+      else if (mkt === 'TOTAL' || mkt === 'TOTAL_1H') total += 1;
+      else if (mkt === 'MONEYLINE' || mkt === 'ML') ml += 1;
+      if (mkt === 'SPREAD_1H' || mkt === 'TOTAL_1H') first_half += 1;
       if (conf.tier === 'HIGH') high_conf += 1;
       const st = game?.start_time ? new Date(game.start_time).getTime() : 0;
       if (st > nowMs - 30 * 60000 && st <= nowMs + 3 * 3600 * 1000) soon += 1;
@@ -695,6 +703,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       high_conf,
       spread,
       total,
+      ml,
+      first_half,
       soon,
     };
   }, [scopedTopPlays]);
@@ -736,8 +746,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
 
   const tabs = useMemo(() => {
     const base = [
-      { id: 'top_plays', label: `Best Bets (${actionablePlays.length})` },
       { id: 'board', label: `All Games (${slateSummary.totalGames})` },
+      { id: 'top_plays', label: `Best Bets (${actionablePlays.length})` },
     ];
     if (leagueFilter === 'NCAAM') {
       base.push({ id: 'parlays', label: 'Parlays' });
@@ -860,7 +870,11 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
           <div className="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm text-slate-400 mt-1">
             <button
               type="button"
-              onClick={() => setActiveSubTab('board')}
+              onClick={() => {
+                setBoardInitialFilter('all');
+                setBoardFilterSignal((n) => n + 1);
+                setActiveSubTab('board');
+              }}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 font-medium cursor-pointer transition-colors"
             >
               <strong className="font-mono text-white">{slateSummary.totalGames}</strong>
@@ -894,13 +908,21 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
               </button>
             )}
             {slateSummary.liveCount > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/35 text-rose-300 font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  setBoardInitialFilter('live');
+                  setBoardFilterSignal((n) => n + 1);
+                  setActiveSubTab('board');
+                }}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-300 font-semibold cursor-pointer transition-colors"
+              >
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
                 <span>
                   {slateSummary.liveCount} live now
                   {slateSummary.liveTrendingWinCount > 0 ? ` (${slateSummary.liveTrendingWinCount} winning pace)` : ''}
                 </span>
-              </span>
+              </button>
             )}
           </div>
         </div>
@@ -1172,6 +1194,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                     { id: 'high_conf', label: `Strongest (${pickFilterCounts.high_conf})`, show: pickFilterCounts.high_conf > 0 || pickTypeFilter === 'high_conf' },
                     { id: 'spread', label: `Spreads (${pickFilterCounts.spread})`, show: pickFilterCounts.spread > 0 || pickTypeFilter === 'spread' },
                     { id: 'total', label: `Over / Under (${pickFilterCounts.total})`, show: pickFilterCounts.total > 0 || pickTypeFilter === 'total' },
+                    { id: 'ml', label: `Moneyline (${pickFilterCounts.ml})`, show: pickFilterCounts.ml > 0 || pickTypeFilter === 'ml' },
+                    { id: 'first_half', label: `1st Half (${pickFilterCounts.first_half})`, show: pickFilterCounts.first_half > 0 || pickTypeFilter === 'first_half' },
                     { id: 'soon', label: `Starting Soon (${pickFilterCounts.soon})`, show: pickFilterCounts.soon > 0 || pickTypeFilter === 'soon' },
                   ]
                     .filter((pill) => pill.show)
@@ -1432,6 +1456,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
             rowTopPicks={rowTopPicks}
             rowTopPicksByKey={rowTopPicksByKey}
             bankroll={bankroll}
+            initialStatusFilter={boardInitialFilter}
+            filterSignal={boardFilterSignal}
             onOpenDetails={handleOpenGameDetails}
             onAddBet={onAddBet}
           />

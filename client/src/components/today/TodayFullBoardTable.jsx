@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowUpDown, ChevronUp, ChevronDown, BarChart2, PlusCircle, Search, Filter } from 'lucide-react';
 import {
   fmtTimeEt,
@@ -37,12 +37,20 @@ const TodayFullBoardTable = ({
   rowTopPicks = {},
   rowTopPicksByKey = {},
   bankroll = null,
+  initialStatusFilter = 'all',
+  filterSignal = 0,
   onOpenDetails,
   onAddBet,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // all | picks | nobet | final
+  const [statusFilter, setStatusFilter] = useState(initialStatusFilter || 'all'); // all | picks | live | nobet | final
   const [sortConfig, setSortConfig] = useState({ key: 'edge', direction: 'desc' });
+
+  useEffect(() => {
+    if (initialStatusFilter) {
+      setStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter, filterSignal]);
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
