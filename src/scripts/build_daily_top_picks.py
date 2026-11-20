@@ -217,7 +217,7 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
 
     sql = """
     INSERT INTO daily_top_picks(date_et, event_id, league, computed_at, model_version, is_actionable, reason, rec_json, context_json)
-    VALUES (%(d)s, %(eid)s, 'NCAAM', NOW(), %(mv)s, %(act)s, %(reason)s, %(rec)s::jsonb, %(ctx)s::jsonb)
+    VALUES (%(d)s, %(eid)s, 'NCAAM', clock_timestamp(), %(mv)s, %(act)s, %(reason)s, %(rec)s::jsonb, %(ctx)s::jsonb)
     ON CONFLICT (date_et, event_id) DO UPDATE SET
       computed_at = EXCLUDED.computed_at,
       model_version = EXCLUDED.model_version,

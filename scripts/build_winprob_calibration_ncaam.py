@@ -206,13 +206,14 @@ def _fetch_obs_for_window(
     league: str = "NCAAM",
     *,
     season_start: Optional[str] = None,
+    training_cutoff: Optional[datetime] = None,
     min_price: int = -250,
     max_price: int = 185,
 ) -> List[Obs]:
     """Fetch decided model predictions with valid win_prob for the target league/window."""
     lg = str(league or "NCAAM").upper().strip()
     season_clause = ""
-    params: Dict[str, Any] = {"days": f"{int(days)} days", "league": lg}
+    params: Dict[str, Any] = {"days": f"{int(days)} days", "league": lg, "cutoff": training_cutoff or datetime.now(timezone.utc)}
     if season_start:
         season_clause = "AND COALESCE(e.start_time, m.analyzed_at) >= :season_start"
         params["season_start"] = f"{str(season_start)[:10]}T00:00:00+00:00"
@@ -221,7 +222,8 @@ def _fetch_obs_for_window(
     SELECT m.win_prob, m.outcome, COALESCE(m.bet_price, m.price) AS price
     FROM model_predictions m
     JOIN events e ON m.event_id = e.id
-    WHERE m.analyzed_at >= NOW() - INTERVAL :days
+    WHERE m.analyzed_at >= :cutoff - CAST(:days AS interval)
+      AND m.analyzed_at < e.start_time AND e.start_time < :cutoff
       AND UPPER(COALESCE(e.league, 'NCAAM')) = :league
       {season_clause}
       AND m.win_prob IS NOT NULL
@@ -281,8 +283,9 @@ def main(
 
     obs: List[Obs] = []
     used_days = int(days)
+    training_cutoff = datetime.now(timezone.utc)
     for w in windows:
-        candidate = _fetch_obs_for_window(days=w, league=lg, season_start=season_start)
+        candidate = _fetch_obs_for_window(days=w, league=lg, season_start=season_start, training_cutoff=training_cutoff)
         if len(candidate) > len(obs):
             obs = candidate
             used_days = w
@@ -297,6 +300,8 @@ def main(
         raise SystemExit(msg)
 
     artifact = fit_calibration_artifact(obs, days=used_days, min_points=12)
+    artifact["training_cutoff"] = training_cutoff.isoformat()
+    artifact["fit_completed_at"] = datetime.now(timezone.utc).isoformat()
     artifact["league"] = lg
     if season_label:
         artifact["season"] = season_label

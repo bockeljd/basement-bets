@@ -206,7 +206,7 @@ class _FakeConn:
         return False
 
 
-def test_yesterday_slate_falls_back_to_daily_top_picks(monkeypatch):
+def test_unpublished_yesterday_excludes_daily_top_picks(monkeypatch):
     import src.database as db
 
     created_ts = datetime(2026, 11, 11, 15, 0, tzinfo=timezone.utc)
@@ -293,17 +293,12 @@ def test_yesterday_slate_falls_back_to_daily_top_picks(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["date_et"] == "2026-11-11"
-    assert data["slate"]["source"] == "daily_top_picks"
-    assert len(data["straight"]) == 1
-    assert len(data["ml_parlay"]) == 1
-    assert data["straight"][0]["matchup"] == "Duke @ UNC"
-    assert data["straight"][0]["score"] == "78-70"
-    assert data["ml_parlay"][0]["market_type"] == "MONEYLINE"
-    assert data["record"]["straight"] == {"won": 1, "lost": 0, "push": 0, "decided": 1}
-    assert data["record"]["ml_parlay"] == {"won": 0, "lost": 1, "push": 0, "decided": 1}
+    assert data["status"] == "no_publication"
+    assert data["slate"] is None
+    assert data["straight"] == [] and data["ml_parlay"] == []
 
 
-def test_yesterday_slate_falls_back_to_model_predictions(monkeypatch):
+def test_unpublished_yesterday_excludes_model_predictions(monkeypatch):
     import src.database as db
 
     ts = datetime(2026, 11, 11, 20, 0, tzinfo=timezone.utc)
@@ -352,11 +347,9 @@ def test_yesterday_slate_falls_back_to_model_predictions(monkeypatch):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["slate"]["source"] == "model_predictions"
-    assert len(data["straight"]) == 1
-    assert data["straight"][0]["matchup"] == "Villanova @ UConn"
-    assert data["straight"][0]["bet_line"] == 144.5
-    assert data["record"]["straight"] == {"won": 0, "lost": 0, "push": 1, "decided": 1}
+    assert data["status"] == "no_publication"
+    assert data["slate"] is None
+    assert data["straight"] == [] and data["ml_parlay"] == []
 
 
 def test_sport_normalization_and_research_history_sport_filter(monkeypatch):
@@ -1124,7 +1117,7 @@ def test_ncaam_model_hardening_and_sync(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_get_archetype_stats", lambda k: {"n": 80, "mean": 0.04, "sd": 0.90})
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
     monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
@@ -1148,18 +1141,22 @@ def test_ncaam_model_hardening_and_sync(monkeypatch):
     res_zero = model.analyze("hard1", market_snapshot=bad_zero_tot, event_context=ev_ctx, persist=False)
     assert res_zero["is_actionable"] is False
 
-    # 2 & 3. Corrupted odds (0 / +5000) sanitized to -110; whole-number spread uses :g formatting across UI & DB doc
+    # 2 & 3. Reject corrupted odds, then verify a real -110 quote; whole-number spread uses :g formatting across UI & DB doc
     inserted_docs = []
     import src.models.ncaam_market_first_model_v2 as model_mod
 
-    monkeypatch.setattr(model_mod, "insert_model_prediction", lambda doc: inserted_docs.append(dict(doc)))
+    monkeypatch.setattr(model_mod, "insert_model_prediction", lambda doc: inserted_docs.append(dict(doc)) or doc["id"])
     snap_whole = {
         "spread_home": -7.0,
         "spread_price_home": 0,
         "total": None,
-        "_best_spread_home": {"line_value": -7.0, "price": 5000, "book": "DK"},
-        "_best_spread_away": {"line_value": 7.0, "price": 0, "book": "FD"},
+        "_best_spread_home": {"line_value": -7.0, "price": 5000, "captured_at": datetime.now(timezone.utc), "book": "DK"},
+        "_best_spread_away": {"line_value": 7.0, "price": 0, "captured_at": datetime.now(timezone.utc), "book": "FD"},
     }
+    res_whole = model.analyze("hard1", market_snapshot=snap_whole, event_context=ev_ctx, persist=True, relax_gates=True)
+    assert not res_whole["recommendations"]
+    assert not inserted_docs
+    snap_whole["_best_spread_home"]["price"] = -110
     res_whole = model.analyze("hard1", market_snapshot=snap_whole, event_context=ev_ctx, persist=True, relax_gates=True)
     recs = res_whole.get("recommendations") or []
     assert len(recs) >= 1
@@ -1214,7 +1211,7 @@ def test_ncaam_model_leak_fixes_and_clv_capture(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_get_archetype_stats", lambda k: {"n": 80, "mean": 0.04, "sd": 0.90})
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
     monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
@@ -1248,12 +1245,12 @@ def test_ncaam_model_leak_fixes_and_clv_capture(monkeypatch):
 
     inserted_docs = []
     import src.models.ncaam_market_first_model_v2 as model_mod
-    monkeypatch.setattr(model_mod, "insert_model_prediction", lambda doc: inserted_docs.append(dict(doc)))
+    monkeypatch.setattr(model_mod, "insert_model_prediction", lambda doc: inserted_docs.append(dict(doc)) or doc["id"])
     snap_open = {
         "spread_home": -3.5,
         "spread_price_home": -110,
         "total": 146.0,
-        "_best_spread_away": {"line_value": 3.5, "price": -108, "book": "DK"},
+        "_best_spread_away": {"line_value": 3.5, "price": -108, "captured_at": datetime.now(timezone.utc), "book": "DK"},
         "_market_consensus": {
             "open_spread_home": -2.5,
             "current_spread_home": -3.5,
@@ -1503,7 +1500,7 @@ def test_ncaam_model_sharp_benchmark_anchoring_edge_bonus_and_contra_penalty(mon
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_get_archetype_stats", lambda k: {"n": 80, "mean": 0.04, "sd": 0.90})
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
     monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
@@ -1526,12 +1523,12 @@ def test_ncaam_model_sharp_benchmark_anchoring_edge_bonus_and_contra_penalty(mon
 
     # Case A: Retail DraftKings is -4.5 while sharp Pinnacle is -6.5 (+2.0 pt sharp edge)
     snaps_plus_sharp = [
-        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -112, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "DraftKings", "market_type": "SPREAD", "side": "AWAY", "line_value": 4.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "DraftKings", "market_type": "TOTAL", "side": "UNDER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "Pinnacle", "market_type": "SPREAD", "side": "HOME", "line_value": -6.5, "price": -105, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -4.5, "price": -112, "captured_at": datetime.now(timezone.utc)},
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "AWAY", "line_value": 4.5, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 144.0, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "UNDER", "line_value": 144.0, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "Pinnacle", "market_type": "SPREAD", "side": "HOME", "line_value": -6.5, "price": -105, "captured_at": datetime.now(timezone.utc)},
     ]
     monkeypatch.setattr(model, "_get_all_recent_odds", lambda eid: snaps_plus_sharp)
     monkeypatch.setattr(model, "_get_market_consensus", lambda eid: {})
@@ -1554,12 +1551,12 @@ def test_ncaam_model_sharp_benchmark_anchoring_edge_bonus_and_contra_penalty(mon
 
     # Case B: Retail DraftKings/FanDuel agree on -5.5 while sharp Pinnacle is -3.5 (-2.0 pt against Home)
     snaps_contra_sharp = [
-        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -5.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -5.5, "price": -112, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "DraftKings", "market_type": "SPREAD", "side": "AWAY", "line_value": 5.5, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "DraftKings", "market_type": "TOTAL", "side": "UNDER", "line_value": 144.0, "price": -110, "captured_at": "2027-02-14T22:00:00Z"},
-        {"book": "Pinnacle", "market_type": "SPREAD", "side": "HOME", "line_value": -3.5, "price": -105, "captured_at": "2027-02-14T22:00:00Z"},
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "HOME", "line_value": -5.5, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "FanDuel", "market_type": "SPREAD", "side": "HOME", "line_value": -5.5, "price": -112, "captured_at": datetime.now(timezone.utc)},
+        {"book": "DraftKings", "market_type": "SPREAD", "side": "AWAY", "line_value": 5.5, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "OVER", "line_value": 144.0, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "DraftKings", "market_type": "TOTAL", "side": "UNDER", "line_value": 144.0, "price": -110, "captured_at": datetime.now(timezone.utc)},
+        {"book": "Pinnacle", "market_type": "SPREAD", "side": "HOME", "line_value": -3.5, "price": -105, "captured_at": datetime.now(timezone.utc)},
     ]
     monkeypatch.setattr(model, "_get_all_recent_odds", lambda eid: snaps_contra_sharp)
     res_b = model.analyze("sharp_ev1", event_context=ev_ctx, persist=False, relax_gates=True)

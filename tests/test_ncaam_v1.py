@@ -1,6 +1,6 @@
 
 import pytest
-from src.models.ncaam_model import NCAAMModel
+NCAAMModel = pytest.importorskip("src.models.ncaam_model", reason="Legacy v1 model retired").NCAAMModel
 from src.models.schemas import MarketSnapshot, Signal
 
 def test_ncaam_v1_inputs():

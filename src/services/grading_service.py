@@ -245,7 +245,11 @@ class GradingService:
                 rows = _exec(
                     conn,
                     """
-                    SELECT e.id, e.home_team, e.away_team, e.start_time, COALESCE(gr.final, FALSE) AS has_final
+                    SELECT e.id, e.home_team, e.away_team, e.start_time, COALESCE(gr.final, FALSE) AS has_final,
+                           gr.home_score,gr.away_score,
+                           (gr.home_score_1h IS NULL OR gr.away_score_1h IS NULL)
+                           AND EXISTS (SELECT 1 FROM model_predictions p WHERE p.event_id=e.id
+                               AND p.market_type IN ('SPREAD_1H','TOTAL_1H') AND p.outcome='PENDING') AS needs_half
                     FROM events e
                     LEFT JOIN game_results gr ON gr.event_id = e.id
                     WHERE UPPER(COALESCE(e.league, '')) = %(league)s
@@ -329,7 +333,7 @@ class GradingService:
         # 2) ESPN Scoreboard fallback for events still missing final game_results
         missing_events = [
             ev for ev in db_events
-            if not ev.get('has_final') and ev['id'] not in upserted_event_ids
+            if (not ev.get('has_final') and ev['id'] not in upserted_event_ids) or (lg == 'NCAAM' and ev.get('needs_half'))
         ]
         if missing_events and lg in ('NCAAM', 'NFL', 'NBA', 'EPL'):
             espn_count = 0
@@ -363,6 +367,14 @@ class GradingService:
                     eg_dt = _parse_dt_utc(eg.get('start_time'))
                     if ev_dt and eg_dt and abs((ev_dt - eg_dt).total_seconds()) > 36 * 3600:
                         continue
+                    if ev.get('needs_half'):
+                        if eg.get('home_score_1h') is None or eg.get('away_score_1h') is None:
+                            continue
+                        if ev.get('has_final') and (
+                            ev['home_score'] != eg['away_score' if swapped_match else 'home_score']
+                            or ev['away_score'] != eg['home_score' if swapped_match else 'away_score']
+                        ):
+                            continue
                     upsert_game_result({
                         "event_id": ev['id'],
                         "home_score": int(eg['away_score'] if swapped_match else eg['home_score']),

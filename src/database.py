@@ -15,7 +15,7 @@ DB_TYPE = 'postgres'
 _THREAD_LOCAL_DB = threading.local()
 
 @contextmanager
-def get_db_connection():
+def get_db_connection(*, dedicated=False):
     """
     Serverless-safe connection manager.
     Connects to the POOLED url (DATABASE_URL) for standard runtime queries.
@@ -26,7 +26,7 @@ def get_db_connection():
         raise RuntimeError("DATABASE_URL is not set.")
 
     reuse = os.getenv("DB_REUSE_CONNECTION", "").strip().lower() in ("1", "true", "yes")
-    if reuse:
+    if reuse and not dedicated:
         conn = getattr(_THREAD_LOCAL_DB, "conn", None)
         if conn is None or conn.closed:
             conn = psycopg2.connect(
@@ -1274,6 +1274,7 @@ def ensure_recommended_slates_tables():
     ALTER TABLE recommended_slate_items ADD COLUMN IF NOT EXISTS bet_price INTEGER;
     ALTER TABLE recommended_slate_items ADD COLUMN IF NOT EXISTS bet_line REAL;
     ALTER TABLE recommended_slate_items ADD COLUMN IF NOT EXISTS market_type TEXT;
+    ALTER TABLE recommended_slate_items ADD COLUMN IF NOT EXISTS snapshot JSONB;
 
     CREATE INDEX IF NOT EXISTS ix_reco_slates_date ON recommended_slates(league, date_et, created_at DESC);
     CREATE INDEX IF NOT EXISTS ix_reco_items_slate ON recommended_slate_items(slate_id, rank);

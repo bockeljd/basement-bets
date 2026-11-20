@@ -2,7 +2,7 @@
 import math
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 
 from src.services.torvik_projection import TorvikProjectionService
@@ -894,12 +894,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
             total_target = consensus_total['line_value'] if consensus_total else None
 
             # Step B: Get BEST RETAIL PRICES for betting (never sharp benchmark books when retail exists)
-            best_spread_home = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'HOME', target_line=spread_target_home)
-            best_spread_away = self.odds_selector.get_best_price_for_side(raw_snaps, 'SPREAD', 'AWAY', target_line=spread_target_away)
-            best_total_over = self.odds_selector.get_best_price_for_side(raw_snaps, 'TOTAL', 'OVER', target_line=total_target)
-            best_total_under = self.odds_selector.get_best_price_for_side(raw_snaps, 'TOTAL', 'UNDER', target_line=total_target)
-            best_ml_home = self.odds_selector.get_best_price_for_side(raw_snaps, 'MONEYLINE', 'HOME')
-            best_ml_away = self.odds_selector.get_best_price_for_side(raw_snaps, 'MONEYLINE', 'AWAY')
+            from src.utils.ncaam_quotes import recent_retail_quote
+            quote_time = datetime.now(timezone.utc)
+            retail_snaps = [q for q in raw_snaps if recent_retail_quote(q, quote_time)]
+            best_spread_home = self.odds_selector.get_best_price_for_side(retail_snaps, 'SPREAD', 'HOME', target_line=spread_target_home)
+            best_spread_away = self.odds_selector.get_best_price_for_side(retail_snaps, 'SPREAD', 'AWAY', target_line=spread_target_away)
+            best_total_over = self.odds_selector.get_best_price_for_side(retail_snaps, 'TOTAL', 'OVER', target_line=total_target)
+            best_total_under = self.odds_selector.get_best_price_for_side(retail_snaps, 'TOTAL', 'UNDER', target_line=total_target)
+            best_ml_home = self.odds_selector.get_best_price_for_side(retail_snaps, 'MONEYLINE', 'HOME')
+            best_ml_away = self.odds_selector.get_best_price_for_side(retail_snaps, 'MONEYLINE', 'AWAY')
             
             # Composite Snapshot for Analysis (uses CONSENSUS for model math)
             mc = self._derive_market_consensus_from_snaps(
@@ -2262,12 +2265,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             ui_rec = {
                 "bet_type": r['market'],
+                "calibration": {k: self._load_winprob_calibration().get(k) for k in (
+                    "source", "n_obs", "training_cutoff", "fit_completed_at", "season_start")},
                 "side": r.get('side'),
                 "selection": sel,
                 # Numeric EV (decimal & %) + legacy 'edge' string for backward compatibility
                 "ev": round(float(r['ev']), 4),
                 "ev_pct": round(float(r['ev']) * 100.0, 2),
                 "edge": f"{(r['ev']*100):.1f}%",
+                "raw_win_prob": r.get("raw_win_prob"),
                 "win_prob": round(float(win_prob), 3) if win_prob is not None else None,
                 "win_prob_lb10": lb10,
                 "win_prob_ub90": ub90,
@@ -2287,6 +2293,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "confidence_tier": str(conf_label).upper(),
                 "confidence_0_100": conf_score,
                 "book": r['book'],
+                "quote_captured_at": r.get("quote_captured_at"),
                 "sharp_book": r.get('sharp_book'),
                 "sharp_line": r.get('sharp_line'),
                 "sharp_edge_pts": r.get('sharp_edge_pts'),
@@ -2324,6 +2331,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         inputs_payload = {
             "market": market_snapshot,
+            "winprob_calibration": self._load_winprob_calibration(),
             "torvik": torvik_view,
             "kenpom": kenpom_adj,
             "haslametrics": haslametrics_view,
@@ -2352,7 +2360,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
         persisted_spread_sides = set()
         within_lock_window = False
         try:
-            from datetime import timezone
             st = event.get('start_time')
             if st is not None:
                 if isinstance(st, str):
@@ -2394,22 +2401,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return open_l, (int(open_p) if open_p is not None else None)
 
         if recs:
-            def _normalize_spread_line(side, raw_line):
-                if raw_line is None:
-                    return None
-                try:
-                    val = float(raw_line)
-                except Exception:
-                    return None
-                spread_home = market_snapshot.get('spread_home')
-                if spread_home is None:
-                    return val
-                home_sign = -1.0 if float(spread_home) < 0 else 1.0
-                abs_val = abs(val)
-                if side == 'away':
-                    return -home_sign * abs_val
-                return home_sign * abs_val
-
             def _build_rec_doc(rec):
                 mkt = str(rec.get('market') or '').upper()
                 side = str(rec.get('side') or '').lower()
@@ -2427,7 +2418,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
                 if mkt == 'SPREAD':
                     pick = event.get('home_team') if side == 'home' else event.get('away_team')
-                    bet_line = _normalize_spread_line(side, line_val)
+                    bet_line = _safe_float(line_val)
                     if pick and bet_line is not None:
                         v = float(bet_line)
                         sign = '+' if v > 0 else ''
@@ -2463,6 +2454,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     sigma_val = sigma_total
                     if mu_market is not None and mu_final_val is not None:
                         edge = float(mu_final_val) - float(mu_market)
+                elif mkt == 'TOTAL_1H':
+                    pick = side.upper()
+                    bet_line = _safe_float(line_val)
+                    selection = f"1H {pick}"
+                    mu_final_val = _safe_float(rec.get('fair_line_1h_total'))
+                elif mkt == 'SPREAD_1H':
+                    pick = rec.get('team')
+                    bet_line = _safe_float(line_val)
+                    selection = (rec.get('_ui_rec') or {}).get('selection') or pick
+                    fair_home = _safe_float(rec.get('fair_line_1h_home'))
+                    mu_final_val = -fair_home if side == 'away' and fair_home is not None else fair_home
                 else:
                     pick = rec.get('team') or event.get('home_team')
                     bet_line = line_val
@@ -2524,7 +2526,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 try:
                     import uuid
                     doc.setdefault("id", str(uuid.uuid4()))
-                    insert_model_prediction(doc)
+                    persisted_id = insert_model_prediction(doc)
+                    if not persisted_id:
+                        continue
+                    doc["id"] = persisted_id
                 except Exception as e:
                     print(f"[MODEL] failed to persist rec {rec.get('market')} {rec.get('side')}: {e}")
                     continue
@@ -2768,7 +2773,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
             should_persist = False
 
         if persist and should_persist and not persisted_best:
-            insert_model_prediction(res)
+            fallback_id = insert_model_prediction(res)
+            if fallback_id and best_rec and best_rec.get('_ui_rec') is not None:
+                best_rec['_ui_rec']['prediction_id'] = fallback_id
+                res['id'] = fallback_id
             if str(res.get('market_type') or '').upper() == 'SPREAD':
                 rec_side = str((best_rec or {}).get('side') or '').strip().upper()
                 if rec_side:
@@ -2854,7 +2862,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 # Apply same lock window
                 if should_persist_ml:
                     try:
-                        from datetime import timezone
                         st = event.get('start_time')
                         if st is not None:
                             if isinstance(st, str):
@@ -3943,6 +3950,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 return int(default)
             return p
 
+        from src.utils.ncaam_quotes import recent_retail_quote
+        quote_time = snap.get('_quote_as_of') or datetime.now(timezone.utc)
+
+        def executable(quote, target):
+            if not quote or not recent_retail_quote(quote, quote_time) or target is None or quote.get("line_value") is None:
+                return False
+            try:
+                price = int(quote["price"])
+                return _clean_main_price(price, default=0) == price and price != 0 and abs(float(quote["line_value"]) - float(target)) <= 1
+            except (KeyError, TypeError, ValueError):
+                return False
+
         candidates_eval: List[Dict[str, Any]] = []
 
         # --- Spread ---
@@ -3960,11 +3979,6 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 line_s_valid = False
 
         if line_s_valid:
-            def _snap_half(x: float) -> float:
-                try:
-                    return round(float(x) * 2.0) / 2.0
-                except Exception:
-                    return float(x)
 
             # Use consensus for model math, and evaluate prob/bounds/EV at the exact bettable
             # line & price (constrained near consensus so stale alt lines never distort EV).
@@ -3975,12 +3989,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
             best_home_line = best_home.get('line_value')
             best_away_line = (best_away or {}).get('line_value')
 
-            line_home_bet = _snap_half(
+            line_home_bet = float(
                 best_home_line
                 if (best_home_line is not None and abs(float(best_home_line) - market_line_s) <= 1.0)
                 else market_line_s
             )
-            line_away_bet = _snap_half(
+            line_away_bet = float(
                 best_away_line
                 if (best_away_line is not None and abs(float(best_away_line) - (-market_line_s)) <= 1.0)
                 else -market_line_s
@@ -4025,6 +4039,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "team": event["home_team"],
                 "line": line_home_bet,
                 "price": price_home_bet,
+                "raw_win_prob": prob_home,
                 "prob": round(prob_home_cal, 3),
                 "win_prob": round(prob_home_cal, 3),
                 "win_prob_lb10": (round(float(bounds_home.get('lb10')), 3) if bounds_home.get('lb10') is not None else None),
@@ -4032,6 +4047,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_home, 4)),
                 "kelly": float(round(kelly_home, 4)),
                 "book": best_home.get('book') or book_consensus,
+                "quote_captured_at": str(best_home.get("captured_at") or "") or None,
                 "edge_points": float(round(edge_pts_home, 2)),
                 "market_line_edge_pts": home_book_edge_pts,
                 "movement_tags": (["lagging_book_edge"] if home_book_edge_pts >= 1.0 else []),
@@ -4062,6 +4078,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "team": event["away_team"],
                 "line": line_away_bet,
                 "price": price_away_bet,
+                "raw_win_prob": prob_away,
                 "prob": round(prob_away_cal, 3),
                 "win_prob": round(prob_away_cal, 3),
                 "win_prob_lb10": (round(float(bounds_away.get('lb10')), 3) if bounds_away.get('lb10') is not None else None),
@@ -4069,6 +4086,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_away, 4)),
                 "kelly": float(round(kelly_away, 4)),
                 "book": (best_away or {}).get('book') or book_consensus,
+                "quote_captured_at": str((best_away or {}).get("captured_at") or "") or None,
                 "edge_points": float(round(edge_pts_away, 2)),
                 "market_line_edge_pts": away_book_edge_pts,
                 "movement_tags": (["lagging_book_edge"] if away_book_edge_pts >= 1.0 else []),
@@ -4082,9 +4100,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
             }
 
             # Choose the higher-EV side, then gate it.
-            best = cand_home if cand_home["ev"] >= cand_away["ev"] else cand_away
-            candidates_eval.append(best)
-            if relax_gates or self._passes_publish_gates(best, market_line_home=market_line_s, torvik_ok=torvik_ok):
+            choices = [candidate for candidate, quote, target in (
+                (cand_home, best_home, market_line_s), (cand_away, best_away, -market_line_s)
+            ) if executable(quote, target)]
+            best = max(choices, key=lambda c: c["ev"], default=None)
+            if best:
+                candidates_eval.append(best)
+            if best and (relax_gates or self._passes_publish_gates(best, market_line_home=market_line_s, torvik_ok=torvik_ok)):
                 # 1) Steam / movement handling
                 reason = self._steam_block_reason('SPREAD', str(best.get('side') or ''), snap.get('_market_consensus') if isinstance(snap, dict) else None, snap)
                 steam_hard_block = str(os.getenv('STEAM_HARD_BLOCK', '0')).strip() not in ('0', 'false', 'False', '')
@@ -4150,6 +4172,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                     push_p_adj = get_push_prob(float(out['line']), sig_s_adj)
                                     ev_recomp = float(self._calculate_ev(p_cal_adj, int(out['price']), push_prob=push_p_adj))
                                     ev_adj = min(ev_raw, ev_recomp) - float(ev_penalty or 0.0)
+                                    out['raw_win_prob'] = p_raw_adj
                                     out['prob'] = round(p_cal_adj, 3)
                                     out['win_prob'] = round(p_cal_adj, 3)
                                     out['kelly'] = float(round(self._calculate_kelly(p_cal_adj, int(out['price'])), 4))
@@ -4245,6 +4268,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "side": "over",
                 "line": line_over_bet,
                 "price": int(price_over),
+                "raw_win_prob": prob_over_raw,
                 "prob": round(prob_over_cal, 3),
                 "win_prob": round(prob_over_cal, 3),
                 "win_prob_lb10": (round(float(bounds_over.get('lb10')), 3) if bounds_over.get('lb10') is not None else None),
@@ -4252,6 +4276,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_over, 4)),
                 "kelly": float(round(kelly_over, 4)),
                 "book": book_over,
+                "quote_captured_at": str((best_over or {}).get("captured_at") or "") or None,
                 "edge_points": float(round(edge_pts_over, 2)),
                 "sharp_book": snap.get("_sharp_total_book"),
                 "sharp_line": self._sharp_line_for_side("TOTAL", "over", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
@@ -4279,6 +4304,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "side": "under",
                 "line": line_under_bet,
                 "price": int(price_under),
+                "raw_win_prob": prob_under_raw,
                 "prob": round(prob_under_cal, 3),
                 "win_prob": round(prob_under_cal, 3),
                 "win_prob_lb10": (round(float(bounds_under.get('lb10')), 3) if bounds_under.get('lb10') is not None else None),
@@ -4286,6 +4312,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev": float(round(ev_under, 4)),
                 "kelly": float(round(kelly_under, 4)),
                 "book": book_under,
+                "quote_captured_at": str((best_under or {}).get("captured_at") or "") or None,
                 "edge_points": float(round(edge_pts_under, 2)),
                 "sharp_book": snap.get("_sharp_total_book"),
                 "sharp_line": self._sharp_line_for_side("TOTAL", "under", snap.get("_sharp_spread_home"), snap.get("_sharp_total")),
@@ -4296,9 +4323,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "_agree_count_total": g_agree_tot,
             }
 
-            best = cand_over if cand_over["ev"] >= cand_under["ev"] else cand_under
-            candidates_eval.append(best)
-            if relax_gates or self._passes_publish_gates(best, market_line_home=None, torvik_ok=torvik_ok):
+            choices = [candidate for candidate, quote in ((cand_over, best_over), (cand_under, best_under))
+                       if executable(quote, market_line_t)]
+            best = max(choices, key=lambda c: c["ev"], default=None)
+            if best:
+                candidates_eval.append(best)
+            if best and (relax_gates or self._passes_publish_gates(best, market_line_home=None, torvik_ok=torvik_ok)):
                 reason = self._steam_block_reason('TOTAL', str(best.get('side') or ''), snap.get('_market_consensus') if isinstance(snap, dict) else None, snap)
                 steam_hard_block = str(os.getenv('STEAM_HARD_BLOCK', '0')).strip() not in ('0', 'false', 'False', '')
                 if reason and steam_hard_block:
@@ -4358,6 +4388,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                     push_p_adj = get_push_prob(float(out['line']), sig_t_adj)
                                     ev_recomp = float(self._calculate_ev(p_cal_adj, int(out['price']), push_prob=push_p_adj))
                                     ev_adj = min(ev_raw, ev_recomp) - float(ev_penalty or 0.0)
+                                    out['raw_win_prob'] = p_raw_adj
                                     out['prob'] = round(p_cal_adj, 3)
                                     out['win_prob'] = round(p_cal_adj, 3)
                                     out['kelly'] = float(round(self._calculate_kelly(p_cal_adj, int(out['price'])), 4))
@@ -4390,7 +4421,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         import statistics as _stats
         raw_snaps_list = [
             s for s in ((snap.get('_raw_snaps') or []) if isinstance(snap, dict) else [])
-            if not str(s.get('book') or '').strip().lower().startswith('action_book_')
+            if recent_retail_quote(s, quote_time) and s.get('price') is not None
+            and _clean_main_price(s['price'], default=0) != 0
         ]
         if raw_snaps_list and mu_s is not None and sig_s is not None and line_s_valid:
             try:
@@ -4408,17 +4440,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         lh = float(bh['line_value'])
                         if abs(lh - mkt_1h_home) <= 1.5:
                             ph = _clean_main_price(bh.get('price'), default=-110)
-                            prob_h1 = self._calibrate_win_prob(_spread_cover_prob_home(mu_1h_s, sig_1h_s, lh), is_early_season=g_is_early)
+                            raw_h1 = _spread_cover_prob_home(mu_1h_s, sig_1h_s, lh)
+                            prob_h1 = self._calibrate_win_prob(raw_h1, is_early_season=g_is_early)
                             ev_h1 = self._calculate_ev(prob_h1, ph, push_prob=get_push_prob(lh, sig_1h_s))
                             edge_h1 = lh - mu_1h_s
                             if ev_h1 >= 0.03 and prob_h1 >= 0.54 and edge_h1 >= 1.2:
                                 best_1h_cands.append({
                                     "market": "SPREAD_1H", "side": "home", "team": f"{event['home_team']} 1H",
-                                    "line": lh, "price": ph, "prob": round(prob_h1, 3), "win_prob": round(prob_h1, 3),
+                                    "raw_win_prob": raw_h1, "line": lh, "price": ph, "prob": round(prob_h1, 3), "win_prob": round(prob_h1, 3),
                                     "fair_line_1h_home": round(mu_1h_s, 1),
                                     "win_prob_lb10": round(max(0.50, prob_h1 - 0.02), 3),
                                     "win_prob_ub90": round(min(0.95, prob_h1 + 0.02), 3),
                                     "ev": float(round(ev_h1, 4)), "kelly": float(round(self._calculate_kelly(prob_h1, ph), 4)),
+                                    "quote_captured_at": str(bh.get("captured_at") or "") or None,
                                     "book": bh.get('book') or 'Consensus', "edge_points": float(round(edge_h1, 2)),
                                     "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
                                     "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,
@@ -4428,17 +4462,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         la = float(ba['line_value'])
                         if abs(la - (-mkt_1h_home)) <= 1.5:
                             pa = _clean_main_price(ba.get('price'), default=-110)
-                            prob_a1 = self._calibrate_win_prob(1.0 - _spread_cover_prob_home(mu_1h_s, sig_1h_s, -la), is_early_season=g_is_early)
+                            raw_a1 = 1.0 - _spread_cover_prob_home(mu_1h_s, sig_1h_s, -la)
+                            prob_a1 = self._calibrate_win_prob(raw_a1, is_early_season=g_is_early)
                             ev_a1 = self._calculate_ev(prob_a1, pa, push_prob=get_push_prob(la, sig_1h_s))
                             edge_a1 = la - (-mu_1h_s)
                             if ev_a1 >= 0.03 and prob_a1 >= 0.54 and edge_a1 >= 1.2:
                                 best_1h_cands.append({
                                     "market": "SPREAD_1H", "side": "away", "team": f"{event['away_team']} 1H",
-                                    "line": la, "price": pa, "prob": round(prob_a1, 3), "win_prob": round(prob_a1, 3),
+                                    "raw_win_prob": raw_a1, "line": la, "price": pa, "prob": round(prob_a1, 3), "win_prob": round(prob_a1, 3),
                                     "fair_line_1h_home": round(mu_1h_s, 1),
                                     "win_prob_lb10": round(max(0.50, prob_a1 - 0.02), 3),
                                     "win_prob_ub90": round(min(0.95, prob_a1 + 0.02), 3),
                                     "ev": float(round(ev_a1, 4)), "kelly": float(round(self._calculate_kelly(prob_a1, pa), 4)),
+                                    "quote_captured_at": str(ba.get("captured_at") or "") or None,
                                     "book": ba.get('book') or 'Consensus', "edge_points": float(round(edge_a1, 2)),
                                     "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
                                     "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,
@@ -4464,17 +4500,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         lu = float(bu['line_value'])
                         if abs(lu - mkt_1h_tot) <= 2.0:
                             pu = _clean_main_price(bu.get('price'), default=-110)
-                            prob_u1 = self._calibrate_win_prob(self._normal_cdf(lu, mu_1h_t, sig_1h_t), is_early_season=g_is_early)
+                            raw_u1 = self._normal_cdf(lu, mu_1h_t, sig_1h_t)
+                            prob_u1 = self._calibrate_win_prob(raw_u1, is_early_season=g_is_early)
                             ev_u1 = self._calculate_ev(prob_u1, pu, push_prob=get_push_prob(lu, sig_1h_t))
                             edge_u1 = lu - mu_1h_t
                             if ev_u1 >= 0.038 and prob_u1 >= 0.545 and edge_u1 >= 1.5:
                                 best_1h_tot.append({
                                     "market": "TOTAL_1H", "side": "under", "team": "1H UNDER",
-                                    "line": lu, "price": pu, "prob": round(prob_u1, 3), "win_prob": round(prob_u1, 3),
+                                    "raw_win_prob": raw_u1, "line": lu, "price": pu, "prob": round(prob_u1, 3), "win_prob": round(prob_u1, 3),
                                     "fair_line_1h_total": round(mu_1h_t, 1),
                                     "win_prob_lb10": round(max(0.50, prob_u1 - 0.02), 3),
                                     "win_prob_ub90": round(min(0.95, prob_u1 + 0.02), 3),
                                     "ev": float(round(ev_u1, 4)), "kelly": float(round(self._calculate_kelly(prob_u1, pu), 4)),
+                                    "quote_captured_at": str(bu.get("captured_at") or "") or None,
                                     "book": bu.get('book') or 'Consensus', "edge_points": float(round(edge_u1, 2)),
                                     "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
                                     "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,
@@ -4484,17 +4522,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         lo = float(bo['line_value'])
                         if abs(lo - mkt_1h_tot) <= 2.0:
                             po = _clean_main_price(bo.get('price'), default=-110)
-                            prob_o1 = self._calibrate_win_prob(1.0 - self._normal_cdf(lo, mu_1h_t, sig_1h_t), is_early_season=g_is_early)
+                            raw_o1 = 1.0 - self._normal_cdf(lo, mu_1h_t, sig_1h_t)
+                            prob_o1 = self._calibrate_win_prob(raw_o1, is_early_season=g_is_early)
                             ev_o1 = self._calculate_ev(prob_o1, po, push_prob=get_push_prob(lo, sig_1h_t))
                             edge_o1 = mu_1h_t - lo
                             if ev_o1 >= 0.045 and prob_o1 >= 0.55 and edge_o1 >= 1.8:
                                 best_1h_tot.append({
                                     "market": "TOTAL_1H", "side": "over", "team": "1H OVER",
-                                    "line": lo, "price": po, "prob": round(prob_o1, 3), "win_prob": round(prob_o1, 3),
+                                    "raw_win_prob": raw_o1, "line": lo, "price": po, "prob": round(prob_o1, 3), "win_prob": round(prob_o1, 3),
                                     "fair_line_1h_total": round(mu_1h_t, 1),
                                     "win_prob_lb10": round(max(0.50, prob_o1 - 0.02), 3),
                                     "win_prob_ub90": round(min(0.95, prob_o1 + 0.02), 3),
                                     "ev": float(round(ev_o1, 4)), "kelly": float(round(self._calculate_kelly(prob_o1, po), 4)),
+                                    "quote_captured_at": str(bo.get("captured_at") or "") or None,
                                     "book": bo.get('book') or 'Consensus', "edge_points": float(round(edge_o1, 2)),
                                     "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
                                     "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,

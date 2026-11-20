@@ -276,7 +276,7 @@ def test_model_v2_haslametrics_blend_injuries_and_splits(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
 
     event = {
@@ -286,6 +286,7 @@ def test_model_v2_haslametrics_blend_injuries_and_splits(monkeypatch):
         "start_time": datetime(2026, 2, 15, 19, 0, 0),
     }
     snap = {"spread_home": -3.5, "total": 148.0}
+    snap["_best_spread_home"] = {"line_value": -3.5, "price": -110, "book": "DraftKings", "captured_at": datetime.now(timezone.utc)}
     res = model.analyze("evt_sig_1", event_context=event, market_snapshot=snap, relax_gates=True, persist=False)
 
     # Signals populated for UI drawer and strictly JSON-serializable without default=str

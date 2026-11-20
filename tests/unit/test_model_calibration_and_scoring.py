@@ -154,7 +154,7 @@ def test_pava_quantile_pooling_prevents_tail_collapse():
     assert art["points"][-1]["p_cal"] <= 0.99
 
 
-def test_ncaam_and_mlb_calibration_blend_preserves_strong_edges():
+def test_ncaam_and_mlb_calibration_blend_preserves_strong_edges(monkeypatch):
     ncaam = NCAAMMarketFirstModelV2.__new__(NCAAMMarketFirstModelV2)
     ncaam._winprob_calibration = {
         "n_obs": 250,
@@ -166,8 +166,9 @@ def test_ncaam_and_mlb_calibration_blend_preserves_strong_edges():
     }
     # Strong 58% raw signal stays above -110 break-even (52.4%) while marginal 53% is shrunk below it
     assert ncaam._calibrate_win_prob(0.58) >= 0.54
-    assert ncaam._calibrate_win_prob(0.53) < 0.51
+    assert ncaam._calibrate_win_prob(0.53) < 110 / 210
 
+    monkeypatch.setenv("NCAAM_WINPROB_CAL_BLEND", "0.65")
     # With empirical weight 0.65, a degraded curve where 63% raw wins only 46% suppresses false +EV
     ncaam._winprob_calibration = {
         "n_obs": 250,
@@ -312,11 +313,11 @@ def test_ncaam_prevents_correlated_spread_and_ml_double_persistence(monkeypatch)
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_passes_publish_gates", lambda *a, **kw: True)
 
     persisted_docs = []
-    monkeypatch.setattr("src.models.ncaam_market_first_model_v2.insert_model_prediction", lambda doc: persisted_docs.append(doc))
+    monkeypatch.setattr("src.models.ncaam_market_first_model_v2.insert_model_prediction", lambda doc: persisted_docs.append(doc) or doc["id"])
 
     future_tip = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
     event = {
@@ -326,6 +327,7 @@ def test_ncaam_prevents_correlated_spread_and_ml_double_persistence(monkeypatch)
         "start_time": future_tip,
     }
     snap = {
+        "_best_spread_home": {"line_value": -3.5, "price": -110, "book": "DraftKings", "captured_at": datetime.now(timezone.utc)},
         "spread_home": -3.5,
         "spread_price_home": -110,
         "spread_price_away": -110,

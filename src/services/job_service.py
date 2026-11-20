@@ -1,110 +1,57 @@
-
-import os
 import json
-import traceback
-from datetime import datetime
-from contextlib import contextmanager
-from src.database import get_db_connection, try_advisory_lock, release_advisory_lock, _exec
+import sys
 
-class JobContext:
-    def __init__(self, job_name: str):
-        self.job_name = job_name
-        self.run_id = None
-        self.conn = None
-        self.state = {}
-        
-    def __enter__(self):
-        """
-        1. Open connection
-        2. Acquire Lock
-        3. Create 'running' entry in job_runs
-        4. Load state
-        """
-        try:
-            self.conn = get_db_connection().__enter__()  # Manually enter context
-        except Exception as e:
-            # Important: when DB is down, we want cron jobs to *skip* instead of 500ing
-            # (which can trigger retries and burn transfer budget).
-            raise JobLockedException(f"DB unavailable: {e}")
-        
-        # 1. Lock
-        if not try_advisory_lock(self.conn, f"job_lock:{self.job_name}"):
-            # Failed to lock
-            self.conn.close() 
-            raise JobLockedException(f"Job {self.job_name} is currently running.")
-            
-        # 2. Log Start
-        try:
-            cur = _exec(self.conn, 
-                "INSERT INTO job_runs (job_name, status) VALUES (:n, 'running') RETURNING id",
-                {"n": self.job_name}
-            )
-            self.run_id = cur.fetchone()[0]
-            self.conn.commit()
-        except Exception as e:
-            print(f"[Job] Failed to log start: {e}")
-            
-        # 3. Load State
-        try:
-            cur = _exec(self.conn, "SELECT state FROM job_state WHERE job_name = :n", {"n": self.job_name})
-            row = cur.fetchone()
-            if row and row['state']:
-                # row['state'] is likely already dict if using DictCursor and JSONB?
-                # psycopg2 handles JSONB transparently usually
-                self.state = row['state'] if isinstance(row['state'], dict) else json.loads(row['state'])
-        except Exception as e:
-            print(f"[Job] Failed to load state: {e}")
-            self.state = {}
-            
-        return self
+from src.database import _exec, get_db_connection
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """
-        1. Update job_runs status
-        2. Save state
-        3. Release Lock
-        4. Close connection
-        """
-        status = 'success'
-        error_msg = None
-        
-        if exc_type:
-            if exc_type == JobLockedException:
-                # This shouldn't happen deep inside usually, but if manually raised
-                status = 'skipped'
-            else:
-                status = 'failure'
-                error_msg = str(exc_val)
-        
-        if self.conn and not self.conn.closed:
-            try:
-                # Update State
-                if self.state:
-                    state_json = json.dumps(self.state)
-                    q = """
-                    INSERT INTO job_state (job_name, state, updated_at) VALUES (:n, :s, NOW())
-                    ON CONFLICT(job_name) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()
-                    """
-                    _exec(self.conn, q, {"n": self.job_name, "s": state_json})
-                
-                # Update Run Log
-                if self.run_id:
-                    q_run = """
-                    UPDATE job_runs 
-                    SET status = :s, finished_at = NOW(), error = :e 
-                    WHERE id = :id
-                    """
-                    _exec(self.conn, q_run, {"s": status, "e": error_msg, "id": self.run_id})
-                
-                self.conn.commit()
-                
-                # Release Lock
-                release_advisory_lock(self.conn, f"job_lock:{self.job_name}")
-                
-            except Exception as e:
-                print(f"[Job] Exit handler failed: {e}")
-            finally:
-                self.conn.close()
 
 class JobLockedException(Exception):
     pass
+
+
+class JobContext:
+    """Hold a transaction lock for the job, independent of audit-log commits."""
+
+    def __init__(self, job_name):
+        self.job_name = job_name
+        self.state = {}
+        self.run_id = None
+
+    def __enter__(self):
+        self._lock_context = get_db_connection(dedicated=True)
+        lock_conn = self._lock_context.__enter__()
+        try:
+            acquired = _exec(lock_conn, "SELECT pg_try_advisory_xact_lock(hashtext(%s))",
+                             (f"job_lock:{self.job_name}",)).fetchone()[0]
+            with get_db_connection() as conn:
+                if acquired:
+                    self.run_id = _exec(conn, """INSERT INTO job_runs(job_name,status)
+                        VALUES (%s,'running') RETURNING id""", (self.job_name,)).fetchone()[0]
+                    row = _exec(conn, "SELECT state FROM job_state WHERE job_name=%s",
+                                (self.job_name,)).fetchone()
+                    if row and row[0]:
+                        self.state = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                else:
+                    _exec(conn, """INSERT INTO job_runs(job_name,status,finished_at)
+                        VALUES (%s,'skipped',NOW())""", (self.job_name,))
+                conn.commit()
+            if not acquired:
+                raise JobLockedException(f"Job {self.job_name} is currently running")
+            return self
+        except BaseException:
+            self._lock_context.__exit__(*sys.exc_info())
+            raise
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            with get_db_connection() as conn:
+                detail = json.dumps(self.state)
+                if exc_type is None and self.state:
+                    _exec(conn, """INSERT INTO job_state(job_name,state,updated_at)
+                        VALUES (%s,%s,NOW()) ON CONFLICT(job_name) DO UPDATE
+                        SET state=EXCLUDED.state, updated_at=NOW()""", (self.job_name, detail))
+                _exec(conn, """UPDATE job_runs SET status=%s,finished_at=NOW(),error=%s,detail=%s
+                    WHERE id=%s""", ('failure' if exc_type else 'success',
+                                     str(exc_value) if exc_type else None, detail, self.run_id))
+                conn.commit()
+        finally:
+            self._lock_context.__exit__(None, None, None)

@@ -82,7 +82,7 @@ def load_winprob_calibration(
             min_max_pcal=min_max_pcal,
             min_season_start=min_season_start,
         ):
-            return db_cal
+            return {**db_cal, "source": "database"}
     except Exception:
         pass
 
@@ -96,10 +96,10 @@ def load_winprob_calibration(
                 min_max_pcal=min_max_pcal,
                 min_season_start=min_season_start,
             ):
-                return data
-            return {"points": []}
+                return {**data, "source": "file"}
+            return {"points": [], "source": "raw_fallback"}
     except Exception:
-        return {"points": []}
+        return {"points": [], "source": "raw_fallback"}
 
 
 def interpolate_pava_prob(

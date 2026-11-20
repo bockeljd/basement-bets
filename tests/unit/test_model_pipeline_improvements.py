@@ -465,7 +465,7 @@ def test_model_v2_populates_kenpom_fair_total_and_mu_total_final(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
 
     event = {
@@ -716,7 +716,7 @@ def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monk
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda t, as_of_date=None: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda t, ev: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda t, eid, gd: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.02, "sd": 0.90})
 
     snapshot = {
@@ -726,10 +726,10 @@ def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monk
         "total_over_price": -110,
         "book_spread": "DraftKings",
         "book_total": "DraftKings",
-        "_best_spread_home": {"line_value": -4.5, "price": -110, "book": "DraftKings"},
-        "_best_spread_away": {"line_value": 4.5, "price": -110, "book": "DraftKings"},
-        "_best_total_over": {"line_value": 137.0, "price": -110, "book": "DraftKings"},
-        "_best_total_under": {"line_value": 137.0, "price": -110, "book": "DraftKings"},
+        "_best_spread_home": {"line_value": -4.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_spread_away": {"line_value": 4.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_total_over": {"line_value": 137.0, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_total_under": {"line_value": 137.0, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
     }
     res = model.analyze(
         "action:ncaam:999999",
@@ -739,7 +739,7 @@ def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monk
     )
     ctx = res["context"]
     assert ctx["conviction_sources"] == 3
-    assert ctx["efficiency_weight"] == pytest.approx(0.35, abs=0.01)
+    assert ctx["efficiency_weight"] == pytest.approx(0.368, abs=0.001)
     assert ctx["fair_spread_home"] < -5.8
     assert ctx["fair_total"] > 138.0
     assert ctx["closest_lean"] is not None
@@ -825,7 +825,7 @@ def test_blowout_spread_sigma_scaling_projected_score_and_rec_normalization(monk
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda t, as_of_date=None: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda t, ev: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda t, eid, gd: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.0, "sd": 0.90})
 
     snapshot = {
@@ -835,10 +835,10 @@ def test_blowout_spread_sigma_scaling_projected_score_and_rec_normalization(monk
         "total_over_price": -110,
         "book_spread": "DraftKings",
         "book_total": "DraftKings",
-        "_best_spread_home": {"line_value": -37.5, "price": -110, "book": "DraftKings"},
-        "_best_spread_away": {"line_value": 37.5, "price": -110, "book": "DraftKings"},
-        "_best_total_over": {"line_value": 146.5, "price": -110, "book": "DraftKings"},
-        "_best_total_under": {"line_value": 146.5, "price": -110, "book": "DraftKings"},
+        "_best_spread_home": {"line_value": -37.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_spread_away": {"line_value": 37.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_total_over": {"line_value": 146.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_total_under": {"line_value": 146.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
     }
     res = model.analyze(
         "action:ncaam:888888",
@@ -920,7 +920,7 @@ def test_blowout_spread_sigma_scaling_projected_score_and_rec_normalization(monk
 def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
     from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
 
-    assert NCAAMMarketFirstModelV2.VERSION == "2.3.0-calibrated"
+    assert NCAAMMarketFirstModelV2.VERSION == "2.4.0-calibrated"
     model = NCAAMMarketFirstModelV2()
     monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
     ev_ctx = {
@@ -971,7 +971,7 @@ def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda t, as_of_date=None: 0.3 if t == "Duke" else 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda t, ev: -0.2 if t == "Duke" else 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda t, eid, gd: 0.4 if t == "Duke" else 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.0, "sd": 0.90})
 
     # Consensus total is 142.5, while best Over book offers 143.5 — selection & market_line must both reflect 143.5
@@ -982,10 +982,10 @@ def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
         "total_over_price": -110,
         "book_spread": "DraftKings",
         "book_total": "DraftKings",
-        "_best_spread_home": {"line_value": -4.5, "price": -110, "book": "DraftKings"},
-        "_best_spread_away": {"line_value": 4.5, "price": -110, "book": "DraftKings"},
-        "_best_total_over": {"line_value": 143.5, "price": -105, "book": "FanDuel"},
-        "_best_total_under": {"line_value": 142.5, "price": -115, "book": "DraftKings"},
+        "_best_spread_home": {"line_value": -4.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_spread_away": {"line_value": 4.5, "price": -110, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
+        "_best_total_over": {"line_value": 143.5, "price": -105, "captured_at": datetime.now(timezone.utc), "book": "FanDuel"},
+        "_best_total_under": {"line_value": 142.5, "price": -115, "captured_at": datetime.now(timezone.utc), "book": "DraftKings"},
     }
     res = model.analyze(
         "action:ncaam:777777",
@@ -1286,7 +1286,7 @@ def test_kenpom_four_factors_and_experience_flow_into_model_v2(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
 
     event_ctx = {
         "id": "ev-kp-style-1",
@@ -1469,7 +1469,7 @@ def test_model_v2_five_improvements_isolation_calibration_totals_and_signals(mon
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
 
     # 1. W_BASE stays immutable across consecutive calls with different dates
@@ -1496,7 +1496,9 @@ def test_model_v2_five_improvements_isolation_calibration_totals_and_signals(mon
     assert model.W_BASE == pytest.approx(model.DEFAULT_W_BASE)
     assert res_nov["debug"]["w_base"] < 0.20
 
-    res_feb = model.analyze("evt_feb_w", event_context=feb_ev, market_snapshot={"spread_home": -3.5, "total": 152.0}, relax_gates=True, persist=False)
+    feb_snapshot = {"spread_home": -3.5, "total": 152.0, "_best_spread_home": {
+        "line_value": -3.5, "price": -110, "book": "DraftKings", "captured_at": datetime.now(timezone.utc)}}
+    res_feb = model.analyze("evt_feb_w", event_context=feb_ev, market_snapshot=feb_snapshot, relax_gates=True, persist=False)
     assert model.W_BASE == pytest.approx(model.DEFAULT_W_BASE)
     assert res_feb["debug"]["w_base"] > res_nov["debug"]["w_base"]
 
@@ -1635,8 +1637,9 @@ def test_model_v2_six_edge_and_calibration_improvements(monkeypatch):
     assert model._passes_publish_gates({"market": "SPREAD", "side": "HOME", "ev": 0.05, "edge_points": 2.0, "win_prob_lb10": 0.49}, -4.5, True) is False
     assert model._passes_publish_gates({"market": "SPREAD", "side": "HOME", "ev": 0.05, "edge_points": 2.0, "win_prob_lb10": 0.525}, -4.5, True) is True
 
-    # 3. Tightened ML gate blocks plus-money underdogs (+125 / <52%) and calibrates ML confidence
-    assert model._passes_ml_persist_gates(win_prob=0.49, ev=0.09, price=125) is False
+    # 3. Plus-money underdogs require at least 4.5 points above implied probability.
+    assert model._passes_ml_persist_gates(win_prob=0.48, ev=0.09, price=125) is False
+    assert model._passes_ml_persist_gates(win_prob=0.49, ev=0.09, price=125) is True
     assert model._passes_ml_persist_gates(win_prob=0.58, ev=0.06, price=-115) is True
 
     # 4. TOTAL OVER (+4.1% EV) vs UNDER (+3.5% EV) and Haslametrics 106.5/68.0 defaults
@@ -1671,7 +1674,7 @@ def test_model_v2_six_edge_and_calibration_improvements(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
 
     persisted_docs = []
@@ -1774,7 +1777,7 @@ def test_audit_accuracy_fixes_pace_splits_reverse_steam_and_calibration(monkeypa
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
     monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.02, "sd": 0.90})
 
@@ -1830,6 +1833,7 @@ def test_audit_accuracy_fixes_pace_splits_reverse_steam_and_calibration(monkeypa
         snap={
             "spread_home": -3.5,
             "total": 141.0,
+            "_best_total_over": {"line_value": 141.0, "price": -110, "book": "DraftKings", "captured_at": datetime.now(timezone.utc)},
             "total_over_price": -110,
             "_market_consensus": {
                 "open_total": 143.5,
@@ -1939,7 +1943,7 @@ def test_backtest_stress_improvements_one_to_three(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
     monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.03, "sd": 0.90})
 
@@ -2082,7 +2086,7 @@ def test_kenpom_fanmatch_total_ff_and_hasla_pace_sigma(monkeypatch):
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_load_winprob_calibration", lambda: {"points": []})
     monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.02, "sd": 0.90})
     model.kenpom_client.get_team_rating.return_value = None

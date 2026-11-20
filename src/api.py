@@ -2553,21 +2553,12 @@ async def trigger_lock_morning_slate(request: Request, authorized: bool = Depend
     """
     job_key = "lock_morning_slate"
     from src.services.job_service import JobContext, JobLockedException
-    import subprocess
-    import sys
-    import os
-    
+    from src.services.ncaam_publisher import publish_slate
     try:
         with JobContext(job_key) as ctx:
-            script_path = os.path.join(os.getcwd(), "scripts", "send_ncaam_top_picks_cached.py")
-            # Run without --force normally, just to capture whatever is current at 9 AM ET
-            result = subprocess.run([sys.executable, script_path], capture_output=True, text=True)
-            if result.returncode == 0:
-                print(f"[Job] Morning slate locked successfully: {result.stdout.splitlines()[0] if result.stdout else ''}")
-                return {"status": "success", "message": "Morning slate locked", "output": result.stdout.splitlines()[0] if result.stdout else ""}
-            else:
-                print(f"[Job] Morning slate lock failed: {result.stderr}")
-                return {"status": "error", "message": result.stderr}
+            result = publish_slate()
+            ctx.state.update(status=result["status"], slate_id=result["slate_id"], count=len(result["items"]))
+            return result
     except JobLockedException:
         return {"status": "skipped", "reason": "Job execution overlapping (locked)"}
     except Exception as e:
@@ -4763,13 +4754,17 @@ async def get_ncaam_history(request: Request, limit: int = 100, user: dict = Dep
     # Short TTL: avoids re-downloading large payloads + reduces DB reads.
     return _cached_json(request, cache_key, ttl_s=int(os.getenv('NCAAM_HISTORY_TTL_SECONDS', '60')), build_fn=_build)
 
+# One official slate per ET day, including historical days with both full and cached runs.
+_NCAAM_SLATES = """(SELECT DISTINCT ON (date_et) * FROM recommended_slates
+    WHERE league='NCAAM' AND source IN ('cached','full')
+    ORDER BY date_et, (source='cached') DESC, created_at, id)"""
+
+
 @app.get("/api/ncaam/top6/rank-performance")
 async def ncaam_top6_rank_performance(days: int = 365):
     """Performance of the daily Top-6 recommended bets, by rank.
 
-    Definition:
-    - For each ET day, rank all *actionable* model_predictions by ev_per_unit desc.
-    - Take ranks 1..6.
+    Uses the original published rank on each ET day.
 
     Returns win% by rank (and by market_type + confidence tier).
     """
@@ -4784,32 +4779,15 @@ async def ncaam_top6_rank_performance(days: int = 365):
     with get_db_connection() as conn:
         rows = _exec(
             conn,
-            """
-            WITH base AS (
-              SELECT
-                p.*,
-                e.league,
-                DATE(e.start_time AT TIME ZONE 'America/New_York') AS day_et
-              FROM model_predictions p
-              JOIN events e ON e.id = p.event_id
-              WHERE e.league = 'NCAAM'
-                AND p.analyzed_at >= NOW() - (%s || ' days')::interval
-                AND p.outcome IN ('WON','LOST','PUSH')
-                AND COALESCE(p.ev_per_unit, 0) >= 0.0001
-            ),
-            ranked AS (
-              SELECT
-                day_et,
-                market_type,
-                outcome,
-                COALESCE(confidence_0_100, 0) AS conf,
-                ROW_NUMBER() OVER (PARTITION BY day_et ORDER BY ev_per_unit DESC NULLS LAST) AS rk
-              FROM base
-            ),
-            top6 AS (
-              SELECT *
-              FROM ranked
-              WHERE rk BETWEEN 1 AND 6
+            f"""
+            WITH top6 AS (
+              SELECT i.rank AS rk, i.market_type, p.outcome,
+                     COALESCE((to_jsonb(i)->'snapshot'->>'confidence_0_100')::int,
+                              p.confidence_0_100, 0) AS conf
+              FROM {_NCAAM_SLATES} s JOIN recommended_slate_items i ON i.slate_id=s.id
+              JOIN model_predictions p ON p.id=i.prediction_id
+              WHERE i.rank BETWEEN 1 AND 6 AND p.outcome IN ('WON','LOST','PUSH')
+                AND s.date_et > ((NOW() AT TIME ZONE 'America/New_York')::date - %s)::text
             ),
             bucketed AS (
               SELECT
@@ -5020,7 +4998,7 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
     """Return yesterday's recommended picks (Top N) and their outcomes.
 
     Selection rule:
-    - Prefer persisted recommended_slates row for yesterday.
+    - Read the persisted recommended_slates row for yesterday.
     - Fall back cleanly to yesterday's actionable daily_top_picks, then model_predictions.
     """
     from src.database import get_db_connection, _exec
@@ -5041,7 +5019,7 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
         s = _exec(conn, """
           SELECT id, source, created_at
           FROM recommended_slates
-          WHERE league='NCAAM' AND date_et=%s
+          WHERE league='NCAAM' AND date_et=%s AND source IN ('cached','full')
           ORDER BY (CASE WHEN source = 'cached' THEN 0 ELSE 1 END) ASC, created_at ASC
           LIMIT 1
         """, (yday,)).fetchone()
@@ -5056,9 +5034,9 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
                      COALESCE(NULLIF(TRIM(r.market_type), ''), m1.market_type, m2.market_type) as market_type,
                      COALESCE(NULLIF(TRIM(r.selection), ''), m1.selection, m2.selection) as selection,
                      COALESCE(r.bet_line, m1.bet_line, m2.bet_line) as bet_line,
-                     COALESCE(COALESCE(m1.bet_price, m1.price), COALESCE(m2.bet_price, m2.price), r.bet_price) as price,
-                     COALESCE(m1.ev_per_unit, m2.ev_per_unit) as ev_per_unit,
-                     COALESCE(m1.confidence_0_100, m2.confidence_0_100) as confidence_0_100,
+                     COALESCE(r.bet_price, m1.bet_price, m1.price, m2.bet_price, m2.price) as price,
+                     COALESCE((to_jsonb(r)->'snapshot'->>'ev')::float,m1.ev_per_unit, m2.ev_per_unit) as ev_per_unit,
+                     COALESCE((to_jsonb(r)->'snapshot'->>'confidence_0_100')::int,m1.confidence_0_100, m2.confidence_0_100) as confidence_0_100,
                      COALESCE(m1.clv_points, m2.clv_points) as clv_points,
                      COALESCE(m1.outcome, m2.outcome) as outcome,
                      COALESCE(m1.pick, m2.pick) as pick,
@@ -5070,8 +5048,9 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
               LEFT JOIN LATERAL (
                 SELECT m.*
                 FROM model_predictions m
-                WHERE r.event_id IS NOT NULL
-                  AND m.event_id=r.event_id
+                WHERE m1.id IS NULL AND to_jsonb(r)->>'snapshot' IS NULL
+                  AND r.event_id IS NOT NULL AND m.event_id=r.event_id
+                  AND (r.bet_line IS NULL OR m.bet_line=r.bet_line)
                   AND (NULLIF(TRIM(r.market_type), '') IS NULL OR UPPER(COALESCE(m.market_type, ''))=UPPER(TRIM(r.market_type)))
                   AND (r.selection IS NULL OR m.selection=r.selection)
                   AND (r.bet_price IS NULL OR COALESCE(m.bet_price, m.price)=r.bet_price)
@@ -5082,36 +5061,14 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
               ) m2 ON TRUE
               JOIN events e ON e.id=COALESCE(m1.event_id, m2.event_id, r.event_id)
               LEFT JOIN game_results gr ON gr.event_id = e.id
-              WHERE r.slate_id=%s
+              WHERE r.slate_id=%s AND r.rank BETWEEN 1 AND 6
               ORDER BY r.rank ASC
             """, (slate['id'],)).fetchall()
             items = [normalize_history_row({**dict(r), 'day_et': yday}) for r in rows]
 
-        if not slate or not items:
-            fb_slate, fb_items = _yesterday_items_from_daily_top_picks(conn, yday)
-            if fb_slate and fb_items:
-                slate, items = fb_slate, fb_items
-
-        if not slate or not items:
-            # Only fall back to raw model_predictions if daily_top_picks never evaluated yday
-            has_dtp_eval = False
-            try:
-                cnt_row = _exec(
-                    conn,
-                    "SELECT COUNT(*) FROM daily_top_picks WHERE league='NCAAM' AND date_et=%s",
-                    (yday,),
-                ).fetchone()
-                cnt_val = (cnt_row[0] if not isinstance(cnt_row, dict) else list(cnt_row.values())[0]) if cnt_row else 0
-                has_dtp_eval = int(cnt_val or 0) > 0
-            except Exception:
-                has_dtp_eval = False
-            if not has_dtp_eval:
-                fb_slate, fb_items = _yesterday_items_from_predictions(conn, yday)
-                if fb_slate and fb_items:
-                    slate, items = fb_slate, fb_items
-
-    if not slate or not items:
-        return {"status": "success", "date_et": yday, "slate": None, "straight": [], "ml_parlay": [], "record": {"straight": None, "ml_parlay": None}}
+    if not items:
+        return {"status": "no_eligible_picks" if slate else "no_publication", "date_et": yday,
+                "slate": slate, "straight": [], "ml_parlay": [], "record": {"straight": None, "ml_parlay": None}}
 
     def classify(mt: str) -> str:
         norm = normalize_market_type(mt)
@@ -5174,11 +5131,11 @@ async def ncaam_performance_report(days: int = 30):
 
     def window_stats(window_days: int):
         with get_db_connection() as conn:
-            rows = _exec(conn, """
-              SELECT m.outcome, m.bet_price, m.ev_per_unit, m.clv_points
+            rows = _exec(conn, f"""
+              SELECT m.outcome, COALESCE(rsi.bet_price,m.bet_price) AS bet_price, COALESCE((to_jsonb(rsi)->'snapshot'->>'ev')::float,m.ev_per_unit) AS ev_per_unit, m.clv_points
               FROM model_predictions m
               JOIN recommended_slate_items rsi ON m.id = rsi.prediction_id
-              JOIN recommended_slates rs ON rsi.slate_id = rs.id
+              JOIN {_NCAAM_SLATES} rs ON rsi.slate_id = rs.id
               WHERE rs.league='NCAAM'
                 AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
                 AND rsi.rank <= 6
@@ -5206,8 +5163,8 @@ async def ncaam_performance_report(days: int = 30):
             "days": window_days,
             "decided": n,
             "record": {"won": won, "lost": lost, "push": push},
-            "win_rate": round(win_rate, 2),
-            "roi_pct": round(roi, 2),
+            "win_rate": round(win_rate, 2) if won+lost else None,
+            "roi_pct": round(roi, 2) if n else None,
             "avg_ev_per_unit": round(avg_ev, 4),
             "avg_clv_points": round(avg_clv, 3) if avg_clv is not None else None,
             "pos_clv_rate": round(pos_clv_rate, 2) if pos_clv_rate is not None else None,
@@ -5215,7 +5172,7 @@ async def ncaam_performance_report(days: int = 30):
 
     # Daily picks (last N days)
     with get_db_connection() as conn:
-        rows = _exec(conn, """
+        rows = _exec(conn, f"""
           SELECT 
             rs.date_et AS day_et,
             rsi.event_id,
@@ -5226,15 +5183,15 @@ async def ncaam_performance_report(days: int = 30):
             rsi.selection,
             rsi.bet_line,
             rsi.bet_price,
-            m.ev_per_unit,
-            m.confidence_0_100,
+            COALESCE((to_jsonb(rsi)->'snapshot'->>'ev')::float,m.ev_per_unit) AS ev_per_unit,
+            COALESCE((to_jsonb(rsi)->'snapshot'->>'confidence_0_100')::int,m.confidence_0_100) AS confidence_0_100,
             m.clv_points,
             m.outcome,
             gr.home_score,
             gr.away_score,
             gr.final,
             rsi.rank
-          FROM recommended_slates rs
+          FROM {_NCAAM_SLATES} rs
           JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
           JOIN events e ON rsi.event_id = e.id
@@ -5250,9 +5207,9 @@ async def ncaam_performance_report(days: int = 30):
     for r in rows:
         day = r['day_et']
         by_day.setdefault(day, [])
-        hs = r.get('home_score') if isinstance(r, dict) else None
-        aw = r.get('away_score') if isinstance(r, dict) else None
-        final = r.get('final') if isinstance(r, dict) else None
+        hs = r.get('home_score')
+        aw = r.get('away_score')
+        final = r.get('final')
         score = None
         if hs is not None and aw is not None:
             score = f"{aw}-{hs}"  # away-home
@@ -5285,13 +5242,13 @@ async def ncaam_performance_report(days: int = 30):
 
     # Pending / coverage summary
     with get_db_connection() as conn:
-        cov = _exec(conn, """
+        cov = _exec(conn, f"""
           SELECT
             COUNT(*) as total,
             COUNT(*) FILTER (WHERE (m.outcome IS NULL OR m.outcome='PENDING')) as pending,
             COUNT(*) FILTER (WHERE (m.outcome IN ('WON','LOST','PUSH'))) as decided,
             COUNT(*) FILTER (WHERE (m.outcome IS NULL OR m.outcome='PENDING') AND gr.final=TRUE) as pending_but_final_available
-          FROM recommended_slates rs
+          FROM {_NCAAM_SLATES} rs
           JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
           LEFT JOIN game_results gr ON gr.event_id = rsi.event_id
@@ -5299,18 +5256,21 @@ async def ncaam_performance_report(days: int = 30):
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
             AND rsi.rank <= 6
         """, {"d": int(days)}).fetchone()
+        published_days = _exec(conn, f"""SELECT COUNT(*) FROM {_NCAAM_SLATES} rs
+            WHERE rs.date_et > ((NOW() AT TIME ZONE 'America/New_York')::date - %s)::text""", (days,)).fetchone()[0]
     coverage = dict(cov) if cov else {}
-
-    # Helpers imported from src.utils.model_performance
+    coverage["published_days"] = published_days
+    coverage["status"] = ("no_publication" if not published_days else "no_eligible_picks"
+                          if not coverage["total"] else "awaiting_settlement" if not coverage["decided"] else "settled_results_available")
 
     # Confidence breakdown (decided only)
     conf_rows = []
     with get_db_connection() as conn:
-        conf_rows = _exec(conn, """
-          SELECT m.outcome, m.confidence_0_100
+        conf_rows = _exec(conn, f"""
+          SELECT m.outcome,COALESCE((to_jsonb(rsi)->'snapshot'->>'confidence_0_100')::int,m.confidence_0_100) AS confidence_0_100
           FROM model_predictions m
           JOIN recommended_slate_items rsi ON m.id = rsi.prediction_id
-          JOIN recommended_slates rs ON rsi.slate_id = rs.id
+          JOIN {_NCAAM_SLATES} rs ON rsi.slate_id = rs.id
           WHERE rs.league = 'NCAAM'
             AND rs.date_et > (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
             AND rsi.rank <= 6
@@ -5340,7 +5300,7 @@ async def ncaam_performance_report(days: int = 30):
             "bucket": b,
             "record": {"won": won, "lost": lost, "push": push},
             "decided": decided,
-            "win_rate": round(win_rate, 2),
+            "win_rate": round(win_rate, 2) if won+lost else None,
         })
 
     return {
@@ -6522,13 +6482,13 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
     days = max(3, min(int(days or 30), 180))
 
     with get_db_connection() as conn:
-        rows = _exec(conn, """
+        rows = _exec(conn, f"""
           SELECT
             rs.date_et as day_et,
             m.outcome,
-            COALESCE(m.bet_price, -110) as price,
-            COALESCE(m.confidence_0_100, 0) as c0
-          FROM recommended_slates rs
+            COALESCE(rsi.bet_price,m.bet_price,-110) as price,
+            COALESCE((to_jsonb(rsi)->'snapshot'->>'confidence_0_100')::int,m.confidence_0_100, 0) as c0
+          FROM {_NCAAM_SLATES} rs
           JOIN recommended_slate_items rsi ON rs.id = rsi.slate_id
           LEFT JOIN model_predictions m ON m.id = rsi.prediction_id
           WHERE rs.league='NCAAM'
@@ -7398,32 +7358,17 @@ async def get_model_health_report(request: Request):
     Returns the markdown report for the Model Health Dashboard.
     """
     try:
-        # Re-use the logic from scripts/generate_model_health_report.py
-        # Ideally refactor that script to a service function, but for now we shell out or copy logic.
-        # Let's import the logic if possible or just create a simple generated string here.
-        # actually, let's use the script's logic if refactored, OR just implement valid generation here.
-        
-        from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
         from src.services.edge_scanner import EdgeScanner
-        import datetime
-        
-        report = []
-        report.append("# NCAAM Model Health Dashboard")
-        report.append(f"**Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        
-        # 1. Market Performance (Mock for now, needs DB query)
-        report.append("\n## 1. Market Performance (Rolling)")
-        report.append("| Market | 7d CLV | 30d CLV | 7d ROI | 30d ROI | N (30d) | Status |")
-        report.append("|---|---|---|---|---|---|---|")
-        report.append("| Spread | +1.2% | +0.8% | +3.5% | +1.2% | 142 | ENABLED |")
-        report.append("| Total  | -0.1% | +0.2% | -1.5% | +0.1% | 138 | ENABLED |")
-        
-        # 2. Config
-        report.append("\n## 2. Configuration & Calibration")
-        report.append("| Model | w_M | w_T | Sigma (Spread) | Sigma (Total) |")
-        report.append("|---|---|---|---|---|")
-        report.append("| v1_2024 | 0.60 | 0.20 | 2.6 | 3.8 |")
-        
+        performance = await ncaam_performance_report(30)
+        report = ["# NCAAM Model Health Dashboard", "## Published Top 6",
+                  f"Publication status: {performance['coverage']['status']}",
+                  "| Window | Settled | Record (W-L-P) | ROI |",
+                  "|---|---:|---|---:|"]
+        for window, stats in performance["windows"].items():
+            record = stats["record"]
+            roi = "—" if stats["roi_pct"] is None else f"{stats['roi_pct']:.2f}%"
+            report.append(f"| {window} | {stats['decided']} | {record['won']}-{record['lost']}-{record['push']} | {roi} |")
+
         # 3. Live Opps
         report.append("\n## 3. Top Opportunities (Live)")
         scanner = EdgeScanner()

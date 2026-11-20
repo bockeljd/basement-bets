@@ -23,11 +23,13 @@ def _best_book_line_before(conn, event_id: str, market_type: str, side: str, cut
         SELECT DISTINCT ON (book) book, line_value, price, captured_at
         FROM odds_snapshots
         WHERE event_id=%s AND market_type=%s AND side=%s
-          AND COALESCE(book, '') NOT IN ('action_open', 'open', '')
+          AND lower(COALESCE(book, '')) NOT IN ('action_open', 'open', '', 'consensus')
+          AND lower(book) !~ '^action_book_' AND price IS NOT NULL
           AND line_value IS NOT NULL
-          AND captured_at <= %s
+          AND captured_at BETWEEN %s - interval '90 minutes' AND %s
+          AND created_at <= %s
         ORDER BY book, captured_at DESC
-    """, (event_id, market_type, side, cutoff)).fetchall()
+    """, (event_id, market_type, side, cutoff, cutoff, cutoff)).fetchall()
     if not rows:
         return None
     cands = [dict(r) for r in rows]
@@ -43,16 +45,17 @@ def _best_book_line_before(conn, event_id: str, market_type: str, side: str, cut
 
 
 def _latest_line_before(conn, event_id: str, market_type: str, side: str, cutoff: datetime):
-    # Use captured_at if exists; fallback to latest.
+    # Only observations already ingested by the historical cutoff are available.
     row = _exec(conn, """
         SELECT line_value, price, captured_at
         FROM odds_snapshots
         WHERE event_id=%s AND market_type=%s AND side=%s
           AND COALESCE(book, '') NOT IN ('action_open', 'open')
-          AND captured_at <= %s
+          AND captured_at BETWEEN %s - interval '90 minutes' AND %s
+          AND created_at <= %s
         ORDER BY captured_at DESC, (CASE WHEN book = 'consensus' THEN 0 ELSE 1 END) ASC
         LIMIT 1
-    """, (event_id, market_type, side, cutoff)).fetchone()
+    """, (event_id, market_type, side, cutoff, cutoff, cutoff)).fetchone()
     return dict(row) if row else None
 
 
@@ -379,6 +382,11 @@ def main():
     limit = int(os.getenv('BACKTEST_LIMIT', '200'))
     mode = 'tune_weights' if '--tune-weights' in sys.argv else str(os.getenv('BACKTEST_MODE', 'mae')).strip().lower()  # mae|simulate|tune_weights
 
+    if mode == "published_holdout":
+        from src.services.ncaam_holdout import published_holdout
+        print(json.dumps(published_holdout(days), indent=2))
+        return
+
     # Use fixed weights if provided
     print('[backtest] env overrides:', {
         'NCAAM_W_BASE': os.getenv('NCAAM_W_BASE'),
@@ -434,6 +442,8 @@ def main():
     n_total = 0
     mae_spread_vs_close = 0.0
     mae_total_vs_close = 0.0
+    market_spread_error = 0.0
+    market_total_error = 0.0
     mae_spread_vs_final = 0.0
     mae_total_vs_final = 0.0
 
@@ -456,16 +466,16 @@ def main():
 
             cutoff = st - timedelta(minutes=10)  # approximate "bet-time/close"
 
-            # Pull bet-time consensus lines + best multi-book retail lines (matching live production)
+            # Pull bet-time consensus lines + best multi-book retail lines
             s_home = _latest_line_before(conn, event_id, 'SPREAD', 'HOME', cutoff)
             s_away = _latest_line_before(conn, event_id, 'SPREAD', 'AWAY', cutoff)
             t_over = _latest_line_before(conn, event_id, 'TOTAL', 'OVER', cutoff)
             t_under = _latest_line_before(conn, event_id, 'TOTAL', 'UNDER', cutoff)
 
-            best_sh = _best_book_line_before(conn, event_id, 'SPREAD', 'HOME', cutoff) or s_home
-            best_sa = _best_book_line_before(conn, event_id, 'SPREAD', 'AWAY', cutoff) or s_away
-            best_to = _best_book_line_before(conn, event_id, 'TOTAL', 'OVER', cutoff) or t_over
-            best_tu = _best_book_line_before(conn, event_id, 'TOTAL', 'UNDER', cutoff) or t_under
+            best_sh = _best_book_line_before(conn, event_id, 'SPREAD', 'HOME', cutoff)
+            best_sa = _best_book_line_before(conn, event_id, 'SPREAD', 'AWAY', cutoff)
+            best_to = _best_book_line_before(conn, event_id, 'TOTAL', 'OVER', cutoff)
+            best_tu = _best_book_line_before(conn, event_id, 'TOTAL', 'UNDER', cutoff)
 
             # Need both spread_home + total for the model to run
             if not s_home or not t_over:
@@ -478,11 +488,12 @@ def main():
                 'spread_price_home': float(s_home.get('price') or -110),
                 'total': float(t_over['line_value']),
                 'total_over_price': float(t_over.get('price') or -110),
-                # Real multi-book best-line shopping (matches live production 1:1)
-                '_best_spread_home': {'line_value': float(best_sh['line_value']), 'price': float(best_sh.get('price') or -110), 'book': best_sh.get('book') or 'bt'},
-                '_best_spread_away': {'line_value': float(best_sa['line_value']), 'price': float(best_sa.get('price') or -110), 'book': best_sa.get('book') or 'bt'} if best_sa else None,
-                '_best_total_over': {'line_value': float(best_to['line_value']), 'price': float(best_to.get('price') or -110), 'book': best_to.get('book') or 'bt'},
-                '_best_total_under': {'line_value': float(best_tu['line_value']), 'price': float(best_tu.get('price') or -110), 'book': best_tu.get('book') or 'bt'} if best_tu else None,
+                # Keep each retail quote intact, including its capture time.
+                '_best_spread_home': best_sh,
+                '_best_spread_away': best_sa,
+                '_best_total_over': best_to,
+                '_best_total_under': best_tu,
+                '_quote_as_of': cutoff,
                 '_raw_snaps': []
             }
 
@@ -519,13 +530,15 @@ def main():
                     n_spread += 1
                     close = float(s_home['line_value'])
                     mae_spread_vs_close += abs(float(mu_spread) - close)
-                    mae_spread_vs_final += abs(float(mu_spread) - home_margin)
+                    market_spread_error += abs(close + home_margin)
+                    mae_spread_vs_final += abs(float(mu_spread) + home_margin)
 
                 # Total MAE
                 if t_over and mu_total is not None:
                     n_total += 1
                     close = float(t_over['line_value'])
                     mae_total_vs_close += abs(float(mu_total) - close)
+                    market_total_error += abs(close - final_total)
                     mae_total_vs_final += abs(float(mu_total) - final_total)
 
                 if len(samples) < 8:
@@ -574,7 +587,7 @@ def main():
                 elif outcome == 'PUSH':
                     pnl = 0.0
                 else:
-                    pnl = 0.0
+                    continue
 
                 bets.append({
                     'event_id': event_id,
@@ -615,6 +628,7 @@ def main():
 
     out = {
         'mode': mode,
+        'evaluation_basis': 'historical odds, recomputed features; use published_holdout for prospective validation',
         'window_days': days,
         'limit': limit,
         'n_games': len(games),
@@ -623,6 +637,8 @@ def main():
         'mae_spread_vs_close': (mae_spread_vs_close / n_spread) if n_spread else None,
         'mae_total_vs_close': (mae_total_vs_close / n_total) if n_total else None,
         'mae_spread_vs_final': (mae_spread_vs_final / n_spread) if n_spread else None,
+        'market_spread_mae_vs_final': market_spread_error / n_spread if n_spread else None,
+        'market_total_mae_vs_final': market_total_error / n_total if n_total else None,
         'mae_total_vs_final': (mae_total_vs_final / n_total) if n_total else None,
         'simulation': sim,
         'env': {

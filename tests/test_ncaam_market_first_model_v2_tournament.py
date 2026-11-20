@@ -175,7 +175,7 @@ def test_analyze_november_big_favorite_no_kenpom_bias_and_outer_cap(monkeypatch)
     monkeypatch.setattr(model, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_situational_spots", lambda *a, **kw: 0.0)
     monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
-    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot: tot)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
     monkeypatch.setattr(model, "_generate_recommendations", lambda *a, **kw: [])
 
     event = {
