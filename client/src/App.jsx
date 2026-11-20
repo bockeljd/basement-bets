@@ -7,8 +7,8 @@ import {
 import { TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, DollarSign, Activity, BarChart3, LayoutDashboard, Search, X, PlusCircle, Trash, RefreshCw, AlertCircle, Filter, Table } from 'lucide-react';
 
 import Research from './pages/Research';
-import { PasteSlipContainer } from './components/PasteSlipContainer';
-import ManualAddBetModal from './components/ManualAddBetModal';
+const PasteSlipContainer = lazy(() => import('./components/PasteSlipContainer').then(module => ({ default: module.PasteSlipContainer })));
+const ManualAddBetModal = lazy(() => import('./components/ManualAddBetModal'));
 import ActualsModelReconciliationCard from './components/ActualsModelReconciliationCard';
 import { decodeSportsbookHashImport } from './utils/sportsbookBookmarklets';
 
@@ -271,9 +271,10 @@ function App() {
         const reloadDashboard = async () => {
             setLoading(true);
             try {
-                const { data: d } = await api.get('/api/dashboard', { timeout: 25000 });
-                // Snapshot (reported) vs computed in-play series (snapshots + newly-added settled bets)
-                const { data: inplay } = await api.get('/api/financials/inplay/series', { params: { days: 120 }, timeout: 25000 });
+                const [{ data: d }, { data: inplay }] = await Promise.all([
+                    api.get('/api/dashboard', { timeout: 25000 }),
+                    api.get('/api/financials/inplay/series', { params: { days: 120 }, timeout: 25000 }),
+                ]);
 
                 setStats(d.stats || { total_bets: 0, total_profit: 0, win_rate: 0, roi: 0 });
                 setBets(d.bets || []);
@@ -483,7 +484,7 @@ function App() {
 
     // Actuals sub-tab state moved above (before any conditional returns) to avoid hook-order issues.
 
-    if (!stats) {
+    if (!stats && !(loading && page === 'today')) {
         if (loading) {
             return <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white font-mono animate-pulse">Loading Basement Bets...</div>;
         }
@@ -773,6 +774,7 @@ function App() {
                                     </button>
                                 </div>
 
+                                <Suspense fallback={<p>Loading bet form…</p>}>
                                 {addBetMode === 'slip' ? (
                                     <PasteSlipContainer
                                         onSaveSuccess={() => {
@@ -794,6 +796,7 @@ function App() {
                                         onClose={() => setShowAddBet(false)}
                                     />
                                 )}
+                                </Suspense>
                             </div>
                         </div>
                     )}
