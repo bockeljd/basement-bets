@@ -15,3 +15,13 @@ def recent_retail_quote(quote, as_of):
         return timedelta(0) <= as_of - stamp <= timedelta(minutes=90)
     except (KeyError, AttributeError, TypeError, ValueError):
         return False
+
+
+def executable_moneyline_quote(quote, as_of):
+    if not recent_retail_quote(quote, as_of):
+        return False
+    try:
+        price = float(quote["price"])
+        return price.is_integer() and abs(price) >= 100
+    except (KeyError, ValueError, TypeError, OverflowError):
+        return False

@@ -334,6 +334,8 @@ def test_ncaam_prevents_correlated_spread_and_ml_double_persistence(monkeypatch)
         "total": 144.0,
         "total_over_price": -110,
         "total_under_price": -110,
+        "_best_moneyline_home": {"price": -135, "book": "DraftKings", "captured_at": datetime.now(timezone.utc)},
+        "_best_moneyline_away": {"price": 115, "book": "DraftKings", "captured_at": datetime.now(timezone.utc)},
         "moneyline_price_home": -135,
         "moneyline_price_away": 115,
     }
@@ -349,7 +351,8 @@ def test_ncaam_prevents_correlated_spread_and_ml_double_persistence(monkeypatch)
     model.analyze("evt_ml_only", event_context=event, market_snapshot=snap, persist=True)
     assert "MONEYLINE" in [d["market_type"] for d in persisted_docs]
 
-
-
-
-
+    # Consensus prices remain in the snapshot after a retail quote disappears.
+    persisted_docs.clear()
+    del snap["_best_moneyline_home"]
+    model.analyze("evt_no_retail_ml", event_context=event, market_snapshot=snap, persist=True)
+    assert "MONEYLINE" not in [d["market_type"] for d in persisted_docs]

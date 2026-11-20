@@ -9,12 +9,12 @@ def test_moneyline_symmetry_across_probability_grid(monkeypatch):
     last = 0
     for i in range(101):
         raw = i / 100
-        home, away = model._moneyline_probabilities(raw, True)
+        home, away = model._binary_probabilities(raw, True)
         assert home + away == pytest.approx(1)
-        assert away == pytest.approx(model._moneyline_probabilities(1-raw, True)[0])
+        assert away == pytest.approx(model._binary_probabilities(1-raw, True)[0])
         assert last <= home <= 1
         last = home
-    assert model._moneyline_probabilities(.5, True) == (.5, .5)
+    assert model._binary_probabilities(.5, True) == (.5, .5)
 
 
 @pytest.mark.parametrize("market,side,line", [
@@ -49,3 +49,23 @@ def test_calibration_holdout_uses_later_dates_and_separate_markets(monkeypatch):
     assert report["SPREAD"]["holdout"] == 60
     assert report["SPREAD"]["scores"]["market"]["brier"] == .25
     assert "scores" not in report["TOTAL"]
+
+
+def test_executable_moneyline_requires_recent_named_price():
+    from datetime import datetime, timedelta, timezone
+    from src.utils.ncaam_quotes import executable_moneyline_quote
+
+    now = datetime.now(timezone.utc)
+    quote = {"book": "FanDuel", "price": 110, "captured_at": now}
+    assert executable_moneyline_quote(quote, now)
+    for change in ({"book": "consensus"}, {"price": -99}, {"captured_at": now-timedelta(minutes=91)}):
+        assert not executable_moneyline_quote({**quote, **change}, now)
+
+
+def test_opposite_total_bounds_are_complementary_at_same_line(monkeypatch):
+    model = object.__new__(NCAAMMarketFirstModelV2)
+    monkeypatch.setattr(model, "_tau_for_market", lambda *args, **kw: 1.2)
+    monkeypatch.setattr(model, "_calibrate_win_prob", lambda p, **kw: .04+.8*p)
+    bounds = [model._confidence_bounds_from_mu_uncertainty("TOTAL", 147, 13, 145, side)
+              for side in ("over", "under")]
+    assert bounds[0]["lb10"] + bounds[1]["ub90"] == pytest.approx(1)

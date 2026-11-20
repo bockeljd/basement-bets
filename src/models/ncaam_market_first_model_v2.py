@@ -44,7 +44,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.4.1-calibrated"
+    VERSION = "2.4.2-calibrated"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -2708,7 +2708,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "venue": event.get('venue'),
             "venue_city": event.get('venue_city'),
             "venue_state": event.get('venue_state'),
-            "analyzed_at": datetime.now().isoformat(),
+            "analyzed_at": datetime.now(timezone.utc).isoformat(),
             "model_version": self.VERSION,
             "market_type": persisted_market_type,
             "pick": persisted_pick,
@@ -2789,24 +2789,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
         try:
             from src.utils.ev import ev_per_unit, implied_prob_american
 
-            # Determine best ML prices (prefer best book, fallback to consensus).
-            best_ml_home = (market_snapshot.get('_best_moneyline_home') or {}) if isinstance(market_snapshot, dict) else {}
-            best_ml_away = (market_snapshot.get('_best_moneyline_away') or {}) if isinstance(market_snapshot, dict) else {}
-            ml_price_home = best_ml_home.get('price') if best_ml_home else None
-            ml_price_away = best_ml_away.get('price') if best_ml_away else None
-            ml_book_home = best_ml_home.get('book') if best_ml_home else (market_snapshot.get('book_ml') if isinstance(market_snapshot, dict) else None)
-            ml_book_away = best_ml_away.get('book') if best_ml_away else (market_snapshot.get('book_ml') if isinstance(market_snapshot, dict) else None)
+            from src.utils.ncaam_quotes import executable_moneyline_quote
 
-            if ml_price_home is None and isinstance(market_snapshot, dict):
-                ml_price_home = market_snapshot.get('moneyline_price_home')
-            if ml_price_away is None and isinstance(market_snapshot, dict):
-                ml_price_away = market_snapshot.get('moneyline_price_away')
-
-            # Compute home win prob from margin distribution: P(margin_home > 0)
-            # mu_spread_final is home-perspective margin mean.
-            if ml_price_home is not None and ml_price_away is not None:
+            quote_time = market_snapshot.get('_quote_as_of') or datetime.now(timezone.utc)
+            best_ml_home = market_snapshot.get('_best_moneyline_home') or {}
+            best_ml_away = market_snapshot.get('_best_moneyline_away') or {}
+            if all(executable_moneyline_quote(q, quote_time) for q in (best_ml_home, best_ml_away)):
+                ml_price_home, ml_price_away = best_ml_home['price'], best_ml_away['price']
+                ml_book_home, ml_book_away = best_ml_home['book'], best_ml_away['book']
                 prob_home_raw = 1.0 - self._normal_cdf(0.0, -float(mu_spread_final), float(sigma_spread))
-                prob_home, prob_away = self._moneyline_probabilities(prob_home_raw, is_early_season)
+                prob_home, prob_away = self._binary_probabilities(prob_home_raw, is_early_season)
 
                 ev_home = float(ev_per_unit(prob_home, int(ml_price_home)) or 0.0)
                 ev_away = float(ev_per_unit(prob_away, int(ml_price_away)) or 0.0)
@@ -2890,8 +2882,16 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         ev_per_unit=float(ev),
                     )
                     if (side == 'HOME' and is_home_fav_parlay_leg and not is_neutral) or relax_gates or ml_conf_0_100 >= 55:
+                        ml_inputs = {**inputs_payload, "moneyline_forecast": {
+                            "side": side, "raw_win_prob": prob_home_raw if side == "HOME" else 1.0-prob_home_raw,
+                            "win_prob": wp, "price": price, "book": book,
+                            "captured_at": (best_ml_home if side == "HOME" else best_ml_away)["captured_at"],
+                        }}
                         doc_ml = {
-                            **{k: res.get(k) for k in ("event_id", "user_id", "analyzed_at", "model_version", "mu_market", "mu_torvik", "mu_final", "sigma", "inputs_json", "outputs_json", "narrative_json", "context_json")},
+                            **{k: res.get(k) for k in ("event_id", "user_id", "analyzed_at", "model_version", "outputs_json", "narrative_json", "context_json")},
+                            "inputs_json": json.dumps(ml_inputs, default=str),
+                            "mu_market": market_snapshot.get("spread_home"), "mu_final": mu_spread_final,
+                            "mu_torvik": mu_torvik_spread, "sigma": sigma_spread,
                             "id": str(uuid.uuid4()),
                             "market_type": "MONEYLINE",
                             "pick": team,
@@ -3342,11 +3342,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
         )
         return self._winprob_calibration
 
-    def _moneyline_probabilities(self, home_raw: float, is_early_season: bool):
-        home = self._calibrate_win_prob(home_raw, is_early_season=is_early_season)
-        away = self._calibrate_win_prob(1.0 - home_raw, is_early_season=is_early_season)
-        home_prob = home / (home + away) if home + away > 0 else home_raw
-        return home_prob, 1.0 - home_prob
+    def _binary_probabilities(self, raw: float, is_early_season: bool):
+        """Normalize the two calibrated outcomes of a single bet at one line."""
+        yes = self._calibrate_win_prob(raw, is_early_season=is_early_season)
+        no = self._calibrate_win_prob(1.0 - raw, is_early_season=is_early_season)
+        prob = yes / (yes + no) if yes + no > 0 else raw
+        return prob, 1.0 - prob
 
     def _calibrate_win_prob(self, p: float, is_early_season: bool = False) -> float:
         """Calibrate raw win probability using empirical-weighted PAVA mapping."""
@@ -3485,7 +3486,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 prob_over_raw = 1.0 - self._normal_cdf(float(line), float(mu_true), float(sigma))
                 p = prob_over_raw if side == 'over' else 1.0 - prob_over_raw
 
-            probs.append(self._calibrate_win_prob(p, is_early_season=is_early))
+            calibrated = (self._binary_probabilities(p, is_early)[0] if mkt == "TOTAL"
+                          else self._calibrate_win_prob(p, is_early_season=is_early))
+            probs.append(calibrated)
 
         return {
             "lb10": float(min(probs)),
@@ -4219,8 +4222,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
             push_prob_over = self._push_probability(line_over_bet)
             push_prob_under = self._push_probability(line_under_bet)
 
-            prob_over_cal = self._calibrate_win_prob(prob_over_raw, is_early_season=g_is_early)
-            prob_under_cal = self._calibrate_win_prob(prob_under_raw, is_early_season=g_is_early)
+            prob_over_cal = self._binary_probabilities(prob_over_raw, g_is_early)[0]
+            prob_under_cal = self._binary_probabilities(prob_under_raw, g_is_early)[0]
 
             ev_over = self._calculate_ev(prob_over_cal, price_over, push_prob=push_prob_over)
             kelly_over = self._calculate_kelly(prob_over_cal, price_over)
@@ -4363,7 +4366,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                                         p_raw_adj = 1.0 - self._normal_cdf(float(out['line']), float(mu_t), sig_t_adj)
                                     else:
                                         p_raw_adj = self._normal_cdf(float(out['line']), float(mu_t), sig_t_adj)
-                                    p_cal_adj = self._calibrate_win_prob(p_raw_adj, is_early_season=g_is_early)
+                                    p_cal_adj = self._binary_probabilities(p_raw_adj, g_is_early)[0]
                                     push_p_adj = self._push_probability(float(out['line']))
                                     ev_recomp = float(self._calculate_ev(p_cal_adj, int(out['price']), push_prob=push_p_adj))
                                     ev_adj = min(ev_raw, ev_recomp) - float(ev_penalty or 0.0)

@@ -920,7 +920,7 @@ def test_blowout_spread_sigma_scaling_projected_score_and_rec_normalization(monk
 def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
     from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
 
-    assert NCAAMMarketFirstModelV2.VERSION == "2.4.1-calibrated"
+    assert NCAAMMarketFirstModelV2.VERSION == "2.4.2-calibrated"
     model = NCAAMMarketFirstModelV2()
     monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
     ev_ctx = {
