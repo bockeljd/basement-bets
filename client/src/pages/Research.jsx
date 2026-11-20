@@ -18,6 +18,7 @@ import api from '../api/axios';
 import { loadCache } from '../utils/httpCache';
 import ParlayRecommendations from '../components/ParlayRecommendations';
 import TodayDataHealthStrip, { summarizeDataHealth } from '../components/today/TodayDataHealthStrip';
+import SlatePublication from '../components/today/SlatePublication';
 import TodayPlayCard from '../components/today/TodayPlayCard';
 import TodayFullBoardTable from '../components/today/TodayFullBoardTable';
 import TodayMatchupModal from '../components/today/TodayMatchupModal';
@@ -532,7 +533,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
           reason: freshRec ? null : (merged?.block_reason || merged?.headline || prev[game.id]?.reason || null),
           context: freshCtx || prev[game.id]?.context || null,
           model_version: merged?.model_version || prev[game.id]?.model_version || null,
-          analyzedAt: new Date().toISOString(),
+          analyzedAt: merged?.analyzed_at || prev[game.id]?.analyzedAt || null,
         },
       }));
     } catch (err) {
@@ -556,7 +557,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
       if (meta?.isActionable && meta.rec) {
         seenIds.add(game.id);
-        plays.push({ id: game.id, game, rec: meta.rec, context: meta.context || null, conf: getConfidenceMeta(meta.rec) });
+        plays.push({ id: game.id, game, analyzedAt: meta.analyzedAt, rec: meta.rec, context: meta.context || null, conf: getConfidenceMeta(meta.rec) });
       }
     });
 
@@ -579,7 +580,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         day_et: ev.day_et || selectedDate,
       };
       seenIds.add(eid);
-      plays.push({ id: eid, game: synthGame, rec: meta.rec, context: meta.context || null, conf: getConfidenceMeta(meta.rec) });
+      plays.push({ id: eid, game: synthGame, analyzedAt: meta.analyzedAt, rec: meta.rec, context: meta.context || null, conf: getConfidenceMeta(meta.rec) });
     });
 
     plays.sort((a, b) => {
@@ -1132,6 +1133,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       {/* Active Tab Panel */}
       {activeSubTab === 'top_plays' && (
         <section role="tabpanel" aria-labelledby="today-tab-top_plays" className="space-y-5">
+          {leagueFilter === 'NCAAM' && <SlatePublication day={selectedDate} />}
           {(scopedTopPlays.length > 1 || actionablePlays.length > top6SlatePlays.length) && (
             <div className="flex flex-wrap items-center justify-between gap-2">
               {scopedTopPlays.length > 1 ? (
@@ -1235,6 +1237,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                   rank={item.slateRank}
                   game={item.game}
                   rec={item.rec}
+                  analyzedAt={leagueFilter === 'NCAAM' ? item.analyzedAt : null}
                   context={item.context}
                   bankroll={bankroll}
                   onOpenDetails={handleOpenGameDetails}

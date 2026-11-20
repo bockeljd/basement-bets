@@ -1,0 +1,49 @@
+import React, { useEffect, useState } from 'react';
+import api from '../../api/axios';
+import { fmtOdds, fmtTimeEt, getTodayEtStr } from './todayHelpers';
+
+export default function SlatePublication({ day }) {
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    let active = true;
+    let timer;
+    async function refresh() {
+      let finished = false;
+      try {
+        const { data } = await api.get('/api/ncaam/publication-status', { params: { date: day } });
+        if (active) setResult(data);
+        finished = ['locked', 'no_eligible_picks'].includes(data.status);
+      } catch {
+        if (active) setResult({ day, status: 'unavailable' });
+      }
+      if (active && !finished && day === getTodayEtStr()) timer = setTimeout(refresh, 30000);
+    }
+    refresh();
+    return () => { active = false; clearTimeout(timer); };
+  }, [day]);
+
+  const slate = result?.day === day ? result : null;
+  const time = slate?.locked_at ? fmtTimeEt(slate.locked_at) + ' ET' : '';
+  const labels = {
+    locked: `Locked at ${time}`,
+    no_eligible_picks: `Completed at ${time} · No eligible picks`,
+    unpublished: 'Awaiting publication',
+    locking: 'Locking recommendations',
+    unconfirmed: 'Publication unconfirmed',
+    unavailable: 'Publication status unavailable',
+  };
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-sm text-slate-200" aria-live="polite">
+      <strong>Published morning Top 6</strong> · {labels[slate?.status] || 'Checking publication'}
+      {slate?.picks?.length > 0 && (
+        <ol className="mt-2 list-decimal pl-5">
+          {slate.picks.map(p => (
+            <li key={p.rank} value={p.rank}>{p.away_team} @ {p.home_team} · {p.selection}
+              {p.bet_line != null && !String(p.selection).includes(String(p.bet_line)) ? ` · Line ${p.bet_line}` : ''}
+              {p.bet_price != null ? ` (${fmtOdds(p.bet_price)})` : ''}</li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}

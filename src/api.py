@@ -4760,6 +4760,43 @@ _NCAAM_SLATES = """(SELECT DISTINCT ON (date_et) * FROM recommended_slates
     ORDER BY date_et, (source='cached') DESC, created_at, id)"""
 
 
+@app.get("/api/ncaam/publication-status")
+def ncaam_publication_status(date: str):
+    """Report the committed morning slate independently of the mutable game board."""
+    from src.database import get_db_connection, _exec
+    try:
+        day = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Expected YYYY-MM-DD")
+    with get_db_connection() as conn:
+        slate = _exec(conn, """
+            SELECT id,created_at FROM recommended_slates
+            WHERE league='NCAAM' AND source='cached' AND date_et=%s
+            ORDER BY created_at,id LIMIT 1
+        """, (day.isoformat(),)).fetchone()
+        if slate:
+            picks = _exec(conn, """
+                SELECT i.rank,i.event_id,i.prediction_id,i.selection,i.bet_line,i.bet_price,
+                       e.home_team,e.away_team
+                FROM recommended_slate_items i LEFT JOIN events e ON e.id=i.event_id
+                WHERE i.slate_id=%s AND i.rank BETWEEN 1 AND 6 ORDER BY i.rank
+            """, (slate['id'],)).fetchall()
+            return {"day": day, "status": "locked" if picks else "no_eligible_picks",
+                    "locked_at": slate['created_at'], "picks": [dict(row) for row in picks]}
+        run = _exec(conn, """
+            SELECT status,started_at FROM job_runs WHERE job_name='lock_morning_slate'
+              AND (started_at AT TIME ZONE 'America/New_York')::date=%s AND status <> 'skipped'
+            ORDER BY started_at DESC LIMIT 1
+        """, (day,)).fetchone()
+    state = "unpublished"
+    if run:
+        if run['status'] == 'running' and datetime.now(timezone.utc) - run['started_at'] < timedelta(minutes=2):
+            state = "locking"
+        else:
+            state = "unconfirmed"
+    return {"day": day, "status": state, "locked_at": None, "picks": []}
+
+
 @app.get("/api/ncaam/top6/rank-performance")
 async def ncaam_top6_rank_performance(days: int = 365):
     """Performance of the daily Top-6 recommended bets, by rank.
