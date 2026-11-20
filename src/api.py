@@ -3748,8 +3748,10 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             if ('Object of type' in txt and 'serializable' in txt) or ('Traceback' in txt) or len(txt) > 140:
                 return 'Analysis unavailable — click Details to retry'
             low = txt.lower()
-            if 'market data waiting' in low or 'no line' in low or 'stale' in low:
-                return 'Stale / missing sportsbook odds — awaiting line refresh'
+            if 'stale' in low:
+                return 'Stale sportsbook odds (>90m old) — awaiting line refresh'
+            if 'market data waiting' in low or 'no line' in low:
+                return 'No sportsbook line posted (unlined / non-D1 matchup)'
             if txt.startswith('Sanity block'):
                 return 'Held for safety — model & book odds need closer match'
             if txt.startswith('Steam move'):
@@ -3762,8 +3764,10 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             if is_act:
                 return 'actionable'
             low = str(raw_reason or '').strip().lower()
-            if 'market data waiting' in low or 'no line' in low or 'stale' in low or 'unavailable' in low:
+            if 'stale' in low:
                 return 'stale_odds'
+            if 'market data waiting' in low or 'no line' in low or 'unavailable' in low:
+                return 'unlined'
             return 'true_no_bet'
 
         def _parse_ctx_json(val):
@@ -4827,10 +4831,13 @@ def ncaam_publication_status(date: str):
                    count(*) FILTER (WHERE d.is_actionable) AS actionable_games,
                    count(*) FILTER (
                      WHERE NOT d.is_actionable
+                       AND LOWER(COALESCE(d.reason, '')) LIKE '%%stale%%'
+                   ) AS stale_odds_games,
+                   count(*) FILTER (
+                     WHERE NOT d.is_actionable
                        AND (LOWER(COALESCE(d.reason, '')) LIKE '%%no line%%'
-                            OR LOWER(COALESCE(d.reason, '')) LIKE '%%market data waiting%%'
-                            OR LOWER(COALESCE(d.reason, '')) LIKE '%%stale%%')
-                   ) AS stale_or_missing_odds_games,
+                            OR LOWER(COALESCE(d.reason, '')) LIKE '%%market data waiting%%')
+                   ) AS unlined_games,
                    count(*) FILTER (
                      WHERE NOT d.is_actionable
                        AND LOWER(COALESCE(d.reason, '')) NOT LIKE '%%no line%%'
@@ -4845,6 +4852,14 @@ def ncaam_publication_status(date: str):
             FROM daily_top_picks d WHERE d.league='NCAAM' AND d.date_et=%s
         """, (day, day)).fetchone()
         evaluation = dict(cache)
+        from zoneinfo import ZoneInfo
+        is_today_eval = day == datetime.now(ZoneInfo("America/New_York")).date()
+        lo_at = evaluation.get("latest_odds_at")
+        if lo_at is not None and getattr(lo_at, "tzinfo", None) is None:
+            lo_at = lo_at.replace(tzinfo=timezone.utc)
+        evaluation["is_odds_feed_stale"] = bool(
+            is_today_eval and (lo_at is None or (datetime.now(timezone.utc) - lo_at) > timedelta(minutes=90))
+        )
         slate = _exec(conn, """
             SELECT id,created_at,to_jsonb(recommended_slates)->'rolling_board' AS board FROM recommended_slates
             WHERE league='NCAAM' AND source='cached' AND date_et=%s

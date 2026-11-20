@@ -618,13 +618,16 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       return tags.includes('sharp_backing') || tags.includes('rlm_confirmed');
     }).length;
     let staleOddsCount = 0;
+    let unlinedCount = 0;
     let trueNoBetCount = 0;
     gamesForLeague.forEach((game) => {
       const meta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
       if (!meta || meta.isActionable) return;
       const rLow = String(meta.reason || '').toLowerCase();
-      if (meta.odds_status === 'stale_odds' || rLow.includes('stale') || rLow.includes('no line') || rLow.includes('waiting')) {
+      if (meta.odds_status === 'stale_odds' || rLow.includes('stale')) {
         staleOddsCount += 1;
+      } else if (meta.odds_status === 'unlined' || rLow.includes('no line') || rLow.includes('waiting') || rLow.includes('unlined')) {
+        unlinedCount += 1;
       } else {
         trueNoBetCount += 1;
       }
@@ -640,6 +643,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         liveCount,
         liveTrendingWinCount,
         staleOddsCount,
+        unlinedCount,
         trueNoBetCount,
       },
     };
@@ -1223,15 +1227,15 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
               <h3 className="text-base font-bold text-slate-200">
                 {actionablePlays.length === 0
                   ? slateSummary.staleOddsCount > 0
-                    ? `Stale / Missing Odds on ${slateSummary.staleOddsCount} Game${slateSummary.staleOddsCount === 1 ? '' : 's'} (Not a True No-Bet)`
-                    : 'True No-Bet — No Games Passed Our Edge & Safety Checks Yet'
+                    ? `Stale Odds Hold on ${slateSummary.staleOddsCount} Game${slateSummary.staleOddsCount === 1 ? '' : 's'} (Not a True No-Bet)`
+                    : `True No-Bet Right Now — All ${slateSummary.trueNoBetCount || slateSummary.totalGames} Lined Games Evaluated`
                   : 'No Bets Match This Filter'}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
                 {actionablePlays.length === 0
                   ? slateSummary.staleOddsCount > 0
-                    ? `${slateSummary.staleOddsCount} game${slateSummary.staleOddsCount === 1 ? ' is' : 's are'} waiting on a fresh sportsbook line snapshot (${slateSummary.trueNoBetCount} evaluated as true no-bet). Click Refresh Odds & Recalculate below to pull live lines and re-score before tip-off.`
-                    : `All ${slateSummary.trueNoBetCount || slateSummary.totalGames} games have fresh lines and were evaluated as a true pass (no edge cleared our minimum thresholds). Check Close Calls below or browse All Games.`
+                    ? `${slateSummary.staleOddsCount} game${slateSummary.staleOddsCount === 1 ? ' has' : 's have'} odds older than 90 minutes. Click Recalculate Picks below to refresh lines before tip-off.`
+                    : `All ${slateSummary.trueNoBetCount || slateSummary.totalGames} lined games have fresh sportsbook odds and were evaluated as a true pass (no edge cleared our minimum thresholds${slateSummary.unlinedCount > 0 ? `; ${slateSummary.unlinedCount} non-D1/exhibition games have no sportsbook lines posted` : ''}). Check Close Calls below or browse All Games.`
                   : 'Switch back to All bets or browse All Games to inspect every matchup.'}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
