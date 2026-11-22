@@ -465,6 +465,14 @@ def main():
     market_total_error = 0.0
     mae_spread_vs_final = 0.0
     mae_total_vs_final = 0.0
+    dir_stats = {
+        'spread_05': [0, 0],
+        'spread_10': [0, 0],
+        'spread_lt14_05': [0, 0],
+        'spread_ge14_05': [0, 0],
+        'total_over_05': [0, 0],
+        'total_under_05': [0, 0],
+    }
 
     # Metrics (simulate mode)
     bets = []
@@ -531,11 +539,16 @@ def main():
                     'venue_state': g.get('venue_state'),
                 }, relax_gates=False, persist=False)
                 dbg = (res.get('debug') or {})
+                ctx = (res.get('context') or {})
             except Exception:
                 continue
 
             mu_spread = dbg.get('mu_spread_power')
+            if mu_spread is None:
+                mu_spread = ctx.get('mu_spread_power') if ctx.get('mu_spread_power') is not None else ctx.get('fair_spread_home')
             mu_total = dbg.get('mu_total_power')
+            if mu_total is None:
+                mu_total = ctx.get('mu_total_power') if ctx.get('mu_total_power') is not None else ctx.get('fair_total')
 
             # Final outcomes
             home_score = float(g.get('home_score'))
@@ -551,6 +564,15 @@ def main():
                     mae_spread_vs_close += abs(float(mu_spread) - close)
                     market_spread_error += abs(close + home_margin)
                     mae_spread_vs_final += abs(float(mu_spread) + home_margin)
+                    sp_diff = float(mu_spread) - close
+                    actual_home_sp = -home_margin
+                    if abs(sp_diff) >= 0.5 and abs(actual_home_sp - close) > 1e-9:
+                        won = (actual_home_sp < close) if sp_diff < 0 else (actual_home_sp > close)
+                        dir_stats['spread_05'][0 if won else 1] += 1
+                        bkey = 'spread_lt14_05' if abs(close) < 14.0 else 'spread_ge14_05'
+                        dir_stats[bkey][0 if won else 1] += 1
+                        if abs(sp_diff) >= 1.0:
+                            dir_stats['spread_10'][0 if won else 1] += 1
 
                 # Total MAE
                 if t_over and mu_total is not None:
@@ -559,6 +581,12 @@ def main():
                     mae_total_vs_close += abs(float(mu_total) - close)
                     market_total_error += abs(close - final_total)
                     mae_total_vs_final += abs(float(mu_total) - final_total)
+                    tot_diff = float(mu_total) - close
+                    if abs(tot_diff) >= 0.5 and abs(final_total - close) > 1e-9:
+                        if tot_diff > 0:
+                            dir_stats['total_over_05'][0 if final_total > close else 1] += 1
+                        else:
+                            dir_stats['total_under_05'][0 if final_total < close else 1] += 1
 
                 if len(samples) < 8:
                     samples.append({
@@ -659,6 +687,14 @@ def main():
         'market_spread_mae_vs_final': market_spread_error / n_spread if n_spread else None,
         'market_total_mae_vs_final': market_total_error / n_total if n_total else None,
         'mae_total_vs_final': (mae_total_vs_final / n_total) if n_total else None,
+        'directional_ats': {
+            k: {
+                'wins': w,
+                'losses': l,
+                'win_rate': round(w / (w + l), 4) if (w + l) else None,
+            }
+            for k, (w, l) in dir_stats.items()
+        } if mode == 'mae' else None,
         'simulation': sim,
         'env': {
             'NCAAM_W_BASE': os.getenv('NCAAM_W_BASE'),
