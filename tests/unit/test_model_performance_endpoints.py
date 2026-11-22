@@ -1221,9 +1221,9 @@ def test_ncaam_model_leak_fixes_and_clv_capture(monkeypatch):
     tau_feb = model._tau_for_market("SPREAD", game_month=2, min_rec_games=20, agree_count=3, mean_gap=2.0)
     assert tau_nov > tau_feb * 1.4
 
-    # 2. Early-season solo TOTAL OVER requires stricter EV (+6.3% bar) vs agreed/Under
+    # 2. Early-season solo TOTAL OVER requires stricter EV (+4.4% bar) vs agreed/Under (+3.5%)
     assert model._passes_publish_gates(
-        {"market": "TOTAL", "side": "over", "ev": 0.048, "edge_points": 2.0, "_is_early_season": True, "_agree_count_total": 1},
+        {"market": "TOTAL", "side": "over", "ev": 0.042, "edge_points": 2.0, "_is_early_season": True, "_agree_count_total": 1},
         None,
         True,
     ) is False
