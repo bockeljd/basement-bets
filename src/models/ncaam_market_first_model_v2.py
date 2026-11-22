@@ -2279,13 +2279,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "ev_per_unit": float(r['ev']),
                 "win_prob_lb10": lb10,
                 "confidence_0_100": conf_score,
+                "conviction_sources": int(agree_count),
+                "conviction_sources_total": int(agree_count_total),
                 "movement_tags": r.get('movement_tags') or [],
                 "sanity_reasons": r.get('sanity_reasons') or [],
             }
             top6_eligible = not has_top6_risk_flag(quality_input)
             quality_score = compute_top6_quality_score(quality_input)
+            is_smart_risk = bool(r.get('is_smart_risk', False))
+            risk_tier = str(r.get('risk_tier') or ('SMART_RISK' if is_smart_risk else 'CORE'))
             r['top6_eligible'] = top6_eligible
             r['quality_score'] = quality_score
+            r['is_smart_risk'] = is_smart_risk
+            r['risk_tier'] = risk_tier
 
             sizing = compute_recommended_bet_size(
                 win_prob,
@@ -2295,6 +2301,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 ev=r.get('ev'),
                 kelly_q=r.get('kelly'),
             )
+            if is_smart_risk:
+                capped_u = min(float(sizing.get('units') or 0.5), 0.5)
+                sizing = {
+                    **sizing,
+                    'units': round(capped_u, 2),
+                    'bankroll_pct': round(min(float(sizing.get('bankroll_pct') or capped_u), capped_u), 2),
+                    'sizing_tier': 'Half-Unit Smart Risk Play',
+                }
             r['suggested_units'] = sizing['units']
             r['recommended_units'] = sizing['units']
             r['bankroll_pct'] = sizing['bankroll_pct']
@@ -2341,6 +2355,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "movement_tags": r.get('movement_tags'),
                 "top6_eligible": top6_eligible,
                 "quality_score": quality_score,
+                "is_smart_risk": is_smart_risk,
+                "risk_tier": risk_tier,
+                "conviction_sources": int(agree_count),
+                "conviction_sources_total": int(agree_count_total),
                 "prediction_id": r.get('prediction_id'),
                 "signals": matchup_signals,
             }
@@ -2790,6 +2808,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "edge_points": edge_points_persist,
             "open_line": _extract_open_line_and_price(best_rec)[0] if best_rec else None,
             "open_price": _extract_open_line_and_price(best_rec)[1] if best_rec else None,
+            "risk_tier": (best_rec.get('risk_tier') or 'CORE') if best_rec else None,
+            "is_smart_risk": bool(best_rec.get('is_smart_risk', False)) if best_rec else False,
+            "quality_score": best_rec.get('quality_score') if best_rec else None,
+            "top6_eligible": best_rec.get('top6_eligible') if best_rec else True,
+            "suggested_units": best_rec.get('suggested_units') if best_rec else None,
             "clv_method": "odds_selector_v1",
             "debug": debug_info
         }
@@ -3241,7 +3264,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
         min_n = self.PUBLISH_MIN_N_TORVIK_OK if torvik_ok else self.PUBLISH_MIN_N_TORVIK_MISSING
         side_lower = str(rec.get("side") or "").strip().lower()
         tags = [str(t or "").strip().lower() for t in (rec.get("movement_tags") or [])]
-        has_sharp = ("sharp_backing" in tags) or ("rlm_confirmed" in tags) or ("lagging_book_edge" in tags)
+        sharp_edge_pts = rec.get("sharp_edge_pts")
+        has_sharp_price = False
+        try:
+            has_sharp_price = (sharp_edge_pts is not None and float(sharp_edge_pts) >= 0.5)
+        except Exception:
+            has_sharp_price = False
+        has_sharp = (
+            ("sharp_backing" in tags)
+            or ("rlm_confirmed" in tags)
+            or ("lagging_book_edge" in tags)
+            or ("sharp_price_edge" in tags)
+            or has_sharp_price
+        )
         is_early = bool(rec.get("_is_early_season"))
         min_games = rec.get("_min_rec_games")
         low_sample = min_games is not None and int(min_games) < 6
@@ -3263,7 +3298,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             try:
                 abs_sp_line = abs(float(market_line_home))
                 if 6.0 <= abs_sp_line < 14.0 and os.getenv("NCAAM_DISABLE_MID_SPREAD_GATE") is None:
-                    mid_bump = 0.0 if has_sharp else 0.004
+                    mid_bump = 0.0 if (has_sharp or (agree_sp is not None and int(agree_sp) >= 2)) else 0.004
                     min_ev += max(0.0, mid_bump)
                 elif 14.0 <= abs_sp_line < 22.0:
                     min_ev += 0.006 if has_sharp else 0.014
@@ -3302,19 +3337,31 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return False
 
         lb10 = rec.get("win_prob_lb10")
+        is_smart_risk_play = False
         if lb10 is not None:
-            min_lb10 = float(
+            base_min_lb10 = float(
                 os.getenv(
                     "PUBLISH_MIN_WINPROB_LB10",
                     str(getattr(self, "PUBLISH_MIN_WINPROB_LB10", 0.52)),
                 )
             )
-            # High-EV 3/3-model consensus plays (e.g. +3.5%+ EV with all 3 efficiency feeds agreeing)
-            # may clear at 51.0% lb10 so legitimate November edges aren't over-throttled.
-            if market == "SPREAD" and ev >= 0.035 and (agree_sp is not None and int(agree_sp) >= 3):
-                min_lb10 = min(min_lb10, 0.51)
-            if float(lb10) < min_lb10:
+            min_lb10 = base_min_lb10
+            # High-return Smart Risk tier: unlock strong-EV + consensus/sharp plays down to 50.6% lb10
+            if market == "SPREAD" and ev >= 0.035 and (
+                (agree_sp is not None and int(agree_sp) >= 3)
+                or (agree_sp is not None and int(agree_sp) >= 2 and (ev >= 0.036 or has_sharp))
+                or (has_sharp and ev >= 0.038)
+            ):
+                min_lb10 = min(min_lb10, 0.506)
+            elif market == "TOTAL" and ev >= 0.040 and (
+                (agree_tot is not None and int(agree_tot) >= 2) or has_sharp
+            ):
+                min_lb10 = min(min_lb10, 0.506)
+            lb10_val = float(lb10)
+            if lb10_val < min_lb10:
                 return False
+            if lb10_val < base_min_lb10:
+                is_smart_risk_play = True
 
         if (stats.get("n") or 0) < min_n:
             return False
@@ -3348,7 +3395,20 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if lb < 0.0 and not override_ok:
             return False
 
-        # attach stats for debugging/UI if needed
+        # attach risk tier + stats for debugging/UI
+        if is_smart_risk_play:
+            rec["is_smart_risk"] = True
+            rec["risk_tier"] = "SMART_RISK"
+            tags_list = list(rec.get("movement_tags") or [])
+            if "smart_risk_high_return" not in tags_list:
+                tags_list.append("smart_risk_high_return")
+            rec["movement_tags"] = tags_list
+        else:
+            rec["is_smart_risk"] = False
+            rec["risk_tier"] = "CORE"
+            if rec.get("movement_tags"):
+                rec["movement_tags"] = [t for t in rec["movement_tags"] if t != "smart_risk_high_return"]
+
         rec["archetype"] = {"key": key, "n": n, "mean": mean, "lb95": lb, "override_ok": override_ok}
         return True
 
@@ -4650,8 +4710,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 gate_msg = (
                     f"EV {ev_f * 100:+.1f}% / edge {edge_val if edge_val is not None else 0:+.1f} pts below strict publish gate"
                 )
+            cand_tags = list(top_cand.get('movement_tags') or [])
+            try:
+                cand_sharp_edge = _safe_float(top_cand.get('sharp_edge_pts'))
+                if cand_sharp_edge is not None:
+                    if cand_sharp_edge >= 0.5 and 'sharp_price_edge' not in cand_tags:
+                        cand_tags.append('sharp_price_edge')
+                    elif cand_sharp_edge <= -1.0 and 'contra_sharp_line' not in cand_tags:
+                        cand_tags.append('contra_sharp_line')
+            except Exception:
+                pass
             snap['_best_candidate'] = {
                 'bet_type': mkt,
+                'side': side.upper(),
                 'selection': sel_lbl,
                 'market_line': line_val,
                 'fair_line': fair_val,
@@ -4661,6 +4732,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 'price': top_cand.get('price'),
                 'book': top_cand.get('book'),
                 'win_prob': top_cand.get('win_prob'),
+                'win_prob_lb10': top_cand.get('win_prob_lb10'),
+                'conviction_sources': top_cand.get('_agree_count'),
+                'conviction_sources_total': top_cand.get('_agree_count_total'),
+                'movement_tags': cand_tags,
                 'confidence': self._confidence_label_from_winprob(
                     top_cand.get('win_prob_lb10'),
                     fallback_win_prob=top_cand.get('win_prob'),

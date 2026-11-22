@@ -5867,7 +5867,9 @@ async def get_ncaam_parlays_today(
             p_latest.mu_final,
             p_latest.sigma,
             p_latest.pick AS pred_pick,
-            p_latest.model_version
+            p_latest.model_version,
+            dtp_latest.context_json AS dtp_context_json,
+            dtp_latest.rec_json AS dtp_rec_json
           FROM events e
           JOIN LATERAL (
             SELECT line_value
@@ -5893,6 +5895,13 @@ async def get_ncaam_parlays_today(
             ORDER BY analyzed_at DESC
             LIMIT 1
           ) p_latest ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT context_json, rec_json
+            FROM daily_top_picks
+            WHERE event_id = e.id AND league = 'NCAAM'
+            ORDER BY date_et DESC
+            LIMIT 1
+          ) dtp_latest ON TRUE
           WHERE e.league = 'NCAAM'
             AND COALESCE(e.neutral_site, FALSE) = FALSE
             AND {date_predicate}
@@ -5917,13 +5926,31 @@ async def get_ncaam_parlays_today(
                 home_sp = float(hr.get("home_spread"))
                 ml_price = int(hr.get("ml_home_price"))
                 mu_raw = hr.get("mu_final")
+                sigma_raw = hr.get("sigma")
                 pred_pick = str(hr.get("pred_pick") or "").strip().lower()
                 if mu_raw is not None:
                     mu_f = float(mu_raw)
                     fair_sp_home = mu_f if (not pred_pick or pred_pick == home_team.strip().lower() or pred_pick.startswith(home_team.strip().lower())) else -mu_f
                 else:
-                    fair_sp_home = home_sp
-                sigma_val = max(8.0, float(hr.get("sigma") or 10.8))
+                    ctx_raw = hr.get("dtp_context_json")
+                    if isinstance(ctx_raw, str):
+                        try:
+                            ctx_raw = json.loads(ctx_raw)
+                        except Exception:
+                            ctx_raw = None
+                    ctx_dict = ctx_raw if isinstance(ctx_raw, dict) else {}
+                    dtp_fair = (
+                        ctx_dict.get("fair_spread_home")
+                        if ctx_dict.get("fair_spread_home") is not None
+                        else ctx_dict.get("mu_spread_power")
+                    )
+                    if dtp_fair is not None:
+                        fair_sp_home = float(dtp_fair)
+                        if sigma_raw is None and ctx_dict.get("sigma_spread") is not None:
+                            sigma_raw = ctx_dict.get("sigma_spread")
+                    else:
+                        fair_sp_home = home_sp
+                sigma_val = max(8.0, float(sigma_raw or 10.8))
                 p_raw = 0.5 * (1.0 - math.erf(float(fair_sp_home) / (sigma_val * math.sqrt(2.0))))
                 wp_cal = float(cal_model._calibrate_win_prob(p_raw))
                 ev_leg = wp_cal * (dec_from_american(ml_price) - 1.0) - (1.0 - wp_cal)
@@ -5978,74 +6005,147 @@ async def get_ncaam_parlays_today(
 
     # Enumerate all 2-leg combos (different events)
     combos = []
-    # Also include actionable +EV Spread legs from daily_top_picks so 2-leg parlays
-    # can pair a high-value Spread leg with a sweet-spot ML favorite (or two +EV Spreads).
-    try:
-        sp_date = target_date
-        if not sp_date:
+    # Also include actionable +EV Spread/Total legs and high-EV Smart Risk leans from daily_top_picks
+    # so 2-leg parlays can combine ML favorites, +EV Spreads, +EV Totals, and Smart-Risk value plays.
+    if _strategy != 'home_fav':
+        def _leg_has_contra_risk(raw_tags) -> bool:
+            if not raw_tags:
+                return False
+            if isinstance(raw_tags, str):
+                tag_list = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+            elif isinstance(raw_tags, (list, tuple, set)):
+                tag_list = [str(t or "").strip().lower() for t in raw_tags]
+            else:
+                return False
+            return any(
+                t in ("contra_sharp_money", "contra_sharp_line") or t.startswith("reverse_steam=")
+                for t in tag_list
+            )
+
+        try:
+            sp_date = target_date
+            if not sp_date:
+                with get_db_connection() as conn:
+                    sp_date = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
             with get_db_connection() as conn:
-                sp_date = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
-        with get_db_connection() as conn:
-            sp_rows = _exec(
-                conn,
-                """
-                SELECT d.event_id, d.rec_json, e.away_team, e.home_team, e.start_time
-                FROM daily_top_picks d
-                JOIN events e ON e.id = d.event_id
-                WHERE d.league = 'NCAAM'
-                  AND d.date_et = %s
-                  AND d.is_actionable = TRUE
-                  AND d.rec_json IS NOT NULL
-                """,
-                (sp_date,),
-            ).fetchall()
-        seen_sp_eids = {leg.get("event_id") for leg in norm_legs if leg.get("event_id")}
-        for sr in (sp_rows or []):
-            srd = dict(sr)
-            eid = srd.get("event_id")
-            if not eid or eid in seen_sp_eids:
-                continue
-            rj = srd.get("rec_json")
-            if isinstance(rj, str):
-                try:
-                    rj = json.loads(rj)
-                except Exception:
-                    rj = None
-            if not isinstance(rj, dict):
-                continue
-            bt = str(rj.get("bet_type") or "").upper()
-            if bt not in ("SPREAD", "SPREAD_1H"):
-                continue
-            ev_sp = float(rj.get("ev") or 0.0)
-            wp_sp = float(rj.get("win_prob") or 0.0)
-            pr_sp = int(rj.get("price") or -110)
-            if ev_sp < 0.025 or wp_sp < 0.535:
-                continue
-            sel_str = str(rj.get("selection") or rj.get("pick") or "").strip()
-            home_nm = str(srd.get("home_team") or "").strip()
-            sp_side = "HOME" if (home_nm and home_nm.lower() in sel_str.lower()) else "AWAY"
-            norm_legs.append({
-                "event_id": eid,
-                "matchup": f"{srd.get('away_team')} @ {srd.get('home_team')}",
-                "away_team": srd.get("away_team"),
-                "home_team": srd.get("home_team"),
-                "start_time": str(srd.get("start_time") or ""),
-                "team_pick": sel_str,
-                "pick": sel_str,
-                "selection": sel_str,
-                "market_type": bt,
-                "side": sp_side,
-                "price": pr_sp,
-                "book": rj.get("book") or "Consensus",
-                "win_prob": wp_sp,
-                "ev": ev_sp,
-                "ev_per_unit": ev_sp,
-                "outcome": "PENDING",
-                "is_sweet_spot_7pt": False,
-            })
-            seen_sp_eids.add(eid)
-    except Exception as sp_e:
-        print(f"[parlays] spread leg enrichment skipped: {sp_e}")
+                sp_rows = _exec(
+                    conn,
+                    """
+                    SELECT d.event_id, d.is_actionable, d.rec_json, d.context_json,
+                           e.away_team, e.home_team, e.start_time
+                    FROM daily_top_picks d
+                    JOIN events e ON e.id = d.event_id
+                    WHERE d.league = 'NCAAM'
+                      AND d.date_et = %s
+                    """,
+                    (sp_date,),
+                ).fetchall()
+            seen_sp_eids = {leg.get("event_id") for leg in norm_legs if leg.get("event_id")}
+            for sr in (sp_rows or []):
+                srd = dict(sr)
+                eid = srd.get("event_id")
+                if not eid or eid in seen_sp_eids:
+                    continue
+
+                is_act = bool(srd.get("is_actionable"))
+                rj = srd.get("rec_json")
+                if isinstance(rj, str):
+                    try:
+                        rj = json.loads(rj)
+                    except Exception:
+                        rj = None
+                cj = srd.get("context_json")
+                if isinstance(cj, str):
+                    try:
+                        cj = json.loads(cj)
+                    except Exception:
+                        cj = None
+
+                cand_obj = None
+                leg_smart_risk = False
+                if is_act and isinstance(rj, dict):
+                    bt = str(rj.get("bet_type") or "").upper()
+                    if bt in ("SPREAD", "SPREAD_1H", "TOTAL", "TOTAL_1H"):
+                        ev_val = float(rj.get("ev") or 0.0)
+                        wp_val = float(rj.get("win_prob") or 0.0)
+                        if ev_val >= 0.02 and wp_val >= 0.525 and not _leg_has_contra_risk(rj.get("movement_tags")):
+                            cand_obj = rj
+                            leg_smart_risk = bool(rj.get("is_smart_risk", False))
+                elif (not is_act) and isinstance(cj, dict):
+                    lean = cj.get("closest_lean")
+                    if isinstance(lean, dict):
+                        bt = str(lean.get("bet_type") or "").upper()
+                        if bt in ("SPREAD", "TOTAL"):
+                            ev_val = float(lean.get("ev") or 0.0)
+                            wp_val = float(lean.get("win_prob") or 0.0)
+                            if ev_val >= 0.025 and wp_val >= 0.53 and not _leg_has_contra_risk(lean.get("movement_tags")):
+                                cand_obj = lean
+                                leg_smart_risk = True
+
+                if not cand_obj:
+                    continue
+
+                bt = str(cand_obj.get("bet_type") or "").upper()
+                ev_sp = float(cand_obj.get("ev") or 0.0)
+                wp_sp = float(cand_obj.get("win_prob") or 0.0)
+                pr_sp = int(cand_obj.get("price") or -110)
+                sel_str = str(cand_obj.get("selection") or cand_obj.get("pick") or "").strip()
+                if not sel_str:
+                    continue
+                home_nm = str(srd.get("home_team") or "").strip()
+                if bt in ("TOTAL", "TOTAL_1H"):
+                    side_hint = str(cand_obj.get("side") or sel_str).upper()
+                    sp_side = "OVER" if "OVER" in side_hint else "UNDER"
+                else:
+                    side_hint = str(cand_obj.get("side") or "").strip().upper()
+                    if side_hint in ("HOME", "AWAY"):
+                        sp_side = side_hint
+                    else:
+                        sp_side = "HOME" if (home_nm and home_nm.lower() in sel_str.lower()) else "AWAY"
+
+                mkt_line_val = cand_obj.get("market_line")
+                if mkt_line_val is None:
+                    m_ln_match = re.search(r"([+-]?\d+(?:\.\d+)?)\s*$", sel_str)
+                    if m_ln_match:
+                        try:
+                            mkt_line_val = float(m_ln_match.group(1))
+                        except Exception:
+                            mkt_line_val = None
+                else:
+                    try:
+                        mkt_line_val = float(mkt_line_val)
+                    except Exception:
+                        mkt_line_val = None
+
+                risk_tier_val = str(
+                    cand_obj.get("risk_tier") or ("SMART_RISK" if leg_smart_risk else "CORE")
+                )
+                norm_legs.append({
+                    "event_id": eid,
+                    "matchup": f"{srd.get('away_team')} @ {srd.get('home_team')}",
+                    "away_team": srd.get("away_team"),
+                    "home_team": srd.get("home_team"),
+                    "start_time": str(srd.get("start_time") or ""),
+                    "team_pick": sel_str,
+                    "pick": sel_str,
+                    "selection": sel_str,
+                    "market_type": bt,
+                    "side": sp_side,
+                    "market_line": mkt_line_val,
+                    "price": pr_sp,
+                    "book": cand_obj.get("book") or "Consensus",
+                    "win_prob": wp_sp,
+                    "ev": ev_sp,
+                    "ev_per_unit": ev_sp,
+                    "outcome": "PENDING",
+                    "is_home_pick": (sp_side == "HOME"),
+                    "is_sweet_spot_7pt": False,
+                    "is_smart_risk": leg_smart_risk,
+                    "risk_tier": risk_tier_val,
+                })
+                seen_sp_eids.add(eid)
+        except Exception as sp_e:
+            print(f"[parlays] spread/total leg enrichment skipped: {sp_e}")
 
     # Attach latest DraftKings & FanDuel prices to every leg so DK/FD always take precedent
     # and 2-leg parlays compute exact same-book DK or FD parlay odds.
@@ -6062,6 +6162,7 @@ async def get_ncaam_parlays_today(
                       market_type,
                       side,
                       CASE WHEN LOWER(book) LIKE '%%draftkings%%' THEN 'DraftKings' ELSE 'FanDuel' END AS canon_book,
+                      line_value,
                       price
                     FROM odds_snapshots
                     WHERE event_id = ANY(%s)
@@ -6077,13 +6178,29 @@ async def get_ncaam_parlays_today(
             for r in (dk_fd_rows or []):
                 rd = dict(r)
                 k = (str(rd["event_id"]), str(rd["market_type"]).upper(), str(rd["side"]).upper())
-                dk_fd_map.setdefault(k, {})[rd["canon_book"]] = int(rd["price"])
+                dk_fd_map.setdefault(k, {})[rd["canon_book"]] = {
+                    "price": int(rd["price"]),
+                    "line_value": (float(rd["line_value"]) if rd.get("line_value") is not None else None),
+                }
             for leg in norm_legs:
                 mkt_k = str(leg.get("market_type") or "MONEYLINE").upper()
                 if mkt_k == "ML":
                     mkt_k = "MONEYLINE"
                 side_k = str(leg.get("side") or ("HOME" if leg.get("is_home_pick") else "AWAY")).upper()
-                prices_by_book = dk_fd_map.get((str(leg.get("event_id")), mkt_k, side_k), {})
+                raw_bk_map = dk_fd_map.get((str(leg.get("event_id")), mkt_k, side_k), {})
+                leg_line = leg.get("market_line")
+                prices_by_book = {}
+                for bk_name, bk_info in raw_bk_map.items():
+                    if not isinstance(bk_info, dict):
+                        continue
+                    bk_lv = bk_info.get("line_value")
+                    if (
+                        mkt_k in ("MONEYLINE", "ML")
+                        or leg_line is None
+                        or bk_lv is None
+                        or abs(float(bk_lv) - float(leg_line)) < 0.01
+                    ):
+                        prices_by_book[bk_name] = int(bk_info["price"])
                 leg["_dk_fd_prices"] = prices_by_book
                 if prices_by_book:
                     best_bk, best_pr = max(prices_by_book.items(), key=lambda kv: dec_from_american(kv[1]))
@@ -6166,11 +6283,26 @@ async def get_ncaam_parlays_today(
 
                 if "SPREAD" in mkt:
                     m_ln = _re.search(r"([+-]\d+(?:\.\d+)?)\s*$", pick_str)
-                    if not m_ln:
+                    if m_ln:
+                        ln_val = float(m_ln.group(1))
+                    elif lg.get("market_line") is not None:
+                        ln_val = float(lg["market_line"])
+                    else:
                         continue
-                    ln_val = float(m_ln.group(1))
                     margin = ((hs - as_) if is_home else (as_ - hs)) + ln_val
                     lg["outcome"] = "PUSH" if margin == 0 else ("WON" if margin > 0 else "LOST")
+                elif "TOTAL" in mkt:
+                    m_ln = _re.search(r"(\d+(?:\.\d+)?)\s*$", pick_str)
+                    if not m_ln and lg.get("market_line") is not None:
+                        ln_val = float(lg["market_line"])
+                    elif m_ln:
+                        ln_val = float(m_ln.group(1))
+                    else:
+                        continue
+                    tot_pts = hs + as_
+                    is_over = ("OVER" in pick_str.upper()) or (str(lg.get("side") or "").upper() == "OVER")
+                    diff = (tot_pts - ln_val) if is_over else (ln_val - tot_pts)
+                    lg["outcome"] = "PUSH" if diff == 0 else ("WON" if diff > 0 else "LOST")
                 else:
                     diff = (hs - as_) if is_home else (as_ - hs)
                     lg["outcome"] = "PUSH" if diff == 0 else ("WON" if diff > 0 else "LOST")

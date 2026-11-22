@@ -260,7 +260,7 @@ def has_top6_risk_flag(row: dict) -> bool:
 
 
 def compute_top6_quality_score(row: dict) -> float:
-    """Compute quality-weighted ranking score (curbs extreme-edge outliers, OVER bias, and 14-22 spreads)."""
+    """Compute quality-weighted ranking score (curbs extreme-edge outliers & blowouts; rewards model consensus)."""
     if not isinstance(row, dict):
         return -999.0
 
@@ -300,31 +300,29 @@ def compute_top6_quality_score(row: dict) -> float:
     rec_side = row["rec_json"].get("side") if isinstance(row.get("rec_json"), dict) else None
     side_text = str(_first_present(row.get("side"), rec_side, row.get("selection"), row.get("pick")) or "").upper()
     raw_line = _first_present(row.get("market_line"), row.get("bet_line"), row.get("line"))
-    if mkt == "TOTAL":
-        if "OVER" in side_text:
-            score -= 0.015
-        elif "UNDER" in side_text:
-            score += 0.008
+    if mkt in ("TOTAL", "TOTAL_1H"):
+        if "UNDER" in side_text:
+            score += 0.003
         try:
             if raw_line is not None:
                 tot_line = abs(float(raw_line))
-                if 140.0 <= tot_line < 152.0:
-                    score += 0.005
-                elif tot_line >= 152.0 and "OVER" in side_text:
-                    score -= 0.012
+                if 138.0 <= tot_line <= 156.0:
+                    score += 0.004
         except Exception:
             pass
-    elif mkt == "SPREAD":
+    elif mkt in ("SPREAD", "SPREAD_1H"):
         try:
             if raw_line is not None:
                 signed_line = float(raw_line)
                 abs_line = abs(signed_line)
                 if abs_line < 6.0:
                     score += 0.005
-                elif 14.0 <= abs_line < 22.0:
-                    score -= 0.012
                 elif 6.0 <= abs_line < 14.0:
-                    score -= 0.022
+                    score += 0.003
+                elif 14.0 <= abs_line < 22.0:
+                    score -= 0.018
+                elif abs_line >= 22.0:
+                    score -= 0.030
 
                 side_hint = str(_first_present(row.get("side"), rec_side) or "").strip().lower()
                 is_away = None
@@ -351,6 +349,30 @@ def compute_top6_quality_score(row: dict) -> float:
                     score -= 0.016
         except Exception:
             pass
+
+    rec_obj = row.get("rec_json") if isinstance(row.get("rec_json"), dict) else {}
+    ctx_obj = row.get("context") if isinstance(row.get("context"), dict) else {}
+    if mkt in ("TOTAL", "TOTAL_1H"):
+        raw_agree = _first_present(
+            row.get("conviction_sources_total"),
+            rec_obj.get("conviction_sources_total"),
+            ctx_obj.get("conviction_sources_total"),
+        )
+    else:
+        raw_agree = _first_present(
+            row.get("conviction_sources"),
+            rec_obj.get("conviction_sources"),
+            ctx_obj.get("conviction_sources"),
+        )
+    try:
+        if raw_agree is not None:
+            agree_n = int(raw_agree)
+            if agree_n >= 3:
+                score += 0.012
+            elif agree_n == 2:
+                score += 0.006
+    except Exception:
+        pass
 
     tags = [t.lower() for t in _extract_movement_tags(row)]
     if "sharp_backing" in tags:

@@ -1570,6 +1570,193 @@ def test_ncaam_model_sharp_benchmark_anchoring_edge_bonus_and_contra_penalty(mon
     assert has_top6_risk_flag(rec_b) is True
 
 
+def test_parlays_today_uses_context_json_totals_closest_lean_and_dk_line_match(monkeypatch):
+    import src.database as db
+
+    def fake_exec(_conn, sql, params=None):
+        s = " ".join(sql.split()).lower()
+        if "with latest_preds as" in s:
+            return _FakeCursor([])
+        if "dtp_latest.context_json as dtp_context_json" in s:
+            return _FakeCursor([
+                {
+                    "event_id": "evt_hf",
+                    "away_team": "Siena",
+                    "home_team": "Duke",
+                    "start_time": "2026-11-22T23:00:00Z",
+                    "home_spread": -6.5,
+                    "ml_home_price": -240,
+                    "ml_home_book": "DraftKings",
+                    "mu_final": None,
+                    "sigma": None,
+                    "pred_pick": None,
+                    "model_version": None,
+                    "dtp_context_json": json.dumps({"fair_spread_home": -10.0, "sigma_spread": 10.5}),
+                    "dtp_rec_json": None,
+                }
+            ])
+        if "from daily_top_picks d join events e on e.id = d.event_id" in s:
+            return _FakeCursor([
+                {
+                    "event_id": "evt_tot",
+                    "is_actionable": True,
+                    "rec_json": json.dumps({
+                        "bet_type": "TOTAL",
+                        "side": "over",
+                        "selection": "OVER 148.5",
+                        "market_line": 148.5,
+                        "price": -108,
+                        "book": "FanDuel",
+                        "win_prob": 0.56,
+                        "ev": 0.075,
+                        "movement_tags": [],
+                        "is_smart_risk": False,
+                        "risk_tier": "CORE",
+                    }),
+                    "context_json": None,
+                    "away_team": "Marist",
+                    "home_team": "Iona",
+                    "start_time": "2026-11-22T23:30:00Z",
+                },
+                {
+                    "event_id": "evt_sr",
+                    "is_actionable": False,
+                    "rec_json": None,
+                    "context_json": json.dumps({
+                        "closest_lean": {
+                            "bet_type": "SPREAD",
+                            "side": "AWAY",
+                            "selection": "Rider +4.5",
+                            "market_line": 4.5,
+                            "price": -105,
+                            "book": "DraftKings",
+                            "win_prob": 0.55,
+                            "ev": 0.05,
+                            "movement_tags": [],
+                        }
+                    }),
+                    "away_team": "Rider",
+                    "home_team": "Manhattan",
+                    "start_time": "2026-11-22T23:45:00Z",
+                },
+            ])
+        if "from odds_snapshots" in s and "canon_book" in s:
+            # DraftKings has a DIFFERENT line (-150.5) on evt_tot; must NOT overwrite -108 at 148.5!
+            return _FakeCursor([
+                {
+                    "event_id": "evt_tot",
+                    "market_type": "TOTAL",
+                    "side": "OVER",
+                    "canon_book": "DraftKings",
+                    "line_value": 150.5,
+                    "price": 115,
+                },
+                {
+                    "event_id": "evt_sr",
+                    "market_type": "SPREAD",
+                    "side": "AWAY",
+                    "canon_book": "DraftKings",
+                    "line_value": 4.5,
+                    "price": -105,
+                },
+                {
+                    "event_id": "evt_hf",
+                    "market_type": "MONEYLINE",
+                    "side": "HOME",
+                    "canon_book": "DraftKings",
+                    "line_value": None,
+                    "price": -240,
+                },
+            ])
+        if "join game_results g on g.event_id = e.id" in s:
+            return _FakeCursor([
+                {
+                    "event_id": "evt_hf",
+                    "home_team": "Duke",
+                    "away_team": "Siena",
+                    "home_score": 82,
+                    "away_score": 70,
+                    "home_score_1h": 41,
+                    "away_score_1h": 34,
+                    "final": True,
+                },
+                {
+                    "event_id": "evt_tot",
+                    "home_team": "Iona",
+                    "away_team": "Marist",
+                    "home_score": 80,
+                    "away_score": 72,
+                    "home_score_1h": 39,
+                    "away_score_1h": 35,
+                    "final": True,
+                },
+                {
+                    "event_id": "evt_sr",
+                    "home_team": "Manhattan",
+                    "away_team": "Rider",
+                    "home_score": 71,
+                    "away_score": 70,
+                    "home_score_1h": 36,
+                    "away_score_1h": 34,
+                    "final": True,
+                },
+            ])
+        return _FakeCursor([("2026-11-22",)])
+
+    monkeypatch.setattr(db, "get_db_connection", lambda: _FakeConn())
+    monkeypatch.setattr(db, "_exec", fake_exec)
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+
+    client = TestClient(app)
+    resp = client.get(
+        "/api/ncaam/parlays/today?date=2026-11-22&parlay_odds_lo=-120&parlay_odds_hi=500",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["legs_considered"] == 3
+    all_combos = body["high_confidence"] + body["payout_band"]
+    assert len(all_combos) >= 1
+    legs_flat = [lg for c in all_combos for lg in c["legs"]]
+    assert any(lg.get("is_sweet_spot_7pt") and lg.get("outcome") == "WON" for lg in legs_flat)
+    assert any(lg.get("market_type") == "TOTAL" and lg.get("price") == -108 and lg.get("outcome") == "WON" for lg in legs_flat)
+    assert any(lg.get("risk_tier") == "SMART_RISK" and lg.get("outcome") == "WON" for lg in legs_flat)
+
+
+def test_backtest_simulate_summarizes_risk_tier_top6_and_parlays():
+    from src.scripts.backtest_ncaam_model import summarize_simulate_backtest
+
+    bets = [
+        # Day 1: 7 bets so Top 6 drops the lowest-quality one (event e7)
+        {"event_id": "e1", "day_et": "2026-11-20", "market_type": "SPREAD", "bet_line": -7.5, "ev_per_unit": 0.06, "win_prob_lb10": 0.54, "conviction_sources": 3, "is_smart_risk": False, "risk_tier": "CORE", "outcome": "WIN", "pnl_units": 0.9091},
+        {"event_id": "e2", "day_et": "2026-11-20", "market_type": "TOTAL", "side": "over", "bet_line": 146.5, "ev_per_unit": 0.055, "win_prob_lb10": 0.535, "conviction_sources_total": 2, "is_smart_risk": False, "risk_tier": "CORE", "outcome": "WIN", "pnl_units": 0.9091},
+        {"event_id": "e3", "day_et": "2026-11-20", "market_type": "SPREAD", "bet_line": -4.5, "ev_per_unit": 0.05, "win_prob_lb10": 0.53, "is_smart_risk": False, "risk_tier": "CORE", "outcome": "WIN", "pnl_units": 0.9091},
+        {"event_id": "e4", "day_et": "2026-11-20", "market_type": "SPREAD", "bet_line": -8.5, "ev_per_unit": 0.045, "win_prob_lb10": 0.514, "conviction_sources": 2, "is_smart_risk": True, "risk_tier": "SMART_RISK", "outcome": "WIN", "pnl_units": 0.9091},
+        {"event_id": "e5", "day_et": "2026-11-20", "market_type": "TOTAL", "side": "under", "bet_line": 142.5, "ev_per_unit": 0.042, "win_prob_lb10": 0.512, "conviction_sources_total": 2, "is_smart_risk": True, "risk_tier": "SMART_RISK", "outcome": "LOSS", "pnl_units": -1.0},
+        {"event_id": "e6", "day_et": "2026-11-20", "market_type": "SPREAD", "bet_line": -3.5, "ev_per_unit": 0.038, "win_prob_lb10": 0.525, "is_smart_risk": False, "risk_tier": "CORE", "outcome": "WIN", "pnl_units": 0.9091},
+        {"event_id": "e7", "day_et": "2026-11-20", "market_type": "SPREAD", "bet_line": -23.5, "ev_per_unit": 0.032, "win_prob_lb10": 0.521, "is_smart_risk": False, "risk_tier": "CORE", "outcome": "LOSS", "pnl_units": -1.0},
+    ]
+    parlay_legs = [
+        {"event_id": "p1", "day_et": "2026-11-20", "market_type": "MONEYLINE", "pick": "Duke", "price": -220, "win_prob": 0.74, "ev": 0.075, "risk_tier": "CORE", "outcome": "WIN"},
+        {"event_id": "p2", "day_et": "2026-11-20", "market_type": "MONEYLINE", "pick": "Kansas", "price": -200, "win_prob": 0.72, "ev": 0.080, "risk_tier": "CORE", "outcome": "WIN"},
+        {"event_id": "p3", "day_et": "2026-11-20", "market_type": "SPREAD", "pick": "Iona -4.5", "price": -110, "win_prob": 0.57, "ev": 0.088, "risk_tier": "CORE", "outcome": "WIN"},
+        {"event_id": "p4", "day_et": "2026-11-20", "market_type": "TOTAL", "pick": "OVER 148.5", "price": -105, "win_prob": 0.56, "ev": 0.093, "risk_tier": "SMART_RISK", "outcome": "PUSH"},
+        {"event_id": "p5", "day_et": "2026-11-20", "market_type": "SPREAD", "pick": "Rider +3.5", "price": 100, "win_prob": 0.535, "ev": 0.070, "risk_tier": "SMART_RISK", "outcome": "WIN"},
+        {"event_id": "p6", "day_et": "2026-11-20", "market_type": "SPREAD", "pick": "Siena +5.5", "price": -108, "win_prob": 0.55, "ev": 0.059, "risk_tier": "CORE", "outcome": "WIN"},
+    ]
+    sim = summarize_simulate_backtest(bets, parlay_legs)
+    assert sim["n_bets"] == 7
+    assert sim["by_risk_tier"]["CORE"]["n_bets"] == 5
+    assert sim["by_risk_tier"]["SMART_RISK"]["n_bets"] == 2
+    assert sim["top6_curated"]["n_bets"] == 6
+    assert sim["top6_curated"]["wins"] == 5
+    assert sim["top6_curated"]["losses"] == 1
+    assert sim["parlays"]["n_parlays"] >= 2
+    assert sim["parlays"]["plus_money_parlays"]["n_parlays"] >= 1
+    assert sim["parlays"]["total_pnl_units"] > 0.0
+
+
+
 
 
 

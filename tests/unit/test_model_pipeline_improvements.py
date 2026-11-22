@@ -2442,6 +2442,161 @@ def test_barttorvik_adj_tempo_index44_and_kenpom_continuity_priority(monkeypatch
     assert res_high_cont["venue"] == "T-Mobile Arena"
 
 
+def test_calibrated_top6_quality_score_and_smart_risk_gate(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+    from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+    from src.utils.model_performance import compute_top6_quality_score
+
+    # 1. Spread bucket & consensus scoring
+    base_sp = {
+        "market_type": "SPREAD",
+        "side": "home",
+        "home_team": "Home Univ",
+        "away_team": "Away State",
+        "ev_per_unit": 0.045,
+        "win_prob_lb10": 0.53,
+        "movement_tags": [],
+    }
+    q_comp = compute_top6_quality_score({**base_sp, "market_line": -8.5})
+    q_blow1 = compute_top6_quality_score({**base_sp, "market_line": -16.5})
+    q_blow2 = compute_top6_quality_score({**base_sp, "market_line": -24.5})
+    assert q_comp > q_blow1 > q_blow2
+
+    q_agree1 = compute_top6_quality_score({**base_sp, "market_line": -8.5, "conviction_sources": 1})
+    q_agree2 = compute_top6_quality_score({**base_sp, "market_line": -8.5, "conviction_sources": 2})
+    q_agree3 = compute_top6_quality_score({**base_sp, "market_line": -8.5, "conviction_sources": 3})
+    assert q_agree2 == pytest.approx(q_agree1 + 0.006)
+    assert q_agree3 == pytest.approx(q_agree1 + 0.012)
+
+    # Higher-EV OVER 155.0 outranks lower-EV UNDER 155.0 (old -0.027 penalty removed)
+    q_over = compute_top6_quality_score({
+        "market_type": "TOTAL",
+        "side": "over",
+        "selection": "OVER 155.0",
+        "market_line": 155.0,
+        "ev_per_unit": 0.055,
+        "win_prob_lb10": 0.53,
+    })
+    q_under = compute_top6_quality_score({
+        "market_type": "TOTAL",
+        "side": "under",
+        "selection": "UNDER 155.0",
+        "market_line": 155.0,
+        "ev_per_unit": 0.042,
+        "win_prob_lb10": 0.53,
+    })
+    assert q_over > q_under
+
+    # 2. Smart Risk tier in _passes_publish_gates + 0.5u cap in analyze()
+    model = NCAAMMarketFirstModelV2()
+    model._get_archetype_stats = lambda k: {"n": 80, "mean": 0.03, "sd": 0.10}
+    monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
+
+    sr_sp = {
+        "market": "SPREAD",
+        "side": "home",
+        "ev": 0.040,
+        "edge_points": 2.0,
+        "win_prob_lb10": 0.512,
+        "_agree_count": 2,
+    }
+    assert model._passes_publish_gates(sr_sp, -7.5, True) is True
+    assert sr_sp["is_smart_risk"] is True
+    assert sr_sp["risk_tier"] == "SMART_RISK"
+    assert "smart_risk_high_return" in sr_sp["movement_tags"]
+
+    sr_tot = {
+        "market": "TOTAL",
+        "side": "over",
+        "ev": 0.045,
+        "edge_points": 2.2,
+        "win_prob_lb10": 0.510,
+        "_agree_count_total": 2,
+    }
+    assert model._passes_publish_gates(sr_tot, None, True) is True
+    assert sr_tot["is_smart_risk"] is True
+    assert sr_tot["risk_tier"] == "SMART_RISK"
+
+    core_sp = {
+        "market": "SPREAD",
+        "side": "home",
+        "ev": 0.040,
+        "edge_points": 2.0,
+        "win_prob_lb10": 0.528,
+        "_agree_count": 2,
+    }
+    assert model._passes_publish_gates(core_sp, -7.5, True) is True
+    assert core_sp["is_smart_risk"] is False
+    assert core_sp["risk_tier"] == "CORE"
+
+    # Low lb10 without sufficient EV/consensus stays blocked
+    weak_sp = {
+        "market": "SPREAD",
+        "side": "home",
+        "ev": 0.025,
+        "edge_points": 1.2,
+        "win_prob_lb10": 0.512,
+        "_agree_count": 1,
+    }
+    assert model._passes_publish_gates(weak_sp, -7.5, True) is False
+
+    # End-to-end analyze() caps Smart Risk plays at 0.5u
+    monkeypatch.setenv("REQUIRE_DATABASE", "0")
+    model2 = NCAAMMarketFirstModelV2()
+    model2.torvik_service = MagicMock()
+    model2.kenpom_client = MagicMock()
+    model2.haslametrics_client = MagicMock()
+    model2.news_service = MagicMock()
+    model2.injury_service = MagicMock()
+    model2.news_service.fetch_game_context.return_value = {}
+    model2.news_service.summarize_impact.return_value = ""
+    model2.injury_service.get_matchup_injuries.return_value = {"has_injuries": False, "injuries": []}
+    model2.injury_service.get_game_injury_context.return_value = {"has_injuries": False, "spread_adj": 0.0, "total_adj": 0.0, "injuries": []}
+    monkeypatch.setattr(model2, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model2, "_calculate_shooting_regression", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model2, "_calculate_situational_spots", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model2, "_calculate_fatigue_penalty", lambda *a, **kw: 0.0)
+    monkeypatch.setattr(model2, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
+    monkeypatch.setattr(model2, "_get_archetype_stats", lambda k: {"n": 80, "mean": 0.04, "sd": 0.90})
+    monkeypatch.setattr(model2, "_load_winprob_calibration", lambda: {"points": []})
+    monkeypatch.setattr(model2, "_load_adaptive_learning", lambda: {})
+    model2.torvik_service.get_projection.return_value = {"margin": 9.5, "official_margin": 9.5, "total": 144.0, "lean": "Home"}
+    model2.torvik_service.get_matchup_team_stats.return_value = {
+        "game_tempo": 68.0,
+        "home": {"luck": 0.0, "continuity": 0.75, "record": "14-3"},
+        "away": {"luck": 0.0, "continuity": 0.75, "record": "11-6"},
+    }
+    model2.kenpom_client.calculate_kenpom_adjustment.return_value = {"spread_adj": 9.5, "fair_margin": 9.5, "fair_total": 144.0, "summary": "KP"}
+    model2.haslametrics_client.calculate_projection.return_value = {"available": True, "margin": 9.5, "total": 144.0}
+    monkeypatch.setattr(
+        model2,
+        "_confidence_bounds_from_mu_uncertainty",
+        lambda **kw: {"lb10": 0.512, "ub90": 0.610},
+    )
+    now_q = datetime.now(timezone.utc)
+    res_sr = model2.analyze(
+        "evt_smart_risk",
+        event_context={"id": "evt_smart_risk", "home_team": "Home Univ", "away_team": "Road State", "start_time": datetime(2027, 2, 14, 23, 0, tzinfo=timezone.utc)},
+        market_snapshot={
+            "spread_home": -3.5,
+            "total": 144.0,
+            "_quote_as_of": now_q,
+            "_best_spread_home": {"book": "DraftKings", "line_value": -3.5, "price": -110, "captured_at": now_q},
+            "_best_spread_away": {"book": "DraftKings", "line_value": 3.5, "price": -110, "captured_at": now_q},
+            "_best_total_over": {"book": "DraftKings", "line_value": 144.0, "price": -110, "captured_at": now_q},
+            "_best_total_under": {"book": "DraftKings", "line_value": 144.0, "price": -110, "captured_at": now_q},
+        },
+        persist=False,
+    )
+    assert res_sr["is_actionable"] is True
+    assert res_sr["risk_tier"] == "SMART_RISK"
+    assert res_sr["is_smart_risk"] is True
+    assert res_sr["suggested_units"] <= 0.5
+    assert res_sr["recommendations"][0]["sizing_tier"] == "Half-Unit Smart Risk Play"
+
+
+
 
 
 
