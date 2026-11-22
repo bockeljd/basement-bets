@@ -117,11 +117,11 @@ def test_early_season_weights_and_bundled_params(monkeypatch):
     import os
     model = NCAAMMarketFirstModelV2()
 
-    # November dynamic weights scale down both Torvik and KenPom
+    # November dynamic weights scale down both Torvik and KenPom (KenPom leads early-season MAE)
     nov_dt = datetime(2026, 11, 11, 19, 0, 0)
     assert model._get_dynamic_weights(nov_dt) == 0.12
-    assert model._get_dynamic_kenpom_weight(nov_dt, avg_continuity=0.75) == pytest.approx(0.10)
-    assert model._get_dynamic_kenpom_weight(nov_dt, avg_continuity=0.40) == pytest.approx(0.08)
+    assert model._get_dynamic_kenpom_weight(nov_dt, avg_continuity=0.75) == pytest.approx(0.14)
+    assert model._get_dynamic_kenpom_weight(nov_dt, avg_continuity=0.40) == pytest.approx(0.10)
 
     # Bundled model params resolve from src/services/model_params
     for fname in (

@@ -1,6 +1,7 @@
 import json
 import os
 import psycopg2
+import psycopg2.extensions
 import psycopg2.extras
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -34,6 +35,20 @@ def get_db_connection(*, dedicated=False):
                 cursor_factory=psycopg2.extras.DictCursor
             )
             _THREAD_LOCAL_DB.conn = conn
+        else:
+            try:
+                if conn.info.transaction_status == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
+                    conn.rollback()
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                conn = psycopg2.connect(
+                    settings.DATABASE_URL,
+                    cursor_factory=psycopg2.extras.DictCursor
+                )
+                _THREAD_LOCAL_DB.conn = conn
         try:
             yield conn
         except Exception as e:
@@ -47,6 +62,17 @@ def get_db_connection(*, dedicated=False):
                         pass
                     _THREAD_LOCAL_DB.conn = None
             raise e
+        finally:
+            if conn and not conn.closed:
+                try:
+                    if conn.info.transaction_status == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
+                        conn.rollback()
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    _THREAD_LOCAL_DB.conn = None
         return
 
     conn = None

@@ -367,11 +367,16 @@ class NCAAMTournamentPredictionService:
 
         @contextmanager
         def _optional_db_connection():
+            cm = get_db_connection()
             try:
-                with get_db_connection() as c:
-                    yield c
-            except RuntimeError:
+                c = cm.__enter__()
+            except Exception:
                 yield None
+                return
+            try:
+                yield c
+            finally:
+                cm.__exit__(None, None, None)
 
         try:
             with _optional_db_connection() as conn:

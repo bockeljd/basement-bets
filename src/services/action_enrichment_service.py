@@ -164,23 +164,22 @@ class ActionEnrichmentService:
             # In SQLite we use string. In PG we use string for input and let driver cast or ensure we pass UUID obj.
             # For simplicity, passing string usually works if driver handles it, or explicit.
             
-            # Simple Insert w/ IGNORE on fingerprint
             ins = """
             INSERT INTO action_game_enrichment 
             (id, event_id, provider_game_id, payload_json, fingerprint)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (fingerprint) DO NOTHING
             """
-            # Adjust params for PG in _exec helper
-            
-            # ID generation
             row_id = str(uuid.uuid4())
             
             try:
                 _exec(conn, ins, (row_id, str(event_id), provider_game_id, payload_str, fingerprint))
                 conn.commit()
-            except Exception as e:
-                # Likely Unique Constraint -> Data hasn't changed
-                pass
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
     @staticmethod
     def parse_splits_from_game(game_data: Dict) -> List[Dict]:
