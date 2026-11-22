@@ -256,14 +256,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
         base_kp = float(self.W_KENPOM)
 
         if month == 11:
-            w_kp = base_kp * 0.50  # 0.10 when W_KENPOM=0.20
+            w_kp = base_kp * 0.70  # 0.14 when W_KENPOM=0.20 (KenPom leads early-season MAE)
         elif month == 12:
-            w_kp = base_kp * 0.75  # 0.15 when W_KENPOM=0.20
+            w_kp = base_kp * 0.85  # 0.17 when W_KENPOM=0.20
         else:
             w_kp = base_kp
 
         if avg_continuity < 0.5:
-            w_kp = min(w_kp, 0.08)
+            w_kp = min(w_kp, 0.10)
 
         return w_kp
 
@@ -1263,9 +1263,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if avg_continuity < 0.5:
             w_base = min(w_base, 0.12)
         w_kp_target = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity)
-        w_hasla_base = 0.10 if game_month == 11 else (0.12 if game_month == 12 else 0.15)
+        w_hasla_base = 0.05 if game_month == 11 else (0.08 if game_month == 12 else 0.10)
         if avg_continuity < 0.5:
-            w_hasla_base = min(w_hasla_base, 0.08)
+            w_hasla_base = min(w_hasla_base, 0.04)
         w_hasla_override = os.getenv('NCAAM_W_HASLA')
         w_hasla = 0.0
         if kp_available and hasla_available:
@@ -1558,19 +1558,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
             except Exception:
                 pass
 
-            # Asymmetric TOTAL OVER calibration: efficiency ensembles systematically run hot
-            # above sharp market totals in early season and fast-tempo matchups.
+            # Gentle TOTAL OVER calibration: keep slight early-season conservatism without
+            # over-crushing OVER projections during high-scoring environments.
             if os.getenv('NCAAM_DISABLE_OVER_DAMP') is None and mu_total_final > mu_market_total:
                 if game_month == 11 or low_sample_teams:
-                    over_damp = 0.68 if agree_count_total >= 3 else 0.60
+                    over_damp = 0.88 if agree_count_total >= 3 else 0.84
                 else:
-                    over_damp = 0.74 if is_early_season else 0.80
-                if game_tempo_val >= 72.0:
-                    over_damp *= 0.72
+                    over_damp = 0.90 if is_early_season else 0.94
                 mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * over_damp)
                 eff_cap_tot_use = min(
                     effective_cap_total,
-                    (2.0 if agree_count_total >= 3 else 1.80) if (game_month == 11 or low_sample_teams) else (2.25 if game_tempo_val >= 72.0 else 3.0),
+                    (2.5 if agree_count_total >= 3 else 2.25) if (game_month == 11 or low_sample_teams) else 3.0,
                 )
             else:
                 eff_cap_tot_use = effective_cap_total
@@ -1603,46 +1601,42 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         # 6. Pace-Adjusted & Season-Calibrated Sigma (Refined)
         # Higher tempo = more possessions = higher variance = wider sigma
-        # Early season (Nov/Dec) & low-continuity transfer rosters have higher residual variance.
+        # Early season (Nov/Dec) & low-continuity transfer rosters have higher residual variance,
+        # capped so competitive (<14 pt) spreads stay aligned with realized ~11.0-11.5 pt SD.
         game_tempo = game_tempo_val
         tempo_factor = math.sqrt(game_tempo / 68.0)
         
         base_sigma_spread = 10.5
         base_sigma_total = 15.0  # Restored D1 total scoring sigma to curb marginal O/U false positives
 
-        early_season_sigma_mult = 1.11 if game_month == 11 else (1.045 if game_month == 12 else 1.0)
+        early_season_sigma_mult = 1.05 if game_month == 11 else (1.02 if game_month == 12 else 1.0)
         if min_rec_games is not None and min_rec_games < 5:
-            early_season_sigma_mult *= 1.03
+            early_season_sigma_mult *= 1.02
         if avg_continuity < 0.5:
-            early_season_sigma_mult *= 1.05
+            early_season_sigma_mult *= 1.03
+        early_season_sigma_mult = min(early_season_sigma_mult, 1.10)
 
         blowout_sigma_add = 0.0
         if mu_market_spread is not None and abs(float(mu_market_spread)) >= 14.0:
-            blowout_sigma_add = min(4.5, (abs(float(mu_market_spread)) - 14.0) * 0.18)
-        elif mu_market_spread is not None and abs(float(mu_market_spread)) >= 6.0:
-            blowout_sigma_add = (abs(float(mu_market_spread)) - 6.0) * 0.09
+            blowout_sigma_add = min(3.0, (abs(float(mu_market_spread)) - 14.0) * 0.14)
 
-        sigma_spread = (((base_sigma_spread + blowout_sigma_add) * tempo_factor) + 0.1 * abs(diff_torvik)) * early_season_sigma_mult
-        sigma_total = ((base_sigma_total * tempo_factor) + 0.1 * (abs(mu_torvik_total - mu_market_total) if (mu_torvik_total is not None and mu_market_total is not None) else 0.0)) * early_season_sigma_mult
+        sigma_spread = (((base_sigma_spread + blowout_sigma_add) * tempo_factor) + 0.07 * abs(diff_torvik)) * early_season_sigma_mult
+        sigma_total = ((base_sigma_total * tempo_factor) + 0.08 * (abs(mu_torvik_total - mu_market_total) if (mu_torvik_total is not None and mu_market_total is not None) else 0.0)) * early_season_sigma_mult
         if game_month == 11 and agree_count == 0:
-            sigma_spread *= 1.035
-        elif game_month == 11 and abs(diff_torvik) >= 4.0 and agree_count >= 2:
-            sigma_spread *= 1.05
-        elif is_early_season and abs(diff_torvik) >= 4.5:
-            sigma_spread *= 1.06
-        if game_month == 11 and abs(diff_tv_tot) >= 4.5:
-            sigma_total *= 1.055
-        elif is_early_season and abs(diff_tv_tot) >= 6.0:
-            sigma_total *= 1.06
+            sigma_spread *= 1.02
+        elif is_early_season and abs(diff_torvik) >= 5.0:
+            sigma_spread *= 1.03
+        if game_month == 11 and abs(diff_tv_tot) >= 5.0:
+            sigma_total *= 1.03
+        elif is_early_season and abs(diff_tv_tot) >= 6.5:
+            sigma_total *= 1.04
 
         # Extreme model-vs-market divergence reflects likely unpriced roster/situational info;
         # widen sigma smoothly so 12%+ edge outliers do not overstate predicted cover probability.
-        if mean_sp_gap >= 4.5:
-            sigma_spread *= (1.0 + min(0.22, (mean_sp_gap - 4.5) * 0.045))
-        if mean_tot_gap >= 5.5:
-            sigma_total *= (1.0 + min(0.20, (mean_tot_gap - 5.5) * 0.035))
-        if has_total and mu_market_total is not None and mu_total_final is not None and mu_total_final > mu_market_total and game_tempo >= 72.0:
-            sigma_total *= 1.08
+        if mean_sp_gap >= 5.0:
+            sigma_spread *= (1.0 + min(0.18, (mean_sp_gap - 5.0) * 0.04))
+        if mean_tot_gap >= 6.0:
+            sigma_total *= (1.0 + min(0.18, (mean_tot_gap - 6.0) * 0.035))
 
         # --- Feature: Dynamic Sigma Inflation ---
         # If the Council identifies roster instability or significant red flags, 
@@ -1766,7 +1760,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         event_id = event.get('id')
         h_fatigue = self._calculate_fatigue_penalty(event['home_team'], event_id, game_date) or 0.0
         a_fatigue = self._calculate_fatigue_penalty(event['away_team'], event_id, game_date) or 0.0
-        fatigue_adj = max(-1.0, min(1.0, h_fatigue - a_fatigue))
+        fatigue_adj = max(-1.0, min(1.0, h_fatigue - a_fatigue)) * situational_scale
         mu_spread_final += fatigue_adj
 
         # -- Automated Player-Level Injury Impact (bounded) --
@@ -1826,12 +1820,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
         max_auto_spread_dev = effective_cap_spread + blowout_buffer
         if abs(mu_spread_final - mu_market_spread) > max_auto_spread_dev:
             mu_spread_final = mu_market_spread + (max_auto_spread_dev * math.copysign(1, mu_spread_final - mu_market_spread))
+        # Damp giant 22+ pt blowout edges where walk-on garbage time dominates early-season outcomes.
         if (
-            os.getenv('NCAAM_DISABLE_MID_SPREAD_GATE') is None
-            and mu_market_spread is not None
-            and 6.0 <= abs(float(mu_market_spread)) < 14.0
+            mu_market_spread is not None
+            and abs(float(mu_market_spread)) >= 22.0
+            and is_early_season
         ):
-            mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.80)
+            mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.75)
         # Road favorite asymmetry: market/public favorites on the road face foul trouble & late-clock risk
         if (
             os.getenv('NCAAM_DISABLE_AWAY_FAV_GATE') is None
@@ -2923,7 +2918,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     # Straight bets only for now. (Correlation/parlays are handled elsewhere.)
     PUBLISH_MIN_EV = 0.02  # +2.0% per unit
     PUBLISH_MIN_EV_TOTAL = 0.035  # +3.5% EV required on Over/Under totals (curbs O/U bleed)
-    PUBLISH_MIN_EV_TOTAL_OVER = 0.041  # +4.1% base EV required on TOTAL OVER (higher early-season/solo bars below)
+    PUBLISH_MIN_EV_TOTAL_OVER = 0.038  # +3.8% base EV required on TOTAL OVER (symmetric with UNDER)
     PUBLISH_MIN_WINPROB_LB10 = 0.52  # Require >= 52% 10th-pct cover prob (maps to >= 55 conf / Medium+)
     PUBLISH_MIN_EV_ML = 0.05  # +5.0% EV required on Moneyline picks
     MIN_ML_WIN_PROB = 0.52    # Exclude plus-money / sub-52% underdogs (historically ~20% win rate)
@@ -3222,21 +3217,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
             base_ev = float(self.PUBLISH_MIN_EV)
         min_ev = base_ev if torvik_ok else (base_ev + float(self.PUBLISH_MIN_EV_TORVIK_MISSING_BUMP))
 
-        # Mid-spread (6–14 pt), blowout (14–22 pt), and early-season selectivity gates
+        # Spread-bucket (competitive 6-14 vs blowout 14-22 / 22+) and early-season selectivity gates
         if market == "SPREAD" and market_line_home is not None:
             try:
                 abs_sp_line = abs(float(market_line_home))
                 if 6.0 <= abs_sp_line < 14.0 and os.getenv("NCAAM_DISABLE_MID_SPREAD_GATE") is None:
-                    mid_bump = 0.004 if has_sharp else 0.012
-                    try:
-                        sb_bumps = ((self._load_adaptive_learning() or {}).get("learned_adjustments") or {}).get("spread_bucket_ev_bump") or {}
-                        if "mid_6_14" in sb_bumps and not has_sharp:
-                            mid_bump = float(sb_bumps["mid_6_14"])
-                    except Exception:
-                        pass
+                    mid_bump = 0.0 if has_sharp else 0.004
                     min_ev += max(0.0, mid_bump)
-                elif 14.0 <= abs_sp_line < 22.0 and not has_sharp:
-                    min_ev += 0.006
+                elif 14.0 <= abs_sp_line < 22.0:
+                    min_ev += 0.006 if has_sharp else 0.014
+                elif abs_sp_line >= 22.0:
+                    min_ev += 0.015 if has_sharp else 0.025
                 if (is_early or low_sample) and not has_sharp:
                     if abs_sp_line < 6.0 and (agree_sp is not None and int(agree_sp) < 2):
                         min_ev += 0.012
@@ -3254,13 +3245,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 pass
         elif market == "TOTAL" and side_lower == "over" and os.getenv("NCAAM_DISABLE_OVER_DAMP") is None:
             try:
-                line_val = abs(float(rec.get("line") or rec.get("market_line") or 0.0))
-                if line_val >= 152.0:
-                    min_ev += 0.010
-                if (is_early or low_sample) and not has_sharp:
-                    min_ev += 0.010
-                    if agree_tot is not None and int(agree_tot) < 2:
-                        min_ev += 0.012
+                if (is_early or low_sample) and not has_sharp and (agree_tot is not None and int(agree_tot) < 2):
+                    min_ev += 0.006
             except Exception:
                 pass
         try:
