@@ -7,6 +7,7 @@ ROI per unit, scoring bias, and Bayesian-shrunk archetype bins persisted to
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from datetime import datetime, timezone
@@ -176,9 +177,191 @@ def _compute_ev_bump_from_roi(n: int, mean_roi: float, min_n: int = 10) -> float
     return 0.0
 
 
+def _safe_float_opt(val: Any) -> Optional[float]:
+    if val is None or val == "":
+        return None
+    try:
+        v = float(val)
+        return v if math.isfinite(v) else None
+    except Exception:
+        return None
+
+
+def fit_all_games_learning(slate_rows: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Learn full-slate scoring bias, realized sigma calibration, and feed accuracy
+    across ALL completed lined games (`daily_top_picks` x `game_results`), not just published bets.
+    """
+    n_games = 0
+    total_errors: List[float] = []
+    spread_residuals: List[float] = []
+    total_residuals: List[float] = []
+    model_sigma_spreads: List[float] = []
+    model_sigma_totals: List[float] = []
+
+    feed_keys = [
+        ("market", "current_spread_home"),
+        ("blended_fair", "fair_spread_home"),
+        ("torvik", "torvik_spread_home"),
+        ("kenpom", "kenpom_spread_home"),
+        ("haslametrics", "hasla_spread_home"),
+    ]
+    feed_abs_err: Dict[str, List[float]] = {name: [] for name, _ in feed_keys}
+    feed_ats: Dict[str, List[int]] = {name: [0, 0] for name, _ in feed_keys if name != "market"}
+    spread_buckets: Dict[str, List[int]] = {
+        "under_6": [0, 0],
+        "mid_6_14": [0, 0],
+        "blowout_14_22": [0, 0],
+        "blowout_22_plus": [0, 0],
+    }
+    totals_dir: Dict[str, List[int]] = {"over": [0, 0], "under": [0, 0]}
+
+    for row in slate_rows or []:
+        if not isinstance(row, dict):
+            continue
+        hs = _safe_float_opt(row.get("home_score"))
+        as_ = _safe_float_opt(row.get("away_score"))
+        if hs is None or as_ is None:
+            continue
+        actual_tot = hs + as_
+        if actual_tot <= 40.0:
+            continue
+        ctx = row.get("context_json") if "context_json" in row else row.get("context")
+        if isinstance(ctx, str):
+            try:
+                ctx = json.loads(ctx)
+            except Exception:
+                ctx = None
+        if not isinstance(ctx, dict) or not ctx:
+            continue
+
+        actual_home_sp = -(hs - as_)
+        mkt_sp = _safe_float_opt(ctx.get("current_spread_home"))
+        fair_sp = _safe_float_opt(ctx.get("fair_spread_home"))
+        mkt_tot = _safe_float_opt(ctx.get("current_total"))
+        fair_tot = _safe_float_opt(ctx.get("fair_total"))
+        if mkt_sp is None and mkt_tot is None:
+            continue
+        n_games += 1
+
+        if mkt_sp is not None:
+            sp_res = actual_home_sp - mkt_sp
+            if abs(sp_res) <= 55.0:
+                spread_residuals.append(sp_res)
+                sig_sp = _safe_float_opt(ctx.get("sigma_spread"))
+                if sig_sp is not None and 5.0 <= sig_sp <= 35.0:
+                    model_sigma_spreads.append(sig_sp)
+
+            for fname, fkey in feed_keys:
+                fval = _safe_float_opt(ctx.get(fkey))
+                if fval is None:
+                    continue
+                feed_abs_err[fname].append(abs(actual_home_sp - fval))
+                if fname != "market" and abs(fval - mkt_sp) >= 0.5 and abs(actual_home_sp - mkt_sp) > 1e-9:
+                    won = (actual_home_sp < mkt_sp) if (fval < mkt_sp) else (actual_home_sp > mkt_sp)
+                    feed_ats[fname][0 if won else 1] += 1
+
+            if fair_sp is not None and abs(fair_sp - mkt_sp) >= 0.5 and abs(actual_home_sp - mkt_sp) > 1e-9:
+                won = (actual_home_sp < mkt_sp) if (fair_sp < mkt_sp) else (actual_home_sp > mkt_sp)
+                sb = classify_spread_bucket(mkt_sp)
+                if sb in spread_buckets:
+                    spread_buckets[sb][0 if won else 1] += 1
+
+        if mkt_tot is not None:
+            tot_res = actual_tot - mkt_tot
+            if abs(tot_res) <= 55.0:
+                total_residuals.append(tot_res)
+                sig_tot = _safe_float_opt(ctx.get("sigma_total"))
+                if sig_tot is not None and 7.0 <= sig_tot <= 40.0:
+                    model_sigma_totals.append(sig_tot)
+
+        if fair_tot is not None:
+            err = actual_tot - fair_tot
+            if abs(err) <= 45.0:
+                total_errors.append(err)
+            if mkt_tot is not None and abs(fair_tot - mkt_tot) >= 0.5 and abs(actual_tot - mkt_tot) > 1e-9:
+                if fair_tot > mkt_tot:
+                    totals_dir["over"][0 if actual_tot > mkt_tot else 1] += 1
+                else:
+                    totals_dir["under"][0 if actual_tot < mkt_tot else 1] += 1
+
+    # Shrink full-slate total scoring bias (positive = games scoring hotter than fair_total)
+    n_tot = len(total_errors)
+    raw_bias = (sum(total_errors) / float(n_tot)) if n_tot > 0 else 0.0
+    damped_bias = (float(n_tot) / float(n_tot + 25.0)) * raw_bias
+    total_bias_pts = round(max(-2.5, min(2.5, damped_bias)), 3)
+
+    def _sd(xs: List[float]) -> Optional[float]:
+        if len(xs) < 2:
+            return None
+        m = sum(xs) / float(len(xs))
+        return math.sqrt(sum((x - m) ** 2 for x in xs) / float(len(xs) - 1))
+
+    sp_real_sd = _sd(spread_residuals)
+    sp_mod_avg = (sum(model_sigma_spreads) / float(len(model_sigma_spreads))) if model_sigma_spreads else None
+    tot_real_sd = _sd(total_residuals)
+    tot_mod_avg = (sum(model_sigma_totals) / float(len(model_sigma_totals))) if model_sigma_totals else None
+
+    def _sigma_scale(real_sd: Optional[float], mod_avg: Optional[float], n_obs: int) -> float:
+        if real_sd is None or mod_avg is None or mod_avg <= 0.0 or n_obs < 40:
+            return 1.0
+        raw_ratio = real_sd / mod_avg
+        # Smooth shrinkage toward 1.0 (50% weight at n=80) and strict safety bounds [0.88, 1.12]
+        w = min(0.60, float(n_obs) / float(n_obs + 80.0))
+        scaled = 1.0 + w * (raw_ratio - 1.0)
+        return round(max(0.88, min(1.12, scaled)), 4)
+
+    spread_sigma_scale = _sigma_scale(sp_real_sd, sp_mod_avg, len(model_sigma_spreads))
+    total_sigma_scale = _sigma_scale(tot_real_sd, tot_mod_avg, len(model_sigma_totals))
+
+    feed_accuracy: Dict[str, Any] = {}
+    for fname, _ in feed_keys:
+        errs = feed_abs_err[fname]
+        if not errs:
+            continue
+        entry: Dict[str, Any] = {
+            "n": len(errs),
+            "mae": round(sum(errs) / float(len(errs)), 3),
+        }
+        if fname in feed_ats:
+            w, l = feed_ats[fname]
+            entry["ats_wins"] = w
+            entry["ats_losses"] = l
+            entry["ats_win_rate"] = round(w / float(w + l), 4) if (w + l) > 0 else None
+        feed_accuracy[fname] = entry
+
+    def _fmt_wl(pair: List[int]) -> Dict[str, Any]:
+        w, l = pair
+        return {
+            "wins": w,
+            "losses": l,
+            "win_rate": round(w / float(w + l), 4) if (w + l) > 0 else None,
+        }
+
+    return {
+        "n_games": n_games,
+        "total_bias_pts": total_bias_pts,
+        "total_bias_raw_pts": round(raw_bias, 3),
+        "total_bias_sample": n_tot,
+        "sigma_calibration": {
+            "spread_n": len(model_sigma_spreads),
+            "spread_realized_sd": round(sp_real_sd, 3) if sp_real_sd is not None else None,
+            "spread_model_avg_sigma": round(sp_mod_avg, 3) if sp_mod_avg is not None else None,
+            "spread_sigma_scale": spread_sigma_scale,
+            "total_n": len(model_sigma_totals),
+            "total_realized_sd": round(tot_real_sd, 3) if tot_real_sd is not None else None,
+            "total_model_avg_sigma": round(tot_mod_avg, 3) if tot_mod_avg is not None else None,
+            "total_sigma_scale": total_sigma_scale,
+        },
+        "feed_accuracy": feed_accuracy,
+        "spread_buckets": {k: _fmt_wl(v) for k, v in spread_buckets.items()},
+        "totals_direction": {k: _fmt_wl(v) for k, v in totals_dir.items()},
+    }
+
+
 def fit_adaptive_learning_from_rows(
     rows: List[Dict[str, Any]],
     baseline_bins: Optional[Dict[str, Any]] = None,
+    all_games_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Compute realized ROI metrics, Bayesian-shrunk archetype bins, and model adjustments."""
     by_market_side: Dict[str, Dict[str, Any]] = {}
@@ -304,6 +487,14 @@ def fit_adaptive_learning_from_rows(
     raw_bias = (sum(total_errors) / float(n_tot)) if n_tot > 0 else 0.0
     damped_bias = (float(n_tot) / float(n_tot + 20.0)) * raw_bias
     total_bias_pts = round(max(-2.0, min(2.0, damped_bias)), 3)
+    total_bias_sample = n_tot
+    total_bias_source = "published_bets"
+
+    all_games_summary = fit_all_games_learning(all_games_rows)
+    if all_games_summary["total_bias_sample"] >= 15:
+        total_bias_pts = all_games_summary["total_bias_pts"]
+        total_bias_sample = all_games_summary["total_bias_sample"]
+        total_bias_source = "all_completed_games"
 
     # Spread bucket EV bumps (default +0.012 prior on mid_6_14 when sample is thin)
     spread_bucket_ev_bump: Dict[str, float] = {
@@ -323,6 +514,7 @@ def fit_adaptive_learning_from_rows(
             market_side_ev_bump[ms_key] = bump
 
     total_n = sum(v["n"] for v in ms_summary.values())
+    sig_cal = all_games_summary.get("sigma_calibration") or {}
     return {
         "league": "NCAAM",
         "season": current_ncaam_season_short(),
@@ -335,9 +527,13 @@ def fit_adaptive_learning_from_rows(
         "by_spread_role": sr_summary,
         "by_total_zone": tz_summary,
         "by_home_fav_7pt_ml": _finalize_acc(home_fav_7pt_acc),
+        "all_games_summary": all_games_summary,
         "learned_adjustments": {
             "total_bias_pts": total_bias_pts,
-            "total_bias_sample": n_tot,
+            "total_bias_sample": total_bias_sample,
+            "total_bias_source": total_bias_source,
+            "spread_sigma_scale": float(sig_cal.get("spread_sigma_scale") or 1.0),
+            "total_sigma_scale": float(sig_cal.get("total_sigma_scale") or 1.0),
             "spread_bucket_ev_bump": spread_bucket_ev_bump,
             "market_side_ev_bump": market_side_ev_bump,
         },
@@ -391,12 +587,38 @@ def rebuild_adaptive_model_learning(
       AND UPPER(COALESCE(m.outcome, '')) IN ('WON', 'WIN', 'W', 'LOST', 'LOSS', 'L', 'PUSH', 'P')
       AND UPPER(COALESCE(m.pick, '')) NOT IN ('', 'NONE', 'NO BET', 'PASS')
     """
+    q_all_games = """
+    SELECT DISTINCT ON (d.event_id)
+      d.event_id,
+      d.context_json,
+      gr.home_score,
+      gr.away_score
+    FROM daily_top_picks d
+    JOIN events e ON d.event_id = e.id
+    JOIN game_results gr ON gr.event_id = e.id AND COALESCE(gr.final, FALSE) = TRUE
+    WHERE UPPER(COALESCE(d.league, e.league, 'NCAAM')) = :league
+      AND d.context_json IS NOT NULL
+      AND d.computed_at >= NOW() - INTERVAL :days
+      AND COALESCE(e.start_time, d.computed_at) >= :season_start
+      AND gr.home_score IS NOT NULL
+      AND gr.away_score IS NOT NULL
+    ORDER BY d.event_id, d.computed_at DESC
+    """
+    all_games_rows: List[Dict[str, Any]] = []
     with get_db_connection() as conn:
         rows = [dict(r) for r in _exec(conn, q, params).fetchall()]
+        try:
+            all_games_rows = [dict(r) for r in _exec(conn, q_all_games, params).fetchall()]
+        except Exception as e:
+            print(f"[ADAPTIVE_LEARNING] all-games query skipped: {e}")
 
     base_model = NCAAMMarketFirstModelV2()
     baseline_bins = (base_model._load_action_network_stats() or {}).get("bins") or {}
-    payload = fit_adaptive_learning_from_rows(rows, baseline_bins=baseline_bins)
+    payload = fit_adaptive_learning_from_rows(
+        rows,
+        baseline_bins=baseline_bins,
+        all_games_rows=all_games_rows,
+    )
 
     if persist:
         upsert_model_param(ADAPTIVE_LEARNING_PARAM_KEY, payload)

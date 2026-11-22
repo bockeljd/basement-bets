@@ -1638,6 +1638,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if mean_tot_gap >= 6.0:
             sigma_total *= (1.0 + min(0.18, (mean_tot_gap - 6.0) * 0.035))
 
+        # Apply bounded full-slate learned sigma calibration (from all completed daily_top_picks)
+        try:
+            learned_adj = (self._load_adaptive_learning() or {}).get("learned_adjustments") or {}
+            sp_sig_scale = float(learned_adj.get("spread_sigma_scale") or 1.0)
+            tot_sig_scale = float(learned_adj.get("total_sigma_scale") or 1.0)
+            if 0.88 <= sp_sig_scale <= 1.12 and sp_sig_scale != 1.0:
+                sigma_spread *= sp_sig_scale
+            if 0.88 <= tot_sig_scale <= 1.12 and tot_sig_scale != 1.0:
+                sigma_total *= tot_sig_scale
+        except Exception:
+            pass
+
         # --- Feature: Dynamic Sigma Inflation ---
         # If the Council identifies roster instability or significant red flags, 
         # inflate sigma to represent increased uncertainty (wider bell curve).
