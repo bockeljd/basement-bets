@@ -4,6 +4,7 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
+from zoneinfo import ZoneInfo
 
 from src.services.torvik_projection import TorvikProjectionService
 from src.services.odds_selection_service import OddsSelectionService
@@ -220,30 +221,61 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 return datetime.now()
         return game_date
 
-    def _get_dynamic_weights(self, game_date) -> float:
+    def _to_et_yyyymmdd(self, game_date) -> Optional[str]:
+        """Convert game timestamp/date into Eastern Time YYYYMMDD string."""
+        if game_date is None:
+            return None
+        try:
+            dt = game_date
+            if isinstance(dt, str):
+                dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+            if not hasattr(dt, 'strftime'):
+                return None
+            if getattr(dt, 'tzinfo', None) is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(ZoneInfo("America/New_York")).strftime("%Y%m%d")
+        except Exception:
+            return None
+
+    def _get_dynamic_weights(self, game_date, min_rec_games: Optional[int] = None) -> float:
         """
-        Returns a weight (W_BASE) that scales based on the time of year.
+        Returns a weight (W_BASE) that scales smoothly by games played and time of year.
         Early season: Trust Market heavily (projections are preseason-based).
         Late season: Trust Projections more (based on actual games).
         """
         dt = self._parse_game_datetime(game_date)
         month = getattr(dt, 'month', 1)
-        
-        # Off-season/Early Season (Nov/Dec) - Preseason projections
-        if month == 11: return 0.12  # Trust Market heavily
-        if month == 12: return 0.18  
-        # Conference Play (Jan/Feb) - Real data accumulating
-        if month == 1: return 0.25   # Standard Sniper Weight
-        if month == 2: return 0.32   # Trust Projections more
-        # Tournament Time (March) - Peak sample size
-        if month == 3: return 0.38   # Peak Alpha
-        # April+ (Rare, post-tournament)
-        return 0.25  # Default
 
-    def _get_dynamic_kenpom_weight(self, game_date, avg_continuity: float = 0.7) -> float:
+        # Monthly prior baseline (also preserves backward compatibility when min_rec_games is None)
+        if month == 11:
+            month_w = 0.12
+        elif month == 12:
+            month_w = 0.18
+        elif month == 1:
+            month_w = 0.25
+        elif month == 2:
+            month_w = 0.32
+        elif month == 3:
+            month_w = 0.38
+        else:
+            month_w = 0.25
+
+        if min_rec_games is None:
+            return month_w
+
+        games_progress = min(1.0, max(0.0, (float(min_rec_games) - 2.0) / 22.0))
+        games_w = 0.11 + (0.25 * games_progress)
+        return round((0.55 * month_w) + (0.45 * games_w), 4)
+
+    def _get_dynamic_kenpom_weight(
+        self,
+        game_date,
+        avg_continuity: float = 0.7,
+        min_rec_games: Optional[int] = None,
+    ) -> float:
         """
-        Scale W_KENPOM dynamically by month and roster continuity so early-season
-        preseason priors do not overpower the market in November/December.
+        Scale W_KENPOM smoothly by month, games played, and roster continuity so
+        early-season preseason priors do not overpower the market without cliff jumps.
         """
         if os.getenv('NCAAM_W_KENPOM') is not None:
             try:
@@ -256,11 +288,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
         base_kp = float(self.W_KENPOM)
 
         if month == 11:
-            w_kp = base_kp * 0.70  # 0.14 when W_KENPOM=0.20 (KenPom leads early-season MAE)
+            month_w = base_kp * 0.70  # 0.14 when W_KENPOM=0.20 (KenPom leads early-season MAE)
         elif month == 12:
-            w_kp = base_kp * 0.85  # 0.17 when W_KENPOM=0.20
+            month_w = base_kp * 0.85  # 0.17 when W_KENPOM=0.20
         else:
-            w_kp = base_kp
+            month_w = base_kp
+
+        if min_rec_games is not None:
+            games_progress = min(1.0, max(0.0, (float(min_rec_games) - 2.0) / 22.0))
+            games_w = base_kp * (0.65 + (0.35 * games_progress))
+            w_kp = round((0.55 * month_w) + (0.45 * games_w), 4)
+        else:
+            w_kp = month_w
 
         if avg_continuity < 0.5:
             w_kp = min(w_kp, 0.10)
@@ -511,28 +550,23 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if not rows: 
                 return 0.0
             
-            last_game_date = rows[0]['start_time']
-            if isinstance(last_game_date, str):
-                last_game_date = datetime.fromisoformat(last_game_date)
-            
-            days_rest = (current_game_date - last_game_date).days
-            
-            # Only count >0 days to avoid weird intraday header issues, 
-            # though id exclusion handles the main bug.
-            if days_rest == 0:
-                 # Sanity check: if same day and not same ID, double header? 
-                 # Unlikely in NCAA. Assume data noise.
-                 pass
+            def _et_cal_date(val):
+                dt_v = datetime.fromisoformat(val.replace('Z', '+00:00')) if isinstance(val, str) else val
+                if getattr(dt_v, 'tzinfo', None) is None:
+                    dt_v = dt_v.replace(tzinfo=timezone.utc)
+                return dt_v.astimezone(ZoneInfo("America/New_York")).date()
 
-            if days_rest <= 1: 
+            curr_et_date = _et_cal_date(current_game_date)
+            last_et_date = _et_cal_date(rows[0]['start_time'])
+            days_rest = (curr_et_date - last_et_date).days
+
+            if days_rest <= 1:
                 print(f"[FATIGUE] {team_name}: Back-to-back (-0.75)")
                 return -0.75  # Back-to-back
-            
+
             if len(rows) > 1:
-                two_games_ago = rows[1]['start_time']
-                if isinstance(two_games_ago, str):
-                    two_games_ago = datetime.fromisoformat(two_games_ago)
-                if (current_game_date - two_games_ago).days <= 6:
+                two_ago_et_date = _et_cal_date(rows[1]['start_time'])
+                if (curr_et_date - two_ago_et_date).days <= 6:
                     print(f"[FATIGUE] {team_name}: 3rd game in 6 days (-1.0)")
                     return -1.0  # 3rd game in 6 days
                     
@@ -623,14 +657,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         
         # 1. Base logic
         game_date = (event_context or {}).get('start_time')
-        game_date_str = None
-        if game_date:
-             if isinstance(game_date, str):
-                 try:
-                     game_date = datetime.fromisoformat(game_date.replace('Z', '+00:00'))
-                 except: pass
-             if isinstance(game_date, datetime):
-                 game_date_str = game_date.strftime("%Y%m%d")
+        game_date_str = self._to_et_yyyymmdd(game_date)
                  
         try:
             torvik_view = self.torvik_service.get_projection(team_a_canon, team_b_canon, date=game_date_str, conn=conn, neutral_site=True)
@@ -1019,14 +1046,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # 3. External Projections & Signals
         # Torvik - PRIMARY SIGNAL
         game_date_obj = event.get('start_time')
-        game_date_str = None
-        if game_date_obj:
+        game_date_str = self._to_et_yyyymmdd(game_date_obj)
+        if isinstance(game_date_obj, str):
             try:
-                # Ensure we have a string YYYYMMDD for Torvik service
-                # If it's a string, try to parse it first (ISO format from earlier fix)
-                if isinstance(game_date_obj, str):
-                    game_date_obj = datetime.fromisoformat(game_date_obj.replace('Z', '+00:00'))
-                game_date_str = game_date_obj.strftime("%Y%m%d")
+                game_date_obj = datetime.fromisoformat(game_date_obj.replace('Z', '+00:00'))
             except Exception:
                 pass
 
@@ -1211,6 +1234,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if min_rec_games is not None:
             luck_scale = 0.0 if min_rec_games < 3 else min(1.0, (min_rec_games - 2) / 10.0)
             situational_scale = round(min(1.0, 0.35 + 0.65 * max(0, min_rec_games - 1) / 10.0), 3)
+            if env_w_base is None and abs(float(self.W_BASE) - float(self.DEFAULT_W_BASE)) <= 1e-9:
+                base_w_torvik = self._get_dynamic_weights(game_date_obj, min_rec_games=min_rec_games)
         else:
             luck_scale = 0.30 if game_month == 11 else (0.65 if game_month == 12 else 1.0)
             situational_scale = 0.50 if game_month == 11 else (0.80 if game_month == 12 else 1.0)
@@ -1262,7 +1287,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
         w_base = base_w_torvik
         if avg_continuity < 0.5:
             w_base = min(w_base, 0.12)
-        w_kp_target = self._get_dynamic_kenpom_weight(game_date_obj, avg_continuity=avg_continuity)
+        w_kp_target = self._get_dynamic_kenpom_weight(
+            game_date_obj,
+            avg_continuity=avg_continuity,
+            min_rec_games=min_rec_games,
+        )
         w_hasla_base = 0.05 if game_month == 11 else (0.08 if game_month == 12 else 0.10)
         if avg_continuity < 0.5:
             w_hasla_base = min(w_hasla_base, 0.04)
@@ -1468,7 +1497,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 h_ortg = kp_team_player_home.get('ortg_w')
                 a_ortg = kp_team_player_away.get('ortg_w')
                 if h_ortg is not None and a_ortg is not None:
-                    delta = (float(h_ortg) + float(a_ortg)) / 2.0 - 106.5
+                    lg_eff_val = 106.5
+                    try:
+                        lg_avgs = self.kenpom_client.get_league_averages() if hasattr(self.kenpom_client, "get_league_averages") else None
+                        if isinstance(lg_avgs, dict) and isinstance(lg_avgs.get("eff"), (int, float)):
+                            lg_eff_val = float(lg_avgs["eff"])
+                    except Exception:
+                        pass
+                    delta = (float(h_ortg) + float(a_ortg)) / 2.0 - lg_eff_val
                     kp_player_total_adj = max(min(delta * 0.10, 1.5), -1.5)
         except Exception as e:
             print(f"[MODEL] KenPom player agg error: {e}")
@@ -1532,6 +1568,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         mean_tot_gap = (sum(abs(float(d)) for d in tot_diffs_avail) / len(tot_diffs_avail)) if tot_diffs_avail else 0.0
 
         kp_total_ff_adj = (_safe_float(kenpom_adj.get('total_four_factors_adj')) if isinstance(kenpom_adj, dict) else None) or 0.0
+        eff_cap_tot_use = effective_cap_total
 
         if has_total and mu_market_total is not None:
             mu_total_final = (
@@ -1755,17 +1792,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
         
         # 6.5 Advanced Situational Signals (uses precomputed situational_scale & bounded by outer sniper guardrail)
 
+        # Positive shooting_adj / spot_adj / fatigue_adj favors home team -> lower (more negative) home spread
         # -- Shooting Regression (3PT Variance) --
         shooting_regr_home = self._calculate_shooting_regression(event['home_team'], as_of_date=game_date_obj) or 0.0
         shooting_regr_away = self._calculate_shooting_regression(event['away_team'], as_of_date=game_date_obj) or 0.0
         shooting_adj = (shooting_regr_home - shooting_regr_away) * situational_scale
-        mu_spread_final += shooting_adj
+        mu_spread_final -= shooting_adj
         
         # -- Situational Spots (Letdown/Lookahead) --
         spot_adj_home = self._calculate_situational_spots(event['home_team'], event) or 0.0
         spot_adj_away = self._calculate_situational_spots(event['away_team'], event) or 0.0
         spot_adj = (spot_adj_home - spot_adj_away) * situational_scale
-        mu_spread_final += spot_adj
+        mu_spread_final -= spot_adj
         
         # -- Fatigue / Short Rest Signal --
         game_date = event.get('start_time')
@@ -1773,7 +1811,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         h_fatigue = self._calculate_fatigue_penalty(event['home_team'], event_id, game_date) or 0.0
         a_fatigue = self._calculate_fatigue_penalty(event['away_team'], event_id, game_date) or 0.0
         fatigue_adj = max(-1.0, min(1.0, h_fatigue - a_fatigue)) * situational_scale
-        mu_spread_final += fatigue_adj
+        mu_spread_final -= fatigue_adj
 
         # -- Automated Player-Level Injury Impact (bounded) --
         inj_spread_adj = float((injury_context or {}).get('spread_adj') or 0.0)
@@ -1865,16 +1903,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         if mu_total_final is not None:
             kp_avg_ftr = _safe_float((kenpom_adj or {}).get('avg_ftr'))
             mu_total_final = self._apply_referee_signal(event['id'], mu_total_final, avg_ftr=kp_avg_ftr) or mu_total_final
-            base_tot_cap = effective_cap_total
-            if mu_market_total is not None and mu_total_final > mu_market_total and os.getenv('NCAAM_DISABLE_OVER_DAMP') is None:
-                base_tot_cap = min(
-                    effective_cap_total,
-                    (2.0 if agree_count_total >= 3 else 1.80) if (game_month == 11 or low_sample_teams) else (2.25 if game_tempo >= 72.0 else 3.0),
-                )
-                if float(mu_market_total) >= 152.0:
-                    base_tot_cap = min(base_tot_cap, 1.65 if is_early_season else 1.95)
-                    mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * 0.78)
-            max_auto_total_dev = base_tot_cap + (0.35 if is_early_season else 1.0)
+            max_auto_total_dev = eff_cap_tot_use + (0.35 if is_early_season else 1.0)
             if mu_market_total is not None and abs(mu_total_final - mu_market_total) > max_auto_total_dev:
                 mu_total_final = mu_market_total + (max_auto_total_dev * math.copysign(1, mu_total_final - mu_market_total))
         
@@ -4399,6 +4428,22 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # Anchor 1H fair line to the 1H market median + half of the model's true full-game edge
         # (prevents blowout favorites whose 1H share is ~55% from generating fake 1H underdog edges).
         import statistics as _stats
+
+        def _latest_per_book(snaps_sub: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            by_book: Dict[str, Dict[str, Any]] = {}
+            for s in snaps_sub or []:
+                bk = str(s.get('book') or '').strip().lower()
+                prev = by_book.get(bk)
+                if prev is None:
+                    by_book[bk] = s
+                else:
+                    cur_ts = str(s.get('captured_at') or '')
+                    prev_ts = str(prev.get('captured_at') or '')
+                    if cur_ts >= prev_ts:
+                        by_book[bk] = s
+            return list(by_book.values())
+
+        min_1h_lb10 = float(getattr(self, "PUBLISH_MIN_WINPROB_LB10", 0.52))
         raw_snaps_list = [
             s for s in ((snap.get('_raw_snaps') or []) if isinstance(snap, dict) else [])
             if recent_retail_quote(s, quote_time) and s.get('price') is not None
@@ -4406,8 +4451,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         ]
         if raw_snaps_list and mu_s is not None and sig_s is not None and line_s_valid:
             try:
-                sp1h_home = [s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'SPREAD_1H' and str(s.get('side') or '').upper() == 'HOME' and s.get('line_value') is not None]
-                sp1h_away = [s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'SPREAD_1H' and str(s.get('side') or '').upper() == 'AWAY' and s.get('line_value') is not None]
+                sp1h_home = _latest_per_book([s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'SPREAD_1H' and str(s.get('side') or '').upper() == 'HOME' and s.get('line_value') is not None])
+                sp1h_away = _latest_per_book([s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'SPREAD_1H' and str(s.get('side') or '').upper() == 'AWAY' and s.get('line_value') is not None])
                 if sp1h_home or sp1h_away:
                     h1_home_vals = [float(s['line_value']) for s in sp1h_home] + [-float(s['line_value']) for s in sp1h_away]
                     mkt_1h_home = _stats.median(h1_home_vals)
@@ -4424,13 +4469,26 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             prob_h1 = self._calibrate_win_prob(raw_h1, is_early_season=g_is_early)
                             ev_h1 = self._calculate_ev(prob_h1, ph, push_prob=self._push_probability(lh))
                             edge_h1 = lh - mu_1h_s
-                            if ev_h1 >= 0.03 and prob_h1 >= 0.54 and edge_h1 >= 1.2:
+                            b1h = self._confidence_bounds_from_mu_uncertainty(
+                                market='SPREAD',
+                                mu=float(mu_1h_s),
+                                sigma=float(sig_1h_s),
+                                line=float(lh),
+                                side='home',
+                                game_month=g_month,
+                                min_rec_games=g_min_games,
+                                mean_gap=g_gap_sp,
+                                agree_count=g_agree_sp,
+                            )
+                            lb10_h1 = float(b1h['lb10']) if b1h.get('lb10') is not None else max(0.50, prob_h1 - 0.02)
+                            ub90_h1 = float(b1h['ub90']) if b1h.get('ub90') is not None else min(0.95, prob_h1 + 0.02)
+                            if (relax_gates or lb10_h1 >= min_1h_lb10) and ev_h1 >= 0.03 and prob_h1 >= 0.54 and edge_h1 >= 1.2:
                                 best_1h_cands.append({
                                     "market": "SPREAD_1H", "side": "home", "team": f"{event['home_team']} 1H",
                                     "raw_win_prob": raw_h1, "line": lh, "price": ph, "prob": round(prob_h1, 3), "win_prob": round(prob_h1, 3),
                                     "fair_line_1h_home": round(mu_1h_s, 1),
-                                    "win_prob_lb10": round(max(0.50, prob_h1 - 0.02), 3),
-                                    "win_prob_ub90": round(min(0.95, prob_h1 + 0.02), 3),
+                                    "win_prob_lb10": round(lb10_h1, 3),
+                                    "win_prob_ub90": round(ub90_h1, 3),
                                     "ev": float(round(ev_h1, 4)), "kelly": float(round(self._calculate_kelly(prob_h1, ph), 4)),
                                     "quote_captured_at": str(bh.get("captured_at") or "") or None,
                                     "book": bh.get('book') or 'Consensus', "edge_points": float(round(edge_h1, 2)),
@@ -4446,13 +4504,26 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             prob_a1 = self._calibrate_win_prob(raw_a1, is_early_season=g_is_early)
                             ev_a1 = self._calculate_ev(prob_a1, pa, push_prob=self._push_probability(la))
                             edge_a1 = la - (-mu_1h_s)
-                            if ev_a1 >= 0.03 and prob_a1 >= 0.54 and edge_a1 >= 1.2:
+                            b1a = self._confidence_bounds_from_mu_uncertainty(
+                                market='SPREAD',
+                                mu=float(mu_1h_s),
+                                sigma=float(sig_1h_s),
+                                line=-float(la),
+                                side='away',
+                                game_month=g_month,
+                                min_rec_games=g_min_games,
+                                mean_gap=g_gap_sp,
+                                agree_count=g_agree_sp,
+                            )
+                            lb10_a1 = float(b1a['lb10']) if b1a.get('lb10') is not None else max(0.50, prob_a1 - 0.02)
+                            ub90_a1 = float(b1a['ub90']) if b1a.get('ub90') is not None else min(0.95, prob_a1 + 0.02)
+                            if (relax_gates or lb10_a1 >= min_1h_lb10) and ev_a1 >= 0.03 and prob_a1 >= 0.54 and edge_a1 >= 1.2:
                                 best_1h_cands.append({
                                     "market": "SPREAD_1H", "side": "away", "team": f"{event['away_team']} 1H",
                                     "raw_win_prob": raw_a1, "line": la, "price": pa, "prob": round(prob_a1, 3), "win_prob": round(prob_a1, 3),
                                     "fair_line_1h_home": round(mu_1h_s, 1),
-                                    "win_prob_lb10": round(max(0.50, prob_a1 - 0.02), 3),
-                                    "win_prob_ub90": round(min(0.95, prob_a1 + 0.02), 3),
+                                    "win_prob_lb10": round(lb10_a1, 3),
+                                    "win_prob_ub90": round(ub90_a1, 3),
                                     "ev": float(round(ev_a1, 4)), "kelly": float(round(self._calculate_kelly(prob_a1, pa), 4)),
                                     "quote_captured_at": str(ba.get("captured_at") or "") or None,
                                     "book": ba.get('book') or 'Consensus', "edge_points": float(round(edge_a1, 2)),
@@ -4466,8 +4537,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         if raw_snaps_list and mu_t is not None and sig_t is not None and line_t_valid:
             try:
-                tot1h_over = [s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'TOTAL_1H' and str(s.get('side') or '').upper() == 'OVER' and s.get('line_value') is not None]
-                tot1h_under = [s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'TOTAL_1H' and str(s.get('side') or '').upper() == 'UNDER' and s.get('line_value') is not None]
+                tot1h_over = _latest_per_book([s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'TOTAL_1H' and str(s.get('side') or '').upper() == 'OVER' and s.get('line_value') is not None])
+                tot1h_under = _latest_per_book([s for s in raw_snaps_list if str(s.get('market_type') or '').upper() == 'TOTAL_1H' and str(s.get('side') or '').upper() == 'UNDER' and s.get('line_value') is not None])
                 if tot1h_over or tot1h_under:
                     h1_tot_vals = [float(s['line_value']) for s in (tot1h_over + tot1h_under)]
                     mkt_1h_tot = _stats.median(h1_tot_vals)
@@ -4481,16 +4552,29 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         if abs(lu - mkt_1h_tot) <= 2.0:
                             pu = _clean_main_price(bu.get('price'), default=-110)
                             raw_u1 = self._normal_cdf(lu, mu_1h_t, sig_1h_t)
-                            prob_u1 = self._calibrate_win_prob(raw_u1, is_early_season=g_is_early)
+                            prob_u1 = self._binary_probabilities(raw_u1, g_is_early)[0]
                             ev_u1 = self._calculate_ev(prob_u1, pu, push_prob=self._push_probability(lu))
                             edge_u1 = lu - mu_1h_t
-                            if ev_u1 >= 0.038 and prob_u1 >= 0.545 and edge_u1 >= 1.5:
+                            b1u = self._confidence_bounds_from_mu_uncertainty(
+                                market='TOTAL',
+                                mu=float(mu_1h_t),
+                                sigma=float(sig_1h_t),
+                                line=float(lu),
+                                side='under',
+                                game_month=g_month,
+                                min_rec_games=g_min_games,
+                                mean_gap=g_gap_tot,
+                                agree_count=g_agree_tot,
+                            )
+                            lb10_u1 = float(b1u['lb10']) if b1u.get('lb10') is not None else max(0.50, prob_u1 - 0.02)
+                            ub90_u1 = float(b1u['ub90']) if b1u.get('ub90') is not None else min(0.95, prob_u1 + 0.02)
+                            if (relax_gates or lb10_u1 >= min_1h_lb10) and ev_u1 >= 0.038 and prob_u1 >= 0.545 and edge_u1 >= 1.5:
                                 best_1h_tot.append({
                                     "market": "TOTAL_1H", "side": "under", "team": "1H UNDER",
                                     "raw_win_prob": raw_u1, "line": lu, "price": pu, "prob": round(prob_u1, 3), "win_prob": round(prob_u1, 3),
                                     "fair_line_1h_total": round(mu_1h_t, 1),
-                                    "win_prob_lb10": round(max(0.50, prob_u1 - 0.02), 3),
-                                    "win_prob_ub90": round(min(0.95, prob_u1 + 0.02), 3),
+                                    "win_prob_lb10": round(lb10_u1, 3),
+                                    "win_prob_ub90": round(ub90_u1, 3),
                                     "ev": float(round(ev_u1, 4)), "kelly": float(round(self._calculate_kelly(prob_u1, pu), 4)),
                                     "quote_captured_at": str(bu.get("captured_at") or "") or None,
                                     "book": bu.get('book') or 'Consensus', "edge_points": float(round(edge_u1, 2)),
@@ -4503,16 +4587,29 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         if abs(lo - mkt_1h_tot) <= 2.0:
                             po = _clean_main_price(bo.get('price'), default=-110)
                             raw_o1 = 1.0 - self._normal_cdf(lo, mu_1h_t, sig_1h_t)
-                            prob_o1 = self._calibrate_win_prob(raw_o1, is_early_season=g_is_early)
+                            prob_o1 = self._binary_probabilities(raw_o1, g_is_early)[0]
                             ev_o1 = self._calculate_ev(prob_o1, po, push_prob=self._push_probability(lo))
                             edge_o1 = mu_1h_t - lo
-                            if ev_o1 >= 0.045 and prob_o1 >= 0.55 and edge_o1 >= 1.8:
+                            b1o = self._confidence_bounds_from_mu_uncertainty(
+                                market='TOTAL',
+                                mu=float(mu_1h_t),
+                                sigma=float(sig_1h_t),
+                                line=float(lo),
+                                side='over',
+                                game_month=g_month,
+                                min_rec_games=g_min_games,
+                                mean_gap=g_gap_tot,
+                                agree_count=g_agree_tot,
+                            )
+                            lb10_o1 = float(b1o['lb10']) if b1o.get('lb10') is not None else max(0.50, prob_o1 - 0.02)
+                            ub90_o1 = float(b1o['ub90']) if b1o.get('ub90') is not None else min(0.95, prob_o1 + 0.02)
+                            if (relax_gates or lb10_o1 >= min_1h_lb10) and ev_o1 >= 0.045 and prob_o1 >= 0.55 and edge_o1 >= 1.8:
                                 best_1h_tot.append({
                                     "market": "TOTAL_1H", "side": "over", "team": "1H OVER",
                                     "raw_win_prob": raw_o1, "line": lo, "price": po, "prob": round(prob_o1, 3), "win_prob": round(prob_o1, 3),
                                     "fair_line_1h_total": round(mu_1h_t, 1),
-                                    "win_prob_lb10": round(max(0.50, prob_o1 - 0.02), 3),
-                                    "win_prob_ub90": round(min(0.95, prob_o1 + 0.02), 3),
+                                    "win_prob_lb10": round(lb10_o1, 3),
+                                    "win_prob_ub90": round(ub90_o1, 3),
                                     "ev": float(round(ev_o1, 4)), "kelly": float(round(self._calculate_kelly(prob_o1, po), 4)),
                                     "quote_captured_at": str(bo.get("captured_at") or "") or None,
                                     "book": bo.get('book') or 'Consensus', "edge_points": float(round(edge_o1, 2)),

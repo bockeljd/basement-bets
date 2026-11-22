@@ -13,6 +13,7 @@ class TorvikProjectionService:
     """
     
     LEAGUE_AVG_EFF = 106.0
+    _LEAGUE_AVG_CACHE: Dict[str, Dict[str, float]] = {}
     
     def __init__(self):
         self.bt_client = BartTorvikClient()
@@ -157,6 +158,59 @@ class TorvikProjectionService:
 
         return None
 
+    def _get_league_averages(self, date: Optional[str] = None, conn=None) -> Dict[str, float]:
+        """Compute live season D1 mean AdjOE and AdjTempo from bt_team_metrics_daily (>=50 teams)."""
+        defaults = {"eff": float(self.LEAGUE_AVG_EFF), "tempo": 68.0}
+        date_iso = normalize_iso_date(date)
+        season_start_iso = season_start_date_for_game(date_iso)
+        cached = TorvikProjectionService._LEAGUE_AVG_CACHE.get(season_start_iso)
+        if cached is not None:
+            return cached
+        if os.environ.get("REQUIRE_DATABASE") == "0" and conn is None:
+            return defaults
+
+        date_compact = date_iso.replace("-", "")
+        season_start_compact = season_start_iso.replace("-", "")
+        params = {
+            "date_iso": date_iso,
+            "season_start_iso": season_start_iso,
+            "date_compact": date_compact,
+            "season_start_compact": season_start_compact,
+        }
+        sql = """
+        SELECT AVG(adj_off) AS avg_eff, AVG(adj_tempo) AS avg_tempo, COUNT(*) AS n
+        FROM (
+            SELECT DISTINCT ON (team_text) adj_off, adj_tempo
+            FROM bt_team_metrics_daily
+            WHERE ((date >= :season_start_iso AND date <= :date_iso)
+                   OR (date >= :season_start_compact AND date <= :date_compact))
+              AND adj_off IS NOT NULL AND adj_off > 50
+              AND adj_tempo IS NOT NULL AND adj_tempo > 40
+            ORDER BY team_text, date DESC
+        ) latest_teams
+        """
+        try:
+            if conn is not None:
+                row = _exec(conn, sql, params).fetchone()
+            else:
+                with get_db_connection() as c:
+                    row = _exec(c, sql, params).fetchone()
+            if row:
+                d = dict(row) if not isinstance(row, dict) else row
+                n = int(d.get("n") or 0)
+                eff_v = d.get("avg_eff")
+                tmp_v = d.get("avg_tempo")
+                if n >= 50 and eff_v is not None and tmp_v is not None:
+                    res = {
+                        "eff": round(float(eff_v), 2),
+                        "tempo": round(float(tmp_v), 2),
+                    }
+                    TorvikProjectionService._LEAGUE_AVG_CACHE[season_start_iso] = res
+                    return res
+        except Exception:
+            pass
+        return defaults
+
     def get_matchup_team_stats(self, home_team: str, away_team: str, date: str = None) -> Dict:
         """Return best-available Torvik team efficiency stats for both teams.
 
@@ -174,12 +228,13 @@ class TorvikProjectionService:
         # Be careful: DB rows may include keys with explicit NULLs (None), so `.get(key, 0)`
         # can still return None. Coalesce to 0.0 before arithmetic to avoid
         # `TypeError: unsupported operand type(s) for +: 'NoneType' and 'NoneType'`.
+        base_tempo = self._get_league_averages(date=date).get("tempo", 68.0)
         h_tempo = float(h.get('adj_tempo') or 0.0)
         a_tempo = float(a.get('adj_tempo') or 0.0)
         if h_tempo > 0.0 and a_tempo > 0.0:
-            game_tempo = max(56.0, min(84.0, 68.0 + 0.65 * ((h_tempo - 68.0) + (a_tempo - 68.0))))
+            game_tempo = max(56.0, min(84.0, base_tempo + 0.65 * ((h_tempo - base_tempo) + (a_tempo - base_tempo))))
         else:
-            game_tempo = (h_tempo + a_tempo) / 2.0 if (h_tempo > 0.0 and a_tempo > 0.0) else (h_tempo or a_tempo or 68.0)
+            game_tempo = (h_tempo + a_tempo) / 2.0 if (h_tempo > 0.0 and a_tempo > 0.0) else (h_tempo or a_tempo or base_tempo)
 
         return {
             "home": h,
@@ -199,11 +254,12 @@ class TorvikProjectionService:
         if not h or not a:
              return {"margin": 0, "total": None, "lean": "No Data"}
              
-        tempo = stats.get('game_tempo') or 68.0
+        lg = self._get_league_averages(date=date)
+        tempo = stats.get('game_tempo') or lg.get('tempo', 68.0)
         
         # Calculate scores (defensive None handling)
         # Home Score = (HomeAdjOE * AwayAdjDE) / LeagueAvg * (Tempo/100)
-        eff_factor = float(self.LEAGUE_AVG_EFF)
+        eff_factor = float(lg.get('eff') or self.LEAGUE_AVG_EFF)
         h_off = float(h.get('adj_off') or 0.0)
         h_def = float(h.get('adj_def') or 0.0)
         a_off = float(a.get('adj_off') or 0.0)

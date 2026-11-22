@@ -739,7 +739,7 @@ def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monk
     )
     ctx = res["context"]
     assert ctx["conviction_sources"] == 3
-    assert ctx["efficiency_weight"] == pytest.approx(0.357, abs=0.002)
+    assert ctx["efficiency_weight"] == pytest.approx(0.354, abs=0.002)
     assert ctx["fair_spread_home"] < -5.8
     assert ctx["fair_total"] > 138.0
     assert ctx["closest_lean"] is not None

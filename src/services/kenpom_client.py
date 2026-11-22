@@ -16,6 +16,51 @@ class KenPomClient:
     _ALL_RATINGS_CACHE: Dict[str, Dict[str, Dict]] = {}
     _ALL_HCA_CACHE: Dict[str, Dict[str, Dict]] = {}
     _ALL_FANMATCH_CACHE: Dict[str, List[Dict]] = {}
+    _LEAGUE_AVG_CACHE: Dict[str, Dict[str, float]] = {}
+
+    def get_league_averages(self, asof_date: Optional[str] = None) -> Dict[str, float]:
+        """Compute live current-season D1 mean efficiency, tempo, and four factors from loaded ratings."""
+        defaults = {
+            "eff": 106.5,
+            "tempo": 68.0,
+            "ftr": 33.0,
+            "efg": 50.5,
+            "to": 17.5,
+        }
+        season_start = season_start_date_for_game(asof_date)
+        cached = KenPomClient._LEAGUE_AVG_CACHE.get(season_start)
+        if cached is not None:
+            return cached
+        season_map = KenPomClient._ALL_RATINGS_CACHE.get(season_start)
+        if not isinstance(season_map, dict) or len(season_map) < 50:
+            return defaults
+
+        def _mean_for(keys: List[str], lo: float, hi: float, fallback: float) -> float:
+            vals = []
+            for row in season_map.values():
+                if not isinstance(row, dict):
+                    continue
+                for k in keys:
+                    v = row.get(k)
+                    if v is not None:
+                        try:
+                            fv = float(v)
+                            if lo <= fv <= hi:
+                                vals.append(fv)
+                                break
+                        except Exception:
+                            pass
+            return round(sum(vals) / float(len(vals)), 2) if len(vals) >= 50 else fallback
+
+        res = {
+            "eff": _mean_for(["adj_o"], 70.0, 140.0, defaults["eff"]),
+            "tempo": _mean_for(["adj_t"], 50.0, 85.0, defaults["tempo"]),
+            "ftr": _mean_for(["off_ftr"], 15.0, 55.0, defaults["ftr"]),
+            "efg": _mean_for(["off_efg"], 35.0, 65.0, defaults["efg"]),
+            "to": _mean_for(["off_to"], 10.0, 30.0, defaults["to"]),
+        }
+        KenPomClient._LEAGUE_AVG_CACHE[season_start] = res
+        return res
 
     def __init__(self):
         self.matcher = TeamMatcher()
@@ -532,7 +577,8 @@ class KenPomClient:
                 'summary': 'KenPom data not available'
             }
 
-        baseline_tempo = 68.0
+        lg = self.get_league_averages()
+        baseline_tempo = float(lg.get("tempo") or 68.0)
         h_tempo = float(home_rating.get('adj_t') or baseline_tempo)
         a_tempo = float(away_rating.get('adj_t') or baseline_tempo)
         avg_tempo = (h_tempo + a_tempo) / 2.0
@@ -565,7 +611,7 @@ class KenPomClient:
         fair_total = None
         projected_score = None
         if h_adj_o > 50.0 and h_adj_d > 50.0 and a_adj_o > 50.0 and a_adj_d > 50.0:
-            d1_avg_eff = 106.5
+            d1_avg_eff = float(lg.get("eff") or 106.5)
             hca_ppp = 0.0 if neutral_site else (hca * 0.5)
             h_ppp = ((h_adj_o * a_adj_d) / d1_avg_eff) + hca_ppp
             a_ppp = ((a_adj_o * h_adj_d) / d1_avg_eff) - hca_ppp
@@ -640,13 +686,13 @@ class KenPomClient:
         avg_ftr_val = None
         if None not in (h_off_ftr, a_def_ftr, a_off_ftr, h_def_ftr):
             avg_ftr_val = (h_off_ftr + a_def_ftr + a_off_ftr + h_def_ftr) / 4.0
-            tot_ff_terms.append((avg_ftr_val - 33.0) * 0.08)
+            tot_ff_terms.append((avg_ftr_val - float(lg.get("ftr") or 33.0)) * 0.08)
         if None not in (h_off_efg, a_def_efg, a_off_efg, h_def_efg):
             avg_efg = (h_off_efg + a_def_efg + a_off_efg + h_def_efg) / 4.0
-            tot_ff_terms.append((avg_efg - 50.5) * 0.14)
+            tot_ff_terms.append((avg_efg - float(lg.get("efg") or 50.5)) * 0.14)
         if None not in (h_off_to, a_def_to, a_off_to, h_def_to):
             avg_to = (h_off_to + a_def_to + a_off_to + h_def_to) / 4.0
-            tot_ff_terms.append(-((avg_to - 17.5) * 0.10))
+            tot_ff_terms.append(-((avg_to - float(lg.get("to") or 17.5)) * 0.10))
         if press_transition_total_adj > 0.0:
             tot_ff_terms.append(press_transition_total_adj)
         total_four_factors_adj = round(max(-1.6, min(1.6, sum(tot_ff_terms))), 2) if tot_ff_terms else 0.0

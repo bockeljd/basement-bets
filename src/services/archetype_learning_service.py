@@ -496,12 +496,12 @@ def fit_adaptive_learning_from_rows(
         total_bias_sample = all_games_summary["total_bias_sample"]
         total_bias_source = "all_completed_games"
 
-    # Spread bucket EV bumps (default +0.012 prior on mid_6_14 when sample is thin)
+    # Spread bucket EV bumps (default priors reflect lower EV bar on competitive spreads, higher on blowouts)
     spread_bucket_ev_bump: Dict[str, float] = {
         "under_6": 0.0,
-        "mid_6_14": 0.012,
-        "blowout_14_22": 0.005,
-        "blowout_22_plus": 0.0,
+        "mid_6_14": 0.004,
+        "blowout_14_22": 0.012,
+        "blowout_22_plus": 0.020,
     }
     for sb_key, st in sb_summary.items():
         if st["n"] >= 10:
