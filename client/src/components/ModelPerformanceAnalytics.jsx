@@ -1046,71 +1046,73 @@ const ModelPerformanceAnalytics = ({
         </article>
       </div>
 
-      {/* Row 3: Confidence Tiers & Recent Form + By Sport Comparison */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Card 4: Confidence Tiers & Recent Form */}
-        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="conf-form-heading">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 id="conf-form-heading" className="text-base font-bold text-slate-100">
-                Confidence Levels &amp; Recent Form
-              </h3>
-              <p className="text-xs text-slate-400">
-                High (80+), Medium (50–79), and Low (&lt;50) pick scores. Click a box to filter.
-              </p>
+      {/* Row 3: Confidence Tiers & Recent Form (Full-Width 2-Column Layout) */}
+      <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="conf-form-heading">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 id="conf-form-heading" className="text-base font-bold text-slate-100">
+              Confidence Levels &amp; Recent Form
+            </h3>
+            <p className="text-xs text-slate-400">
+              High (80+), Medium (50–79), and Low (&lt;50) pick scores alongside rolling momentum. Click a confidence box to filter.
+            </p>
+          </div>
+          {selectedConf !== 'ALL' && onSelectConf && (
+            <button
+              type="button"
+              onClick={() => onSelectConf('ALL')}
+              className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer shrink-0"
+            >
+              All Levels
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* Left: Confidence Tiers + Last 14 Active Days Momentum */}
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2.5">
+              {analytics.confidenceTiers.map((t) => {
+                const tierKey = t.label.toUpperCase();
+                const isSelected = selectedConf === tierKey;
+                const badgeColor =
+                  t.label === 'High'
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                    : t.label === 'Medium'
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                      : 'border-slate-700 bg-slate-900/80 text-slate-300';
+                return (
+                  <button
+                    key={t.label}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => onSelectConf && onSelectConf(isSelected ? 'ALL' : tierKey)}
+                    className={`text-left rounded-xl border p-3 transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 ${onSelectConf ? 'cursor-pointer hover:brightness-110' : ''} ${badgeColor} ${
+                      isSelected ? 'ring-2 ring-indigo-400/70' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-bold">{t.label}</span>
+                      <span className="text-[10px] opacity-80">{t.desc}</span>
+                    </div>
+                    <div className="mt-1.5 text-lg font-extrabold font-mono text-slate-100">
+                      {t.decided > 0 ? formatPct(t.winRate) : '—'}
+                    </div>
+                    <div className="mt-0.5 text-[11px] font-mono text-slate-300">{t.recordText}</div>
+                    <div className={`mt-1 text-[11px] font-mono font-semibold ${t.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {formatUnits(t.profitUnits)} ({t.settled > 0 ? formatSignedPct(t.roiPct) : '—'})
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-            {selectedConf !== 'ALL' && onSelectConf && (
-              <button
-                type="button"
-                onClick={() => onSelectConf('ALL')}
-                className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer shrink-0"
-              >
-                All Levels
-              </button>
-            )}
-          </div>
 
-          <div className="grid grid-cols-3 gap-2.5">
-            {analytics.confidenceTiers.map((t) => {
-              const tierKey = t.label.toUpperCase();
-              const isSelected = selectedConf === tierKey;
-              const badgeColor =
-                t.label === 'High'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                  : t.label === 'Medium'
-                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                    : 'border-slate-700 bg-slate-900/80 text-slate-300';
-              return (
-                <button
-                  key={t.label}
-                  type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => onSelectConf && onSelectConf(isSelected ? 'ALL' : tierKey)}
-                  className={`text-left rounded-xl border p-3 transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 ${onSelectConf ? 'cursor-pointer hover:brightness-110' : ''} ${badgeColor} ${
-                    isSelected ? 'ring-2 ring-indigo-400/70' : ''
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs font-bold">{t.label}</span>
-                    <span className="text-[10px] opacity-80">{t.desc}</span>
-                  </div>
-                  <div className="mt-1.5 text-lg font-extrabold font-mono text-slate-100">
-                    {t.decided > 0 ? formatPct(t.winRate) : '—'}
-                  </div>
-                  <div className="mt-0.5 text-[11px] font-mono text-slate-300">{t.recordText}</div>
-                  <div className={`mt-1 text-[11px] font-mono font-semibold ${t.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {formatUnits(t.profitUnits)} ({t.settled > 0 ? formatSignedPct(t.roiPct) : '—'})
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="space-y-3">
             {analytics.recentDailyBars.length > 0 && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="font-bold uppercase tracking-wider text-slate-400">Last {Math.min(14, analytics.recentDailyBars.length)} Active Days</span>
+                  <span className="font-bold uppercase tracking-wider text-slate-400">
+                    Last {Math.min(14, analytics.recentDailyBars.length)} Active Days
+                  </span>
                   <span className="text-slate-500">Hover tile for record</span>
                 </div>
                 <div className="grid grid-cols-7 gap-1.5">
@@ -1138,31 +1140,36 @@ const ModelPerformanceAnalytics = ({
                 </div>
               </div>
             )}
+          </div>
 
-            <h4 id="recent-form-heading" className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent Form</h4>
+          {/* Right: Recent Form Timeframe Breakdown */}
+          <div className="space-y-2">
+            <h4 id="recent-form-heading" className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Recent Form by Window
+            </h4>
             <div role="region" aria-labelledby="recent-form-heading" tabIndex={0} className="perf-table-wrapper">
               <table className="perf-sticky-table w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
-                    <th scope="col" className="py-1.5 pr-3 font-medium">Timeframe</th>
-                    <th scope="col" className="py-1.5 px-3 font-medium">Record</th>
-                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Win %</th>
-                    <th scope="col" className="py-1.5 px-3 font-medium text-right">Profit</th>
-                    <th scope="col" className="py-1.5 pl-3 font-medium text-right">ROI</th>
+                    <th scope="col" className="py-2 pr-3 font-medium">Timeframe</th>
+                    <th scope="col" className="py-2 px-3 font-medium">Record</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Profit</th>
+                    <th scope="col" className="py-2 pl-3 font-medium text-right">ROI</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/70">
                   {analytics.recentWindows.map((w) => (
                     <tr key={w.label} className="hover:bg-slate-900/50">
-                      <th scope="row" className="py-1.5 pr-3 font-medium text-slate-200">{w.label}</th>
-                      <td className="py-1.5 px-3 font-mono text-slate-300">{w.recordText}</td>
-                      <td className={`py-1.5 px-3 text-right font-mono font-semibold ${w.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                      <th scope="row" className="py-2 pr-3 font-medium text-slate-200">{w.label}</th>
+                      <td className="py-2 px-3 font-mono text-slate-300">{w.recordText}</td>
+                      <td className={`py-2 px-3 text-right font-mono font-semibold ${w.winRate >= 52.4 ? 'text-emerald-400' : 'text-slate-300'}`}>
                         {w.decided > 0 ? formatPct(w.winRate) : '—'}
                       </td>
-                      <td className={`py-1.5 px-3 text-right font-mono font-semibold ${w.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <td className={`py-2 px-3 text-right font-mono font-semibold ${w.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {w.settled > 0 ? formatUnits(w.profitUnits) : '—'}
                       </td>
-                      <td className={`py-1.5 pl-3 text-right font-mono font-semibold ${w.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <td className={`py-2 pl-3 text-right font-mono font-semibold ${w.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {w.settled > 0 ? formatSignedPct(w.roiPct) : '—'}
                       </td>
                     </tr>
@@ -1171,81 +1178,8 @@ const ModelPerformanceAnalytics = ({
               </table>
             </div>
           </div>
-        </article>
-
-        {/* Card 5: Performance by Sport (Click to Filter) */}
-        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="by-sport-heading">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 id="by-sport-heading" className="text-base font-bold text-slate-100">
-                Performance by Sport
-              </h3>
-              <p className="text-xs text-slate-400">
-                {selectedSport !== 'ALL'
-                  ? `Filtered to ${filterSummary} (${isTop6Scope ? 'Top 6 / Day' : 'All Picks'}). Click Show All Sports to compare sports.`
-                  : `${filterSummary} (${isTop6Scope ? 'Top 6 / Day' : 'All Picks'}). Click any sport row to filter the whole page.`}
-              </p>
-            </div>
-            {selectedSport !== 'ALL' && onSelectSport && (
-              <button
-                type="button"
-                onClick={() => onSelectSport('ALL')}
-                className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
-              >
-                Show All Sports
-              </button>
-            )}
-          </div>
-
-          {analytics.sportBreakdown.length === 0 ? (
-            <div className="h-[200px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
-              No sport history found.
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {analytics.sportBreakdown.map((s) => {
-                const isSelected = selectedSport === s.sport;
-                return (
-                  <button
-                    key={s.sport}
-                    type="button"
-                    aria-pressed={isSelected}
-                    onClick={() => onSelectSport && onSelectSport(isSelected ? 'ALL' : s.sport)}
-                    className={`w-full text-left rounded-xl border p-3.5 transition-all cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 ${
-                      isSelected
-                        ? 'border-indigo-400 bg-indigo-500/15 ring-1 ring-indigo-400/50'
-                        : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 hover:bg-slate-900/70'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5">
-                        <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold tracking-wide bg-slate-800 text-slate-100">
-                          {s.sport}
-                        </span>
-                        <div>
-                          <div className="text-sm font-mono font-semibold text-slate-100">{s.recordText}</div>
-                          <div className="text-[11px] text-slate-400">
-                            {s.settled} settled{s.voids > 0 ? ` • ${s.voids} void` : ''}{s.pending > 0 ? ` • ${s.pending} pending` : ''}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className={`text-sm font-mono font-bold ${s.roiPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {formatUnits(s.profitUnits)} ({s.settled > 0 ? formatSignedPct(s.roiPct) : '—'})
-                        </div>
-                        <div className="text-xs font-mono text-slate-300">
-                          {s.decided > 0 ? `${formatPct(s.winRate)} Win Rate` : 'Awaiting settlement'}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </article>
-      </div>
+        </div>
+      </article>
 
       {/* Row 3.5: NCAAM Model Insights & Sweet Spots */}
       {(selectedSport === 'NCAAM' || selectedSport === 'ALL') && (() => {
