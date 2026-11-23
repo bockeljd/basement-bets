@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getConfidenceMeta,
+  getLiveGameStatus,
   getRecEv,
   getRecQualityScore,
   hasTop6RiskFlag,
@@ -37,5 +38,31 @@ describe('Today recommendations', () => {
     const comp = getRecQualityScore({ bet_type: 'SPREAD', side: 'home', market_line: -8.5, ev: 0.045, win_prob_lb10: 0.53, conviction_sources: 3 });
     const blowout = getRecQualityScore({ bet_type: 'SPREAD', side: 'home', market_line: -23.5, ev: 0.045, win_prob_lb10: 0.53, conviction_sources: 1 });
     expect(comp).toBeGreaterThan(blowout);
+  });
+
+  it('tracks 1H bets against the 20-minute first half clock instead of 40-minute full game', () => {
+    const game = {
+      sport: 'NCAAM',
+      status: 'LIVE',
+      period: 1,
+      clock: '2:36',
+      away_team: 'Charlotte 49ers',
+      home_team: 'Florida Gulf Coast Eagles',
+      away_score: 32,
+      home_score: 25,
+    };
+    const rec = {
+      bet_type: 'TOTAL_1H',
+      selection: '1H OVER 66.5',
+      side: 'over',
+      market_line: 66.5,
+      fair_line: 69.0,
+    };
+    const live = getLiveGameStatus(game, rec, { fair_total: 147.0 });
+    expect(live.progressPct).toBeGreaterThanOrEqual(85);
+    expect(live.liveProjTotal).toBeGreaterThan(60);
+    expect(live.liveProjTotal).toBeLessThan(72);
+    expect(live.trendDetail).toContain('2.6 min in 1H');
+    expect(live.liveWinProb).toBeLessThan(0.75);
   });
 });
