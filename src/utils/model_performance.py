@@ -534,6 +534,15 @@ def normalize_history_row(row: dict) -> dict:
     out["is_smart_risk"] = is_sr
     out["risk_tier"] = "SMART_RISK" if is_sr else "CORE"
 
+    try:
+        from src.utils.bet_timing import extract_bet_timing_action
+
+        timing_action = extract_bet_timing_action(out)
+        if timing_action:
+            out["bet_timing_action"] = timing_action
+    except Exception:
+        pass
+
     if out.get("clv_points") is None and out.get("close_line") is not None and out.get("bet_line") is not None:
         try:
             cl = float(out["close_line"])

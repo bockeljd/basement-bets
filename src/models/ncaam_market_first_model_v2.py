@@ -2362,6 +2362,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "prediction_id": r.get('prediction_id'),
                 "signals": matchup_signals,
             }
+            try:
+                from src.utils.bet_timing import compute_bet_timing
+
+                timing = compute_bet_timing(
+                    ui_rec,
+                    start_time=event.get("start_time"),
+                    home_team=event.get("home_team"),
+                    away_team=event.get("away_team"),
+                )
+                if timing is not None:
+                    ui_rec["bet_timing"] = timing
+            except Exception:
+                pass
             ui_recs.append(ui_rec)
             r['_ui_rec'] = ui_rec
 

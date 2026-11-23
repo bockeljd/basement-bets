@@ -7,6 +7,9 @@ import {
   TrendingUp,
   TrendingDown,
   Activity,
+  Zap,
+  Clock,
+  Eye,
 } from 'lucide-react';
 import ModelVisualComparison from './ModelVisualComparison';
 import {
@@ -23,6 +26,7 @@ import {
   getLiveGameStatus,
   getModelSignalData,
   getRecommendedBetSize,
+  getBetTimingGuidance,
 } from './todayHelpers';
 
 const TONE_BADGES = {
@@ -32,6 +36,24 @@ const TONE_BADGES = {
   indigo: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/35',
   blue: 'bg-sky-500/15 text-sky-300 border-sky-500/35',
   slate: 'bg-slate-800 text-slate-300 border-slate-700',
+};
+
+const TIMING_STYLE = {
+  BET_NOW: {
+    boxCls: 'border-emerald-500/40 bg-emerald-950/35',
+    badgeCls: 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200',
+    Icon: Zap,
+  },
+  WAIT_LINEUPS: {
+    boxCls: 'border-amber-500/40 bg-amber-950/35',
+    badgeCls: 'bg-amber-500/20 border-amber-400/50 text-amber-200',
+    Icon: Clock,
+  },
+  MONITOR: {
+    boxCls: 'border-sky-500/40 bg-sky-950/35',
+    badgeCls: 'bg-sky-500/20 border-sky-400/50 text-sky-200',
+    Icon: Eye,
+  },
 };
 
 const TodayPlayCard = ({
@@ -88,6 +110,8 @@ const TodayPlayCard = ({
   const isBetLost = liveInfo.trendVerdict === 'LOST';
   const isBetPush = liveInfo.trendVerdict === 'PUSH';
   const isBetSettled = isBetWon || isBetLost || isBetPush;
+  const timing = !liveInfo.isLive && !liveInfo.isFinal && !isBetSettled ? getBetTimingGuidance(rec, game, context) : null;
+  const timingUi = timing ? TIMING_STYLE[timing.action] || TIMING_STYLE.BET_NOW : null;
   const liveBadgeText = isBetSettled
     ? liveInfo.coverText || (isBetWon ? 'Bet Won' : isBetLost ? 'Bet Lost' : 'Push')
     : liveInfo.isLive && liveInfo.trendLabel
@@ -302,6 +326,24 @@ const TodayPlayCard = ({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Pre-game When-to-Bet Timing Indicator */}
+      {timing && timingUi && (
+        <div className={`rounded-xl border px-3 py-2 flex flex-wrap items-center gap-2 text-xs ${timingUi.boxCls}`}>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+            When to Bet
+          </span>
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-bold ${timingUi.badgeCls}`}
+          >
+            <timingUi.Icon size={12} aria-hidden="true" />
+            <span>{timing.label}</span>
+          </span>
+          <span className="text-[11px] text-slate-200 leading-snug">
+            {timing.reason}
+          </span>
         </div>
       )}
 

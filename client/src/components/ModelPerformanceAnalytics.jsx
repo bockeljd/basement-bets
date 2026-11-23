@@ -362,6 +362,28 @@ const ModelPerformanceAnalytics = ({
       med_conf: createBucketAccumulator('Medium (50–79)'),
     };
 
+    const timingAcc = {
+      BET_NOW: createBucketAccumulator('Bet Now'),
+      WAIT_LINEUPS: createBucketAccumulator('Wait · Check Lineups'),
+      MONITOR: createBucketAccumulator('Monitor · May Improve'),
+    };
+    const timingClvPos = { BET_NOW: 0, WAIT_LINEUPS: 0, MONITOR: 0 };
+
+    for (const h of graded) {
+      const tAct = String(
+        h?.bet_timing_action || h?.bet_timing?.action || h?.rec_json?.bet_timing?.action || ''
+      )
+        .trim()
+        .toUpperCase();
+      if (timingAcc[tAct]) {
+        accumulateRowInto(timingAcc[tAct], h);
+        const clv = parseFloat(h?.clv_points);
+        if (Number.isFinite(clv) && clv > 0) {
+          timingClvPos[tAct] += 1;
+        }
+      }
+    }
+
     for (const h of ncaamGraded) {
       const mkt = normalizeMarketType(h);
       const rawLine = h?.bet_line ?? h?.market_line ?? h?.line;
@@ -450,6 +472,17 @@ const ModelPerformanceAnalytics = ({
       ],
     };
 
+    const timingBuckets = ['BET_NOW', 'WAIT_LINEUPS', 'MONITOR'].map((action) => {
+      const fin = finalizeBucket(timingAcc[action]);
+      const posRate =
+        fin.clvCount > 0 ? Math.round((timingClvPos[action] / fin.clvCount) * 100) : null;
+      return {
+        ...fin,
+        action,
+        posClvRate: posRate,
+      };
+    });
+
     return {
       gradedCount: graded.length,
       settledDays,
@@ -461,6 +494,7 @@ const ModelPerformanceAnalytics = ({
       betTypes,
       sportBreakdown,
       ncaamEdgeInsights,
+      timingBuckets,
       latestCumulativeUnits: settledDays.length > 0 ? settledDays[settledDays.length - 1].cumulativeUnits : 0,
     };
   }, [history, allHistory, preConfHistory, preMarketHistory]);
@@ -1274,6 +1308,85 @@ const ModelPerformanceAnalytics = ({
           </article>
         );
       })()}
+
+      {/* When to Bet · Closing Line Check (shown once graded rows have timing tags) */}
+      {analytics.timingBuckets.some((b) => b.settled > 0) && (
+        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="timing-clv-heading">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 id="timing-clv-heading" className="text-base font-bold text-slate-100">
+                When to Bet · Closing Line Check
+              </h3>
+              <p className="text-xs text-slate-400">
+                Tracks whether &ldquo;Bet Now&rdquo; calls beat the final closing line and how each timing signal performs.
+              </p>
+            </div>
+            <span className="px-2.5 py-1 rounded-full border border-emerald-500/35 bg-emerald-500/15 text-emerald-200 text-xs font-semibold">
+              Timing Validation
+            </span>
+          </div>
+
+          <div role="region" aria-labelledby="timing-clv-heading" tabIndex={0} className="perf-table-wrapper">
+            <table className="perf-sticky-table w-full text-left border-collapse text-xs">
+              <caption className="sr-only">Performance and closing line value by When to Bet timing signal</caption>
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400">
+                  <th scope="col" className="py-2 pr-3 font-medium">Timing Signal</th>
+                  <th scope="col" className="py-2 px-3 font-medium text-right">Settled</th>
+                  <th scope="col" className="py-2 px-3 font-medium">Record</th>
+                  <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
+                  <th scope="col" className="py-2 px-3 font-medium text-right">ROI</th>
+                  <th scope="col" className="py-2 px-3 font-medium text-right">Avg Line Beat</th>
+                  <th scope="col" className="py-2 pl-3 font-medium text-right">Beat Close %</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/70">
+                {analytics.timingBuckets
+                  .filter((b) => b.settled > 0)
+                  .map((b) => {
+                    const clvCls =
+                      b.avgClv === null
+                        ? 'text-slate-400'
+                        : b.avgClv > 0
+                          ? 'text-emerald-300'
+                          : b.avgClv === 0
+                            ? 'text-slate-200'
+                            : 'text-rose-300';
+                    const toneCls =
+                      b.action === 'BET_NOW'
+                        ? 'bg-emerald-500/15 border-emerald-400/45 text-emerald-200'
+                        : b.action === 'WAIT_LINEUPS'
+                          ? 'bg-amber-500/15 border-amber-400/45 text-amber-200'
+                          : 'bg-sky-500/15 border-sky-400/45 text-sky-200';
+                    return (
+                      <tr key={b.action} className="hover:bg-slate-900/50">
+                        <th scope="row" className="py-2 pr-3 font-medium">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${toneCls}`}>
+                            {b.label}
+                          </span>
+                        </th>
+                        <td className="py-2 px-3 text-right text-slate-300">{b.settled}</td>
+                        <td className="py-2 px-3 font-mono text-slate-200">{b.recordText}</td>
+                        <td className={`py-2 px-3 text-right font-mono font-semibold ${b.winRate >= 52.4 ? 'text-emerald-300' : 'text-slate-200'}`}>
+                          {b.decided > 0 ? formatPct(b.winRate) : '—'}
+                        </td>
+                        <td className={`py-2 px-3 text-right font-mono font-semibold ${b.roiPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {b.settled > 0 ? formatSignedPct(b.roiPct) : '—'}
+                        </td>
+                        <td className={`py-2 px-3 text-right font-mono font-semibold ${clvCls}`}>
+                          {b.avgClv !== null ? `${b.avgClv > 0 ? '+' : ''}${b.avgClv.toFixed(2)}` : '—'}
+                        </td>
+                        <td className="py-2 pl-3 text-right font-mono text-slate-200">
+                          {b.posClvRate !== null ? `${b.posClvRate}%` : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      )}
 
       {/* Row 4: Live In-Game Win-Chance Accuracy */}
       {(() => {

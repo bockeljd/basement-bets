@@ -112,7 +112,13 @@ def fetch_event_ids_for_date(date_et: str, limit_games: int = 250, days: int = 3
         return out
 
 
-def _normalize_rec_for_storage(rec: dict | None) -> dict | None:
+def _normalize_rec_for_storage(
+    rec: dict | None,
+    *,
+    start_time=None,
+    home_team: str | None = None,
+    away_team: str | None = None,
+) -> dict | None:
     if not isinstance(rec, dict):
         return rec
     norm = dict(rec)
@@ -199,14 +205,46 @@ def _normalize_rec_for_storage(rec: dict | None) -> dict | None:
     except Exception:
         pass
 
+    try:
+        if not isinstance(norm.get("bet_timing"), dict) or not norm["bet_timing"].get("action"):
+            from src.utils.bet_timing import compute_bet_timing
+
+            timing = compute_bet_timing(
+                norm,
+                start_time=start_time,
+                home_team=home_team,
+                away_team=away_team,
+            )
+            if timing is not None:
+                norm["bet_timing"] = timing
+    except Exception:
+        pass
+
     return norm
 
 
 def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
+    # context_json is a JSON string currently in the model; store as JSONB if possible
+    ctx = None
+    try:
+        cj = res.get('context_json') if isinstance(res, dict) else None
+        if cj:
+            ctx = json.loads(cj) if isinstance(cj, str) else cj
+    except Exception:
+        ctx = None
+
     rec = None
     try:
         raw_rec = (res.get('recommendations') or [None])[0]
-        rec = _normalize_rec_for_storage(raw_rec)
+        rec = _normalize_rec_for_storage(
+            raw_rec,
+            start_time=(res.get('start_time') if isinstance(res, dict) else None)
+            or (ctx.get('start_time') if isinstance(ctx, dict) else None),
+            home_team=(res.get('home_team') if isinstance(res, dict) else None)
+            or (ctx.get('home_team') if isinstance(ctx, dict) else None),
+            away_team=(res.get('away_team') if isinstance(res, dict) else None)
+            or (ctx.get('away_team') if isinstance(ctx, dict) else None),
+        )
     except Exception:
         rec = None
 
@@ -219,15 +257,6 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
             reason = 'Analysis unavailable — click Details to retry'
         else:
             reason = r_str or 'No bet'
-
-    # context_json is a JSON string currently in the model; store as JSONB if possible
-    ctx = None
-    try:
-        cj = res.get('context_json')
-        if cj:
-            ctx = json.loads(cj) if isinstance(cj, str) else cj
-    except Exception:
-        ctx = None
 
     sql = """
     INSERT INTO daily_top_picks(date_et, event_id, league, computed_at, model_version, is_actionable, reason, rec_json, context_json)

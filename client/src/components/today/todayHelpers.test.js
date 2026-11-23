@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getBetTimingGuidance,
   getConfidenceMeta,
   getLiveGameStatus,
   getRecEv,
@@ -183,5 +184,106 @@ describe('Today recommendations', () => {
     );
     expect(half1HNo1HScores.trendVerdict).toBe('PENDING_1H');
     expect(half1HNo1HScores.trendDetail).not.toContain('null');
+  });
+
+  it('computes pre-game When to Bet guidance from sharp-book edge, injuries, public splits, and clock', () => {
+    const nowMs = Date.parse('2026-11-23T17:00:00Z');
+    const tipIn = (mins) => new Date(nowMs + mins * 60000).toISOString();
+
+    // 1. Sharp-book advantage -> Bet Now
+    const sharpTiming = getBetTimingGuidance(
+      {
+        bet_type: 'TOTAL',
+        selection: 'UNDER 154.5',
+        side: 'under',
+        book: 'DraftKings',
+        sharp_edge_pts: 1.5,
+        movement_tags: ['sharp_price_edge'],
+      },
+      { start_time: tipIn(180), status: 'SCHEDULED' },
+      null,
+      nowMs
+    );
+    expect(sharpTiming.action).toBe('BET_NOW');
+    expect(sharpTiming.label).toBe('Bet Now');
+    expect(sharpTiming.reason).toContain('1.5 pts');
+
+    // 2. Questionable injury > 60m out -> Wait · Check Lineups (OUT does not block)
+    const waitTiming = getBetTimingGuidance(
+      {
+        bet_type: 'SPREAD',
+        selection: 'Duke -4.5',
+        side: 'home',
+        sharp_edge_pts: 1.0,
+        signals: { injuries: [{ player: 'Caleb Foster', status: 'Questionable' }] },
+      },
+      { start_time: tipIn(180), status: 'SCHEDULED' },
+      null,
+      nowMs
+    );
+    expect(waitTiming.action).toBe('WAIT_LINEUPS');
+    expect(waitTiming.reason).toContain('Caleb Foster');
+
+    const outTiming = getBetTimingGuidance(
+      {
+        bet_type: 'SPREAD',
+        selection: 'Duke -4.5',
+        side: 'home',
+        sharp_edge_pts: 1.0,
+        signals: { injuries: [{ player: 'Bench Guard', status: 'Out' }] },
+      },
+      { start_time: tipIn(180), status: 'SCHEDULED' },
+      null,
+      nowMs
+    );
+    expect(outTiming.action).toBe('BET_NOW');
+
+    // 3. Auto-flips backend MONITOR / WAIT_LINEUPS to BET_NOW when tipoff <= 60m
+    const flippedTiming = getBetTimingGuidance(
+      {
+        bet_type: 'TOTAL',
+        selection: 'OVER 141.5',
+        side: 'over',
+        bet_timing: {
+          action: 'MONITOR',
+          label: 'Monitor · May Improve',
+          short_label: 'Monitor',
+          tone: 'blue',
+          reason: 'Early no rush',
+        },
+      },
+      { start_time: tipIn(35), status: 'SCHEDULED' },
+      null,
+      nowMs
+    );
+    expect(flippedTiming.action).toBe('BET_NOW');
+    expect(flippedTiming.drivers).toContain('tipoff_imminent');
+
+    // 4. Opposite public ticket wave -> Monitor
+    const monitorTiming = getBetTimingGuidance(
+      {
+        bet_type: 'SPREAD',
+        selection: 'Seton Hall +6.5',
+        signals: {
+          public_splits: { SPREAD: { HOME: { bet_pct: 70 }, AWAY: { bet_pct: 30 } } },
+        },
+      },
+      { start_time: tipIn(150), home_team: 'Villanova', away_team: 'Seton Hall', status: 'SCHEDULED' },
+      null,
+      nowMs
+    );
+    expect(monitorTiming.action).toBe('MONITOR');
+    expect(monitorTiming.reason).toContain('70%');
+
+    // 5. 3-of-3 conviction -> Bet Now; live / final / started -> null
+    const convTiming = getBetTimingGuidance(
+      { bet_type: 'TOTAL', selection: 'UNDER 144.5', side: 'under', conviction_sources_total: 3 },
+      { start_time: tipIn(260), status: 'SCHEDULED' },
+      null,
+      nowMs
+    );
+    expect(convTiming.action).toBe('BET_NOW');
+    expect(getBetTimingGuidance({ bet_type: 'TOTAL' }, { start_time: tipIn(30), status: 'LIVE' }, null, nowMs)).toBeNull();
+    expect(getBetTimingGuidance({ bet_type: 'TOTAL' }, { start_time: tipIn(-5), status: 'SCHEDULED' }, null, nowMs)).toBeNull();
   });
 });

@@ -1931,3 +1931,289 @@ export const getRecommendedBetSize = (rec, bankroll = null) => {
       dollarStake != null ? `${unitsStr} · ${pctStr} ($${dollarStake})` : `${unitsStr} · ${pctStr} of bankroll`,
   };
 };
+
+const TIMING_UNCERTAIN_STATUS_RE = /\b(questionable|doubtful|gtd|game[- ]time|day[- ]to[- ]day)\b/i;
+
+const TIMING_ACTION_META = {
+  BET_NOW: {
+    label: 'Bet Now',
+    short_label: 'Bet Now',
+    tone: 'emerald',
+  },
+  WAIT_LINEUPS: {
+    label: 'Wait · Check Lineups',
+    short_label: 'Wait Lineups',
+    tone: 'amber',
+  },
+  MONITOR: {
+    label: 'Monitor · May Improve',
+    short_label: 'Monitor',
+    tone: 'blue',
+  },
+};
+
+const extractUncertainTimingPlayers = (signals) => {
+  if (!signals || typeof signals !== 'object') return [];
+  const seen = new Set();
+  const out = [];
+  const check = (entry) => {
+    if (!entry || typeof entry !== 'object') return;
+    const st = String(entry.status || '').trim();
+    if (!st || !TIMING_UNCERTAIN_STATUS_RE.test(st)) return;
+    const label = String(entry.player || entry.name || '').trim() || 'Key player';
+    const key = label.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(label);
+    }
+  };
+  if (Array.isArray(signals.injuries)) {
+    signals.injuries.forEach(check);
+  }
+  if (Array.isArray(signals.injuries_impact?.impact_players)) {
+    signals.injuries_impact.impact_players.forEach(check);
+  }
+  return out;
+};
+
+/**
+ * Compute pre-game "When to Bet" timing guidance ('BET_NOW' | 'WAIT_LINEUPS' | 'MONITOR').
+ * Matches backend rules in src/utils/bet_timing.py while re-evaluating clock urgency against nowMs.
+ */
+export const getBetTimingGuidance = (rec, game = null, context = null, nowMs = Date.now()) => {
+  if (!rec || typeof rec !== 'object') return null;
+
+  if (game) {
+    const flags = resolveLiveFlags(game);
+    if (flags.isLive || flags.isFinal || flags.isHalftime) return null;
+  }
+
+  const rawStart = game?.start_time || rec?.start_time || context?.start_time;
+  let minutesToTip = null;
+  if (rawStart) {
+    const startMs = new Date(rawStart).getTime();
+    if (Number.isFinite(startMs)) {
+      minutesToTip = Math.round(((startMs - nowMs) / 60000) * 10) / 10;
+      if (minutesToTip <= 0) return null;
+    }
+  }
+
+  const backendTiming = rec?.bet_timing;
+  const backendAction = String(backendTiming?.action || '').trim().toUpperCase();
+  if (
+    backendTiming &&
+    typeof backendTiming === 'object' &&
+    TIMING_ACTION_META[backendAction] &&
+    backendTiming.label &&
+    backendTiming.reason
+  ) {
+    const tipImminentNow = minutesToTip !== null && minutesToTip <= 60;
+    if (!tipImminentNow || backendAction === 'BET_NOW') {
+      const meta = TIMING_ACTION_META[backendAction];
+      return {
+        action: backendAction,
+        label: backendTiming.label || meta.label,
+        short_label: backendTiming.short_label || meta.short_label,
+        tone: backendTiming.tone || meta.tone,
+        reason: backendTiming.reason,
+        drivers: Array.isArray(backendTiming.drivers) ? backendTiming.drivers : [],
+        minutes_to_tip: minutesToTip ?? toNum(backendTiming.minutes_to_tip),
+      };
+    }
+  }
+
+  const rawTags = rec.movement_tags || rec.sanity_reasons;
+  const tags = (
+    Array.isArray(rawTags)
+      ? rawTags
+      : typeof rawTags === 'string'
+        ? rawTags.split(',')
+        : []
+  )
+    .map((t) => String(t || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  const signals = rec.signals && typeof rec.signals === 'object' ? rec.signals : {};
+  const sharpEdgePts = toNum(rec.sharp_edge_pts);
+  const hasSharpPriceEdge =
+    (sharpEdgePts !== null && sharpEdgePts >= 0.5) ||
+    tags.includes('sharp_price_edge') ||
+    tags.includes('lagging_book_edge');
+  const hasSharpSteam = tags.includes('rlm_confirmed') || tags.includes('sharp_backing');
+
+  const betType = String(rec.bet_type || rec.market_type || rec.market || '').trim().toUpperCase();
+  const selectionText = String(rec.selection || rec.pick || '');
+  const isFirstHalf = betType === 'TOTAL_1H' || betType === 'SPREAD_1H' || tags.includes('first_half_market');
+  const isSmartRisk =
+    Boolean(rec.is_smart_risk) ||
+    String(rec.risk_tier || '').trim().toUpperCase() === 'SMART_RISK' ||
+    tags.includes('smart_risk_high_return');
+  const bookName = String(rec.book || 'Sportsbook').trim() || 'Sportsbook';
+  const uncertainPlayers = extractUncertainTimingPlayers(signals);
+
+  const pack = (action, reason, drivers) => ({
+    action,
+    ...TIMING_ACTION_META[action],
+    reason,
+    drivers,
+    minutes_to_tip: minutesToTip,
+  });
+
+  // 1. Tipoff imminent (<= 60 min)
+  if (minutesToTip !== null && minutesToTip <= 60) {
+    const drivers = ['tipoff_imminent'];
+    if (hasSharpPriceEdge) drivers.push('sharp_price_edge');
+    const minsInt = Math.max(1, Math.round(minutesToTip));
+    if (sharpEdgePts !== null && sharpEdgePts >= 0.5) {
+      return pack(
+        'BET_NOW',
+        `Tipoff in ~${minsInt} min and ${bookName} is ${sharpEdgePts.toFixed(1)} pts better than sharp books — lock in before close.`,
+        drivers
+      );
+    }
+    if (uncertainPlayers.length > 0) {
+      return pack(
+        'BET_NOW',
+        `Tipoff in ~${minsInt} min — confirm final status on ${uncertainPlayers.slice(0, 2).join(', ')}, then lock in before tip.`,
+        drivers
+      );
+    }
+    return pack(
+      'BET_NOW',
+      `Tipoff in ~${minsInt} min — closing lines are firming up, good time to lock it in.`,
+      drivers
+    );
+  }
+
+  // 2. Uncertain lineup news (> 60 min or unknown start_time)
+  if (uncertainPlayers.length > 0) {
+    const listed = uncertainPlayers.slice(0, 2).join(', ');
+    const suffix = uncertainPlayers.length > 1 ? ' listed Questionable/Doubtful' : ' is Questionable/Doubtful';
+    return pack('WAIT_LINEUPS', `${listed}${suffix} — wait for lineup news ~45 min before tip.`, ['uncertain_injury']);
+  }
+
+  // 3. Sharp-book lag or sharp steam
+  if (hasSharpPriceEdge || hasSharpSteam) {
+    const drivers = [];
+    if (hasSharpPriceEdge) {
+      if ((sharpEdgePts !== null && sharpEdgePts >= 0.5) || tags.includes('sharp_price_edge')) {
+        drivers.push('sharp_price_edge');
+      }
+      if (tags.includes('lagging_book_edge')) drivers.push('lagging_book_edge');
+    }
+    if (tags.includes('rlm_confirmed')) drivers.push('rlm_confirmed');
+    if (tags.includes('sharp_backing')) drivers.push('sharp_backing');
+
+    let reason = 'Big money is backing this side and the number may tighten closer to tip.';
+    if (sharpEdgePts !== null && sharpEdgePts >= 0.5) {
+      reason = `${bookName} is ${sharpEdgePts.toFixed(1)} pts better than sharp books — likely to move soon.`;
+    } else if (tags.includes('sharp_price_edge') || tags.includes('lagging_book_edge')) {
+      reason = `${bookName} is offering a better number than sharp books — take it before it adjusts.`;
+    } else if (tags.includes('rlm_confirmed')) {
+      reason = 'Respected money already pushed the line toward this pick — better to grab it now.';
+    }
+    return pack('BET_NOW', reason, drivers);
+  }
+
+  // Resolve public ticket splits
+  const splitMkt =
+    betType.includes('TOTAL') || /\b(OVER|UNDER)\b/i.test(selectionText)
+      ? 'TOTAL'
+      : betType === 'ML' || betType === 'MONEYLINE' || betType === 'H2H' || betType.includes('MONEYLINE')
+        ? 'ML'
+        : betType.includes('SPREAD')
+          ? 'SPREAD'
+          : betType;
+
+  let pickSide = null;
+  const rawSide = String(rec.side || '').trim().toUpperCase();
+  if (splitMkt === 'TOTAL') {
+    if (rawSide === 'OVER' || rawSide === 'UNDER') pickSide = rawSide;
+    else if (/\bOVER\b/i.test(selectionText)) pickSide = 'OVER';
+    else if (/\bUNDER\b/i.test(selectionText)) pickSide = 'UNDER';
+  } else if (rawSide === 'HOME' || rawSide === 'AWAY') {
+    pickSide = rawSide;
+  } else {
+    const selLow = selectionText.trim().toLowerCase();
+    const hLow = String(game?.home_team || rec.home_team || context?.home_team || '').trim().toLowerCase();
+    const aLow = String(game?.away_team || rec.away_team || context?.away_team || '').trim().toLowerCase();
+    if (hLow && selLow.startsWith(hLow)) pickSide = 'HOME';
+    else if (aLow && selLow.startsWith(aLow)) pickSide = 'AWAY';
+    else if (hLow && selLow.includes(hLow) && (!aLow || !selLow.includes(aLow))) pickSide = 'HOME';
+    else if (aLow && selLow.includes(aLow) && (!hLow || !selLow.includes(hLow))) pickSide = 'AWAY';
+  }
+
+  let pickBetPct = null;
+  let oppBetPct = null;
+  const splits = signals.public_splits;
+  if (splits && typeof splits === 'object' && splitMkt && splits[splitMkt] && pickSide) {
+    const oppSide =
+      splitMkt === 'TOTAL' ? (pickSide === 'OVER' ? 'UNDER' : 'OVER') : pickSide === 'HOME' ? 'AWAY' : 'HOME';
+    pickBetPct = toNum(splits[splitMkt][pickSide]?.bet_pct);
+    oppBetPct = toNum(splits[splitMkt][oppSide]?.bet_pct);
+  }
+
+  // 4. Opposite public ticket wave
+  if (oppBetPct !== null && oppBetPct >= 62.0 && (minutesToTip === null || minutesToTip > 90)) {
+    return pack(
+      'MONITOR',
+      `${Math.round(oppBetPct)}% of public tickets are on the other side — waiting may get a better number.`,
+      ['opposite_public_tickets']
+    );
+  }
+
+  // 5. Early 1H or Smart Risk play (> 3h to tip)
+  if ((isFirstHalf || isSmartRisk) && minutesToTip !== null && minutesToTip > 180) {
+    const hrs = Math.max(1, Math.round(minutesToTip / 60));
+    if (isFirstHalf) {
+      return pack(
+        'MONITOR',
+        `1st-half limits are light with ~${hrs}h to tip — check again closer to game time.`,
+        ['early_1h_market']
+      );
+    }
+    return pack(
+      'MONITOR',
+      `Higher-variance Smart Risk play with ~${hrs}h to tip — monitor line moves before sizing in.`,
+      ['early_smart_risk']
+    );
+  }
+
+  // 6. Our-side public steam or high conviction
+  const adj = signals.adjustments && typeof signals.adjustments === 'object' ? signals.adjustments : {};
+  const rawAgree = betType.includes('TOTAL')
+    ? rec.conviction_sources_total ?? adj.conviction_sources_total ?? context?.conviction_sources_total
+    : rec.conviction_sources ?? adj.conviction_sources ?? context?.conviction_sources;
+  const agreeCount = Math.round(toNum(rawAgree) ?? 0);
+  const evDec = getRecEv(rec);
+
+  const hasOurPublic = pickBetPct !== null && pickBetPct >= 65.0;
+  const hasHighConv = agreeCount >= 3;
+  const hasStrongEv = evDec !== null && evDec >= 0.06;
+  if (hasOurPublic || hasHighConv || hasStrongEv) {
+    const drivers = [];
+    if (hasOurPublic) drivers.push('our_public_steam');
+    if (hasHighConv) drivers.push('high_conviction');
+    if (hasStrongEv) drivers.push('strong_ev');
+
+    let reason = `High +${(evDec * 100).toFixed(1)}% value cushion is likely to trim down closer to tipoff.`;
+    if (hasOurPublic) {
+      reason = `${Math.round(pickBetPct)}% of tickets are backing this side — bet now before the line moves away.`;
+    } else if (hasHighConv) {
+      reason = `${agreeCount}-of-${agreeCount} rating models agree with no injury flags — strong number to grab now.`;
+    }
+    return pack('BET_NOW', reason, drivers);
+  }
+
+  // 7. Default fallback
+  if (minutesToTip !== null && minutesToTip > 240) {
+    const hrs = Math.max(1, Math.round(minutesToTip / 60));
+    return pack(
+      'MONITOR',
+      `No sharp-book rush yet with ~${hrs}h to tip — fine to watch for a better number.`,
+      ['early_no_rush']
+    );
+  }
+
+  return pack('BET_NOW', 'Clean number with no lineup flags — good to lock in now.', ['clean_number']);
+};

@@ -3700,6 +3700,18 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             out['signals'] = rec.get('signals')
         if rec.get('movement_tags') is not None:
             out['movement_tags'] = rec.get('movement_tags')
+        for opt_key in (
+            'sharp_edge_pts',
+            'sharp_book',
+            'sharp_line',
+            'is_smart_risk',
+            'risk_tier',
+            'conviction_sources',
+            'conviction_sources_total',
+            'bet_timing',
+        ):
+            if rec.get(opt_key) is not None:
+                out[opt_key] = rec.get(opt_key)
         from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
         out['top6_eligible'] = bool(rec.get('top6_eligible', not has_top6_risk_flag(rec)))
         out['quality_score'] = compute_top6_quality_score(out)
@@ -5137,6 +5149,7 @@ def _yesterday_items_from_daily_top_picks(conn, yday: str):
             'score': score,
             'day_et': yday,
             'movement_tags': rec.get('movement_tags'),
+            'bet_timing': rec.get('bet_timing'),
             'top6_eligible': rec.get('top6_eligible'),
             'quality_score': rec.get('quality_score'),
         }))

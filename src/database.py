@@ -2045,6 +2045,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                     "score": rd.get("score"),
                     "final": rd.get("final"),
                     "movement_tags": rec.get("movement_tags"),
+                    "bet_timing": rec.get("bet_timing"),
                     "top6_eligible": rec.get("top6_eligible"),
                     "quality_score": rec.get("quality_score"),
                     "source": "daily_top_picks",

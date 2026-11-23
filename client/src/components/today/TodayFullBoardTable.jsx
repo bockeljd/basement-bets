@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowUpDown, ChevronUp, ChevronDown, BarChart2, PlusCircle, Search, Filter } from 'lucide-react';
+import { ArrowUpDown, ChevronUp, ChevronDown, BarChart2, PlusCircle, Search, Filter, Zap, Clock, Eye } from 'lucide-react';
 import {
   fmtTimeEt,
   fmtOdds,
@@ -12,7 +12,23 @@ import {
   getLiveGameStatus,
   getModelSignalData,
   getRecommendedBetSize,
+  getBetTimingGuidance,
 } from './todayHelpers';
+
+const TABLE_TIMING_STYLES = {
+  BET_NOW: {
+    badgeCls: 'bg-emerald-500/15 border-emerald-400/45 text-emerald-200',
+    Icon: Zap,
+  },
+  WAIT_LINEUPS: {
+    badgeCls: 'bg-amber-500/15 border-amber-400/45 text-amber-200',
+    Icon: Clock,
+  },
+  MONITOR: {
+    badgeCls: 'bg-sky-500/15 border-sky-400/45 text-sky-200',
+    Icon: Eye,
+  },
+};
 
 const SortHeaderButton = ({ label, column, sortConfig, onSort, align = 'left' }) => {
   const isActive = sortConfig.key === column;
@@ -276,6 +292,11 @@ const TodayFullBoardTable = ({
                 const isLeanMiss = !isActionable && Boolean(lean) && liveInfo.trendVerdict === 'LOST';
                 const isLeanPush = !isActionable && Boolean(lean) && liveInfo.trendVerdict === 'PUSH';
                 const isLeanSettled = isLeanHit || isLeanMiss || isLeanPush;
+                const timing =
+                  isActionable && rec && !liveInfo.isLive && !isFinal && !isBetSettled
+                    ? getBetTimingGuidance(rec, game, ctx)
+                    : null;
+                const timingStyle = timing ? TABLE_TIMING_STYLES[timing.action] || TABLE_TIMING_STYLES.BET_NOW : null;
                 const leanCoverDisplay = (liveInfo.coverText || liveInfo.gameTrendText || '')
                   .replace(/^Bet Won\b/i, 'Lean Hit')
                   .replace(/^Bet Lost\b/i, 'Lean Missed');
@@ -484,6 +505,19 @@ const TodayFullBoardTable = ({
                             <span className="text-[10px] text-slate-300 line-clamp-1">
                               {liveInfo.trendDetail}
                             </span>
+                          )}
+                          {timing && timingStyle && (
+                            <div className="mt-0.5 flex flex-col gap-0.5">
+                              <span
+                                className={`inline-flex items-center gap-1 w-fit px-1.5 py-0.5 rounded-full border text-[10px] font-semibold ${timingStyle.badgeCls}`}
+                              >
+                                <timingStyle.Icon size={10} aria-hidden="true" />
+                                <span>{timing.short_label}</span>
+                              </span>
+                              <span className="text-[10px] text-slate-300 line-clamp-1">
+                                {timing.reason}
+                              </span>
+                            </div>
                           )}
                         </div>
                       ) : (
