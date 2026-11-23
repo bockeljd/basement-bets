@@ -151,8 +151,13 @@ export const normalizeMovementTag = (tag) => {
   const t = String(tag || '').toLowerCase();
   if (t === 'rlm_confirmed') return { label: 'Pro Money Line Move', tone: 'emerald' };
   if (t === 'sharp_backing') return { label: 'Big Money Backing', tone: 'emerald' };
+  if (t === 'sharp_price_edge') return { label: 'Better Line Than Sharp Books', tone: 'emerald' };
+  if (t === 'lagging_book_edge') return { label: 'Better Line vs. Market', tone: 'emerald' };
+  if (t === 'smart_risk_high_return') return { label: 'Smart Risk · 0.5u', tone: 'indigo' };
+  if (t === 'first_half_market') return { label: '1st Half Line', tone: 'blue' };
   if (t === 'injury_line_adjusted') return { label: 'Injury Priced In', tone: 'amber' };
   if (t === 'contra_sharp_money') return { label: 'Against Big Money', tone: 'rose' };
+  if (t === 'contra_sharp_line') return { label: 'Behind Sharp Books', tone: 'rose' };
   if (t.startsWith('reverse_steam=')) return { label: 'Market Steamed Opposite', tone: 'rose' };
   if (t === 'steam_warning') return { label: 'Line Moving Fast', tone: 'amber' };
   return { label: String(tag || '').replace(/_/g, ' '), tone: 'slate' };
@@ -218,19 +223,18 @@ export const getRecQualityScore = (rec) => {
   const rawLine = rec.market_line ?? rec.bet_line ?? rec.line;
   const parsedLine = rawLine !== null && rawLine !== undefined && rawLine !== '' ? Number(rawLine) : NaN;
   if (mkt.includes('TOTAL')) {
-    if (sel.includes('OVER')) score -= 0.015;
-    else if (sel.includes('UNDER')) score += 0.008;
+    if (sel.includes('UNDER')) score += 0.003;
     if (Number.isFinite(parsedLine)) {
       const totLine = Math.abs(parsedLine);
-      if (totLine >= 140 && totLine < 152) score += 0.005;
-      else if (totLine >= 152 && sel.includes('OVER')) score -= 0.012;
+      if (totLine >= 138 && totLine <= 156) score += 0.004;
     }
   } else if (mkt.includes('SPREAD')) {
     if (Number.isFinite(parsedLine)) {
       const absLine = Math.abs(parsedLine);
       if (absLine < 6) score += 0.005;
-      else if (absLine >= 14 && absLine < 22) score -= 0.012;
-      else if (absLine >= 6 && absLine < 14) score -= 0.022;
+      else if (absLine >= 6 && absLine < 14) score += 0.003;
+      else if (absLine >= 14 && absLine < 22) score -= 0.018;
+      else if (absLine >= 22) score -= 0.03;
 
       const sideHint = String(rec.side || '').trim().toLowerCase();
       let isAway = null;
@@ -247,6 +251,15 @@ export const getRecQualityScore = (rec) => {
       if (parsedLine > 0) score += isAway ? 0.007 : 0.005;
       else if (parsedLine < 0 && isAway) score -= 0.016;
     }
+  }
+
+  const rawAgree = mkt.includes('TOTAL')
+    ? (rec.conviction_sources_total ?? rec.signals?.adjustments?.conviction_sources_total)
+    : (rec.conviction_sources ?? rec.signals?.adjustments?.conviction_sources);
+  const agreeN = rawAgree !== null && rawAgree !== undefined && rawAgree !== '' ? Number(rawAgree) : NaN;
+  if (Number.isFinite(agreeN)) {
+    if (agreeN >= 3) score += 0.012;
+    else if (agreeN === 2) score += 0.006;
   }
 
   const rawTags = rec.movement_tags || rec.sanity_reasons;
@@ -281,6 +294,17 @@ export const getConfidenceMeta = (rec) => {
       (typeof rec.confidence === 'number' ? rec.confidence : NaN)
   );
   const score = Number.isFinite(rawScore) ? Math.round(rawScore <= 1 ? rawScore * 100 : rawScore) : null;
+  const isSmartRisk =
+    Boolean(rec.is_smart_risk) ||
+    String(rec.risk_tier || '').trim().toUpperCase() === 'SMART_RISK';
+  if (isSmartRisk) {
+    return {
+      tier: 'SMART_RISK',
+      score,
+      sortScore: Math.max(score ?? 52, 52),
+      badgeCls: 'bg-indigo-500/15 text-indigo-200 border-indigo-400/40',
+    };
+  }
   const resolved =
     rawTier === 'HIGH' || rawTier === 'MEDIUM' || rawTier === 'LOW'
       ? rawTier

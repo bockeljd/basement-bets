@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { getRecEv, hasTop6RiskFlag, lookupTopPickForGame, makeMatchupKey } from './todayHelpers';
+import {
+  getConfidenceMeta,
+  getRecEv,
+  getRecQualityScore,
+  hasTop6RiskFlag,
+  lookupTopPickForGame,
+  makeMatchupKey,
+  normalizeMovementTag,
+} from './todayHelpers';
 
 describe('Today recommendations', () => {
   it('preserves a zero EV and reads a percentage when EV is absent', () => {
@@ -17,5 +25,17 @@ describe('Today recommendations', () => {
     const game = { day_et: '2026-11-20', home_team: 'Temple', away_team: 'Penn' };
     const key = makeMatchupKey(game.day_et, game.home_team, game.away_team);
     expect(lookupTopPickForGame(game, {}, { [key]: { id: 'pick' } })).toEqual({ id: 'pick' });
+  });
+
+  it('labels Smart Risk picks and sharp-line tags in plain language', () => {
+    expect(getConfidenceMeta({ is_smart_risk: true, confidence_0_100: 46 }).tier).toBe('SMART_RISK');
+    expect(normalizeMovementTag('sharp_price_edge').label).toBe('Better Line Than Sharp Books');
+    expect(normalizeMovementTag('smart_risk_high_return').label).toBe('Smart Risk · 0.5u');
+  });
+
+  it('ranks competitive spreads and 3-of-3 consensus ahead of blowouts', () => {
+    const comp = getRecQualityScore({ bet_type: 'SPREAD', side: 'home', market_line: -8.5, ev: 0.045, win_prob_lb10: 0.53, conviction_sources: 3 });
+    const blowout = getRecQualityScore({ bet_type: 'SPREAD', side: 'home', market_line: -23.5, ev: 0.045, win_prob_lb10: 0.53, conviction_sources: 1 });
+    expect(comp).toBeGreaterThan(blowout);
   });
 });

@@ -59,12 +59,23 @@ const TodayPlayCard = ({
             : betType === 'SPREAD'
               ? 'Spread'
               : betType;
+  const isSmartRisk = conf.tier === 'SMART_RISK';
   const confTitle =
-    conf.tier === 'HIGH' ? 'High Confidence' : conf.tier === 'MEDIUM' ? 'Medium Confidence' : 'Low Confidence';
+    conf.tier === 'SMART_RISK'
+      ? 'Smart Risk'
+      : conf.tier === 'HIGH'
+        ? 'High Confidence'
+        : conf.tier === 'MEDIUM'
+          ? 'Medium Confidence'
+          : 'Low Confidence';
   const winProb = rec?.calibrated_win_prob ?? rec?.win_prob;
   const sizeInfo = getRecommendedBetSize(rec, bankroll);
   const sizeText = sizeInfo ? sizeInfo.detailedLabel : conf.tier === 'HIGH' ? '1.5u · 1.5%' : '1u · 1%';
-  const tags = Array.isArray(rec?.movement_tags) ? rec.movement_tags.slice(0, 1) : [];
+  const tags = Array.isArray(rec?.movement_tags)
+    ? rec.movement_tags
+        .filter((t) => !(isSmartRisk && String(t || '').toLowerCase() === 'smart_risk_high_return'))
+        .slice(0, 2)
+    : [];
   const injImpact = rec?.signals?.injuries_impact;
 
   const analysisLike = context ? { context } : null;
@@ -145,19 +156,19 @@ const TodayPlayCard = ({
             {game?.away_team} {game?.neutral_site ? 'vs' : '@'} {game?.home_team}
           </p>
           {analyzedAt && (
-            <div className="mt-1 text-xs text-slate-300">
-              <p>Model run completed {fmtTimeEt(analyzedAt)} ET
-                {game?.start_time && <> · Game cutoff {fmtTimeEt(new Date(new Date(game.start_time).getTime() - 600000))} ET</>}
+            <div className="mt-1 text-xs text-slate-400">
+              <p>Updated {fmtTimeEt(analyzedAt)} ET
+                {game?.start_time && <> · Locks {fmtTimeEt(new Date(new Date(game.start_time).getTime() - 1800000))} ET</>}
               </p>
-              <p>{rec?.signals?.referees?.officials?.length
-                ? `Crew on file: ${rec.signals.referees.officials.join(', ')}`
-                : 'Crew unconfirmed for this run'}</p>
+              {rec?.signals?.referees?.officials?.length > 0 && (
+                <p>Referees: {rec.signals.referees.officials.join(', ')}</p>
+              )}
             </div>
           )}
         </div>
 
         <span className={`px-2.5 py-0.5 rounded-full border text-[11px] font-semibold tracking-wide shrink-0 ${conf.badgeCls}`}>
-          {confTitle}{conf.score !== null ? ` · ${conf.score}` : ''}
+          {isSmartRisk ? `${confTitle} · ${sizeInfo?.unitsLabel || '0.5u'}` : `${confTitle}${conf.score !== null ? ` · ${conf.score}` : ''}`}
         </span>
       </div>
 

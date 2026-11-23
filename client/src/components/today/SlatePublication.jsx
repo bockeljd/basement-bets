@@ -71,22 +71,20 @@ export default function SlatePublication({ day }) {
           {slate.evaluation.latest_odds_at && ` · Odds ${fmtTimeEt(slate.evaluation.latest_odds_at)} ET`}
         </p>
       )}
-      {slate?.status === 'rolling' && slate.provisional?.map(p => (
-        <p key={p.event_id}>Up Next · {p.away_team} @ {p.home_team} · {p.selection} ({fmtOdds(p.bet_price)})
-          {' · Locks '}{fmtTimeEt(p.locks_at)} ET · Refs {p.referees?.officials?.join(', ') || 'TBD'}</p>
-      ))}
       {Object.entries(slate?.stale_holds || {}).map(([event, reason]) => (
         <p key={event} className="text-amber-300 text-xs mt-1">Waiting on fresh odds · {reason}</p>
       ))}
-      {Object.entries(slate?.passes || {}).map(([event, reason]) => <p key={event}>Pass · {event} · {reason}</p>)}
+      {Object.entries(slate?.passes || {}).map(([event, reason]) => (
+        <p key={event} className="text-xs text-slate-400 mt-1">Skipped · {reason}</p>
+      ))}
       {slate?.picks?.length > 0 && (
-        <ol className="mt-2 list-decimal pl-5">
+        <ol className="mt-2 list-decimal pl-5 space-y-0.5 text-xs text-slate-300">
           {slate.picks.map(p => (
             <li key={p.rank} value={p.rank}>{p.away_team} @ {p.home_team} · {p.selection}
               {p.bet_line != null && !String(p.selection).includes(String(p.bet_line)) ? ` · Line ${p.bet_line}` : ''}
               {p.bet_price != null ? ` (${fmtOdds(p.bet_price)})` : ''}
-              {p.locked_at && ` · Locked ${fmtTimeEt(p.locked_at)} ET · Crew ${p.referees?.officials?.join(', ') || 'unconfirmed'}`}
-              {p.computed_at && ` · Model ${fmtTimeEt(p.computed_at)} ET · Quote ${fmtTimeEt(p.quote_captured_at)} ET`}</li>
+              {p.locked_at && ` · Locked ${fmtTimeEt(p.locked_at)} ET`}
+              {p.referees?.officials?.length > 0 && ` · Refs ${p.referees.officials.join(', ')}`}</li>
           ))}
         </ol>
       )}

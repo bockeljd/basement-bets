@@ -101,6 +101,11 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
                       {leg.is_sweet_spot_7pt ? 'Sweet-Spot ~7pt Home Fav' : 'Home Favorite'}
                     </span>
                   )}
+                  {(leg.is_smart_risk || String(leg.risk_tier || '').toUpperCase() === 'SMART_RISK') && (
+                    <span className="text-[9px] font-bold text-indigo-200 bg-indigo-500/15 border border-indigo-400/35 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                      Smart Risk
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-bold leading-tight ${lWon ? 'text-green-300' : lLoss ? 'text-red-300' : 'text-slate-200'}`}>{leg.team_pick}</span>
@@ -183,7 +188,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
       const dateParams = date ? { date } : {};
       const [main, homeFav] = await Promise.all([
         api.get('/api/ncaam/parlays/today', {
-          params: { ...dateParams, min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 300 },
+          params: { ...dateParams, min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 500 },
         }),
         api.get('/api/ncaam/parlays/today', {
           params: { ...dateParams, strategy: 'home_fav', parlay_odds_lo: -165, parlay_odds_hi: 140 },

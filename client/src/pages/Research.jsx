@@ -1283,6 +1283,15 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                     <span>{rescoringSlate ? (rescoreProgress || 'Updating...') : 'Recalculate Picks'}</span>
                   </button>
                 )}
+                {actionablePlays.length === 0 && leagueFilter === 'NCAAM' && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('parlays')}
+                    className="inline-flex px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-xs font-semibold text-amber-200 cursor-pointer"
+                  >
+                    Check Parlays
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setActiveSubTab('board')}
