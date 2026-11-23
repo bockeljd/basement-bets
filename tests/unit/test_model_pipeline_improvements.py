@@ -2595,6 +2595,59 @@ def test_calibrated_top6_quality_score_and_smart_risk_gate(monkeypatch):
     assert res_sr["suggested_units"] <= 0.5
     assert res_sr["recommendations"][0]["sizing_tier"] == "Half-Unit Smart Risk Play"
 
+    # 3. Audit hardening: nested rec_json matches flattened dict, contra blocks Smart Risk, RLM promotes Smart Risk -> CORE
+    flat_row = {
+        "market_type": "TOTAL",
+        "side": "under",
+        "selection": "UNDER 148.5",
+        "market_line": 148.5,
+        "ev": 0.055,
+        "win_prob_lb10": 0.535,
+        "conviction_sources_total": 3,
+        "movement_tags": ["sharp_price_edge"],
+    }
+    nested_row = {"rec_json": dict(flat_row)}
+    assert compute_top6_quality_score(nested_row) == pytest.approx(compute_top6_quality_score(flat_row))
+
+    contra_sr = {
+        "market": "SPREAD",
+        "side": "home",
+        "ev": 0.045,
+        "edge_points": 2.0,
+        "win_prob_lb10": 0.512,
+        "_agree_count": 3,
+        "sharp_edge_pts": -1.5,
+        "movement_tags": ["contra_sharp_line"],
+    }
+    assert model._passes_publish_gates(contra_sr, -7.5, True) is False
+
+    promoted = model._apply_split_and_injury_signals(
+        [{
+            "market": "SPREAD",
+            "side": "home",
+            "line": -4.5,
+            "price": -110,
+            "win_prob": 0.545,
+            "win_prob_lb10": 0.518,
+            "ev": 0.040,
+            "is_smart_risk": True,
+            "risk_tier": "SMART_RISK",
+            "movement_tags": ["smart_risk_high_return"],
+        }],
+        action_splits={
+            "SPREAD": {
+                "HOME": {"bet_pct": 35.0, "handle_pct": 62.0},
+                "AWAY": {"bet_pct": 65.0, "handle_pct": 38.0},
+            }
+        },
+        market_consensus={"open_spread_home": -3.5, "current_spread_home": -4.5},
+    )
+    assert len(promoted) == 1
+    assert promoted[0]["win_prob_lb10"] == pytest.approx(0.521)
+    assert promoted[0]["is_smart_risk"] is False
+    assert promoted[0]["risk_tier"] == "CORE"
+    assert "smart_risk_high_return" not in (promoted[0].get("movement_tags") or [])
+
 
 
 

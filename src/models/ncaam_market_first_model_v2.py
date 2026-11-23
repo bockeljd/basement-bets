@@ -3346,17 +3346,28 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 )
             )
             min_lb10 = base_min_lb10
+            has_contra_sharp_line = False
+            try:
+                has_contra_sharp_line = (sharp_edge_pts is not None and float(sharp_edge_pts) <= -1.0)
+            except Exception:
+                has_contra_sharp_line = False
+            has_contra = has_contra_sharp_line or any(
+                t in ("contra_sharp_money", "contra_sharp_line") or t.startswith("reverse_steam=")
+                for t in tags
+            )
             # High-return Smart Risk tier: unlock strong-EV + consensus/sharp plays down to 50.6% lb10
-            if market == "SPREAD" and ev >= 0.035 and (
-                (agree_sp is not None and int(agree_sp) >= 3)
-                or (agree_sp is not None and int(agree_sp) >= 2 and (ev >= 0.036 or has_sharp))
-                or (has_sharp and ev >= 0.038)
-            ):
-                min_lb10 = min(min_lb10, 0.506)
-            elif market == "TOTAL" and ev >= 0.040 and (
-                (agree_tot is not None and int(agree_tot) >= 2) or has_sharp
-            ):
-                min_lb10 = min(min_lb10, 0.506)
+            # Never relax lb10 when sharp money/line movement is actively against the pick.
+            if not has_contra:
+                if market == "SPREAD" and ev >= 0.035 and (
+                    (agree_sp is not None and int(agree_sp) >= 3)
+                    or (agree_sp is not None and int(agree_sp) >= 2 and (ev >= 0.036 or has_sharp))
+                    or (has_sharp and ev >= 0.038)
+                ):
+                    min_lb10 = min(min_lb10, 0.506)
+                elif market == "TOTAL" and ev >= 0.040 and (
+                    (agree_tot is not None and int(agree_tot) >= 2) or has_sharp
+                ):
+                    min_lb10 = min(min_lb10, 0.506)
             lb10_val = float(lb10)
             if lb10_val < min_lb10:
                 return False
@@ -3696,7 +3707,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             new_ev = float(self._calculate_ev(new_wp, rec["price"], self._push_probability(rec.get("line"))))
                             rec["win_prob"] = round(new_wp, 3)
                             if rec.get("win_prob_lb10") is not None:
-                                rec["win_prob_lb10"] = round(self._clamp_prob(float(rec["win_prob_lb10"]) + (new_wp - old_wp)), 3)
+                                new_lb10 = round(self._clamp_prob(float(rec["win_prob_lb10"]) + (new_wp - old_wp)), 3)
+                                rec["win_prob_lb10"] = new_lb10
+                                if new_lb10 >= float(getattr(self, "PUBLISH_MIN_WINPROB_LB10", 0.52)) and rec.get("is_smart_risk"):
+                                    rec["is_smart_risk"] = False
+                                    rec["risk_tier"] = "CORE"
+                                    tags = [t for t in tags if t != "smart_risk_high_return"]
                             rec["ev"] = round(new_ev, 4)
                             new_kelly = float(self._calculate_kelly(new_wp, rec["price"]))
                             rec["kelly"] = round(new_kelly, 4)

@@ -1754,6 +1754,101 @@ def test_backtest_simulate_summarizes_risk_tier_top6_and_parlays():
     assert sim["parlays"]["n_parlays"] >= 2
     assert sim["parlays"]["plus_money_parlays"]["n_parlays"] >= 1
     assert sim["parlays"]["total_pnl_units"] > 0.0
+    assert sim["sized_pnl_units"] == pytest.approx(2.591, abs=0.01)
+
+    # Hardening: missing day_et/start_time and invalid parlay odds (price=0) do not crash
+    bad_sim = summarize_simulate_backtest(
+        [{"event_id": "x1", "market_type": "SPREAD", "outcome": "WIN", "pnl_units": 0.9091, "is_smart_risk": False}],
+        [
+            {"event_id": "p_bad", "day_et": "2026-11-20", "market_type": "MONEYLINE", "price": 0, "win_prob": 0.70, "outcome": "WIN"},
+            {"event_id": "p_ok", "day_et": "2026-11-20", "market_type": "MONEYLINE", "price": -150, "win_prob": 0.70, "outcome": "WIN"},
+        ],
+    )
+    assert bad_sim["n_bets"] == 1
+    assert bad_sim["parlays"]["n_parlays"] == 0
+
+
+def test_parlays_today_hardening_official_daily_days_ago_and_ev_floor(monkeypatch):
+    import src.database as db
+
+    seen_dtp_dates = []
+
+    def fake_exec(_conn, sql, params=None):
+        s = " ".join(sql.split()).lower()
+        if "with latest_preds as" in s:
+            return _FakeCursor([])
+        if "select (now() at time zone 'america/new_york' -" in s:
+            return _FakeCursor([("2026-11-21",)])
+        if "dtp_latest.context_json as dtp_context_json" in s:
+            # First row malformed (None spread), second valid
+            return _FakeCursor([
+                {"event_id": "evt_bad", "away_team": "A", "home_team": "B", "start_time": "2026-11-21T23:00:00Z", "home_spread": None, "ml_home_price": -200, "ml_home_book": "DraftKings", "mu_final": None, "sigma": None, "pred_pick": None, "model_version": None, "dtp_context_json": None, "dtp_rec_json": None},
+            ])
+        if "from daily_top_picks d join events e on e.id = d.event_id" in s:
+            seen_dtp_dates.append(params[0] if params else None)
+            return _FakeCursor([
+                {
+                    "event_id": "evt_a",
+                    "is_actionable": True,
+                    "rec_json": json.dumps({
+                        "bet_type": "SPREAD", "side": "home", "selection": "Duke -4.5",
+                        "market_line": -4.5, "price": -108, "book": "DraftKings",
+                        "win_prob": 0.56, "ev": 0.078, "movement_tags": [],
+                    }),
+                    "context_json": None,
+                    "away_team": "Siena", "home_team": "Duke", "start_time": "2099-11-21T23:00:00Z",
+                },
+                {
+                    "event_id": "evt_b",
+                    "is_actionable": True,
+                    "rec_json": json.dumps({
+                        "bet_type": "TOTAL", "side": "under", "selection": "UNDER 145.5",
+                        "market_line": 145.5, "price": -105, "book": "DraftKings",
+                        "win_prob": 0.56, "ev": 0.093, "movement_tags": [],
+                    }),
+                    "context_json": None,
+                    "away_team": "Iona", "home_team": "Marist", "start_time": "2099-11-21T23:30:00Z",
+                },
+                {
+                    "event_id": "evt_neg_after_dk",
+                    "is_actionable": True,
+                    "rec_json": json.dumps({
+                        "bet_type": "SPREAD", "side": "away", "selection": "Rider +3.5",
+                        "market_line": 3.5, "price": 100, "book": "Consensus",
+                        "win_prob": 0.53, "ev": 0.06, "movement_tags": [],
+                    }),
+                    "context_json": None,
+                    "away_team": "Rider", "home_team": "Manhattan", "start_time": "2099-11-21T23:45:00Z",
+                },
+            ])
+        if "from odds_snapshots" in s and "canon_book" in s:
+            # DraftKings price (-140) turns evt_neg_after_dk negative EV -> must be filtered out!
+            return _FakeCursor([
+                {"event_id": "evt_a", "market_type": "SPREAD", "side": "HOME", "canon_book": "DraftKings", "line_value": -4.5, "price": -108},
+                {"event_id": "evt_b", "market_type": "TOTAL", "side": "UNDER", "canon_book": "DraftKings", "line_value": 145.5, "price": -105},
+                {"event_id": "evt_neg_after_dk", "market_type": "SPREAD", "side": "AWAY", "canon_book": "DraftKings", "line_value": 3.5, "price": -140},
+            ])
+        if "from recommended_parlays" in s:
+            return _FakeCursor([])
+        return _FakeCursor([])
+
+    monkeypatch.setattr(db, "get_db_connection", lambda: _FakeConn())
+    monkeypatch.setattr(db, "_exec", fake_exec)
+    monkeypatch.setattr(settings, "BASEMENT_PASSWORD", "test-secret")
+
+    client = TestClient(app)
+    resp = client.get(
+        "/api/ncaam/parlays/today?days_ago=1&parlay_odds_lo=-120&parlay_odds_hi=500",
+        headers={"X-BASEMENT-KEY": "test-secret"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert seen_dtp_dates == ["2026-11-21"]
+    assert body["legs_considered"] == 2
+    assert body["official_daily_parlay"] is not None
+    assert body["official_daily_parlay"]["is_official_daily"] is True
+    assert body["official_daily_parlay"]["is_locked"] is False
+    assert all(c["ev"] >= 0.02 for c in (body["high_confidence"] + body["payout_band"]))
 
 
 

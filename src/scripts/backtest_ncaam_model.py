@@ -132,11 +132,11 @@ def _leg_has_contra_risk(tags) -> bool:
 
 def _dec_from_american(price: float) -> float:
     p = float(price)
+    if abs(p) < 100.0:
+        return 1.0
     if p > 0:
         return 1.0 + (p / 100.0)
-    if p < 0:
-        return 1.0 + (100.0 / abs(p))
-    return 1.0
+    return 1.0 + (100.0 / abs(p))
 
 
 def _american_from_dec(dec: float) -> int:
@@ -193,9 +193,18 @@ def _simulate_parlays(parlay_legs: list[dict]) -> dict:
                 ob = str(b.get("outcome") or "").upper()
                 if oa not in ("WIN", "LOSS", "PUSH") or ob not in ("WIN", "LOSS", "PUSH"):
                     continue
-                p_win = float(a["win_prob"]) * float(b["win_prob"])
-                dec_a = _dec_from_american(float(a["price"]))
-                dec_b = _dec_from_american(float(b["price"]))
+                try:
+                    wa = float(a.get("win_prob"))
+                    wb = float(b.get("win_prob"))
+                    pa = float(a.get("price"))
+                    pb = float(b.get("price"))
+                except Exception:
+                    continue
+                if not (0.0 < wa < 1.0 and 0.0 < wb < 1.0 and abs(pa) >= 100.0 and abs(pb) >= 100.0):
+                    continue
+                p_win = wa * wb
+                dec_a = _dec_from_american(pa)
+                dec_b = _dec_from_american(pb)
                 dec = dec_a * dec_b
                 amer = _american_from_dec(dec)
                 ev = p_win * (dec - 1.0) - (1.0 - p_win)
@@ -275,10 +284,22 @@ def summarize_simulate_backtest(bets: list[dict], parlay_legs: list[dict]) -> di
         "CORE": _summarize_bet_slice(core_bets),
         "SMART_RISK": _summarize_bet_slice(smart_risk_bets),
     }
+    sim["sized_pnl_units"] = round(
+        sum(
+            float(b.get("pnl_units") or 0.0) * (0.5 if b.get("is_smart_risk") else 1.0)
+            for b in bets
+        ),
+        4,
+    ) if bets else 0.0
 
     by_day: dict[str, list[dict]] = {}
     for b in bets:
-        day_k = str(b.get("day_et") or _et_date(datetime.fromisoformat(str(b.get("start_time")).replace("Z", "+00:00"))))
+        day_k = str(b.get("day_et") or "").strip()
+        if not day_k:
+            try:
+                day_k = _et_date(datetime.fromisoformat(str(b.get("start_time") or "").replace("Z", "+00:00")))
+            except Exception:
+                day_k = "unknown"
         by_day.setdefault(day_k, []).append(b)
     top6_bets: list[dict] = []
     for day_k in sorted(by_day.keys()):

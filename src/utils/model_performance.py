@@ -264,7 +264,10 @@ def compute_top6_quality_score(row: dict) -> float:
     if not isinstance(row, dict):
         return -999.0
 
-    raw_ev = _first_present(row.get("ev_per_unit"), row.get("ev"))
+    rec_obj = row.get("rec_json") if isinstance(row.get("rec_json"), dict) else {}
+    ctx_obj = row.get("context") if isinstance(row.get("context"), dict) else {}
+
+    raw_ev = _first_present(row.get("ev_per_unit"), row.get("ev"), rec_obj.get("ev_per_unit"), rec_obj.get("ev"))
     try:
         ev = float(raw_ev or 0.0)
         if abs(ev) > 1.5:
@@ -281,13 +284,18 @@ def compute_top6_quality_score(row: dict) -> float:
         eff_ev = 0.085 + (0.020 * 0.30) - (ev - 0.105) * 0.20
     score = eff_ev
 
-    lb10 = row.get("win_prob_lb10")
+    lb10 = _first_present(row.get("win_prob_lb10"), rec_obj.get("win_prob_lb10"))
     try:
         if lb10 is not None:
             score += max(0.0, float(lb10) - 0.52) * 0.35
         else:
             c0 = normalize_confidence_pct(
-                row.get("confidence_0_100") if row.get("confidence_0_100") is not None else row.get("confidence")
+                _first_present(
+                    row.get("confidence_0_100"),
+                    row.get("confidence"),
+                    rec_obj.get("confidence_0_100"),
+                    rec_obj.get("confidence"),
+                )
             )
             if c0 is not None:
                 score += max(0.0, float(c0) - 55.0) * 0.0004
@@ -295,11 +303,34 @@ def compute_top6_quality_score(row: dict) -> float:
         pass
 
     mkt = normalize_market_type(
-        _first_present(row.get("market_type"), row.get("market"), row.get("bet_type"))
+        _first_present(
+            row.get("market_type"),
+            row.get("market"),
+            row.get("bet_type"),
+            rec_obj.get("market_type"),
+            rec_obj.get("bet_type"),
+        )
     )
-    rec_side = row["rec_json"].get("side") if isinstance(row.get("rec_json"), dict) else None
-    side_text = str(_first_present(row.get("side"), rec_side, row.get("selection"), row.get("pick")) or "").upper()
-    raw_line = _first_present(row.get("market_line"), row.get("bet_line"), row.get("line"))
+    rec_side = rec_obj.get("side")
+    side_text = str(
+        _first_present(
+            row.get("side"),
+            rec_side,
+            row.get("selection"),
+            row.get("pick"),
+            rec_obj.get("selection"),
+            rec_obj.get("pick"),
+        )
+        or ""
+    ).upper()
+    raw_line = _first_present(
+        row.get("market_line"),
+        row.get("bet_line"),
+        row.get("line"),
+        rec_obj.get("market_line"),
+        rec_obj.get("bet_line"),
+        rec_obj.get("line"),
+    )
     if mkt in ("TOTAL", "TOTAL_1H"):
         if "UNDER" in side_text:
             score += 0.003
@@ -350,8 +381,6 @@ def compute_top6_quality_score(row: dict) -> float:
         except Exception:
             pass
 
-    rec_obj = row.get("rec_json") if isinstance(row.get("rec_json"), dict) else {}
-    ctx_obj = row.get("context") if isinstance(row.get("context"), dict) else {}
     if mkt in ("TOTAL", "TOTAL_1H"):
         raw_agree = _first_present(
             row.get("conviction_sources_total"),
