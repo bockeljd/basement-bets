@@ -9,6 +9,12 @@ import {
   Search,
   Filter,
   RotateCcw,
+  TrendingUp,
+  Target,
+  ShieldCheck,
+  Activity,
+  Flame,
+  Sparkles,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -481,6 +487,84 @@ export default function Picks() {
     };
   }, [scopedHistory]);
 
+  const executiveMetrics = useMemo(() => {
+    const graded = (scopedHistory || [])
+      .filter((h) => {
+        const n = normalizeOutcome(getRawOutcome(h));
+        return n === 'WON' || n === 'LOST' || n === 'PUSH';
+      })
+      .slice()
+      .sort((a, b) => {
+        const da = getPerformanceDay(a) || '';
+        const db = getPerformanceDay(b) || '';
+        if (da !== db) return da.localeCompare(db);
+        return String(a?.start_time || a?.analyzed_at || '').localeCompare(
+          String(b?.start_time || b?.analyzed_at || '')
+        );
+      });
+
+    let running = 0;
+    let peak = 0;
+    let maxDrawdown = 0;
+    let grossWon = 0;
+    let grossLost = 0;
+    const dayTotals = new Map();
+
+    for (const row of graded) {
+      const pnl = computeRowProfitUnits(row);
+      running += pnl;
+      if (running > peak) peak = running;
+      const dd = peak - running;
+      if (dd > maxDrawdown) maxDrawdown = dd;
+      if (pnl > 0) grossWon += pnl;
+      else if (pnl < 0) grossLost += Math.abs(pnl);
+
+      const day = getPerformanceDay(row);
+      if (day) {
+        dayTotals.set(day, (dayTotals.get(day) || 0) + pnl);
+      }
+    }
+
+    // Current win/loss streak (ignoring pushes)
+    let streakType = null;
+    let streakCount = 0;
+    for (let i = graded.length - 1; i >= 0; i -= 1) {
+      const n = normalizeOutcome(getRawOutcome(graded[i]));
+      if (n !== 'WON' && n !== 'LOST') continue;
+      if (!streakType) {
+        streakType = n === 'WON' ? 'W' : 'L';
+        streakCount = 1;
+      } else if ((n === 'WON' && streakType === 'W') || (n === 'LOST' && streakType === 'L')) {
+        streakCount += 1;
+      } else {
+        break;
+      }
+    }
+
+    // Daily cumulative sparkline points
+    let dayRun = 0;
+    const sparkPoints = [];
+    const sortedDays = Array.from(dayTotals.keys()).sort();
+    for (const d of sortedDays) {
+      dayRun += dayTotals.get(d);
+      sparkPoints.push(Number(dayRun.toFixed(2)));
+    }
+
+    const activeDays = sortedDays.length;
+    const profitFactor =
+      grossLost > 0.001 ? grossWon / grossLost : grossWon > 0 ? Infinity : null;
+
+    return {
+      maxDrawdown: Number(maxDrawdown.toFixed(2)),
+      profitFactor,
+      streak: streakType ? { type: streakType, count: streakCount } : null,
+      activeDays,
+      avgDailyUnits: activeDays > 0 ? running / activeDays : null,
+      sparkPoints,
+      currentDrawdown: Number(Math.max(0, peak - running).toFixed(2)),
+    };
+  }, [scopedHistory]);
+
   const pastPendingCount = useMemo(() => {
     const todayEt = toEtDay(new Date());
     return (recommendedHistory || []).filter((h) => {
@@ -752,24 +836,106 @@ export default function Picks() {
 
   const breakEvenDelta = scopedStats.decided > 0 ? scopedStats.winRate - 52.38 : null;
 
+  const renderEquitySparkline = (points, isPositive) => {
+    if (!Array.isArray(points) || points.length < 2) return null;
+    const w = 132;
+    const h = 34;
+    const min = Math.min(0, ...points);
+    const max = Math.max(0, ...points);
+    const span = Math.max(0.01, max - min);
+    const coords = points.map((v, idx) => {
+      const x = (idx / (points.length - 1)) * w;
+      const y = h - 3 - ((v - min) / span) * (h - 6);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const zeroY = h - 3 - ((0 - min) / span) * (h - 6);
+    const stroke = isPositive ? '#10b981' : '#f43f5e';
+    const areaPoints = `0,${h} ${coords.join(' ')} ${w},${h}`;
+    return (
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="w-28 h-8 shrink-0 overflow-visible"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id={isPositive ? 'kpiSparkPos' : 'kpiSparkNeg'} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={stroke} stopOpacity="0.32" />
+            <stop offset="100%" stopColor={stroke} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <line
+          x1="0"
+          y1={zeroY.toFixed(1)}
+          x2={w}
+          y2={zeroY.toFixed(1)}
+          stroke="#475569"
+          strokeDasharray="2 2"
+          strokeWidth="1"
+        />
+        <polygon points={areaPoints} fill={`url(#${isPositive ? 'kpiSparkPos' : 'kpiSparkNeg'})`} />
+        <polyline
+          fill="none"
+          stroke={stroke}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={coords.join(' ')}
+        />
+      </svg>
+    );
+  };
+
   return (
     <div className="space-y-6 pb-12">
-      {/* Page Header */}
-      <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
+      {/* Executive Hero Header */}
+      <header className="perf-hero-surface p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-indigo-400/35 bg-indigo-500/15 text-indigo-200 text-[11px] font-bold uppercase tracking-wider">
+              <Sparkles className="w-3 h-3" aria-hidden="true" />
+              <span>Performance Command Center</span>
+            </span>
+            {scopedStats.decided > 0 && (
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${
+                  scopedStats.winRate >= 52.38
+                    ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300'
+                    : 'border-amber-500/35 bg-amber-500/15 text-amber-200'
+                }`}
+              >
+                <TrendingUp className="w-3 h-3" aria-hidden="true" />
+                <span>{scopedStats.winRate >= 52.38 ? 'Beating Break-Even' : 'Tracking Below 52.4%'}</span>
+              </span>
+            )}
+            {executiveMetrics.streak && executiveMetrics.streak.count >= 2 && (
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-mono font-bold ${
+                  executiveMetrics.streak.type === 'W'
+                    ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300'
+                    : 'border-rose-500/35 bg-rose-500/15 text-rose-300'
+                }`}
+              >
+                <Flame className="w-3 h-3" aria-hidden="true" />
+                <span>
+                  {executiveMetrics.streak.type}
+                  {executiveMetrics.streak.count} Streak
+                </span>
+              </span>
+            )}
+          </div>
           <h1>Model Performance</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Track win rate, flat 1-unit profit, and overall return. At standard -110 odds, winning over <strong className="text-slate-200 font-semibold">52.4%</strong> makes money.
+          <p className="text-sm text-slate-300/90 max-w-2xl">
+            Live profit curve, drawdown risk, closing-line sharpness, and bet-type intelligence. At standard -110 odds, winning over <strong className="text-white font-semibold">52.4%</strong> generates long-term profit.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
             aria-expanded={showExplainer}
             aria-controls="grading-explainer-panel"
             onClick={() => setShowExplainer((prev) => !prev)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-700/80 bg-slate-950/70 hover:bg-slate-800 text-slate-200 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
           >
             <HelpCircle className="w-4 h-4 text-indigo-400" aria-hidden="true" />
             <span>How Grading Works</span>
@@ -779,7 +945,7 @@ export default function Picks() {
             type="button"
             onClick={gradeNow}
             disabled={isGrading || loading}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-indigo-500/40 bg-indigo-500/15 hover:bg-indigo-500/25 disabled:opacity-50 text-indigo-200 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-indigo-500/45 bg-indigo-500/20 hover:bg-indigo-500/30 disabled:opacity-50 text-indigo-100 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${isGrading ? 'animate-spin' : ''}`} aria-hidden="true" />
             <span>{isGrading ? 'Grading...' : 'Grade Pending'}</span>
@@ -1086,102 +1252,53 @@ export default function Picks() {
       </search>
 
       {/* Top KPI Summary Cards + Actionable Key Takeaways */}
-      <section aria-labelledby="kpi-summary-heading" className="space-y-3">
+      <section aria-labelledby="kpi-summary-heading" className="space-y-4">
         <h2 id="kpi-summary-heading" className="sr-only">
           Key Performance Summary
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Settled Record</div>
-              <div className="text-2xl font-extrabold font-mono text-slate-100">
-                {scopedStats.wins}-{scopedStats.losses}-{scopedStats.pushes}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {/* Card 1: Net Profit & ROI + Inline Equity Sparkline */}
+          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+                  <span>Net Profit</span>
+                </div>
+                <div
+                  className={`perf-kpi-value font-extrabold font-mono ${
+                    scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {formatUnits(scopedStats.profitUnits)}
+                </div>
+                <div className="text-xs text-slate-400">
+                  {scopedStats.settled > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`font-mono font-semibold ${
+                          scopedStats.roiPct >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                        }`}
+                      >
+                        {formatSignedPct(scopedStats.roiPct)} ROI
+                      </span>
+                      <span className="text-slate-600">·</span>
+                      <span>1u flat</span>
+                    </span>
+                  ) : (
+                    'Waiting on finished games'
+                  )}
+                </div>
               </div>
-              <div className="text-xs text-slate-400">
-                {scopedStats.settled.toLocaleString()} finished
-                {scopedStats.voids > 0 ? ` • ${scopedStats.voids} void` : ''}
-                {scopedStats.pending > 0 ? ` • ${scopedStats.pending} open` : ''}
-              </div>
+              {renderEquitySparkline(executiveMetrics.sparkPoints, scopedStats.profitUnits >= 0)}
             </div>
             {scopedStats.settled > 0 && (
-              <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden flex" aria-hidden="true">
-                <div
-                  className="h-full bg-emerald-500"
-                  style={{ width: `${(scopedStats.wins / scopedStats.settled) * 100}%` }}
-                />
-                <div
-                  className="h-full bg-rose-500"
-                  style={{ width: `${(scopedStats.losses / scopedStats.settled) * 100}%` }}
-                />
-                {scopedStats.pushes > 0 && (
-                  <div
-                    className="h-full bg-slate-500"
-                    style={{ width: `${(scopedStats.pushes / scopedStats.settled) * 100}%` }}
-                  />
-                )}
-              </div>
-            )}
-          </article>
-
-          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Win Rate</div>
-              <div
-                className={`text-2xl font-extrabold font-mono ${
-                  scopedStats.decided === 0
-                    ? 'text-slate-300'
-                    : scopedStats.winRate >= 52.38
-                      ? 'text-emerald-400'
-                      : 'text-rose-400'
-                }`}
-              >
-                {scopedStats.decided > 0 ? `${scopedStats.winRate.toFixed(1)}%` : '—'}
-              </div>
-              <div className="text-xs text-slate-400">
-                {breakEvenDelta === null
-                  ? 'Break-even at -110 odds is 52.4%'
-                  : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% needed`}
-              </div>
-            </div>
-            <div className="relative h-2 w-full rounded-full bg-slate-800 overflow-hidden" aria-hidden="true">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  scopedStats.decided === 0
-                    ? 'bg-slate-600'
-                    : scopedStats.winRate >= 52.38
-                      ? 'bg-emerald-500'
-                      : 'bg-rose-500'
-                }`}
-                style={{ width: `${scopedStats.decided > 0 ? Math.max(0, Math.min(100, scopedStats.winRate)) : 0}%` }}
-              />
-              <div
-                className="absolute top-0 bottom-0 w-0.5 bg-amber-400"
-                style={{ left: '52.4%' }}
-              />
-            </div>
-          </article>
-
-          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Profit</div>
-              <div
-                className={`text-2xl font-extrabold font-mono ${
-                  scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                }`}
-              >
-                {formatUnits(scopedStats.profitUnits)}
-              </div>
-              <div className="text-xs text-slate-400">
-                {scopedStats.settled > 0 ? `${formatSignedPct(scopedStats.roiPct)} ROI (1u flat)` : 'Waiting on finished games'}
-              </div>
-            </div>
-            {scopedStats.settled > 0 && (
-              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
-                <div className={`rounded-lg border px-2 py-1 flex items-center justify-between ${scopedStats.profitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono pt-1">
+                <div className={`rounded-lg border px-2.5 py-1 flex items-center justify-between ${scopedStats.profitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
                   <span className="font-sans text-[10px] text-slate-300">1u Flat</span>
                   <span className="font-bold">{formatUnits(scopedStats.profitUnits)}</span>
                 </div>
-                <div className={`rounded-lg border px-2 py-1 flex items-center justify-between ${weightedProfitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
+                <div className={`rounded-lg border px-2.5 py-1 flex items-center justify-between ${weightedProfitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
                   <span className="font-sans text-[10px] text-slate-300">Tier-Sized</span>
                   <span className="font-bold">{formatUnits(weightedProfitUnits)}</span>
                 </div>
@@ -1189,39 +1306,177 @@ export default function Picks() {
             )}
           </article>
 
-          <article className="ui-card p-5 flex flex-col justify-between gap-2.5">
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Closing Line Edge</div>
-              <div
-                className={`text-2xl font-extrabold font-mono ${
-                  clvStats.avg === null
-                    ? 'text-slate-300'
-                    : clvStats.avg > 0
-                      ? 'text-emerald-400'
-                      : clvStats.avg === 0
-                        ? 'text-slate-200'
-                        : 'text-amber-300'
-                }`}
-              >
-                {clvStats.avg === null ? 'N/A' : `${clvStats.avg > 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
+          {/* Card 2: Win Rate & Record */}
+          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  <Target className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+                  <span>Win Rate &amp; Record</span>
+                </div>
+                <div className="flex items-baseline gap-2.5">
+                  <span
+                    className={`perf-kpi-value font-extrabold font-mono ${
+                      scopedStats.decided === 0
+                        ? 'text-slate-300'
+                        : scopedStats.winRate >= 52.38
+                          ? 'text-emerald-400'
+                          : 'text-rose-400'
+                    }`}
+                  >
+                    {scopedStats.decided > 0 ? `${scopedStats.winRate.toFixed(1)}%` : '—'}
+                  </span>
+                  <span className="text-sm font-mono font-bold text-slate-200">
+                    {scopedStats.wins}-{scopedStats.losses}
+                    {scopedStats.pushes > 0 ? `-${scopedStats.pushes}` : ''}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400">
+                  {breakEvenDelta === null
+                    ? 'Break-even at -110 odds is 52.4%'
+                    : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% · ${scopedStats.settled.toLocaleString()} graded`}
+                </div>
               </div>
-              <div className="text-xs text-slate-400">
-                {clvStats.count > 0
-                  ? `Beat closing line ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% (${clvStats.count.toLocaleString()} picks)`
-                  : 'No closing-line checks saved yet'}
+              {scopedStats.pending > 0 && (
+                <span className="px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-[10px] font-mono text-slate-300 shrink-0">
+                  {scopedStats.pending} open
+                </span>
+              )}
+            </div>
+            <div className="space-y-1">
+              <div className="relative h-2.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    scopedStats.decided === 0
+                      ? 'bg-slate-600'
+                      : scopedStats.winRate >= 52.38
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                        : 'bg-gradient-to-r from-rose-500 to-amber-500'
+                  }`}
+                  style={{ width: `${scopedStats.decided > 0 ? Math.max(0, Math.min(100, scopedStats.winRate)) : 0}%` }}
+                />
+                <div
+                  className="absolute top-0 bottom-0 w-0.5 bg-amber-300 shadow-[0_0_6px_rgba(251,191,36,0.9)]"
+                  style={{ left: '52.4%' }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                <span>0%</span>
+                <span className="text-amber-300/90">52.4% Break-Even</span>
+                <span>100%</span>
               </div>
             </div>
-            <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden" aria-hidden="true">
-              <div
-                className={`h-full rounded-full ${
-                  clvStats.count === 0
-                    ? 'bg-slate-700'
-                    : (clvStats.beatCount / clvStats.count) >= 0.5
-                      ? 'bg-emerald-500'
-                      : 'bg-amber-400'
-                }`}
-                style={{ width: `${clvStats.count > 0 ? Math.max(4, Math.min(100, (clvStats.beatCount / clvStats.count) * 100)) : 0}%` }}
-              />
+          </article>
+
+          {/* Card 3: Closing Line Value (CLV) */}
+          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+                  <span>Closing Line Edge</span>
+                </div>
+                <div
+                  className={`perf-kpi-value font-extrabold font-mono ${
+                    clvStats.avg === null
+                      ? 'text-slate-300'
+                      : clvStats.avg > 0
+                        ? 'text-emerald-400'
+                        : clvStats.avg === 0
+                          ? 'text-slate-200'
+                          : 'text-amber-300'
+                  }`}
+                >
+                  {clvStats.avg === null ? 'N/A' : `${clvStats.avg > 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
+                </div>
+                <div className="text-xs text-slate-400">
+                  {clvStats.count > 0
+                    ? `Beat closing line ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% (${clvStats.count.toLocaleString()} picks)`
+                    : 'No closing-line checks saved yet'}
+                </div>
+              </div>
+              {clvStats.avg !== null && (
+                <span
+                  className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                    clvStats.avg >= 1.0
+                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                      : clvStats.avg > 0
+                        ? 'border-sky-500/40 bg-sky-500/15 text-sky-300'
+                        : 'border-amber-500/35 bg-amber-500/10 text-amber-200'
+                  }`}
+                >
+                  {clvStats.avg >= 1.0 ? 'Elite' : clvStats.avg > 0 ? 'Sharp' : 'Neutral'}
+                </span>
+              )}
+            </div>
+            <div className="space-y-1">
+              <div className="h-2.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    clvStats.count === 0
+                      ? 'bg-slate-700'
+                      : (clvStats.beatCount / clvStats.count) >= 0.5
+                        ? 'bg-gradient-to-r from-indigo-500 to-emerald-400'
+                        : 'bg-amber-400'
+                  }`}
+                  style={{ width: `${clvStats.count > 0 ? Math.max(4, Math.min(100, (clvStats.beatCount / clvStats.count) * 100)) : 0}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500">
+                <span>Market Sharpness</span>
+                <span className="font-mono text-slate-300">
+                  {clvStats.count > 0 ? `${clvStats.beatCount}/${clvStats.count} beat close` : 'Pending close'}
+                </span>
+              </div>
+            </div>
+          </article>
+
+          {/* Card 4: Risk, Profit Factor & Drawdown */}
+          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                <Activity className="w-3.5 h-3.5 text-purple-400" aria-hidden="true" />
+                <span>Risk &amp; Consistency</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span
+                  className={`perf-kpi-value font-extrabold font-mono ${
+                    executiveMetrics.profitFactor === null
+                      ? 'text-slate-300'
+                      : executiveMetrics.profitFactor >= 1.15
+                        ? 'text-emerald-400'
+                        : executiveMetrics.profitFactor >= 1.0
+                          ? 'text-sky-300'
+                          : 'text-rose-400'
+                  }`}
+                >
+                  {executiveMetrics.profitFactor === null
+                    ? '—'
+                    : executiveMetrics.profitFactor === Infinity
+                      ? '∞'
+                      : `${executiveMetrics.profitFactor.toFixed(2)}x`}
+                </span>
+                <span className="text-xs text-slate-400">Profit Factor</span>
+              </div>
+              <div className="text-xs text-slate-400">
+                {executiveMetrics.activeDays > 0
+                  ? `${formatUnits(executiveMetrics.avgDailyUnits)} avg across ${executiveMetrics.activeDays} active days`
+                  : 'Waiting on finished game days'}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono pt-1">
+              <div className="rounded-lg border border-slate-800 bg-slate-950/75 px-2.5 py-1 flex items-center justify-between">
+                <span className="font-sans text-[10px] text-slate-400">Max Dip</span>
+                <span className={`font-bold ${executiveMetrics.maxDrawdown > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                  {executiveMetrics.maxDrawdown > 0 ? `-${executiveMetrics.maxDrawdown.toFixed(2)}u` : '0.00u'}
+                </span>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/75 px-2.5 py-1 flex items-center justify-between">
+                <span className="font-sans text-[10px] text-slate-400">From Peak</span>
+                <span className={`font-bold ${executiveMetrics.currentDrawdown > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                  {executiveMetrics.currentDrawdown > 0 ? `-${executiveMetrics.currentDrawdown.toFixed(2)}u` : 'At Peak'}
+                </span>
+              </div>
             </div>
           </article>
         </div>
@@ -1232,11 +1487,11 @@ export default function Picks() {
             <button
               type="button"
               onClick={() => bestMarketTakeaway?.best && setMarketFilter(bestMarketTakeaway.best.marketKey === marketFilter ? 'ALL' : bestMarketTakeaway.best.marketKey)}
-              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/70 hover:border-indigo-500/45 px-4 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-all cursor-pointer"
             >
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Best Bet Type ({historyScope === 'top6' ? 'Top 6' : 'All'})</div>
               {bestMarketTakeaway?.best ? (
-                <div className="mt-0.5 text-slate-200">
+                <div className="mt-1 text-slate-200 leading-snug">
                   <strong className={bestMarketTakeaway.best.profitUnits >= 0 ? 'text-emerald-300' : 'text-amber-300'}>
                     {bestMarketTakeaway.best.label}
                   </strong>{' '}
@@ -1248,17 +1503,17 @@ export default function Picks() {
                   ){bestMarketTakeaway.worst ? ` • Weakest: ${bestMarketTakeaway.worst.label} (${formatUnits(bestMarketTakeaway.worst.profitUnits)})` : ''}
                 </div>
               ) : (
-                <div className="mt-0.5 text-slate-400">Need finished picks to compare bet types</div>
+                <div className="mt-1 text-slate-400">Need finished picks to compare bet types</div>
               )}
             </button>
 
             <button
               type="button"
               onClick={() => setConfFilter(confFilter === confTakeaway.best.key ? 'ALL' : confTakeaway.best.key)}
-              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/70 hover:border-indigo-500/45 px-4 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-all cursor-pointer"
             >
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Best Confidence Level ({historyScope === 'top6' ? 'Top 6' : 'All'})</div>
-              <div className="mt-0.5 text-slate-200">
+              <div className="mt-1 text-slate-200 leading-snug">
                 <strong className="text-indigo-300">{confTakeaway.best.label}</strong>:{' '}
                 <span className="font-mono font-semibold">
                   {confTakeaway.best.decided > 0 ? `${confTakeaway.best.winRate.toFixed(1)}%` : '—'}
@@ -1275,10 +1530,10 @@ export default function Picks() {
             <button
               type="button"
               onClick={() => setHistoryScope(historyScope === 'top6' ? 'all' : 'top6')}
-              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/60 hover:border-slate-700 px-3.5 py-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-colors cursor-pointer"
+              className="text-left rounded-xl border border-slate-800/90 bg-slate-900/70 hover:border-indigo-500/45 px-4 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 transition-all cursor-pointer"
             >
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Top 6 vs. All Picks</div>
-              <div className="mt-0.5 text-slate-200">
+              <div className="mt-1 text-slate-200 leading-snug">
                 <strong className="text-sky-300">Top 6 / Day</strong>:{' '}
                 <span className="font-mono font-semibold">
                   {scopeComparison.top6Stats.decided > 0 ? `${scopeComparison.top6Stats.winRate.toFixed(1)}%` : '—'}
@@ -1294,7 +1549,7 @@ export default function Picks() {
           </div>
         )}
 
-        {/* Core vs. Smart Risk Breakdown */}
+        {/* Core vs. Smart Risk Visual Breakdown */}
         {scopedStats.settled > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
             {[
@@ -1302,33 +1557,53 @@ export default function Picks() {
                 key: 'core',
                 title: 'Core Picks',
                 subtitle: 'Full-confidence plays (up to 1.0u)',
-                accent: 'text-emerald-300',
-                badgeCls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+                badgeCls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300',
+                barCls: 'bg-gradient-to-r from-emerald-500 to-teal-400',
                 stats: riskTierBreakdown.core,
               },
               {
                 key: 'smart',
                 title: 'Smart Risk Picks',
-                subtitle: 'Higher-upside / thinner-edge plays (0.5u cap)',
-                accent: 'text-indigo-300',
+                subtitle: 'Higher-upside plays (0.5u risk cap)',
                 badgeCls: 'border-indigo-400/35 bg-indigo-500/15 text-indigo-200',
+                barCls: 'bg-gradient-to-r from-indigo-500 to-purple-400',
                 stats: riskTierBreakdown.smartRisk,
               },
             ].map((tier) => (
               <div
                 key={tier.key}
-                className="rounded-xl border border-slate-800/90 bg-slate-900/60 px-4 py-3 flex flex-wrap items-center justify-between gap-3"
+                className="perf-chart-card px-4 py-3.5 space-y-2.5"
               >
-                <div className="space-y-0.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${tier.badgeCls}`}>
                       {tier.title}
                     </span>
                     <span className="text-[11px] text-slate-400">{tier.subtitle}</span>
                   </div>
-                  <div className="text-slate-300 font-mono text-xs pt-0.5">
-                    {tier.stats.settled > 0 ? (
-                      <>
+                  {tier.stats.settled > 0 && (
+                    <div className="text-right font-mono">
+                      <span className={`text-sm font-extrabold ${tier.stats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {formatUnits(tier.stats.profitUnits)}
+                      </span>
+                      <span className="text-[10px] text-slate-400 ml-1.5">
+                        ({formatSignedPct(tier.stats.roiPct)} ROI)
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {tier.stats.settled > 0 ? (
+                  <>
+                    <div className="relative h-2 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
+                      <div
+                        className={`h-full rounded-full ${tier.barCls}`}
+                        style={{ width: `${Math.max(4, Math.min(100, tier.stats.winRate))}%` }}
+                      />
+                      <div className="absolute top-0 bottom-0 w-0.5 bg-amber-300/90" style={{ left: '52.4%' }} />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-slate-300 font-mono text-[11px]">
+                      <span>
                         Record:{' '}
                         <strong className="text-white">
                           {tier.stats.wins}-{tier.stats.losses}
@@ -1338,28 +1613,20 @@ export default function Picks() {
                         <strong className={tier.stats.winRate >= 52.38 ? 'text-emerald-300' : 'text-rose-300'}>
                           {tier.stats.decided > 0 ? `${tier.stats.winRate.toFixed(1)}%` : '—'}
                         </strong>
-                        {tier.stats.clv.avg !== null && (
-                          <>
-                            {' '}· Avg CLV:{' '}
-                            <strong className={tier.stats.clv.avg >= 0 ? 'text-emerald-300' : 'text-amber-300'}>
-                              {tier.stats.clv.avg > 0 ? '+' : ''}{tier.stats.clv.avg.toFixed(2)} pts
-                            </strong>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <span className="font-sans text-slate-500">No graded picks in this tier for current filters yet</span>
-                    )}
-                  </div>
-                </div>
-                {tier.stats.settled > 0 && (
-                  <div className="text-right font-mono">
-                    <div className={`text-sm font-extrabold ${tier.stats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {formatUnits(tier.stats.profitUnits)}
+                      </span>
+                      {tier.stats.clv.avg !== null && (
+                        <span>
+                          Avg CLV:{' '}
+                          <strong className={tier.stats.clv.avg >= 0 ? 'text-emerald-300' : 'text-amber-300'}>
+                            {tier.stats.clv.avg > 0 ? '+' : ''}{tier.stats.clv.avg.toFixed(2)} pts
+                          </strong>
+                        </span>
+                      )}
                     </div>
-                    <div className="text-[10px] text-slate-400">
-                      {formatSignedPct(tier.stats.roiPct)} ROI
-                    </div>
+                  </>
+                ) : (
+                  <div className="font-sans text-slate-500 text-xs">
+                    No graded picks in this tier for current filters yet
                   </div>
                 )}
               </div>

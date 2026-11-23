@@ -166,12 +166,15 @@ const ModelPerformanceAnalytics = ({
     }
 
     let runningUnits = 0;
+    let peakUnits = 0;
     const chronologicalDays = Object.values(dayMap)
       .sort((a, b) => a.day.localeCompare(b.day))
       .map((d) => {
         const decided = d.wins + d.losses;
         const settled = decided + d.pushes;
         runningUnits += d.profitUnits;
+        if (runningUnits > peakUnits) peakUnits = runningUnits;
+        const drawdownUnits = Number(Math.min(0, runningUnits - peakUnits).toFixed(2));
         return {
           ...d,
           decided,
@@ -183,6 +186,8 @@ const ModelPerformanceAnalytics = ({
           winRate: decided > 0 ? Number(((d.wins / decided) * 100).toFixed(1)) : null,
           profitUnits: Number(d.profitUnits.toFixed(2)),
           cumulativeUnits: Number(runningUnits.toFixed(2)),
+          peakUnits: Number(peakUnits.toFixed(2)),
+          drawdownUnits,
           avgConf: d.confCount > 0 ? Number((d.confSum / d.confCount).toFixed(1)) : null,
         };
       });
@@ -463,11 +468,11 @@ const ModelPerformanceAnalytics = ({
   return (
     <section className="space-y-6" aria-label="Model Performance Charts and Breakdowns">
       {/* Card 1: Performance Over Time */}
-      <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="perf-trend-heading">
+      <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="perf-trend-heading">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <h3 id="perf-trend-heading" className="text-lg font-bold text-slate-100">
-              Profit &amp; Results Over Time
+              Equity Curve, Drawdown &amp; Daily Results
             </h3>
             <p className="text-xs text-slate-400">
               {filterSummary} • Flat 1-unit profit across {analytics.settledDays.length} finished days ({scopeLabel}).
@@ -480,8 +485,9 @@ const ModelPerformanceAnalytics = ({
             className="perf-tablist"
           >
             {[
-              { id: 'cumulative', label: 'Total Profit' },
+              { id: 'cumulative', label: 'Equity Curve' },
               { id: 'daily', label: 'Day by Day' },
+              { id: 'drawdown', label: 'Drawdown' },
               { id: 'confidence', label: 'Daily Confidence' },
             ].map((t) => {
               const active = trendTab === t.id;
@@ -666,6 +672,67 @@ const ModelPerformanceAnalytics = ({
           </div>
         )}
 
+        {/* Underwater Drawdown Chart */}
+        {trendTab === 'drawdown' && (
+          <div
+            id="trend-panel-drawdown"
+            role="tabpanel"
+            aria-labelledby="trend-tab-drawdown"
+            className="space-y-2"
+          >
+            {analytics.settledDays.length === 0 ? (
+              <div className="h-[260px] flex items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">
+                No settled picks match the current filters.
+              </div>
+            ) : (
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={analytics.settledDays} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="drawdownFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.08} />
+                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.38} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey="shortDay" stroke="#64748b" fontSize={11} tickLine={false} minTickGap={26} />
+                    <YAxis
+                      stroke="#64748b"
+                      fontSize={11}
+                      tickLine={false}
+                      domain={['dataMin', 0]}
+                      tickFormatter={(v) => `${v === 0 ? '0' : v}u`}
+                      width={52}
+                    />
+                    <ReferenceLine y={0} stroke="#10b981" strokeDasharray="4 4" label={{ value: 'Peak High', fill: '#6ee7b7', fontSize: 10, position: 'insideBottomRight' }} />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(value) => [formatUnits(value), 'Drawdown from Peak']}
+                      labelFormatter={(_, payload) => {
+                        const p = payload?.[0]?.payload;
+                        if (!p) return '';
+                        return `${p.day} • Peak ${formatUnits(p.peakUnits)} • Running ${formatUnits(p.cumulativeUnits)}`;
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="drawdownUnits"
+                      stroke="#fb7185"
+                      strokeWidth={2}
+                      fill="url(#drawdownFill)"
+                      dot={false}
+                      activeDot={{ r: 4, fill: '#fb7185' }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400">
+              Shows how far cumulative profit dipped below its highest peak on each day. Shallow dips mean smoother bankroll growth.
+            </p>
+          </div>
+        )}
+
         {/* Daily Confidence Trend */}
         {trendTab === 'confidence' && (
           <div
@@ -731,7 +798,7 @@ const ModelPerformanceAnalytics = ({
       {/* Row 2: Bet Type Performance & Edge Calibration */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card 2: Bet Type Performance */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="bet-type-heading">
+        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="bet-type-heading">
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 id="bet-type-heading" className="text-base font-bold text-slate-100">
@@ -842,7 +909,7 @@ const ModelPerformanceAnalytics = ({
         </article>
 
         {/* Card 3: Edge Calibration */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="edge-cal-heading">
+        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="edge-cal-heading">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h3 id="edge-cal-heading" className="text-base font-bold text-slate-100">
@@ -982,7 +1049,7 @@ const ModelPerformanceAnalytics = ({
       {/* Row 3: Confidence Tiers & Recent Form + By Sport Comparison */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card 4: Confidence Tiers & Recent Form */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="conf-form-heading">
+        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="conf-form-heading">
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 id="conf-form-heading" className="text-base font-bold text-slate-100">
@@ -1039,7 +1106,39 @@ const ModelPerformanceAnalytics = ({
             })}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
+            {analytics.recentDailyBars.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-bold uppercase tracking-wider text-slate-400">Last {Math.min(14, analytics.recentDailyBars.length)} Active Days</span>
+                  <span className="text-slate-500">Hover tile for record</span>
+                </div>
+                <div className="grid grid-cols-7 gap-1.5">
+                  {analytics.recentDailyBars.slice(-14).map((d) => {
+                    const isPos = d.profitUnits > 0;
+                    const isNeg = d.profitUnits < 0;
+                    const cls = isPos
+                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                      : isNeg
+                        ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
+                        : 'border-slate-700 bg-slate-900/70 text-slate-300';
+                    return (
+                      <div
+                        key={d.day}
+                        title={`${d.day}: ${d.recordText} (${formatUnits(d.profitUnits)})`}
+                        className={`rounded-lg border px-1.5 py-1.5 text-center transition hover:brightness-125 ${cls}`}
+                      >
+                        <div className="text-[9px] font-mono opacity-80">{d.shortDay}</div>
+                        <div className="text-[11px] font-mono font-bold leading-tight">
+                          {d.profitUnits > 0 ? `+${d.profitUnits.toFixed(1)}` : d.profitUnits.toFixed(1)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <h4 id="recent-form-heading" className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent Form</h4>
             <div role="region" aria-labelledby="recent-form-heading" tabIndex={0} className="perf-table-wrapper">
               <table className="perf-sticky-table w-full text-left border-collapse text-xs">
@@ -1075,7 +1174,7 @@ const ModelPerformanceAnalytics = ({
         </article>
 
         {/* Card 5: Performance by Sport (Click to Filter) */}
-        <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="by-sport-heading">
+        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="by-sport-heading">
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 id="by-sport-heading" className="text-base font-bold text-slate-100">
@@ -1189,6 +1288,15 @@ const ModelPerformanceAnalytics = ({
                       <span className="text-slate-500">No settled picks in filter</span>
                     )}
                   </div>
+                  {item.settled > 0 && (
+                    <div className="relative h-1.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
+                      <div
+                        className={`h-full rounded-full ${item.winRate >= 52.4 ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                        style={{ width: `${Math.max(4, Math.min(100, item.winRate))}%` }}
+                      />
+                      <div className="absolute top-0 bottom-0 w-0.5 bg-amber-300/90" style={{ left: '52.4%' }} />
+                    </div>
+                  )}
                   <div className="text-[10px] text-slate-400 font-mono">{item.benchmark}</div>
                 </div>
               ))}
@@ -1197,7 +1305,7 @@ const ModelPerformanceAnalytics = ({
         );
 
         return (
-          <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="ncaam-insights-heading">
+          <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="ncaam-insights-heading">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h3 id="ncaam-insights-heading" className="text-base font-bold text-slate-100">
@@ -1247,7 +1355,7 @@ const ModelPerformanceAnalytics = ({
         const bins = Array.isArray(cal.bins) ? cal.bins : [];
 
         return (
-          <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="live-cal-heading">
+          <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="live-cal-heading">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 id="live-cal-heading" className="text-base font-bold text-slate-100">
@@ -1313,7 +1421,38 @@ const ModelPerformanceAnalytics = ({
             </div>
 
             {bins.some((b) => Number(b.count || 0) > 0) ? (
-              <div role="region" aria-labelledby="live-cal-heading" tabIndex={0} className="perf-table-wrapper">
+              <div className="space-y-4">
+                <div className="h-[210px] w-full rounded-xl border border-slate-800/80 bg-slate-950/55 p-3">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart
+                      data={bins
+                        .filter((b) => Number(b.count || 0) > 0)
+                        .map((b) => ({
+                          label: b.label,
+                          count: b.count || 0,
+                          predicted: b.avg_predicted_pct != null ? Number(Number(b.avg_predicted_pct).toFixed(1)) : null,
+                          actual: b.actual_win_pct != null ? Number(Number(b.actual_win_pct).toFixed(1)) : null,
+                        }))}
+                      margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                      <XAxis dataKey="label" stroke="#64748b" fontSize={11} tickLine={false} />
+                      <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(val, name) => [`${val}%`, name === 'actual' ? 'Actually Won' : 'Model Predicted']}
+                        labelFormatter={(lbl, payload) => {
+                          const cnt = payload?.[0]?.payload?.count;
+                          return `${lbl}${cnt ? ` (${cnt} live checks)` : ''}`;
+                        }}
+                      />
+                      <Bar dataKey="actual" fill="#10b981" fillOpacity={0.75} radius={[4, 4, 0, 0]} maxBarSize={36} />
+                      <Line type="monotone" dataKey="predicted" stroke="#fbbf24" strokeWidth={2.5} dot={{ r: 3.5, fill: '#fbbf24' }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div role="region" aria-labelledby="live-cal-heading" tabIndex={0} className="perf-table-wrapper">
                 <table className="perf-sticky-table w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
@@ -1375,6 +1514,7 @@ const ModelPerformanceAnalytics = ({
                     })}
                   </tbody>
                 </table>
+              </div>
               </div>
             ) : (
               <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 px-4 py-3 text-xs text-slate-400">
