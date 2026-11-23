@@ -1352,6 +1352,8 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
   let projectedBetMargin = null;
 
   if (isFirstHalfBet && isSecondHalfOrLater && !effectiveIsFinal && rec) {
+    trendVerdict = 'PENDING_1H';
+    trendLabel = '1st Half Complete';
     coverText = '1st Half Complete';
     trendDetail = '1st half has finished; awaiting official 1st-half score grading.';
   } else if (effectiveHomeScore != null && effectiveAwayScore != null && rec && (effectiveIsLive || effectiveIsFinal)) {
@@ -1590,8 +1592,13 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
       trendLabel = totalTrend || spreadTrend || 'Live Pace';
       coverTone = 'neutral';
       const ratePart = pointsPerMinute != null ? `${pointsPerMinute.toFixed(1)} pts/min` : 'In progress';
-      const projPart = `Proj Final: ${awayTeam} ${liveProjAwayScore} – ${homeTeam} ${liveProjHomeScore}`;
-      trendDetail = spreadTrend ? `${ratePart} · ${projPart} (${spreadTrend})` : `${ratePart} · ${projPart}`;
+      const projPart =
+        liveProjAwayScore != null && liveProjHomeScore != null
+          ? `Proj Final: ${awayTeam} ${liveProjAwayScore} – ${homeTeam} ${liveProjHomeScore}`
+          : '';
+      trendDetail = projPart
+        ? (spreadTrend ? `${ratePart} · ${projPart} (${spreadTrend})` : `${ratePart} · ${projPart}`)
+        : ratePart;
     } else if (isFinal && (mktTotal != null || mktHomeSpread != null)) {
       const parts = [];
       if (mktTotal != null) {
@@ -1614,9 +1621,13 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
     isFinal,
     isLive,
     isHalftime,
+    isFirstHalfBet,
+    isBetSettled: effectiveIsFinal,
     hasScore,
     homeScore,
     awayScore,
+    homeScore1H,
+    awayScore1H,
     statusDetail: game.status_detail || (isFinal ? 'Final' : isHalftime ? 'Halftime' : isLive ? 'Live' : ''),
     periodLabel: progress.periodLabel,
     elapsedMinutes: progress.elapsedMinutes,

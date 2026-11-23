@@ -146,5 +146,42 @@ describe('Today recommendations', () => {
     );
     expect(half1H.trendVerdict).toBe('WON');
     expect(half1H.liveWinProb).toBe(1);
+
+    // 4. 1H bet in 2nd half settles immediately when home_score_1h/away_score_1h exist (LOST case -> 34+28=62 < 66.5)
+    const half1HIn2HLoss = getLiveGameStatus(
+      {
+        sport: 'NCAAM',
+        status: 'IN_PROGRESS',
+        period: 2,
+        clock: '19:39',
+        home_team: 'Florida Gulf Coast Eagles',
+        away_team: 'Charlotte 49ers',
+        home_score: 31,
+        away_score: 37,
+        home_score_1h: 28,
+        away_score_1h: 34,
+      },
+      { bet_type: 'TOTAL_1H', selection: '1H OVER 66.5', side: 'over', market_line: 66.5 }
+    );
+    expect(half1HIn2HLoss.trendVerdict).toBe('LOST');
+    expect(half1HIn2HLoss.isBetSettled).toBe(true);
+    expect(half1HIn2HLoss.coverTone).toBe('loss');
+
+    // 5. 1H bet in 2nd half WITHOUT 1H scores enters PENDING_1H and never renders "null"
+    const half1HNo1HScores = getLiveGameStatus(
+      {
+        sport: 'NCAAM',
+        status: 'IN_PROGRESS',
+        period: 2,
+        clock: '19:39',
+        home_team: 'Florida Gulf Coast Eagles',
+        away_team: 'Charlotte 49ers',
+        home_score: 31,
+        away_score: 37,
+      },
+      { bet_type: 'TOTAL_1H', selection: '1H OVER 66.5', side: 'over', market_line: 66.5 }
+    );
+    expect(half1HNo1HScores.trendVerdict).toBe('PENDING_1H');
+    expect(half1HNo1HScores.trendDetail).not.toContain('null');
   });
 });

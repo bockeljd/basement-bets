@@ -11,6 +11,7 @@ Covers 16+ real college basketball scenarios:
 - Online learning via fit_live_calibration_artifact (proving zero hardcoding)
 """
 
+from unittest.mock import MagicMock, patch
 import pytest
 
 from src.services.live_calibration_service import (
@@ -315,3 +316,67 @@ def test_16_online_learning_adapts_pacing_params_from_graded_snapshots():
         assert k in params
     assert art["brier_calibrated"] is not None
     assert art["brier_calibrated"] <= art["brier_raw"] + 1e-6
+
+
+def test_17_espn_scoreboard_extracts_1h_linescores_and_handles_swapped_neutral_orientation():
+    from datetime import date
+    from src import api as api_mod
+
+    fake_payload = {
+        "events": [
+            {
+                "id": "401999111",
+                "competitions": [
+                    {
+                        "neutralSite": True,
+                        "status": {
+                            "period": 2,
+                            "displayClock": "19:39",
+                            "type": {"state": "in", "name": "STATUS_IN_PROGRESS", "shortDetail": "19:39 - 2nd", "completed": False},
+                        },
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "37",
+                                "linescores": [{"value": 34.0}, {"value": 3.0}],
+                                "team": {"displayName": "Charlotte 49ers", "shortDisplayName": "Charlotte", "location": "Charlotte"},
+                            },
+                            {
+                                "homeAway": "away",
+                                "score": "31",
+                                "linescores": [{"value": 28.0}, {"value": 3.0}],
+                                "team": {"displayName": "Florida Gulf Coast Eagles", "shortDisplayName": "FGCU", "location": "Florida Gulf Coast"},
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = fake_payload
+    mock_resp.raise_for_status.return_value = None
+
+    api_mod._LIVE_SCOREBOARD_CACHE.clear()
+    with patch("requests.get", return_value=mock_resp):
+        parsed = api_mod._fetch_espn_live_scoreboard_date("20261123")
+        assert len(parsed) == 1
+        assert parsed[0]["home_score_1h"] == 34
+        assert parsed[0]["away_score_1h"] == 28
+
+        # Action Network board item has neutral-site orientation flipped (FGCU listed as home)
+        board_items = [
+            {
+                "id": "action:ncaam:298007",
+                "home_team": "Florida Gulf Coast Eagles",
+                "away_team": "Charlotte 49ers",
+                "home_score": None,
+                "away_score": None,
+            }
+        ]
+        api_mod._enrich_ncaam_board_with_live_scores(board_items, date(2026, 11, 23), date(2026, 11, 23))
+        assert board_items[0]["home_score"] == 31
+        assert board_items[0]["away_score"] == 37
+        assert board_items[0]["home_score_1h"] == 28
+        assert board_items[0]["away_score_1h"] == 34
+    api_mod._LIVE_SCOREBOARD_CACHE.clear()

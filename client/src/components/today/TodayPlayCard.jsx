@@ -84,13 +84,27 @@ const TodayPlayCard = ({
   const liveInfo = getLiveGameStatus(game, rec, context);
   const modelSignals = getModelSignalData(rec, context, null, game);
   const cardSignals = modelSignals.pills.slice(0, 2);
-  const liveBadgeText = liveInfo.isLive && liveInfo.trendLabel
-    ? `${liveInfo.trendLabel}${liveInfo.liveWinProb != null ? ` (${Math.round(liveInfo.liveWinProb * 100)}%)` : ''}`
-    : liveInfo.coverText;
+  const isBetWon = liveInfo.trendVerdict === 'WON';
+  const isBetLost = liveInfo.trendVerdict === 'LOST';
+  const isBetPush = liveInfo.trendVerdict === 'PUSH';
+  const isBetSettled = isBetWon || isBetLost || isBetPush;
+  const liveBadgeText = isBetSettled
+    ? liveInfo.coverText || (isBetWon ? 'Bet Won' : isBetLost ? 'Bet Lost' : 'Push')
+    : liveInfo.isLive && liveInfo.trendLabel
+      ? `${liveInfo.trendLabel}${liveInfo.liveWinProb != null ? ` (${Math.round(liveInfo.liveWinProb * 100)}%)` : ''}`
+      : liveInfo.coverText;
   const liveProjLine =
     liveInfo.liveProjAwayScore != null && liveInfo.liveProjHomeScore != null
-      ? `Proj. Finish: ${game?.away_team} ${liveInfo.liveProjAwayScore} – ${game?.home_team} ${liveInfo.liveProjHomeScore}`
+      ? `${liveInfo.isBetSettled ? (liveInfo.isFirstHalfBet ? '1H Final' : 'Final') : (liveInfo.isFirstHalfBet ? 'Proj. 1H Finish' : 'Proj. Finish')}: ${game?.away_team} ${liveInfo.liveProjAwayScore} – ${game?.home_team} ${liveInfo.liveProjHomeScore}`
       : liveInfo.gameTrendText;
+
+  const cardSurfaceCls = isBetWon
+    ? 'border-2 border-emerald-500/80 bg-gradient-to-br from-emerald-950/75 via-emerald-950/40 to-slate-950 shadow-[0_0_28px_rgba(16,185,129,0.22)] hover:border-emerald-400'
+    : isBetLost
+      ? 'border-2 border-rose-500/80 bg-gradient-to-br from-rose-950/75 via-rose-950/40 to-slate-950 shadow-[0_0_28px_rgba(244,63,94,0.22)] hover:border-rose-400'
+      : isBetPush
+        ? 'border-2 border-slate-500/75 bg-gradient-to-br from-slate-800/75 via-slate-900 to-slate-950 hover:border-slate-400'
+        : 'border border-slate-700/80 bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 hover:border-indigo-500/40';
 
   const pickLabel = rec?.selection || rec?.pick || game?.home_team || 'Pick';
   const matchupLabel = `${game?.away_team || 'Away'} at ${game?.home_team || 'Home'}`;
@@ -113,7 +127,7 @@ const TodayPlayCard = ({
 
   return (
     <article
-      className="today-play-card rounded-2xl border border-slate-700/80 bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 p-4 shadow-lg flex flex-col gap-3 transition-colors hover:border-indigo-500/40"
+      className={`today-play-card rounded-2xl p-4 shadow-lg flex flex-col gap-3 transition-colors ${cardSurfaceCls}`}
       aria-label={`Top play ${rank}: ${pickLabel}`}
     >
       {/* Header row */}
@@ -125,7 +139,20 @@ const TodayPlayCard = ({
             </span>
             <span className="font-semibold tracking-wide text-slate-300">{marketLabel}</span>
             <span>·</span>
-            {liveInfo.isLive ? (
+            {isBetSettled ? (
+              <span
+                className={`px-2.5 py-0.5 rounded-full border font-extrabold text-[11px] uppercase tracking-wider ${
+                  isBetWon
+                    ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200'
+                    : isBetLost
+                      ? 'bg-rose-500/25 border-rose-400/60 text-rose-200'
+                      : 'bg-slate-700/80 border-slate-500 text-slate-200'
+                }`}
+              >
+                {liveInfo.isFirstHalfBet ? '1H ' : ''}
+                {isBetWon ? 'BET WON' : isBetLost ? 'BET LOST' : 'PUSH'}
+              </span>
+            ) : liveInfo.isLive ? (
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/45 text-rose-200 font-bold text-[11px]">
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true" />
                 LIVE {liveInfo.statusDetail ? `· ${liveInfo.statusDetail}` : ''}
@@ -176,10 +203,10 @@ const TodayPlayCard = ({
       {liveInfo.hasScore && (
         <div
           className={`rounded-xl border px-3 py-2.5 space-y-2 text-xs ${
-            liveInfo.isLive && liveInfo.coverTone === 'win'
-              ? 'border-emerald-500/40 bg-emerald-950/20'
-              : liveInfo.isLive && liveInfo.coverTone === 'loss'
-                ? 'border-rose-500/40 bg-rose-950/20'
+            isBetWon || (liveInfo.isLive && liveInfo.coverTone === 'win')
+              ? 'border-emerald-500/50 bg-emerald-950/35'
+              : isBetLost || (liveInfo.isLive && liveInfo.coverTone === 'loss')
+                ? 'border-rose-500/50 bg-rose-950/35'
                 : liveInfo.isLive && liveInfo.coverTone === 'tossup'
                   ? 'border-amber-500/40 bg-amber-950/20'
                   : 'border-slate-700/80 bg-slate-950/90'
@@ -188,14 +215,25 @@ const TodayPlayCard = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2 font-mono font-bold text-white">
               <span className="text-[10px] uppercase tracking-wider font-sans text-slate-400">
-                {liveInfo.isFinal ? 'Final Score' : 'Live Score'}
+                {liveInfo.isFirstHalfBet && liveInfo.homeScore1H != null && liveInfo.awayScore1H != null && isBetSettled
+                  ? '1H Final'
+                  : liveInfo.isFinal
+                    ? 'Final Score'
+                    : 'Live Score'}
               </span>
               <span>
-                {game?.away_team} {liveInfo.awayScore} – {game?.home_team} {liveInfo.homeScore}
+                {liveInfo.isFirstHalfBet && liveInfo.homeScore1H != null && liveInfo.awayScore1H != null && isBetSettled
+                  ? `${game?.away_team} ${liveInfo.awayScore1H} – ${game?.home_team} ${liveInfo.homeScore1H}`
+                  : `${game?.away_team} ${liveInfo.awayScore} – ${game?.home_team} ${liveInfo.homeScore}`}
               </span>
-              {liveInfo.isLive && liveInfo.progressPct > 0 && (
+              {!isBetSettled && liveInfo.isLive && liveInfo.progressPct > 0 && (
                 <span className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-[10px] font-sans font-semibold text-slate-300">
                   {liveInfo.periodLabel} · {liveInfo.progressPct}% played
+                </span>
+              )}
+              {isBetSettled && liveInfo.isFirstHalfBet && liveInfo.isLive && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-[10px] font-sans font-semibold text-slate-300">
+                  Game Live: {liveInfo.awayScore}–{liveInfo.homeScore} ({liveInfo.periodLabel})
                 </span>
               )}
             </div>
@@ -204,9 +242,9 @@ const TodayPlayCard = ({
               <span
                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${
                   liveInfo.coverTone === 'win'
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
                     : liveInfo.coverTone === 'loss'
-                      ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                      ? 'bg-rose-500/20 border-rose-400/50 text-rose-200'
                       : liveInfo.coverTone === 'tossup'
                         ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
                         : 'bg-slate-800 border-slate-700 text-slate-200'
@@ -224,7 +262,11 @@ const TodayPlayCard = ({
             )}
           </div>
 
-          {liveInfo.isLive && (
+          {isBetSettled ? (
+            liveInfo.trendDetail && (
+              <p className="text-[11px] text-slate-200 leading-snug">{liveInfo.trendDetail}</p>
+            )
+          ) : liveInfo.isLive && (
             <div className="space-y-1.5">
               {liveInfo.trendDetail && (
                 <p className="text-[11px] text-slate-200 leading-snug">{liveInfo.trendDetail}</p>

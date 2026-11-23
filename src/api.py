@@ -2812,6 +2812,8 @@ def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
             away_variants: set[str] = set()
             home_score = None
             away_score = None
+            home_score_1h = None
+            away_score_1h = None
             for competitor in comp.get("competitors") or []:
                 side = competitor.get("homeAway")
                 team = competitor.get("team") or {}
@@ -2822,6 +2824,20 @@ def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
                         score_val = int(float(raw_score))
                     except Exception:
                         score_val = None
+                score_1h_val = None
+                linescores = competitor.get("linescores") or []
+                if isinstance(linescores, list) and len(linescores) >= 1 and state in ("in", "post"):
+                    first_ls = linescores[0] if isinstance(linescores[0], dict) else {}
+                    raw_1h = first_ls.get("value")
+                    if raw_1h is None:
+                        raw_1h = first_ls.get("displayValue")
+                    if raw_1h is not None:
+                        try:
+                            score_1h_val = int(round(float(raw_1h)))
+                        except Exception:
+                            score_1h_val = None
+                if score_1h_val is None and live_status == "HALFTIME" and score_val is not None:
+                    score_1h_val = score_val
                 variants = {
                     _norm_live_team_key(team.get("displayName")),
                     _norm_live_team_key(team.get("shortDisplayName")),
@@ -2831,9 +2847,11 @@ def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
                 if side == "home":
                     home_variants = variants
                     home_score = score_val
+                    home_score_1h = score_1h_val
                 elif side == "away":
                     away_variants = variants
                     away_score = score_val
+                    away_score_1h = score_1h_val
 
             venue_obj = comp.get("venue") or {}
             venue_addr = venue_obj.get("address") or {}
@@ -2845,6 +2863,8 @@ def _fetch_espn_live_scoreboard_date(yyyymmdd: str) -> list[dict]:
                 "final": bool(completed),
                 "home_score": home_score,
                 "away_score": away_score,
+                "home_score_1h": home_score_1h,
+                "away_score_1h": away_score_1h,
                 "period": status_obj.get("period"),
                 "clock": status_obj.get("displayClock"),
                 "status_detail": status_type.get("shortDetail") or status_type.get("detail") or "",
@@ -3142,6 +3162,10 @@ def _enrich_ncaam_board_with_live_scores(items: list[dict], start_date, end_date
             if matched.get("final"):
                 item["final"] = True
 
+        if matched.get("home_score_1h") is not None and matched.get("away_score_1h") is not None:
+            item["home_score_1h"] = matched["away_score_1h"] if swapped else matched["home_score_1h"]
+            item["away_score_1h"] = matched["home_score_1h"] if swapped else matched["away_score_1h"]
+
         if (
             matched["live_status"] in ("IN_PROGRESS", "HALFTIME")
             and item.get("home_score") is not None
@@ -3301,7 +3325,7 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
            -- Back-compat aliases (older UI expected these names)
            ml_home.price as moneyline_home,
            ml_away.price as moneyline_away,
-           gr.home_score, gr.away_score, gr.final
+           gr.home_score, gr.away_score, gr.home_score_1h, gr.away_score_1h, gr.final
     FROM dedup_events e
     LEFT JOIN board_snaps s_home  ON e.id = s_home.event_id  AND s_home.market_type = 'SPREAD'    AND s_home.side = 'HOME'
     LEFT JOIN board_snaps s_away  ON e.id = s_away.event_id  AND s_away.market_type = 'SPREAD'    AND s_away.side = 'AWAY'
