@@ -17,7 +17,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt -r requirements-worker.txt
-          pip install pytest httpx
+          pip install pytest "httpx<0.28"
       - name: Compile core modules
         run: |
           python3 -m py_compile src/api.py src/utils/model_performance.py src/utils/naming.py src/services/ncaam_parlay_service.py src/models/ncaam_market_first_model_v2.py src/scripts/backtest_ncaam_model.py src/scripts/build_daily_top_picks.py src/scripts/ingest_kenpom.py
