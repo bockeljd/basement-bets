@@ -272,20 +272,39 @@ const TodayFullBoardTable = ({
                 const isBetLost = isActionable && rec && liveInfo.trendVerdict === 'LOST';
                 const isBetPush = isActionable && rec && liveInfo.trendVerdict === 'PUSH';
                 const isBetSettled = isBetWon || isBetLost || isBetPush;
+                const isLeanHit = !isActionable && Boolean(lean) && liveInfo.trendVerdict === 'WON';
+                const isLeanMiss = !isActionable && Boolean(lean) && liveInfo.trendVerdict === 'LOST';
+                const isLeanPush = !isActionable && Boolean(lean) && liveInfo.trendVerdict === 'PUSH';
+                const isLeanSettled = isLeanHit || isLeanMiss || isLeanPush;
+                const leanCoverDisplay = (liveInfo.coverText || liveInfo.gameTrendText || '')
+                  .replace(/^Bet Won\b/i, 'Lean Hit')
+                  .replace(/^Bet Lost\b/i, 'Lean Missed');
                 const rowHighlightCls = isBetWon
                   ? 'bg-emerald-950/50 hover:bg-emerald-950/65'
                   : isBetLost
                     ? 'bg-rose-950/50 hover:bg-rose-950/65'
                     : isBetPush
                       ? 'bg-slate-800/60 hover:bg-slate-800/75'
-                      : 'hover:bg-slate-800/40';
+                      : isLeanHit
+                        ? 'bg-emerald-950/20 hover:bg-emerald-950/30'
+                        : isLeanMiss
+                          ? 'bg-rose-950/20 hover:bg-rose-950/30'
+                          : isLeanPush
+                            ? 'bg-slate-800/35 hover:bg-slate-800/50'
+                            : 'hover:bg-slate-800/40';
                 const leftStripeCls = isBetWon
                   ? 'border-l-4 border-l-emerald-400'
                   : isBetLost
                     ? 'border-l-4 border-l-rose-400'
                     : isBetPush
                       ? 'border-l-4 border-l-slate-400'
-                      : '';
+                      : isLeanHit
+                        ? 'border-l-2 border-dashed border-l-emerald-400/60'
+                        : isLeanMiss
+                          ? 'border-l-2 border-dashed border-l-rose-400/60'
+                          : isLeanPush
+                            ? 'border-l-2 border-dashed border-l-slate-400/60'
+                            : '';
 
                 return (
                   <tr
@@ -306,6 +325,21 @@ const TodayFullBoardTable = ({
                           >
                             {liveInfo.isFirstHalfBet ? '1H ' : ''}
                             {isBetWon ? 'WON' : isBetLost ? 'LOST' : 'PUSH'}
+                          </span>
+                        </div>
+                      )}
+                      {isLeanSettled && (
+                        <div className="mb-1">
+                          <span
+                            className={`inline-flex px-1.5 py-0.5 rounded border border-dashed text-[9px] font-sans font-bold uppercase tracking-wider ${
+                              isLeanHit
+                                ? 'bg-emerald-500/10 border-emerald-400/50 text-emerald-300/90'
+                                : isLeanMiss
+                                  ? 'bg-rose-500/10 border-rose-400/50 text-rose-300/90'
+                                  : 'bg-slate-800/80 border-slate-500/60 text-slate-300'
+                            }`}
+                          >
+                            {isLeanHit ? 'Lean Hit' : isLeanMiss ? 'Lean Miss' : 'Lean Push'}
                           </span>
                         </div>
                       )}
@@ -465,7 +499,7 @@ const TodayFullBoardTable = ({
                               </span>
                             )}
                           </div>
-                          {liveInfo.isLive && (liveInfo.coverText || liveInfo.gameTrendText) && (
+                          {(liveInfo.isLive || isLeanSettled) && leanCoverDisplay && (
                             <span
                               className={`text-[11px] font-semibold truncate ${
                                 liveInfo.coverTone === 'win'
@@ -477,15 +511,15 @@ const TodayFullBoardTable = ({
                                       : 'text-sky-300'
                               }`}
                             >
-                              {liveInfo.coverText || liveInfo.gameTrendText}
+                              {leanCoverDisplay}
                             </span>
                           )}
-                          {(isBetSettled || liveInfo.isLive) && liveInfo.trendDetail && (
+                          {(liveInfo.isLive || isLeanSettled) && liveInfo.trendDetail && (
                             <span className="text-[10px] text-slate-300 line-clamp-1">
                               {liveInfo.trendDetail}
                             </span>
                           )}
-                          {!liveInfo.isLive && cleanReason && (
+                          {!liveInfo.isLive && !isLeanSettled && cleanReason && (
                             <span className="text-[11px] text-slate-400 line-clamp-1">{cleanReason}</span>
                           )}
                         </div>
