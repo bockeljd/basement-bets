@@ -2975,35 +2975,64 @@ def _compute_live_game_pace(
         period_label = detail_str or "Live"
 
     live_cal = None
-    live_weight_scale = 0.85
-    sigma_total_rem = 13.5
-    sigma_spread_rem = 10.5
+    p_cfg = {
+        "live_weight_scale": 0.85,
+        "sigma_total_rem": 13.5,
+        "sigma_spread_rem": 10.5,
+        "first_half_share": 0.47,
+        "late_foul_boost_pts": 3.5,
+        "late_blowout_drag_pts": 2.5,
+        "ot_extra_pts": 15.5,
+        "ot_prob_scale": 1.0,
+    }
     try:
-        from src.services.live_calibration_service import get_active_live_calibration
+        from src.services.live_calibration_service import (
+            LEARNABLE_LIVE_PARAM_KEYS,
+            get_active_live_calibration,
+            project_live_cbb_pace,
+        )
 
         live_cal = get_active_live_calibration()
-        p_cfg = (live_cal or {}).get("params") or {}
-        if p_cfg.get("live_weight_scale") is not None:
-            live_weight_scale = float(p_cfg["live_weight_scale"])
-        if p_cfg.get("sigma_total_rem") is not None:
-            sigma_total_rem = float(p_cfg["sigma_total_rem"])
-        if p_cfg.get("sigma_spread_rem") is not None:
-            sigma_spread_rem = float(p_cfg["sigma_spread_rem"])
+        raw_cfg = (live_cal or {}).get("params") or {}
+        for k in LEARNABLE_LIVE_PARAM_KEYS:
+            if raw_cfg.get(k) is not None:
+                p_cfg[k] = float(raw_cfg[k])
     except Exception:
         live_cal = None
+        project_live_cbb_pace = None
 
-    rem_frac = max(0.0, 1.0 - elapsed_frac)
-    max_live_wt = 0.85 if live_weight_scale > 0.88 else 0.80
-    live_weight = max(0.15, min(max_live_wt, elapsed_frac * live_weight_scale))
     pts_per_min = round(total_now / elapsed_mins, 2) if elapsed_mins > 0.5 else None
+    in_ot = bool(period_num is not None and period_num > 2)
 
-    raw_pace_total = max(75.0, min(235.0, total_now / max(0.04, elapsed_frac)))
-    blended_total_rate = live_weight * raw_pace_total + (1.0 - live_weight) * pregame_total
-    proj_total = round(max(float(total_now), total_now + blended_total_rate * rem_frac), 1)
-
-    raw_pace_margin = max(-35.0, min(35.0, current_home_margin / max(0.04, elapsed_frac)))
-    blended_margin_rate = live_weight * raw_pace_margin + (1.0 - live_weight) * pregame_home_margin
-    proj_home_margin = round(current_home_margin + blended_margin_rate * rem_frac, 1)
+    if callable(project_live_cbb_pace):
+        pace = project_live_cbb_pace(
+            elapsed_fraction=elapsed_frac,
+            home_score=hs,
+            away_score=as_,
+            pregame_total=pregame_total,
+            pregame_home_margin=pregame_home_margin,
+            params=p_cfg,
+            is_first_half=False,
+            in_overtime=in_ot,
+        )
+        proj_total = pace["projected_total"]
+        proj_home_margin = pace["projected_home_margin"]
+        late_pace_adj = pace["late_pace_adj"]
+        ot_prob = pace["ot_prob"]
+        ot_expected_pts = pace["ot_expected_pts"]
+    else:
+        rem_frac = max(0.0, 1.0 - elapsed_frac)
+        max_live_wt = 0.85 if p_cfg["live_weight_scale"] > 0.88 else 0.80
+        live_weight = max(0.15, min(max_live_wt, elapsed_frac * p_cfg["live_weight_scale"]))
+        raw_pace_total = max(75.0, min(235.0, total_now / max(0.04, elapsed_frac)))
+        blended_total_rate = live_weight * raw_pace_total + (1.0 - live_weight) * pregame_total
+        proj_total = round(max(float(total_now), total_now + blended_total_rate * rem_frac), 1)
+        raw_pace_margin = max(-35.0, min(35.0, current_home_margin / max(0.04, elapsed_frac)))
+        blended_margin_rate = live_weight * raw_pace_margin + (1.0 - live_weight) * pregame_home_margin
+        proj_home_margin = round(current_home_margin + blended_margin_rate * rem_frac, 1)
+        late_pace_adj = 0.0
+        ot_prob = 0.0
+        ot_expected_pts = 0.0
 
     rem_total = max(0.0, proj_total - total_now)
     rem_margin = proj_home_margin - current_home_margin
@@ -3027,9 +3056,17 @@ def _compute_live_game_pace(
         "projected_home_margin": proj_home_margin,
         "projected_home_score": max(hs, int(round(hs + rem_home))),
         "projected_away_score": max(as_, int(round(as_ + rem_away))),
-        "live_weight_scale": round(live_weight_scale, 3),
-        "sigma_total_rem": round(sigma_total_rem, 2),
-        "sigma_spread_rem": round(sigma_spread_rem, 2),
+        "late_pace_adj": late_pace_adj,
+        "ot_prob": ot_prob,
+        "ot_expected_pts": ot_expected_pts,
+        "live_weight_scale": round(p_cfg["live_weight_scale"], 3),
+        "sigma_total_rem": round(p_cfg["sigma_total_rem"], 2),
+        "sigma_spread_rem": round(p_cfg["sigma_spread_rem"], 2),
+        "first_half_share": round(p_cfg["first_half_share"], 3),
+        "late_foul_boost_pts": round(p_cfg["late_foul_boost_pts"], 2),
+        "late_blowout_drag_pts": round(p_cfg["late_blowout_drag_pts"], 2),
+        "ot_extra_pts": round(p_cfg["ot_extra_pts"], 2),
+        "ot_prob_scale": round(p_cfg["ot_prob_scale"], 3),
     }
     if isinstance(live_cal, dict) and live_cal.get("active") and live_cal.get("points"):
         out["calibration_points"] = live_cal.get("points")

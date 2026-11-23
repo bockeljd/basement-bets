@@ -65,4 +65,86 @@ describe('Today recommendations', () => {
     expect(live.trendDetail).toContain('2.6 min in 1H');
     expect(live.liveWinProb).toBeLessThan(0.75);
   });
+
+  it('applies learned 47/53 CBB curve, late fouling surge, blowout drag, and OT bump dynamically', () => {
+    // 1. Halftime 47/53 curve projects higher than naive 50/50
+    const half47 = getLiveGameStatus(
+      {
+        sport: 'NCAAM',
+        status: 'HALFTIME',
+        home_team: 'Duke',
+        away_team: 'UNC',
+        home_score: 35,
+        away_score: 33,
+        live_trend: { first_half_share: 0.47 },
+      },
+      { bet_type: 'TOTAL', selection: 'OVER 143.5', side: 'over', market_line: 143.5 },
+      { fair_total: 144.0 }
+    );
+    const half50 = getLiveGameStatus(
+      {
+        sport: 'NCAAM',
+        status: 'HALFTIME',
+        home_team: 'Duke',
+        away_team: 'UNC',
+        home_score: 35,
+        away_score: 33,
+        live_trend: { first_half_share: 0.5 },
+      },
+      { bet_type: 'TOTAL', selection: 'OVER 143.5', side: 'over', market_line: 143.5 },
+      { fair_total: 144.0 }
+    );
+    expect(half47.liveProjTotal).toBeGreaterThan(half50.liveProjTotal + 3);
+
+    // 2. Tight game with 2:00 left gets late-foul surge + OT chance; blowout gets negative drag
+    const tightLate = getLiveGameStatus(
+      {
+        sport: 'NCAAM',
+        status: 'LIVE',
+        period: 2,
+        clock: '2:00',
+        home_team: 'Duke',
+        away_team: 'UNC',
+        home_score: 70,
+        away_score: 68,
+        live_trend: { late_foul_boost_pts: 4.0, ot_prob_scale: 1.0, ot_extra_pts: 15.5 },
+      },
+      { bet_type: 'TOTAL', selection: 'OVER 144.5', side: 'over', market_line: 144.5 },
+      { fair_total: 144.0 }
+    );
+    const blowoutLate = getLiveGameStatus(
+      {
+        sport: 'NCAAM',
+        status: 'LIVE',
+        period: 2,
+        clock: '2:00',
+        home_team: 'Duke',
+        away_team: 'UNC',
+        home_score: 82,
+        away_score: 56,
+        live_trend: { late_blowout_drag_pts: 3.0, ot_prob_scale: 1.0 },
+      },
+      { bet_type: 'TOTAL', selection: 'OVER 144.5', side: 'over', market_line: 144.5 },
+      { fair_total: 144.0 }
+    );
+    expect(tightLate.latePaceAdj).toBeGreaterThan(0.5);
+    expect(tightLate.otProb).toBeGreaterThan(0.05);
+    expect(blowoutLate.latePaceAdj).toBeLessThan(-0.5);
+    expect(tightLate.liveProjTotal).toBeGreaterThan(blowoutLate.liveProjTotal + 3);
+
+    // 3. 1H bet automatically grades as WON at Halftime
+    const half1H = getLiveGameStatus(
+      {
+        sport: 'NCAAM',
+        status: 'HALFTIME',
+        home_team: 'FGCU',
+        away_team: 'Charlotte',
+        home_score: 30,
+        away_score: 38,
+      },
+      { bet_type: 'TOTAL_1H', selection: '1H OVER 66.5', side: 'over', market_line: 66.5 }
+    );
+    expect(half1H.trendVerdict).toBe('WON');
+    expect(half1H.liveWinProb).toBe(1);
+  });
 });

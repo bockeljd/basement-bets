@@ -1229,10 +1229,31 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
   let totalNow = null;
   let pointsPerMinute = null;
   let liveProjTotal = null;
+  let liveProjTotalReg = null;
   let liveProjHomeMargin = null;
   let liveProjHomeScore = null;
   let liveProjAwayScore = null;
+  let latePaceAdj = 0;
+  let otProb = 0;
+  let otExpectedPts = 0;
   let gameTrendText = '';
+
+  const lt = game?.live_trend || {};
+  const firstHalfShare = clamp(toNum(lt.first_half_share) ?? 0.47, 0.4, 0.54);
+  const lateFoulBoostPts = Math.max(0, toNum(lt.late_foul_boost_pts) ?? 3.5);
+  const lateBlowoutDragPts = Math.max(0, toNum(lt.late_blowout_drag_pts) ?? 2.5);
+  const otExtraPts = Math.max(0, toNum(lt.ot_extra_pts) ?? 15.5);
+  const otProbScale = Math.max(0, toNum(lt.ot_prob_scale) ?? 1.0);
+  const sigmaSpreadBaseFull = toNum(lt.sigma_spread_rem) ?? 10.5;
+  const inOvertime =
+    (toNum(game?.period) != null && toNum(game?.period) > 2) ||
+    /\bOT\b/i.test(String(game?.status_detail || game?.period_label || ''));
+
+  const expectedCbbScoringShare = (ef) => {
+    const c = clamp(ef, 0, 1);
+    if (c <= 0.5) return (c / 0.5) * firstHalfShare;
+    return firstHalfShare + ((c - 0.5) / 0.5) * (1 - firstHalfShare);
+  };
 
   if (effectiveHomeScore != null && effectiveAwayScore != null) {
     totalNow = effectiveHomeScore + effectiveAwayScore;
@@ -1240,6 +1261,7 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
       pointsPerMinute =
         progress.elapsedMinutes > 0 ? Number((totalNow / progress.elapsedMinutes).toFixed(2)) : null;
       liveProjTotal = totalNow;
+      liveProjTotalReg = totalNow;
       liveProjHomeMargin = effectiveHomeScore - effectiveAwayScore;
       liveProjHomeScore = effectiveHomeScore;
       liveProjAwayScore = effectiveAwayScore;
@@ -1248,23 +1270,60 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
     } else if (effectiveIsLive) {
       const elapsedFrac = progress.elapsedFraction;
       const remFrac = Math.max(0, 1 - elapsedFrac);
-      const liveWeightScale = toNum(game?.live_trend?.live_weight_scale) ?? 0.85;
+      const liveWeightScale = toNum(lt.live_weight_scale) ?? 0.85;
       const maxLiveWeight = liveWeightScale > 0.88 ? 0.85 : 0.8;
       const liveWeight = clamp(elapsedFrac * liveWeightScale, 0.15, maxLiveWeight);
       pointsPerMinute =
         progress.elapsedMinutes > 0.5 ? Number((totalNow / progress.elapsedMinutes).toFixed(2)) : null;
-
-      const paceMin = isFirstHalfBet ? 30 : 75;
-      const paceMax = isFirstHalfBet ? 125 : 235;
-      const rawPaceTotal = clamp(totalNow / Math.max(0.04, elapsedFrac), paceMin, paceMax);
-      const blendedTotalRate = liveWeight * rawPaceTotal + (1 - liveWeight) * pregameTotal;
-      liveProjTotal = Number(Math.max(totalNow, totalNow + blendedTotalRate * remFrac).toFixed(1));
 
       const currentHomeMargin = effectiveHomeScore - effectiveAwayScore;
       const marginCap = isFirstHalfBet ? 22 : 35;
       const rawPaceHomeMargin = clamp(currentHomeMargin / Math.max(0.04, elapsedFrac), -marginCap, marginCap);
       const blendedMarginRate = liveWeight * rawPaceHomeMargin + (1 - liveWeight) * pregameHomeMargin;
       liveProjHomeMargin = Number((currentHomeMargin + blendedMarginRate * remFrac).toFixed(1));
+
+      if (isFirstHalfBet) {
+        const preTarget1H = pregameTotal > 95 ? pregameTotal * firstHalfShare : pregameTotal;
+        const rawPaceTotal = clamp(totalNow / Math.max(0.04, elapsedFrac), 30, 125);
+        const blendedTotalRate = liveWeight * rawPaceTotal + (1 - liveWeight) * preTarget1H;
+        liveProjTotal = Number(Math.max(totalNow, totalNow + blendedTotalRate * remFrac).toFixed(1));
+        liveProjTotalReg = liveProjTotal;
+      } else {
+        const scoredShare = clamp(expectedCbbScoringShare(elapsedFrac), 0.04, 0.99);
+        const remShare = Math.max(0, 1 - scoredShare);
+        const rawPaceTotal = clamp(totalNow / scoredShare, 75, 235);
+        const blendedTotalRate = liveWeight * rawPaceTotal + (1 - liveWeight) * pregameTotal;
+        const baseProjTotal = Math.max(totalNow, totalNow + blendedTotalRate * remShare);
+
+        // Late-game fouling surge (close games) vs. blowout slowdown in final ~5 minutes
+        const remMins = Math.max(0, progress.remainingMinutes);
+        if (!inOvertime && remMins > 0.05 && remMins < 5.0) {
+          const lateWindow = clamp((5.0 - remMins) / 4.0, 0, 1);
+          const timeTaper = Math.min(1.0, remMins / 1.5);
+          const foulTimeFactor = lateWindow * timeTaper;
+          const absMargin = Math.abs(currentHomeMargin);
+          if (absMargin >= 1 && absMargin <= 9) {
+            const closeness = Math.max(0, 1 - Math.abs(absMargin - 4.0) / 5.0);
+            latePaceAdj = Number((lateFoulBoostPts * foulTimeFactor * closeness).toFixed(2));
+          } else if (absMargin >= 15) {
+            const blowoutIntensity = clamp((absMargin - 14.0) / 10.0, 0, 1);
+            latePaceAdj = Number((-lateBlowoutDragPts * foulTimeFactor * blowoutIntensity).toFixed(2));
+          }
+        }
+        liveProjTotalReg = Number(Math.max(totalNow, baseProjTotal + latePaceAdj).toFixed(1));
+
+        // Overtime probability bump for close 2nd-half games
+        if (!inOvertime && elapsedFrac >= 0.55 && remMins > 0.05 && otProbScale > 0) {
+          const sigmaSpNow = Math.max(1.5, sigmaSpreadBaseFull * Math.sqrt(Math.max(0.02, remFrac)));
+          const pTieRaw =
+            normalCdf((0.5 - liveProjHomeMargin) / sigmaSpNow) -
+            normalCdf((-0.5 - liveProjHomeMargin) / sigmaSpNow);
+          otProb = Number(clamp(pTieRaw * otProbScale, 0, 0.35).toFixed(4));
+          otExpectedPts = Number((otProb * otExtraPts).toFixed(2));
+        }
+
+        liveProjTotal = Number(Math.max(totalNow, liveProjTotalReg + otExpectedPts).toFixed(1));
+      }
 
       const remTotal = Math.max(0, liveProjTotal - totalNow);
       const remMargin = liveProjHomeMargin - currentHomeMargin;
@@ -1359,7 +1418,18 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
           const sigmaTotalBaseFull = toNum(game?.live_trend?.sigma_total_rem) ?? 13.5;
           const sigmaTotalBase = isFirstHalfBet ? sigmaTotalBaseFull * Math.SQRT1_2 : sigmaTotalBaseFull;
           const sigmaTotalRem = Math.max(1.5, sigmaTotalBase * Math.sqrt(remFrac));
-          const rawLiveProb = clamp(normalCdf(projectedEdgeVsLine / sigmaTotalRem), 0.02, 0.98);
+          let rawLiveProb;
+          if (!isFirstHalfBet && otProb > 0.01 && liveProjTotalReg != null) {
+            const regMargin = isOver ? liveProjTotalReg - line : line - liveProjTotalReg;
+            const otMargin = isOver
+              ? liveProjTotalReg + otExtraPts - line
+              : line - (liveProjTotalReg + otExtraPts);
+            const pReg = normalCdf(regMargin / sigmaTotalRem);
+            const pOt = normalCdf(otMargin / Math.sqrt(sigmaTotalRem * sigmaTotalRem + 16));
+            rawLiveProb = clamp((1 - otProb) * pReg + otProb * pOt, 0.02, 0.98);
+          } else {
+            rawLiveProb = clamp(normalCdf(projectedEdgeVsLine / sigmaTotalRem), 0.02, 0.98);
+          }
           liveWinProb = Number(
             interpolateLiveCalProb(rawLiveProb, game?.live_trend?.calibration_points, 0.5).toFixed(2)
           );
@@ -1382,12 +1452,17 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
           coverText = `${trendLabel} (${pctTxt}) · Pace ${liveProjTotal.toFixed(1)} vs ${sideTag}`;
           const rateTxt = pointsPerMinute != null ? `${pointsPerMinute.toFixed(1)} pts/min` : 'live scoring';
           const remSuffix = isFirstHalfBet ? ` in 1H` : '';
+          const contextTags = [];
+          if (!isFirstHalfBet && latePaceAdj >= 0.75) contextTags.push('late-foul surge');
+          else if (!isFirstHalfBet && latePaceAdj <= -0.75) contextTags.push('blowout pace');
+          if (!isFirstHalfBet && otProb >= 0.06) contextTags.push(`${Math.round(otProb * 100)}% OT chance`);
+          const contextNote = contextTags.length > 0 ? ` (${contextTags.join(', ')})` : '';
           if (isOver) {
             const needPts = Math.max(0, Math.floor(line) + 1 - totalNow);
-            trendDetail = `Scoring at ${rateTxt}, on pace for ~${liveProjTotal.toFixed(1)} ${isFirstHalfBet ? '1H ' : ''}pts (${fmtSigned(projectedEdgeVsLine, 1)} vs ${isFirstHalfBet ? '1H ' : ''}Over ${lineStr}); needs ${needPts} more pts over the last ${remMinsLabel}${remSuffix}.`;
+            trendDetail = `Scoring at ${rateTxt}, on pace for ~${liveProjTotal.toFixed(1)} ${isFirstHalfBet ? '1H ' : ''}pts${contextNote} (${fmtSigned(projectedEdgeVsLine, 1)} vs ${isFirstHalfBet ? '1H ' : ''}Over ${lineStr}); needs ${needPts} more pts over the last ${remMinsLabel}${remSuffix}.`;
           } else {
             const roomLeft = Math.max(0, Math.ceil(line) - 1 - totalNow);
-            trendDetail = `Scoring at ${rateTxt}, on pace for ~${liveProjTotal.toFixed(1)} ${isFirstHalfBet ? '1H ' : ''}pts (${fmtSigned(-projectedEdgeVsLine, 1)} vs ${isFirstHalfBet ? '1H ' : ''}Under ${lineStr}); needs teams to score ${roomLeft} or fewer pts in the last ${remMinsLabel}${remSuffix}.`;
+            trendDetail = `Scoring at ${rateTxt}, on pace for ~${liveProjTotal.toFixed(1)} ${isFirstHalfBet ? '1H ' : ''}pts${contextNote} (${fmtSigned(-projectedEdgeVsLine, 1)} vs ${isFirstHalfBet ? '1H ' : ''}Under ${lineStr}); needs teams to score ${roomLeft} or fewer pts in the last ${remMinsLabel}${remSuffix}.`;
           }
         }
       }
@@ -1554,6 +1629,9 @@ export const getLiveGameStatus = (game, rec = null, context = null) => {
     liveProjHomeMargin,
     liveProjHomeScore,
     liveProjAwayScore,
+    latePaceAdj,
+    otProb,
+    otExpectedPts,
     gameTrendText,
     trendVerdict,
     trendLabel,

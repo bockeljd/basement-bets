@@ -31,8 +31,24 @@ LIVE_CAL_FILENAME = "live_winprob_calibration_ncaam.json"
 DEFAULT_LIVE_WEIGHT_SCALE = 0.85
 DEFAULT_SIGMA_TOTAL_REM = 13.5
 DEFAULT_SIGMA_SPREAD_REM = 10.5
+DEFAULT_FIRST_HALF_SHARE = 0.47
+DEFAULT_LATE_FOUL_BOOST_PTS = 3.5
+DEFAULT_LATE_BLOWOUT_DRAG_PTS = 2.5
+DEFAULT_OT_EXTRA_PTS = 15.5
+DEFAULT_OT_PROB_SCALE = 1.0
 MIN_LIVE_CAL_OBS = 25
 CALIBRATION_BLEND_WEIGHT = 0.75
+
+LEARNABLE_LIVE_PARAM_KEYS = (
+    "live_weight_scale",
+    "sigma_total_rem",
+    "sigma_spread_rem",
+    "first_half_share",
+    "late_foul_boost_pts",
+    "late_blowout_drag_pts",
+    "ot_extra_pts",
+    "ot_prob_scale",
+)
 
 _CAL_CACHE_TTL_SECONDS = 300.0
 _cal_cache_payload: Optional[Dict[str, Any]] = None
@@ -47,11 +63,16 @@ def normal_cdf(z: float) -> float:
 
 
 def default_live_calibration_params() -> Dict[str, float]:
-    """Return baseline uncalibrated live projection and uncertainty parameters."""
+    """Return baseline uncalibrated live projection, CBB scoring curve, and uncertainty parameters."""
     return {
         "live_weight_scale": DEFAULT_LIVE_WEIGHT_SCALE,
         "sigma_total_rem": DEFAULT_SIGMA_TOTAL_REM,
         "sigma_spread_rem": DEFAULT_SIGMA_SPREAD_REM,
+        "first_half_share": DEFAULT_FIRST_HALF_SHARE,
+        "late_foul_boost_pts": DEFAULT_LATE_FOUL_BOOST_PTS,
+        "late_blowout_drag_pts": DEFAULT_LATE_BLOWOUT_DRAG_PTS,
+        "ot_extra_pts": DEFAULT_OT_EXTRA_PTS,
+        "ot_prob_scale": DEFAULT_OT_PROB_SCALE,
     }
 
 
@@ -99,7 +120,7 @@ def _infer_side(market_type: str, pick: str, selection: str, home_team: str, awa
     mkt = str(market_type or "").upper().strip()
     text = f"{selection or ''} {pick or ''}".strip()
     up = text.upper()
-    if mkt == "TOTAL":
+    if mkt in ("TOTAL", "TOTAL_1H"):
         if "UNDER" in up or up.startswith("U "):
             return "UNDER"
         return "OVER"
@@ -126,7 +147,7 @@ def _extract_params(cal: Optional[Dict[str, Any]]) -> Dict[str, float]:
     if not isinstance(cal, dict):
         return base
     params = cal.get("params") if isinstance(cal.get("params"), dict) else {}
-    for k in ("live_weight_scale", "sigma_total_rem", "sigma_spread_rem"):
+    for k in LEARNABLE_LIVE_PARAM_KEYS:
         if params.get(k) is not None:
             try:
                 base[k] = float(params[k])
@@ -287,6 +308,126 @@ def build_reliability_bins(pairs: List[Tuple[float, float]]) -> List[Dict[str, A
     return out
 
 
+def expected_cbb_scoring_share(elapsed_fraction: float, first_half_share: float = DEFAULT_FIRST_HALF_SHARE) -> float:
+    """Cumulative fraction of full-game CBB points expected by `elapsed_fraction` (non-linear 1H/2H curve)."""
+    ef = _clamp(elapsed_fraction, 0.0, 1.0)
+    fh = _clamp(first_half_share, 0.40, 0.54)
+    if ef <= 0.5:
+        return (ef / 0.5) * fh
+    return fh + ((ef - 0.5) / 0.5) * (1.0 - fh)
+
+
+def project_live_cbb_pace(
+    *,
+    elapsed_fraction: float,
+    home_score: int,
+    away_score: int,
+    pregame_total: float,
+    pregame_home_margin: float,
+    params: Optional[Dict[str, float]] = None,
+    is_first_half: bool = False,
+    in_overtime: bool = False,
+) -> Dict[str, Any]:
+    """Project live CBB total, margin, late-game foul/blowout adjustment, and OT probability."""
+    p_cfg = dict(default_live_calibration_params())
+    if params:
+        for k, v in params.items():
+            if v is not None and k in p_cfg:
+                p_cfg[k] = float(v)
+
+    total_now = int(home_score) + int(away_score)
+    current_home_margin = int(home_score) - int(away_score)
+    fh_share = _clamp(p_cfg["first_half_share"], 0.40, 0.54)
+    pre_t_full = float(pregame_total) if pregame_total is not None else 142.0
+    pre_m_full = float(pregame_home_margin) if pregame_home_margin is not None else 0.0
+
+    if is_first_half:
+        # First-half market uses the 20-minute 1st-half window (elapsed_fraction 0..0.5 of 40m game)
+        ef_1h = _clamp(float(elapsed_fraction) / 0.5, 0.04, 1.0)
+        rem_frac = max(0.0, 1.0 - ef_1h)
+        max_live_wt = 0.85 if p_cfg["live_weight_scale"] > 0.88 else 0.80
+        live_weight = _clamp(ef_1h * p_cfg["live_weight_scale"], 0.15, max_live_wt)
+
+        pre_t_1h = pre_t_full * fh_share if pre_t_full > 95.0 else pre_t_full
+        pre_m_1h = pre_m_full * 0.5
+
+        raw_pace_total = _clamp(total_now / max(0.04, ef_1h), 30.0, 125.0)
+        blended_total_rate = live_weight * raw_pace_total + (1.0 - live_weight) * pre_t_1h
+        proj_total = round(max(float(total_now), total_now + blended_total_rate * rem_frac), 1)
+
+        raw_pace_margin = _clamp(current_home_margin / max(0.04, ef_1h), -22.0, 22.0)
+        blended_margin_rate = live_weight * raw_pace_margin + (1.0 - live_weight) * pre_m_1h
+        proj_home_margin = round(current_home_margin + blended_margin_rate * rem_frac, 1)
+
+        return {
+            "projected_total": proj_total,
+            "projected_total_reg": proj_total,
+            "projected_home_margin": proj_home_margin,
+            "late_pace_adj": 0.0,
+            "ot_prob": 0.0,
+            "ot_expected_pts": 0.0,
+            "effective_rem_frac": max(0.02, rem_frac),
+            "scored_share": round(ef_1h, 4),
+            "params": p_cfg,
+        }
+
+    ef = _clamp(elapsed_fraction, 0.04, 0.99)
+    scored_share = _clamp(expected_cbb_scoring_share(ef, fh_share), 0.04, 0.99)
+    rem_share = max(0.0, 1.0 - scored_share)
+    rem_frac = max(0.02, 1.0 - ef)
+
+    max_live_wt = 0.85 if p_cfg["live_weight_scale"] > 0.88 else 0.80
+    live_weight = _clamp(ef * p_cfg["live_weight_scale"], 0.15, max_live_wt)
+
+    raw_pace_total = _clamp(total_now / max(0.04, scored_share), 75.0, 235.0)
+    blended_total_rate = live_weight * raw_pace_total + (1.0 - live_weight) * pre_t_full
+    base_proj_total = max(float(total_now), total_now + blended_total_rate * rem_share)
+
+    raw_pace_margin = _clamp(current_home_margin / max(0.04, ef), -35.0, 35.0)
+    blended_margin_rate = live_weight * raw_pace_margin + (1.0 - live_weight) * pre_m_full
+    proj_home_margin = round(current_home_margin + blended_margin_rate * rem_frac, 1)
+
+    # Late-game fouling surge (close games) vs. blowout slowdown in final ~5 minutes
+    rem_mins = max(0.0, (1.0 - ef) * 40.0)
+    late_pace_adj = 0.0
+    if not in_overtime and 0.05 < rem_mins < 5.0:
+        late_window = _clamp((5.0 - rem_mins) / 4.0, 0.0, 1.0)
+        time_taper = min(1.0, rem_mins / 1.5)
+        foul_time_factor = late_window * time_taper
+        abs_margin = abs(current_home_margin)
+        if 1 <= abs_margin <= 9:
+            closeness = max(0.0, 1.0 - abs(abs_margin - 4.0) / 5.0)
+            late_pace_adj = p_cfg["late_foul_boost_pts"] * foul_time_factor * closeness
+        elif abs_margin >= 15:
+            blowout_intensity = _clamp((abs_margin - 14.0) / 10.0, 0.0, 1.0)
+            late_pace_adj = -p_cfg["late_blowout_drag_pts"] * foul_time_factor * blowout_intensity
+
+    proj_total_reg = round(max(float(total_now), base_proj_total + late_pace_adj), 1)
+
+    # Overtime probability & expected OT points for close 2nd-half games
+    ot_prob = 0.0
+    ot_expected_pts = 0.0
+    if not in_overtime and ef >= 0.55 and rem_mins > 0.05 and p_cfg["ot_prob_scale"] > 0.0:
+        sigma_sp_now = max(1.5, p_cfg["sigma_spread_rem"] * math.sqrt(rem_frac))
+        p_tie_raw = normal_cdf((0.5 - proj_home_margin) / sigma_sp_now) - normal_cdf((-0.5 - proj_home_margin) / sigma_sp_now)
+        ot_prob = _clamp(p_tie_raw * p_cfg["ot_prob_scale"], 0.0, 0.35)
+        ot_expected_pts = ot_prob * p_cfg["ot_extra_pts"]
+
+    proj_total = round(max(float(total_now), proj_total_reg + ot_expected_pts), 1)
+
+    return {
+        "projected_total": proj_total,
+        "projected_total_reg": proj_total_reg,
+        "projected_home_margin": proj_home_margin,
+        "late_pace_adj": round(late_pace_adj, 2),
+        "ot_prob": round(ot_prob, 4),
+        "ot_expected_pts": round(ot_expected_pts, 2),
+        "effective_rem_frac": rem_frac,
+        "scored_share": round(scored_share, 4),
+        "params": p_cfg,
+    }
+
+
 def compute_live_bet_win_prob(
     *,
     elapsed_fraction: float,
@@ -299,38 +440,36 @@ def compute_live_bet_win_prob(
     bet_line: Optional[float],
     params: Optional[Dict[str, float]] = None,
     calibration: Optional[Dict[str, Any]] = None,
+    in_overtime: bool = False,
 ) -> Dict[str, Any]:
     """Project remaining scoring/margin and return raw + optionally calibrated live win probability."""
-    p_cfg = dict(default_live_calibration_params())
-    if params:
-        for k, v in params.items():
-            if v is not None and k in p_cfg:
-                p_cfg[k] = float(v)
+    mkt = str(market_type or "").upper().strip()
+    is_first_half = "1H" in mkt
+    base_mkt = mkt.replace("_1H", "")
+    s_up = str(side or "").upper().strip()
 
-    ef = _clamp(elapsed_fraction, 0.04, 0.98)
-    rem_frac = max(0.03, 1.0 - ef)
-    max_live_wt = 0.85 if p_cfg["live_weight_scale"] > 0.88 else 0.80
-    live_weight = _clamp(ef * p_cfg["live_weight_scale"], 0.15, max_live_wt)
+    pace = project_live_cbb_pace(
+        elapsed_fraction=elapsed_fraction,
+        home_score=home_score,
+        away_score=away_score,
+        pregame_total=pregame_total,
+        pregame_home_margin=pregame_home_margin,
+        params=params,
+        is_first_half=is_first_half,
+        in_overtime=in_overtime,
+    )
+    p_cfg = pace["params"]
+    proj_total = pace["projected_total"]
+    proj_total_reg = pace["projected_total_reg"]
+    proj_home_margin = pace["projected_home_margin"]
+    rem_frac = pace["effective_rem_frac"]
+    ot_prob = pace["ot_prob"]
 
     total_now = int(home_score) + int(away_score)
-    pre_t = float(pregame_total) if pregame_total is not None else 142.0
-    pre_m = float(pregame_home_margin) if pregame_home_margin is not None else 0.0
-
-    raw_pace_total = _clamp(total_now / ef, 75.0, 235.0)
-    blended_total_rate = live_weight * raw_pace_total + (1.0 - live_weight) * pre_t
-    proj_total = round(max(float(total_now), total_now + blended_total_rate * rem_frac), 1)
-
-    current_home_margin = int(home_score) - int(away_score)
-    raw_pace_margin = _clamp(current_home_margin / ef, -35.0, 35.0)
-    blended_margin_rate = live_weight * raw_pace_margin + (1.0 - live_weight) * pre_m
-    proj_home_margin = round(current_home_margin + blended_margin_rate * rem_frac, 1)
-
-    mkt = str(market_type or "").upper().strip()
-    s_up = str(side or "").upper().strip()
     proj_bet_margin = 0.0
     raw_prob = 0.5
 
-    if mkt == "TOTAL" and bet_line is not None:
+    if base_mkt == "TOTAL" and bet_line is not None:
         line_val = float(bet_line)
         is_over = s_up == "OVER"
         if is_over and total_now > line_val:
@@ -341,14 +480,23 @@ def compute_live_bet_win_prob(
             raw_prob = 0.01
         else:
             proj_bet_margin = round((proj_total - line_val) if is_over else (line_val - proj_total), 1)
-            sigma_rem = max(2.0, p_cfg["sigma_total_rem"] * math.sqrt(rem_frac))
-            raw_prob = _clamp(normal_cdf(proj_bet_margin / sigma_rem), 0.02, 0.98)
+            sigma_base = p_cfg["sigma_total_rem"] * (math.sqrt(0.5) if is_first_half else 1.0)
+            sigma_rem = max(1.5 if is_first_half else 2.0, sigma_base * math.sqrt(rem_frac))
+            if not is_first_half and ot_prob > 0.01:
+                reg_margin = (proj_total_reg - line_val) if is_over else (line_val - proj_total_reg)
+                ot_margin = ((proj_total_reg + p_cfg["ot_extra_pts"]) - line_val) if is_over else (line_val - (proj_total_reg + p_cfg["ot_extra_pts"]))
+                p_reg = normal_cdf(reg_margin / sigma_rem)
+                p_ot = normal_cdf(ot_margin / math.sqrt(sigma_rem ** 2 + 16.0))
+                raw_prob = _clamp((1.0 - ot_prob) * p_reg + ot_prob * p_ot, 0.02, 0.98)
+            else:
+                raw_prob = _clamp(normal_cdf(proj_bet_margin / sigma_rem), 0.02, 0.98)
     else:
-        eff_line = 0.0 if mkt in ("ML", "MONEYLINE") else float(bet_line or 0.0)
+        eff_line = 0.0 if base_mkt in ("ML", "MONEYLINE") else float(bet_line or 0.0)
         is_home = s_up == "HOME"
         proj_pick_margin = proj_home_margin if is_home else -proj_home_margin
         proj_bet_margin = round(proj_pick_margin + eff_line, 1)
-        sigma_rem = max(1.5, p_cfg["sigma_spread_rem"] * math.sqrt(rem_frac))
+        sigma_base = p_cfg["sigma_spread_rem"] * (math.sqrt(0.5) if is_first_half else 1.0)
+        sigma_rem = max(1.2 if is_first_half else 1.5, sigma_base * math.sqrt(rem_frac))
         raw_prob = _clamp(normal_cdf(proj_bet_margin / sigma_rem), 0.02, 0.98)
 
     cal_prob = raw_prob
@@ -362,8 +510,12 @@ def compute_live_bet_win_prob(
 
     return {
         "projected_total": proj_total,
+        "projected_total_reg": proj_total_reg,
         "projected_home_margin": proj_home_margin,
         "projected_bet_margin": proj_bet_margin,
+        "late_pace_adj": pace["late_pace_adj"],
+        "ot_prob": ot_prob,
+        "ot_expected_pts": pace["ot_expected_pts"],
         "raw_live_win_prob": round(raw_prob, 4),
         "calibrated_live_win_prob": round(cal_prob, 4),
     }
@@ -434,7 +586,8 @@ def fit_live_calibration_artifact(
             best_weight_brier = b
             best_params["live_weight_scale"] = lw
 
-    total_rows = [r for r in decided if str(r.get("market_type") or "").upper() == "TOTAL"]
+    total_rows = [r for r in decided if str(r.get("market_type") or "").upper() in ("TOTAL", "TOTAL_1H")]
+    full_total_rows = [r for r in decided if str(r.get("market_type") or "").upper() == "TOTAL"]
     if len(total_rows) >= 10:
         best_tb = compute_brier_score(_eval_rows(total_rows, best_params)) or 1.0
         for st in (11.5, 12.5, 13.5, 15.0, 16.5, 18.0, 19.5):
@@ -444,7 +597,47 @@ def fit_live_calibration_artifact(
                 best_tb = b
                 best_params["sigma_total_rem"] = st
 
-    spread_rows = [r for r in decided if str(r.get("market_type") or "").upper() != "TOTAL"]
+        # Learn 1st-half vs. 2nd-half CBB scoring split from graded totals
+        if len(full_total_rows) >= 10:
+            best_fhb = compute_brier_score(_eval_rows(full_total_rows, best_params)) or 1.0
+            for fh in (0.45, 0.46, 0.47, 0.48, 0.49, 0.50):
+                cand = dict(best_params, first_half_share=fh)
+                b = compute_brier_score(_eval_rows(full_total_rows, cand))
+                if b is not None and b < best_fhb:
+                    best_fhb = b
+                    best_params["first_half_share"] = fh
+
+            # Learn late-game fouling surge, blowout drag, and OT probability scaling
+            late_rows = [r for r in full_total_rows if float(r.get("elapsed_fraction") or 0.0) >= 0.75]
+            if len(late_rows) >= 8:
+                best_lb = compute_brier_score(_eval_rows(late_rows, best_params)) or 1.0
+                best_all_b = compute_brier_score(_eval_rows(full_total_rows, best_params)) or 1.0
+                for fb in (0.0, 1.5, 2.5, 3.5, 4.5, 6.0):
+                    cand = dict(best_params, late_foul_boost_pts=fb)
+                    b = compute_brier_score(_eval_rows(late_rows, cand))
+                    b_all = compute_brier_score(_eval_rows(full_total_rows, cand))
+                    if b is not None and b < best_lb and b_all is not None and b_all <= best_all_b + 1e-6:
+                        best_lb = b
+                        best_all_b = b_all
+                        best_params["late_foul_boost_pts"] = fb
+                for bd in (0.0, 1.0, 2.0, 2.5, 3.5, 4.5):
+                    cand = dict(best_params, late_blowout_drag_pts=bd)
+                    b = compute_brier_score(_eval_rows(late_rows, cand))
+                    b_all = compute_brier_score(_eval_rows(full_total_rows, cand))
+                    if b is not None and b < best_lb and b_all is not None and b_all <= best_all_b + 1e-6:
+                        best_lb = b
+                        best_all_b = b_all
+                        best_params["late_blowout_drag_pts"] = bd
+                for ots in (0.0, 0.5, 0.75, 1.0, 1.25):
+                    cand = dict(best_params, ot_prob_scale=ots)
+                    b = compute_brier_score(_eval_rows(late_rows, cand))
+                    b_all = compute_brier_score(_eval_rows(full_total_rows, cand))
+                    if b is not None and b < best_lb and b_all is not None and b_all <= best_all_b + 1e-6:
+                        best_lb = b
+                        best_all_b = b_all
+                        best_params["ot_prob_scale"] = ots
+
+    spread_rows = [r for r in decided if str(r.get("market_type") or "").upper() not in ("TOTAL", "TOTAL_1H")]
     if len(spread_rows) >= 10:
         best_sb = compute_brier_score(_eval_rows(spread_rows, best_params)) or 1.0
         for ss in (8.5, 9.5, 10.5, 11.5, 13.0, 14.5, 16.0):
