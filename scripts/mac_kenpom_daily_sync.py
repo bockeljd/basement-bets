@@ -155,6 +155,51 @@ def fetch_torvik_bundle_data(season_year: int | None = None, days_back: int = 5)
     except Exception as exc:
         print(f"[mac-torvik] team_results warning: {exc}")
 
+    # 1b. BartTorvik daily matchup schedule projections (today + tomorrow ET) from residential IP
+    daily_schedules: dict[str, list[dict]] = {}
+    try:
+        from zoneinfo import ZoneInfo
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        now_et = datetime.now(timezone.utc)
+    for day_off in (0, 1):
+        d_str = (now_et + timedelta(days=day_off)).strftime("%Y%m%d")
+        try:
+            sched_resp = sess.get(f"https://barttorvik.com/schedule.php?date={d_str}&json=1", timeout=20)
+            if sched_resp.status_code != 200:
+                continue
+            raw_sched = sched_resp.json()
+            if not isinstance(raw_sched, list):
+                continue
+            parsed_games = []
+            for row in raw_sched:
+                if isinstance(row, dict):
+                    away = str(row.get("away") or row.get("away_team") or "").strip()
+                    home = str(row.get("home") or row.get("home_team") or "").strip()
+                    if not away or not home:
+                        continue
+                    parsed_games.append({
+                        "away": away,
+                        "home": home,
+                        "home_spread": row.get("home_spread") if row.get("home_spread") is not None else row.get("spread"),
+                        "total": row.get("total"),
+                        "away_score": row.get("away_score"),
+                        "home_score": row.get("home_score"),
+                    })
+                elif isinstance(row, (list, tuple)) and len(row) >= 6:
+                    # BartTorvik schedule.php?json=1 array format: [date, conf, away, home, ...]
+                    away = str(row[2] or "").strip()
+                    home = str(row[3] or "").strip()
+                    if away and home:
+                        parsed_games.append({"away": away, "home": home, "raw_row": list(row[:12])})
+            if parsed_games:
+                daily_schedules[d_str] = parsed_games
+                print(f"[mac-torvik] Pulled {len(parsed_games)} daily schedule projections for {d_str}")
+        except Exception as exc:
+            print(f"[mac-torvik] daily schedule {d_str} warning: {exc}")
+    if daily_schedules:
+        out["torvik_daily_schedules"] = daily_schedules
+
     # 2. Recent completed D1 game logs (including 3PT% for shooting regression) via public ESPN API
     logs: list[dict] = []
     seen_logs: set[tuple[str, str, str]] = set()
@@ -302,6 +347,9 @@ def run_mac_sync(dry_run: bool = False) -> dict:
         bundle.update(torvik_extra)
         summary["torvik_teams"] = len(torvik_extra.get("torvik_teams") or [])
         summary["torvik_game_logs"] = len(torvik_extra.get("torvik_game_logs") or [])
+        summary["torvik_daily_schedules"] = sum(
+            len(v or []) for v in (torvik_extra.get("torvik_daily_schedules") or {}).values()
+        )
 
     bundle_json = json.dumps(bundle)
     if dry_run:

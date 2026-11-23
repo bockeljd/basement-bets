@@ -106,6 +106,11 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
                       Smart Risk
                     </span>
                   )}
+                  {leg.is_value_underdog && (
+                    <span className="text-[9px] font-bold text-emerald-200 bg-emerald-500/15 border border-emerald-400/35 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                      Value Dog
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-bold leading-tight ${lWon ? 'text-green-300' : lLoss ? 'text-red-300' : 'text-slate-200'}`}>{leg.team_pick}</span>
@@ -211,9 +216,15 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
   const officialParlay = allData?.official_daily_parlay || null;
   const highConf = (allData?.high_confidence || []).slice(0, 5);
   const valuePick = (allData?.payout_band || []).slice(0, 5);
+  const threeLeg = (allData?.three_leg_high_payout || []).slice(0, 3);
   const homeFav = (homeFavData?.high_confidence || []).slice(0, 5);
   const legsConsidered = Number(allData?.legs_considered ?? 0);
-  const hasAnyCombos = Boolean(officialParlay) || highConf.length > 0 || valuePick.length > 0 || homeFav.length > 0;
+  const hasAnyCombos =
+    Boolean(officialParlay) ||
+    highConf.length > 0 ||
+    valuePick.length > 0 ||
+    threeLeg.length > 0 ||
+    homeFav.length > 0;
   const displayDate = allData?.date_et || date || '';
 
   return (
@@ -354,6 +365,27 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
               onAddBet={onAddBet}
             />
           </div>
+
+          {threeLeg.length > 0 && (
+            <section className="rounded-2xl border border-purple-500/30 bg-purple-950/10 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <TrendingUp size={14} className="text-purple-300" aria-hidden="true" />
+                  <span className="text-xs font-black uppercase tracking-wider text-purple-300">
+                    3-Leg High-Payout Parlays (+300 to +1000)
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Higher-upside 3-leg mixes from separate games · Sized smaller (0.25u–0.5u)
+                </span>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {threeLeg.map((c, i) => (
+                  <ComboCard key={`3leg-${i}`} c={c} color="purple" bankroll={bankroll} onAddBet={onAddBet} />
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       )}
     </div>

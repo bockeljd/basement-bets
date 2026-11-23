@@ -2220,6 +2220,21 @@ def ingest_kenpom_bundle(bundle: dict, asof_date: str | None = None) -> dict:
         except Exception as e:
             warnings.append(f"torvik_game_logs: {e}")
 
+    if isinstance(bundle.get("torvik_daily_schedules"), dict) and bundle.get("torvik_daily_schedules"):
+        try:
+            from src.database import upsert_bt_daily_schedule
+            sched_games_total = 0
+            for d_key, games_list in bundle["torvik_daily_schedules"].items():
+                if not d_key or not isinstance(games_list, list) or not games_list:
+                    continue
+                d_clean = str(d_key).replace("-", "").strip()[:8]
+                if len(d_clean) == 8 and d_clean.isdigit():
+                    upsert_bt_daily_schedule(games_list, d_clean)
+                    sched_games_total += len(games_list)
+            counts["torvik_daily_schedules"] = sched_games_total
+        except Exception as e:
+            warnings.append(f"torvik_daily_schedules: {e}")
+
     kenpom_synced = sum(
         counts[k]
         for k in (
@@ -2281,6 +2296,7 @@ def ingest_kenpom_csv(csv_text: str, asof_date: str | None = None) -> dict:
                     "fanmatch",
                     "torvik_teams",
                     "torvik_game_logs",
+                    "torvik_daily_schedules",
                 )
             )
         ):

@@ -385,6 +385,11 @@ const TodayFullBoardTable = ({
                             <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[10px] font-bold uppercase">
                               {rec.bet_type || rec.market_type || 'BET'}
                             </span>
+                            {(rec.is_smart_risk || String(rec.risk_tier || '').toUpperCase() === 'SMART_RISK') && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-500/15 border border-indigo-400/35 text-indigo-200 text-[10px] font-bold uppercase">
+                                Smart Risk
+                              </span>
+                            )}
                             <span className="font-bold text-white truncate">
                               {rec.selection || rec.pick}
                             </span>

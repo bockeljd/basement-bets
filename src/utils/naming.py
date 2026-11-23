@@ -52,8 +52,25 @@ def standardize_team_name(team_name: str) -> str:
         "michigan st": "Michigan St.",
         "wright st": "Wright St.",
         "mcneese": "McNeese St.",
+        "delaware fightin blue hens": "Delaware",
+        "delaware blue hens": "Delaware",
+        "tennessee-martin": "UT Martin",
+        "tennessee-martin skyhawks": "UT Martin",
+        "ut martin": "UT Martin",
+        "ut martin skyhawks": "UT Martin",
+        "american university": "American",
+        "american university eagles": "American",
+        "american eagles": "American",
+        "nicholls state": "Nicholls",
+        "nicholls": "Nicholls",
+        "george washington revolutionaries": "George Washington",
+        "george washington colonials": "George Washington",
+        "san jose state": "San Jose St.",
+        "san jose st": "San Jose St.",
     }
     
+    # Normalize common accents (e.g., San José State -> San Jose State)
+    normalized = normalized.replace("é", "e").replace("É", "E")
     # Remove parenthesis content (e.g., "Queens (N.C.)" -> "Queens")
     normalized = re.sub(r'\s*\([^)]*\)', '', normalized).strip()
     

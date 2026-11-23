@@ -519,6 +519,36 @@ def normalize_history_row(row: dict) -> dict:
     tags = _extract_movement_tags(out)
     if tags:
         out["movement_tags"] = tags
+    rec_obj = out.get("rec_json") if isinstance(out.get("rec_json"), dict) else {}
+    inp_obj = out.get("inputs_json") if isinstance(out.get("inputs_json"), dict) else {}
+    raw_tier = str(
+        _first_present(out.get("risk_tier"), rec_obj.get("risk_tier"), inp_obj.get("risk_tier")) or ""
+    ).strip().upper()
+    is_sr = (
+        bool(out.get("is_smart_risk"))
+        or bool(rec_obj.get("is_smart_risk"))
+        or bool(inp_obj.get("is_smart_risk"))
+        or raw_tier == "SMART_RISK"
+        or any(str(t).strip().lower() == "smart_risk_high_return" for t in tags)
+    )
+    out["is_smart_risk"] = is_sr
+    out["risk_tier"] = "SMART_RISK" if is_sr else "CORE"
+
+    if out.get("clv_points") is None and out.get("close_line") is not None and out.get("bet_line") is not None:
+        try:
+            cl = float(out["close_line"])
+            bl = float(out["bet_line"])
+            if out["market_type"] == "SPREAD":
+                out["clv_points"] = round(bl - cl, 2)
+            elif out["market_type"] == "TOTAL":
+                sel_up = str(out.get("selection") or out.get("pick") or "").upper()
+                if "UNDER" in sel_up:
+                    out["clv_points"] = round(bl - cl, 2)
+                elif "OVER" in sel_up:
+                    out["clv_points"] = round(cl - bl, 2)
+        except Exception:
+            pass
+
     if "top6_eligible" not in out:
         out["top6_eligible"] = not has_top6_risk_flag(out)
     elif out.get("top6_eligible") is not False and has_top6_risk_flag(out):

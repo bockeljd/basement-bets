@@ -1,0 +1,44 @@
+name: CI (Backend & Frontend Tests)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-worker.txt
+          pip install pytest httpx fastapi starlette
+      - name: Compile core modules
+        run: |
+          python3 -m py_compile src/api.py src/utils/model_performance.py src/utils/naming.py src/services/ncaam_parlay_service.py src/models/ncaam_market_first_model_v2.py src/scripts/backtest_ncaam_model.py src/scripts/build_daily_top_picks.py src/scripts/ingest_kenpom.py
+      - name: Run unit & NCAAM test suite
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          REQUIRE_DATABASE: "0"
+        run: |
+          pytest tests/unit/ tests/test_ncaam_market_first_model_v2_tournament.py tests/test_ncaam_publisher.py tests/test_ncaam_tournament_features.py tests/test_ncaam_tournament_service.py tests/test_ncaam_tournament_service_locked.py tests/test_walk_forward.py -q
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+      - name: Install & test frontend
+        run: |
+          npm --prefix client ci
+          npm --prefix client test -- --run
+          npm --prefix client run build

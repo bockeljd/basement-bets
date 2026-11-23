@@ -1411,6 +1411,29 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                           <span>·</span>
                           <span className="text-indigo-300">Our Line: {lean.fair_line != null ? lean.fair_line : '—'}</span>
                         </div>
+                        {(() => {
+                          const mkt = Number(lean.market_line);
+                          const fair = Number(lean.fair_line);
+                          const bt = String(lean.bet_type || '').toUpperCase();
+                          if (!Number.isFinite(mkt) || !Number.isFinite(fair) || (bt !== 'SPREAD' && bt !== 'TOTAL')) return null;
+                          const edgeAbs = Number.isFinite(Number(lean.edge_points)) ? Math.abs(Number(lean.edge_points)) : Math.abs(fair - mkt);
+                          const targetGap = bt === 'TOTAL' ? 4.0 : 2.5;
+                          const needed = Math.max(0.5, Math.ceil((targetGap - edgeAbs) * 2) / 2);
+                          let targetText = `Needs ~${needed.toFixed(1)} pt better line`;
+                          if (bt === 'TOTAL') {
+                            const isOver = String(lean.selection || '').toUpperCase().startsWith('OVER');
+                            const targetLine = isOver ? mkt - needed : mkt + needed;
+                            targetText = `Watch for ${targetLine.toFixed(1)} or ${isOver ? 'lower' : 'higher'} (${needed.toFixed(1)} pts better)`;
+                          } else {
+                            const targetLine = mkt + needed;
+                            targetText = `Watch for ${targetLine > 0 ? `+${targetLine.toFixed(1)}` : targetLine.toFixed(1)} or better (${needed.toFixed(1)} pts better)`;
+                          }
+                          return (
+                            <div className="text-[11px] text-amber-200/95 bg-amber-500/10 border border-amber-500/25 rounded-lg px-2 py-1 font-medium">
+                              {targetText}
+                            </div>
+                          );
+                        })()}
                         {reasonTxt && (
                           <p className="text-[11px] text-slate-400 line-clamp-2">{reasonTxt}</p>
                         )}

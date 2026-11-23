@@ -455,6 +455,32 @@ export default function Picks() {
     return { count, beatCount, avg: count > 0 ? sum / count : null };
   }, [scopedHistory]);
 
+  const riskTierBreakdown = useMemo(() => {
+    const coreRows = [];
+    const smartRiskRows = [];
+    for (const h of scopedHistory) {
+      const isSmart = Boolean(h?.is_smart_risk) || String(h?.risk_tier || '').toUpperCase() === 'SMART_RISK';
+      if (isSmart) smartRiskRows.push(h);
+      else coreRows.push(h);
+    }
+    const summarizeClv = (rows) => {
+      let sum = 0;
+      let count = 0;
+      for (const r of rows) {
+        const v = parseFloat(r?.clv_points);
+        if (Number.isFinite(v)) {
+          sum += v;
+          count += 1;
+        }
+      }
+      return { count, avg: count > 0 ? sum / count : null };
+    };
+    return {
+      core: { ...computeRecordStats(coreRows), clv: summarizeClv(coreRows) },
+      smartRisk: { ...computeRecordStats(smartRiskRows), clv: summarizeClv(smartRiskRows) },
+    };
+  }, [scopedHistory]);
+
   const pastPendingCount = useMemo(() => {
     const todayEt = toEtDay(new Date());
     return (recommendedHistory || []).filter((h) => {
@@ -1265,6 +1291,79 @@ export default function Picks() {
                 </span>
               </div>
             </button>
+          </div>
+        )}
+
+        {/* Core vs. Smart Risk Breakdown */}
+        {scopedStats.settled > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            {[
+              {
+                key: 'core',
+                title: 'Core Picks',
+                subtitle: 'Full-confidence plays (up to 1.0u)',
+                accent: 'text-emerald-300',
+                badgeCls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+                stats: riskTierBreakdown.core,
+              },
+              {
+                key: 'smart',
+                title: 'Smart Risk Picks',
+                subtitle: 'Higher-upside / thinner-edge plays (0.5u cap)',
+                accent: 'text-indigo-300',
+                badgeCls: 'border-indigo-400/35 bg-indigo-500/15 text-indigo-200',
+                stats: riskTierBreakdown.smartRisk,
+              },
+            ].map((tier) => (
+              <div
+                key={tier.key}
+                className="rounded-xl border border-slate-800/90 bg-slate-900/60 px-4 py-3 flex flex-wrap items-center justify-between gap-3"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${tier.badgeCls}`}>
+                      {tier.title}
+                    </span>
+                    <span className="text-[11px] text-slate-400">{tier.subtitle}</span>
+                  </div>
+                  <div className="text-slate-300 font-mono text-xs pt-0.5">
+                    {tier.stats.settled > 0 ? (
+                      <>
+                        Record:{' '}
+                        <strong className="text-white">
+                          {tier.stats.wins}-{tier.stats.losses}
+                          {tier.stats.pushes > 0 ? `-${tier.stats.pushes}` : ''}
+                        </strong>{' '}
+                        · Win %:{' '}
+                        <strong className={tier.stats.winRate >= 52.38 ? 'text-emerald-300' : 'text-rose-300'}>
+                          {tier.stats.decided > 0 ? `${tier.stats.winRate.toFixed(1)}%` : '—'}
+                        </strong>
+                        {tier.stats.clv.avg !== null && (
+                          <>
+                            {' '}· Avg CLV:{' '}
+                            <strong className={tier.stats.clv.avg >= 0 ? 'text-emerald-300' : 'text-amber-300'}>
+                              {tier.stats.clv.avg > 0 ? '+' : ''}{tier.stats.clv.avg.toFixed(2)} pts
+                            </strong>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <span className="font-sans text-slate-500">No graded picks in this tier for current filters yet</span>
+                    )}
+                  </div>
+                </div>
+                {tier.stats.settled > 0 && (
+                  <div className="text-right font-mono">
+                    <div className={`text-sm font-extrabold ${tier.stats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {formatUnits(tier.stats.profitUnits)}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      {formatSignedPct(tier.stats.roiPct)} ROI
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </section>

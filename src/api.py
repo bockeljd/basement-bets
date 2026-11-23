@@ -5733,8 +5733,8 @@ async def get_ncaam_parlays_today(
     - payout_band: best EV combos within a reasonable payout range
     """
     import re
-    if int(max_legs) != 2:
-        raise HTTPException(status_code=400, detail="Only 2-leg parlays supported in v1")
+    if int(max_legs) not in (2, 3):
+        raise HTTPException(status_code=400, detail="Only 2-leg and 3-leg parlays are supported")
 
     target_date = None
     if date is not None and str(date).strip():
@@ -5751,27 +5751,16 @@ async def get_ncaam_parlays_today(
             parlay_odds_hi = 140
 
     from src.database import get_db_connection, _exec
-
-    def dec_from_american(a: int) -> float:
-        a = int(a)
-        if abs(a) < 100:
-            return 1.0
-        return 1.0 + (a / 100.0) if a > 0 else 1.0 + (100.0 / abs(a))
-
-    def implied_prob(a: int) -> float:
-        a = int(a)
-        if abs(a) < 100:
-            return 0.5
-        return 100.0 / (a + 100.0) if a > 0 else abs(a) / (abs(a) + 100.0)
-
-    def american_from_dec(d: float) -> int:
-        # d is decimal odds
-        if d <= 1.0:
-            return 0
-        x = d - 1.0
-        if x >= 1.0:
-            return int(round(x * 100))
-        return int(round(-100 / x))
+    from src.services.ncaam_parlay_service import (
+        american_from_dec,
+        build_three_leg_high_payout_parlays,
+        combine_leg_outcomes,
+        dec_from_american,
+        evaluate_value_underdog_ml_leg,
+        grade_parlay_leg_from_scores,
+        implied_prob_american as implied_prob,
+        leg_has_contra_risk,
+    )
 
     # ET date filter
     date_predicate = (
@@ -6021,22 +6010,10 @@ async def get_ncaam_parlays_today(
 
     # Enumerate all 2-leg combos (different events)
     combos = []
-    # Also include actionable +EV Spread/Total legs and high-EV Smart Risk leans from daily_top_picks
-    # so 2-leg parlays can combine ML favorites, +EV Spreads, +EV Totals, and Smart-Risk value plays.
+    # Also include actionable +EV Spread/Total legs, high-EV Smart Risk leans, and Value Underdog MLs
+    # from daily_top_picks so 2-leg and 3-leg parlays can combine ML favorites, +EV Spreads/Totals, and upset dogs.
     if _strategy != 'home_fav':
-        def _leg_has_contra_risk(raw_tags) -> bool:
-            if not raw_tags:
-                return False
-            if isinstance(raw_tags, str):
-                tag_list = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
-            elif isinstance(raw_tags, (list, tuple, set)):
-                tag_list = [str(t or "").strip().lower() for t in raw_tags]
-            else:
-                return False
-            return any(
-                t in ("contra_sharp_money", "contra_sharp_line") or t.startswith("reverse_steam=")
-                for t in tag_list
-            )
+        _leg_has_contra_risk = leg_has_contra_risk
 
         try:
             sp_date = resolved_date_et or target_date
@@ -6168,6 +6145,77 @@ async def get_ncaam_parlays_today(
         except Exception as sp_e:
             print(f"[parlays] spread/total leg enrichment skipped: {sp_e}")
 
+        # Value Underdog Moneyline legs (+110..+220 with >=2 model consensus & >=+3.5% EV)
+        try:
+            from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
+            ud_query = f"""
+              SELECT
+                e.id AS event_id,
+                e.away_team,
+                e.home_team,
+                e.start_time,
+                ml_dog.side AS dog_side,
+                ml_dog.price AS dog_price,
+                ml_dog.book AS dog_book,
+                dtp.context_json AS dtp_context_json
+              FROM events e
+              JOIN daily_top_picks dtp
+                ON dtp.event_id = e.id AND dtp.league = 'NCAAM' AND dtp.date_et = %(sp_date)s
+              JOIN LATERAL (
+                SELECT side, price, book
+                FROM odds_snapshots
+                WHERE event_id = e.id AND market_type = 'MONEYLINE'
+                  AND COALESCE(book, '') NOT IN ('action_open', 'open')
+                  AND price BETWEEN 110 AND 220
+                ORDER BY (CASE WHEN LOWER(COALESCE(book,'')) LIKE '%%draftkings%%' OR LOWER(COALESCE(book,'')) LIKE '%%fanduel%%' THEN 0 ELSE 1 END), price DESC, captured_at DESC
+                LIMIT 1
+              ) ml_dog ON TRUE
+              WHERE e.league = 'NCAAM'
+                AND {date_predicate}
+              LIMIT 40
+            """
+            ud_params = {"days": int(days_ago), "sp_date": resolved_date_et or target_date}
+            if target_date:
+                ud_params["target_date"] = target_date
+            with get_db_connection() as conn:
+                ud_rows = [dict(r) for r in _exec(conn, ud_query, ud_params).fetchall()]
+            if ud_rows:
+                cal_model_ud = NCAAMMarketFirstModelV2()
+                seen_ud_eids = {leg.get("event_id") for leg in norm_legs if leg.get("event_id")}
+                for ur in ud_rows:
+                    try:
+                        eid = ur.get("event_id")
+                        if not eid or eid in seen_ud_eids:
+                            continue
+                        cj_u = ur.get("dtp_context_json")
+                        if isinstance(cj_u, str):
+                            cj_u = json.loads(cj_u)
+                        if not isinstance(cj_u, dict):
+                            continue
+                        fair_sp = cj_u.get("fair_spread_home") if cj_u.get("fair_spread_home") is not None else cj_u.get("mu_spread_power")
+                        if fair_sp is None:
+                            continue
+                        dog_leg = evaluate_value_underdog_ml_leg(
+                            event_id=eid,
+                            home_team=str(ur.get("home_team") or ""),
+                            away_team=str(ur.get("away_team") or ""),
+                            start_time=ur.get("start_time"),
+                            side=str(ur.get("dog_side") or ""),
+                            ml_price=int(ur.get("dog_price")),
+                            ml_book=str(ur.get("dog_book") or "Consensus"),
+                            fair_spread_home=float(fair_sp),
+                            sigma_spread=float(cj_u.get("sigma_spread") or 10.8),
+                            conviction_sources=int(cj_u.get("conviction_sources") or 0),
+                            calibrate_fn=cal_model_ud._calibrate_win_prob,
+                        )
+                        if dog_leg:
+                            norm_legs.append(dog_leg)
+                            seen_ud_eids.add(eid)
+                    except Exception:
+                        continue
+        except Exception as ud_e:
+            print(f"[parlays] value underdog enrichment skipped: {ud_e}")
+
     # Attach latest DraftKings & FanDuel prices to every leg so DK/FD always take precedent
     # and 2-leg parlays compute exact same-book DK or FD parlay odds.
     try:
@@ -6241,21 +6289,7 @@ async def get_ncaam_parlays_today(
         print(f"[parlays] DK/FD price enrichment skipped: {dkfd_e}")
 
     def _combine_two_leg_outcome(oa_raw: str, ob_raw: str) -> str:
-        oa = str(oa_raw or "").upper()
-        ob = str(ob_raw or "").upper()
-        if oa in ("PENDING", "") or ob in ("PENDING", ""):
-            return "PENDING"
-        if oa == "LOST" or ob == "LOST":
-            return "LOST"
-        if oa == "WON" and ob == "WON":
-            return "WON"
-        if oa == "PUSH" and ob == "PUSH":
-            return "PUSH"
-        if oa == "VOID" or ob == "VOID":
-            return "VOID"
-        if (oa == "WON" and ob == "PUSH") or (oa == "PUSH" and ob == "WON"):
-            return "WON (partial)"
-        return "PENDING"
+        return combine_leg_outcomes((oa_raw, ob_raw))
 
     def _grade_parlay_legs_from_results(target_legs: list) -> None:
         if not target_legs:
@@ -6268,7 +6302,6 @@ async def get_ncaam_parlays_today(
         if not pending_eids:
             return
         try:
-            import re as _re
             with get_db_connection() as conn:
                 gr_rows = _exec(
                     conn,
@@ -6291,48 +6324,9 @@ async def get_ncaam_parlays_today(
                 gr = gr_map.get(str(lg.get("event_id")))
                 if not gr:
                     continue
-                hs = float(gr["home_score"])
-                as_ = float(gr["away_score"])
-                h_team = str(gr.get("home_team") or "").strip().lower()
-                a_team = str(gr.get("away_team") or "").strip().lower()
-                pick_str = str(lg.get("team_pick") or lg.get("selection") or lg.get("pick") or "").strip()
-                pick_low = pick_str.lower()
-                mkt = str(lg.get("market_type") or "MONEYLINE").upper()
-                is_home = bool(lg.get("is_home_pick")) or (
-                    str(lg.get("side") or "").upper() == "HOME"
-                ) or (h_team and h_team in pick_low and (not a_team or a_team not in pick_low))
-
-                if "1H" in mkt:
-                    if gr.get("home_score_1h") is None or gr.get("away_score_1h") is None:
-                        continue
-                    hs = float(gr["home_score_1h"])
-                    as_ = float(gr["away_score_1h"])
-
-                if "SPREAD" in mkt:
-                    m_ln = _re.search(r"([+-]\d+(?:\.\d+)?)\s*$", pick_str)
-                    if m_ln:
-                        ln_val = float(m_ln.group(1))
-                    elif lg.get("market_line") is not None:
-                        ln_val = float(lg["market_line"])
-                    else:
-                        continue
-                    margin = ((hs - as_) if is_home else (as_ - hs)) + ln_val
-                    lg["outcome"] = "PUSH" if margin == 0 else ("WON" if margin > 0 else "LOST")
-                elif "TOTAL" in mkt:
-                    m_ln = _re.search(r"(\d+(?:\.\d+)?)\s*$", pick_str)
-                    if not m_ln and lg.get("market_line") is not None:
-                        ln_val = float(lg["market_line"])
-                    elif m_ln:
-                        ln_val = float(m_ln.group(1))
-                    else:
-                        continue
-                    tot_pts = hs + as_
-                    is_over = ("OVER" in pick_str.upper()) or (str(lg.get("side") or "").upper() == "OVER")
-                    diff = (tot_pts - ln_val) if is_over else (ln_val - tot_pts)
-                    lg["outcome"] = "PUSH" if diff == 0 else ("WON" if diff > 0 else "LOST")
-                else:
-                    diff = (hs - as_) if is_home else (as_ - hs)
-                    lg["outcome"] = "PUSH" if diff == 0 else ("WON" if diff > 0 else "LOST")
+                graded = grade_parlay_leg_from_scores(lg, gr)
+                if graded:
+                    lg["outcome"] = graded
         except Exception as gr_e:
             print(f"[parlays] leg grading from game_results skipped: {gr_e}")
 
@@ -6615,6 +6609,12 @@ async def get_ncaam_parlays_today(
         except Exception:
             pass
 
+    three_leg_high_payout = (
+        build_three_leg_high_payout_parlays(norm_legs, min_ev=max(0.04, float(min_ev_per_unit)))
+        if _strategy != 'home_fav'
+        else []
+    )
+
     return {
         "status": "success",
         "date_et": resolved_date_et,
@@ -6629,6 +6629,7 @@ async def get_ncaam_parlays_today(
         "official_daily_parlay": official_daily_parlay,
         "high_confidence": high_conf,
         "payout_band": payout_band,
+        "three_leg_high_payout": three_leg_high_payout,
     }
 
 
