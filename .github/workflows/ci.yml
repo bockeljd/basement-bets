@@ -16,8 +16,8 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install -r requirements-worker.txt
-          pip install pytest httpx fastapi starlette
+          pip install -r requirements.txt -r requirements-worker.txt
+          pip install pytest httpx
       - name: Compile core modules
         run: |
           python3 -m py_compile src/api.py src/utils/model_performance.py src/utils/naming.py src/services/ncaam_parlay_service.py src/models/ncaam_market_first_model_v2.py src/scripts/backtest_ncaam_model.py src/scripts/build_daily_top_picks.py src/scripts/ingest_kenpom.py
@@ -25,8 +25,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
           REQUIRE_DATABASE: "0"
+          PYTHONPATH: .
         run: |
-          pytest tests/unit/ tests/test_ncaam_market_first_model_v2_tournament.py tests/test_ncaam_publisher.py tests/test_ncaam_tournament_features.py tests/test_ncaam_tournament_service.py tests/test_ncaam_tournament_service_locked.py tests/test_walk_forward.py -q
+          python3 -m pytest tests/unit/ tests/test_ncaam_market_first_model_v2_tournament.py tests/test_ncaam_publisher.py tests/test_ncaam_tournament_features.py tests/test_ncaam_tournament_service.py tests/test_ncaam_tournament_service_locked.py tests/test_walk_forward.py -q
 
   frontend-tests:
     runs-on: ubuntu-latest
@@ -35,10 +36,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: client/package-lock.json
       - name: Install & test frontend
         run: |
-          npm --prefix client ci
+          npm --prefix client install
           npm --prefix client test -- --run
           npm --prefix client run build
