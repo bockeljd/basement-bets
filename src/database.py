@@ -1102,11 +1102,11 @@ def upsert_game_result(res: dict):
     INSERT INTO game_results (event_id, home_score, away_score, home_score_1h, away_score_1h, final, period)
     VALUES (:event_id, :home_score, :away_score, :home_score_1h, :away_score_1h, :final, :period)
     ON CONFLICT (event_id) DO UPDATE SET
-        home_score = EXCLUDED.home_score,
-        away_score = EXCLUDED.away_score,
+        home_score = COALESCE(EXCLUDED.home_score, game_results.home_score),
+        away_score = COALESCE(EXCLUDED.away_score, game_results.away_score),
         home_score_1h = COALESCE(EXCLUDED.home_score_1h, game_results.home_score_1h),
         away_score_1h = COALESCE(EXCLUDED.away_score_1h, game_results.away_score_1h),
-        final = EXCLUDED.final,
+        final = COALESCE(game_results.final, FALSE) OR COALESCE(EXCLUDED.final, FALSE),
         period = EXCLUDED.period,
         updated_at = CURRENT_TIMESTAMP
     """

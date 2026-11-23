@@ -299,8 +299,9 @@ def fetch_espn_scoreboard_finals(
     league: str,
     yyyymmdd: str,
     session: Optional[requests.Session] = None,
+    include_first_half_complete: bool = False,
 ) -> List[dict]:
-    """Fetch final game scores directly from ESPN public scoreboard without DB side effects."""
+    """Fetch final (and optionally 1H-complete NCAAM) game scores directly from ESPN public scoreboard."""
     lg = str(league or "").upper().strip()
     path = ESPN_LEAGUE_PATHS.get(lg)
     if not path:
@@ -323,9 +324,18 @@ def fetch_espn_scoreboard_finals(
     finals: List[dict] = []
     for ev in data.get("events", []):
         comp = (ev.get("competitions") or [{}])[0]
-        status_type = ((comp.get("status") or {}).get("type") or {})
+        status_obj = comp.get("status") or {}
+        status_type = status_obj.get("type") or {}
         completed = bool(status_type.get("completed")) or str(status_type.get("state") or "").lower() == "post"
-        if not completed:
+        type_name = str(status_type.get("name") or "").upper()
+        short_detail = str(status_type.get("shortDetail") or status_type.get("detail") or "").upper()
+        try:
+            period_num = int(status_obj.get("period") or 0)
+        except Exception:
+            period_num = 0
+        is_halftime = (not completed) and ("HALFTIME" in type_name or "HALFTIME" in short_detail)
+        first_half_complete = completed or is_halftime or period_num >= 2
+        if not completed and not (include_first_half_complete and lg == "NCAAM" and first_half_complete):
             continue
 
         home_team = None
@@ -344,11 +354,17 @@ def fetch_espn_scoreboard_finals(
                 score_val = None
             ls = competitor.get("linescores") or []
             s1h = None
-            if ls and isinstance(ls[0], dict) and ls[0].get("value") is not None:
-                try:
-                    s1h = int(round(float(ls[0]["value"])))
-                except Exception:
-                    s1h = None
+            if ls and isinstance(ls[0], dict):
+                raw_1h = ls[0].get("value")
+                if raw_1h is None:
+                    raw_1h = ls[0].get("displayValue")
+                if raw_1h is not None:
+                    try:
+                        s1h = int(round(float(raw_1h)))
+                    except Exception:
+                        s1h = None
+            if s1h is None and is_halftime and score_val is not None:
+                s1h = score_val
             if side == "home":
                 home_team = team_name
                 home_score = score_val
@@ -358,7 +374,7 @@ def fetch_espn_scoreboard_finals(
                 away_score = score_val
                 away_score_1h = s1h
 
-        if home_team and away_team and is_valid_final_score(home_score, away_score, league=lg):
+        if completed and home_team and away_team and is_valid_final_score(home_score, away_score, league=lg):
             finals.append({
                 "id": f"espn:{ev.get('id')}",
                 "home_team": home_team,
@@ -369,6 +385,28 @@ def fetch_espn_scoreboard_finals(
                 "away_score_1h": away_score_1h,
                 "start_time": comp.get("date") or ev.get("date"),
                 "completed": True,
+                "first_half_complete": True,
+            })
+        elif (
+            include_first_half_complete
+            and first_half_complete
+            and home_team
+            and away_team
+            and home_score_1h is not None
+            and away_score_1h is not None
+        ):
+            finals.append({
+                "id": f"espn:{ev.get('id')}",
+                "home_team": home_team,
+                "away_team": away_team,
+                "home_score": home_score,
+                "away_score": away_score,
+                "home_score_1h": home_score_1h,
+                "away_score_1h": away_score_1h,
+                "start_time": comp.get("date") or ev.get("date"),
+                "completed": False,
+                "first_half_complete": True,
+                "period": "HALFTIME" if is_halftime else "2H",
             })
     return finals
 

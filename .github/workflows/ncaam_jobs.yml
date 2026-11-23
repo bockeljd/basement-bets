@@ -4,8 +4,9 @@ name: NCAAM Frequent Jobs
 on:
   schedule:
     # Jittered off-minute crons avoid GitHub's :00/:15/:30/:45 queue throttling ($0 free)
-    # 15m cadence across active daytime & evening slate (15:00-03:59 UTC / 10am-11pm EST)
-    - cron: '7,22,37,52 15-23,0-3 * * *'
+    # 30m cadence across active daytime & evening slate (15:00-03:59 UTC / 10am-11pm EST)
+    - cron: '13,43 15-23 * * *'
+    - cron: '13,43 0-3 * * *'
     - cron: '12,42 11-14 * * *'
     - cron: '17 4-10 * * *'
   workflow_dispatch:

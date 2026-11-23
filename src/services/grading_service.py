@@ -348,11 +348,24 @@ class GradingService:
 
             espn_games = []
             for d_str in sorted(espn_dates):
-                espn_games.extend(fetch_espn_scoreboard_finals(lg, d_str))
+                espn_games.extend(
+                    fetch_espn_scoreboard_finals(
+                        lg, d_str, include_first_half_complete=(lg == 'NCAAM')
+                    )
+                )
 
             for ev in missing_events:
                 ev_dt = _parse_dt_utc(ev.get('start_time'))
                 for eg in espn_games:
+                    eg_completed = bool(eg.get('completed', True))
+                    if not eg_completed:
+                        if not (
+                            ev.get('needs_half')
+                            and eg.get('first_half_complete')
+                            and eg.get('home_score_1h') is not None
+                            and eg.get('away_score_1h') is not None
+                        ):
+                            continue
                     direct_match = (
                         match_team_names(ev.get('home_team'), eg.get('home_team'), is_mlb=False)
                         and match_team_names(ev.get('away_team'), eg.get('away_team'), is_mlb=False)
@@ -375,14 +388,17 @@ class GradingService:
                             or ev['away_score'] != eg['home_score' if swapped_match else 'away_score']
                         ):
                             continue
+                    raw_h = eg['away_score'] if swapped_match else eg['home_score']
+                    raw_a = eg['home_score'] if swapped_match else eg['away_score']
+                    is_final_flag = bool(eg_completed or ev.get('has_final'))
                     upsert_game_result({
                         "event_id": ev['id'],
-                        "home_score": int(eg['away_score'] if swapped_match else eg['home_score']),
-                        "away_score": int(eg['home_score'] if swapped_match else eg['away_score']),
+                        "home_score": int(raw_h) if raw_h is not None else None,
+                        "away_score": int(raw_a) if raw_a is not None else None,
                         "home_score_1h": eg.get('away_score_1h') if swapped_match else eg.get('home_score_1h'),
                         "away_score_1h": eg.get('home_score_1h') if swapped_match else eg.get('away_score_1h'),
-                        "final": True,
-                        "period": "FINAL",
+                        "final": is_final_flag,
+                        "period": "FINAL" if is_final_flag else (eg.get("period") or "2H"),
                     })
                     upserted_event_ids.add(ev['id'])
                     espn_count += 1
@@ -576,6 +592,11 @@ class GradingService:
         WHERE (UPPER(COALESCE(m.outcome, 'PENDING')) IN ('PENDING', 'VOID', ''))
           AND (
               gr.final = TRUE
+              OR (
+                  UPPER(COALESCE(m.market_type, '')) IN ('SPREAD_1H', 'TOTAL_1H')
+                  AND gr.home_score_1h IS NOT NULL
+                  AND gr.away_score_1h IS NOT NULL
+              )
               OR (UPPER(COALESCE(m.market_type, '')) = 'PARLAY' AND e.start_time < CURRENT_TIMESTAMP - INTERVAL '6 hours')
               OR (gr.home_score IS NOT NULL AND gr.away_score IS NOT NULL AND e.start_time < CURRENT_TIMESTAMP - INTERVAL '8 hours')
           )

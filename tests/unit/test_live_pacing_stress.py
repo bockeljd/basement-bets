@@ -380,3 +380,107 @@ def test_17_espn_scoreboard_extracts_1h_linescores_and_handles_swapped_neutral_o
         assert board_items[0]["home_score_1h"] == 28
         assert board_items[0]["away_score_1h"] == 34
     api_mod._LIVE_SCOREBOARD_CACHE.clear()
+
+
+def test_18_fetch_espn_finals_with_1h_complete_and_grading_service_1h_rows():
+    from src.services.grading_backfill import fetch_espn_scoreboard_finals
+    from src.services.grading_service import GradingService
+
+    fake_scoreboard = {
+        "events": [
+            {
+                "id": "g_2h",
+                "competitions": [
+                    {
+                        "date": "2026-11-23T18:30Z",
+                        "status": {
+                            "period": 2,
+                            "type": {"state": "in", "name": "STATUS_IN_PROGRESS", "shortDetail": "19:39 - 2nd", "completed": False},
+                        },
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "31",
+                                "linescores": [{"value": 28.0}, {"value": 3.0}],
+                                "team": {"displayName": "Florida Gulf Coast Eagles"},
+                            },
+                            {
+                                "homeAway": "away",
+                                "score": "37",
+                                "linescores": [{"value": 34.0}, {"value": 3.0}],
+                                "team": {"displayName": "Charlotte 49ers"},
+                            },
+                        ],
+                    }
+                ],
+            },
+            {
+                "id": "g_1h_in_prog",
+                "competitions": [
+                    {
+                        "date": "2026-11-23T19:00Z",
+                        "status": {
+                            "period": 1,
+                            "type": {"state": "in", "name": "STATUS_IN_PROGRESS", "shortDetail": "08:00 - 1st", "completed": False},
+                        },
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "18",
+                                "linescores": [{"value": 18.0}],
+                                "team": {"displayName": "Duke Blue Devils"},
+                            },
+                            {
+                                "homeAway": "away",
+                                "score": "20",
+                                "linescores": [{"value": 20.0}],
+                                "team": {"displayName": "North Carolina Tar Heels"},
+                            },
+                        ],
+                    }
+                ],
+            },
+        ]
+    }
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = fake_scoreboard
+    mock_resp.raise_for_status.return_value = None
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_resp
+
+    # Without flag: neither non-final game is returned
+    assert fetch_espn_scoreboard_finals("NCAAM", "20261123", session=mock_session) == []
+
+    # With include_first_half_complete=True: 2H game returns 1H scores, 1H-in-progress game is skipped
+    partial = fetch_espn_scoreboard_finals("NCAAM", "20261123", session=mock_session, include_first_half_complete=True)
+    assert len(partial) == 1
+    assert partial[0]["completed"] is False
+    assert partial[0]["first_half_complete"] is True
+    assert partial[0]["home_score_1h"] == 28
+    assert partial[0]["away_score_1h"] == 34
+
+    # GradingService._grade_row grades TOTAL_1H and SPREAD_1H directly from 1H scores even when final=False
+    svc = GradingService()
+    assert svc._grade_row({
+        "market_type": "TOTAL_1H",
+        "pick": "1H OVER",
+        "selection": "1H OVER 66.5",
+        "bet_line": 66.5,
+        "home_team": "Florida Gulf Coast Eagles",
+        "away_team": "Charlotte 49ers",
+        "home_score_1h": 28,
+        "away_score_1h": 34,
+        "final": False,
+    }) == "LOST"
+    assert svc._grade_row({
+        "market_type": "SPREAD_1H",
+        "pick": "Charlotte 49ers",
+        "selection": "Charlotte 49ers -4.5",
+        "bet_line": -4.5,
+        "home_team": "Florida Gulf Coast Eagles",
+        "away_team": "Charlotte 49ers",
+        "home_score_1h": 28,
+        "away_score_1h": 34,
+        "final": False,
+    }) == "WON"

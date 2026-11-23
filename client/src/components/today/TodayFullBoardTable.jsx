@@ -268,13 +268,47 @@ const TodayFullBoardTable = ({
                 const hasFairLines = ctx?.fair_spread_home != null || ctx?.fair_total != null;
                 const matchupLabel = `${game.away_team || 'Away'} at ${game.home_team || 'Home'}`;
                 const sizeInfo = isActionable && rec ? getRecommendedBetSize(rec, bankroll) : null;
+                const isBetWon = isActionable && rec && liveInfo.trendVerdict === 'WON';
+                const isBetLost = isActionable && rec && liveInfo.trendVerdict === 'LOST';
+                const isBetPush = isActionable && rec && liveInfo.trendVerdict === 'PUSH';
+                const isBetSettled = isBetWon || isBetLost || isBetPush;
+                const rowHighlightCls = isBetWon
+                  ? 'bg-emerald-950/50 hover:bg-emerald-950/65'
+                  : isBetLost
+                    ? 'bg-rose-950/50 hover:bg-rose-950/65'
+                    : isBetPush
+                      ? 'bg-slate-800/60 hover:bg-slate-800/75'
+                      : 'hover:bg-slate-800/40';
+                const leftStripeCls = isBetWon
+                  ? 'border-l-4 border-l-emerald-400'
+                  : isBetLost
+                    ? 'border-l-4 border-l-rose-400'
+                    : isBetPush
+                      ? 'border-l-4 border-l-slate-400'
+                      : '';
 
                 return (
                   <tr
                     key={game.id}
-                    className="hover:bg-slate-800/40 transition-colors"
+                    className={`${rowHighlightCls} transition-colors`}
                   >
-                    <td data-label="Tip (ET)" className="py-2.5 pl-3 pr-1.5 font-mono text-slate-300 whitespace-nowrap w-16">
+                    <td data-label="Tip (ET)" className={`py-2.5 pl-3 pr-1.5 font-mono text-slate-300 whitespace-nowrap w-16 ${leftStripeCls}`}>
+                      {isBetSettled && (
+                        <div className="mb-1">
+                          <span
+                            className={`inline-flex px-1.5 py-0.5 rounded border text-[9px] font-sans font-extrabold uppercase tracking-wider ${
+                              isBetWon
+                                ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200'
+                                : isBetLost
+                                  ? 'bg-rose-500/25 border-rose-400/60 text-rose-200'
+                                  : 'bg-slate-700/80 border-slate-500 text-slate-200'
+                            }`}
+                          >
+                            {liveInfo.isFirstHalfBet ? '1H ' : ''}
+                            {isBetWon ? 'WON' : isBetLost ? 'LOST' : 'PUSH'}
+                          </span>
+                        </div>
+                      )}
                       {liveInfo.isLive ? (
                         <div className="flex flex-col gap-0.5">
                           <span className="inline-flex items-center gap-1 w-fit px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/45 text-rose-200 text-[10px] font-bold">
@@ -337,9 +371,9 @@ const TodayFullBoardTable = ({
                               </span>
                             )}
                           </div>
-                          {liveInfo.isLive && liveInfo.liveProjTotal != null ? (
+                          {liveInfo.isLive && !isBetSettled && liveInfo.liveProjTotal != null && liveInfo.liveProjAwayScore != null && liveInfo.liveProjHomeScore != null ? (
                             <span className="text-[10px] text-amber-300/95 font-medium truncate">
-                              Live Pace: {game.away_team} {liveInfo.liveProjAwayScore} – {game.home_team} {liveInfo.liveProjHomeScore} (~{Math.round(liveInfo.liveProjTotal)} pts)
+                              {liveInfo.isFirstHalfBet ? '1H Pace' : 'Live Pace'}: {game.away_team} {liveInfo.liveProjAwayScore} – {game.home_team} {liveInfo.liveProjHomeScore} (~{Math.round(liveInfo.liveProjTotal)} pts)
                             </span>
                           ) : projScore ? (
                             <span className="text-[10px] text-sky-300/90 truncate">
@@ -412,7 +446,7 @@ const TodayFullBoardTable = ({
                               </span>
                             )}
                           </div>
-                          {liveInfo.isLive && liveInfo.trendDetail && (
+                          {(isBetSettled || liveInfo.isLive) && liveInfo.trendDetail && (
                             <span className="text-[10px] text-slate-300 line-clamp-1">
                               {liveInfo.trendDetail}
                             </span>
@@ -446,7 +480,7 @@ const TodayFullBoardTable = ({
                               {liveInfo.coverText || liveInfo.gameTrendText}
                             </span>
                           )}
-                          {liveInfo.isLive && liveInfo.trendDetail && (
+                          {(isBetSettled || liveInfo.isLive) && liveInfo.trendDetail && (
                             <span className="text-[10px] text-slate-300 line-clamp-1">
                               {liveInfo.trendDetail}
                             </span>
