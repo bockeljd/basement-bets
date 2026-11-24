@@ -2223,6 +2223,185 @@ export const getBetTimingGuidance = (rec, game = null, context = null, nowMs = D
   return pack('BET_NOW', 'Clean number with no lineup flags — good to lock in now.', ['clean_number']);
 };
 
+const TIMING_SHARP_URGENCY_DRIVERS = new Set([
+  'sharp_price_edge',
+  'lagging_book_edge',
+  'rlm_confirmed',
+  'sharp_backing',
+]);
+const TIMING_SIGNAL_URGENCY_DRIVERS = new Set([
+  'our_public_steam',
+  'high_conviction',
+  'strong_ev',
+]);
+const DECIDED_PARLAY_OUTCOMES = new Set(['WON', 'LOST', 'PUSH', 'VOID', 'WON (PARTIAL)']);
+
+const parlayLegLabel = (leg) =>
+  String(leg?.team_pick || leg?.selection || leg?.pick || 'Leg').trim() || 'Leg';
+
+/**
+ * Resolve pre-game "When to Bet" guidance for a multi-leg parlay, honoring backend
+ * timing while auto-escalating imminent tips and returning null once started/decided.
+ */
+export const getParlayTimingGuidance = (parlay, nowMs = Date.now()) => {
+  if (!parlay || typeof parlay !== 'object') return null;
+
+  const rawOutcome = String(parlay.outcome || '').trim().toUpperCase();
+  if (DECIDED_PARLAY_OUTCOMES.has(rawOutcome)) return null;
+
+  const legs = Array.isArray(parlay.legs) ? parlay.legs : [];
+  let earliestMins = null;
+  for (const leg of legs) {
+    if (leg?.start_time) {
+      const startMs = new Date(leg.start_time).getTime();
+      if (Number.isFinite(startMs)) {
+        const mins = Math.round(((startMs - nowMs) / 60000) * 10) / 10;
+        if (mins <= 0) return null;
+        earliestMins = earliestMins === null ? mins : Math.min(earliestMins, mins);
+      }
+    }
+  }
+
+  const backendTiming = parlay.bet_timing;
+  const backendAction = String(backendTiming?.action || '').trim().toUpperCase();
+  if (
+    backendTiming &&
+    typeof backendTiming === 'object' &&
+    TIMING_ACTION_META[backendAction] &&
+    backendTiming.label &&
+    backendTiming.reason
+  ) {
+    const tipImminentNow = earliestMins !== null && earliestMins <= 60;
+    if (!tipImminentNow || backendAction === 'BET_NOW') {
+      const meta = TIMING_ACTION_META[backendAction];
+      return {
+        action: backendAction,
+        label: backendTiming.label || meta.label,
+        short_label: backendTiming.short_label || meta.short_label,
+        tone: backendTiming.tone || meta.tone,
+        reason: backendTiming.reason,
+        drivers: Array.isArray(backendTiming.drivers) ? backendTiming.drivers : [],
+        minutes_to_tip: earliestMins ?? toNum(backendTiming.minutes_to_tip),
+        leg_actions: Array.isArray(backendTiming.leg_actions) ? backendTiming.leg_actions : undefined,
+      };
+    }
+    const minsInt = Math.max(1, Math.round(earliestMins));
+    return {
+      action: 'BET_NOW',
+      label: TIMING_ACTION_META.BET_NOW.label,
+      short_label: TIMING_ACTION_META.BET_NOW.short_label,
+      tone: TIMING_ACTION_META.BET_NOW.tone,
+      reason: `Earliest leg tips in ~${minsInt} min — lock in before tip.`,
+      drivers: ['tipoff_imminent'],
+      minutes_to_tip: earliestMins,
+    };
+  }
+
+  if (legs.length === 0) return null;
+
+  const paired = [];
+  for (const leg of legs) {
+    const legTiming = getBetTimingGuidance(
+      leg,
+      {
+        start_time: leg?.start_time,
+        home_team: leg?.home_team,
+        away_team: leg?.away_team,
+        status: 'SCHEDULED',
+      },
+      null,
+      nowMs
+    );
+    if (!legTiming) return null;
+    paired.push({ leg, timing: legTiming });
+  }
+
+  const allDrivers = [];
+  const seenDrivers = new Set();
+  for (const { timing } of paired) {
+    for (const drv of timing.drivers || []) {
+      const key = String(drv || '').trim();
+      if (key && !seenDrivers.has(key)) {
+        seenDrivers.add(key);
+        allDrivers.push(key);
+      }
+    }
+  }
+  const legActions = paired.map(({ timing }) => timing.action);
+
+  if (earliestMins !== null && earliestMins <= 60) {
+    const minsInt = Math.max(1, Math.round(earliestMins));
+    return {
+      action: 'BET_NOW',
+      label: TIMING_ACTION_META.BET_NOW.label,
+      short_label: TIMING_ACTION_META.BET_NOW.short_label,
+      tone: TIMING_ACTION_META.BET_NOW.tone,
+      reason: `Earliest leg tips in ~${minsInt} min — lock in before tip.`,
+      drivers: ['tipoff_imminent', ...allDrivers.filter((d) => d !== 'tipoff_imminent')],
+      minutes_to_tip: earliestMins,
+      leg_actions: legActions,
+    };
+  }
+
+  const waitPair = paired.find(({ timing }) => timing.action === 'WAIT_LINEUPS');
+  if (waitPair) {
+    return {
+      action: 'WAIT_LINEUPS',
+      label: TIMING_ACTION_META.WAIT_LINEUPS.label,
+      short_label: TIMING_ACTION_META.WAIT_LINEUPS.short_label,
+      tone: TIMING_ACTION_META.WAIT_LINEUPS.tone,
+      reason: `${parlayLegLabel(waitPair.leg)}: ${waitPair.timing.reason}`,
+      drivers: allDrivers,
+      minutes_to_tip: earliestMins,
+      leg_actions: legActions,
+    };
+  }
+
+  const betNowPairs = paired
+    .map((entry, idx) => ({ ...entry, idx }))
+    .filter(({ timing }) => timing.action === 'BET_NOW');
+  if (betNowPairs.length > 0) {
+    const rankUrgency = ({ timing, idx }) => {
+      const drvs = timing.drivers || [];
+      if (drvs.some((d) => TIMING_SHARP_URGENCY_DRIVERS.has(d))) return [0, idx];
+      if (drvs.some((d) => TIMING_SIGNAL_URGENCY_DRIVERS.has(d))) return [1, idx];
+      return [2, idx];
+    };
+    betNowPairs.sort((a, b) => {
+      const ra = rankUrgency(a);
+      const rb = rankUrgency(b);
+      return ra[0] - rb[0] || ra[1] - rb[1];
+    });
+    const topPair = betNowPairs[0];
+    return {
+      action: 'BET_NOW',
+      label: TIMING_ACTION_META.BET_NOW.label,
+      short_label: TIMING_ACTION_META.BET_NOW.short_label,
+      tone: TIMING_ACTION_META.BET_NOW.tone,
+      reason: `${parlayLegLabel(topPair.leg)}: ${topPair.timing.reason}`,
+      drivers: allDrivers,
+      minutes_to_tip: earliestMins,
+      leg_actions: legActions,
+    };
+  }
+
+  const monPair = [...paired].sort((a, b) => {
+    const am = toNum(a.timing.minutes_to_tip);
+    const bm = toNum(b.timing.minutes_to_tip);
+    return (am ?? Infinity) - (bm ?? Infinity);
+  })[0];
+  return {
+    action: 'MONITOR',
+    label: TIMING_ACTION_META.MONITOR.label,
+    short_label: TIMING_ACTION_META.MONITOR.short_label,
+    tone: TIMING_ACTION_META.MONITOR.tone,
+    reason: `${parlayLegLabel(monPair.leg)}: ${monPair.timing.reason}`,
+    drivers: allDrivers,
+    minutes_to_tip: earliestMins,
+    leg_actions: legActions,
+  };
+};
+
 const OUTCOME_SURFACE_MAP = {
   bet: {
     WON: {

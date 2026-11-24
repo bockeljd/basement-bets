@@ -5893,6 +5893,7 @@ async def ncaam_parlay_performance_report(
         dec_from_american,
         grade_parlay_leg_from_scores,
     )
+    from src.utils.bet_timing import extract_bet_timing_action
     from src.utils.model_performance import get_row_season, payout_per_unit
 
     try:
@@ -6149,6 +6150,8 @@ async def ncaam_parlay_performance_report(
             "outcome": parlay_out,
             "roi_per_unit": roi,
             "locked_at": lk_raw,
+            "lock_reason": pj.get("lock_reason"),
+            "bet_timing_action": extract_bet_timing_action(pj),
             "legs": graded_legs,
         })
 

@@ -4,6 +4,7 @@ import {
   getConfidenceMeta,
   getLiveGameStatus,
   getOutcomeOutlineClasses,
+  getParlayTimingGuidance,
   getRecEv,
   getRecQualityScore,
   hasTop6RiskFlag,
@@ -350,5 +351,101 @@ describe('Today recommendations', () => {
     const leanPending = getOutcomeOutlineClasses(null, 'lean');
     expect(leanPending.outcome).toBeNull();
     expect(leanPending.cardCls).toContain('border-slate-800');
+  });
+
+  it('resolves When-to-Bet guidance for multi-leg parlays', () => {
+    const nowMs = Date.parse('2026-11-24T17:00:00Z');
+    const tipIn = (mins) => new Date(nowMs + mins * 60000).toISOString();
+
+    // 1. Honors backend MONITOR outside imminent window, escalates <= 60m to BET_NOW
+    const backendMon = getParlayTimingGuidance(
+      {
+        outcome: 'PENDING',
+        bet_timing: {
+          action: 'MONITOR',
+          label: 'Monitor · May Improve',
+          short_label: 'Monitor',
+          tone: 'blue',
+          reason: 'No rush yet.',
+          drivers: ['early_no_rush'],
+        },
+        legs: [{ start_time: tipIn(240) }, { start_time: tipIn(300) }],
+      },
+      nowMs
+    );
+    expect(backendMon.action).toBe('MONITOR');
+
+    const flippedSoon = getParlayTimingGuidance(
+      {
+        outcome: 'PENDING',
+        bet_timing: {
+          action: 'MONITOR',
+          label: 'Monitor · May Improve',
+          reason: 'Old monitor reason',
+        },
+        legs: [{ start_time: tipIn(40) }, { start_time: tipIn(180) }],
+      },
+      nowMs
+    );
+    expect(flippedSoon.action).toBe('BET_NOW');
+    expect(flippedSoon.drivers).toContain('tipoff_imminent');
+
+    // 2. Fallback leg aggregation follows WAIT_LINEUPS > BET_NOW > MONITOR precedence
+    const aggWait = getParlayTimingGuidance(
+      {
+        outcome: 'PENDING',
+        legs: [
+          {
+            team_pick: 'Duke -4.5',
+            bet_type: 'SPREAD',
+            start_time: tipIn(200),
+            sharp_edge_pts: 1.0,
+            movement_tags: ['sharp_price_edge'],
+          },
+          {
+            team_pick: 'UNC ML',
+            bet_type: 'MONEYLINE',
+            start_time: tipIn(250),
+            signals: { injuries: [{ player: 'Center', status: 'Questionable' }] },
+          },
+        ],
+      },
+      nowMs
+    );
+    expect(aggWait.action).toBe('WAIT_LINEUPS');
+    expect(aggWait.reason).toContain('UNC ML');
+
+    const aggNow = getParlayTimingGuidance(
+      {
+        outcome: 'PENDING',
+        legs: [
+          { team_pick: 'UConn ML', bet_type: 'MONEYLINE', start_time: tipIn(300) },
+          {
+            team_pick: 'Kansas ML',
+            bet_type: 'MONEYLINE',
+            start_time: tipIn(300),
+            sharp_edge_pts: 0.8,
+            movement_tags: ['sharp_price_edge'],
+          },
+        ],
+      },
+      nowMs
+    );
+    expect(aggNow.action).toBe('BET_NOW');
+    expect(aggNow.reason).toContain('Kansas ML');
+
+    // 3. Returns null when any leg already started or parlay is decided
+    expect(
+      getParlayTimingGuidance(
+        { outcome: 'PENDING', legs: [{ start_time: tipIn(-5) }, { start_time: tipIn(120) }] },
+        nowMs
+      )
+    ).toBeNull();
+    expect(
+      getParlayTimingGuidance(
+        { outcome: 'LOST', legs: [{ start_time: tipIn(120) }, { start_time: tipIn(180) }] },
+        nowMs
+      )
+    ).toBeNull();
   });
 });

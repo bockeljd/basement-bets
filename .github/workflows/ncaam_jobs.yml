@@ -101,6 +101,8 @@ jobs:
                       "has_parlay": bool(odp),
                       "is_locked": odp.get("is_locked"),
                       "locks_at": odp.get("locks_at"),
+                      "lock_reason": odp.get("lock_reason"),
+                      "timing_action": (odp.get("bet_timing") or {}).get("action"),
                       "odds": odp.get("american_odds"),
                   },
                   default=str,

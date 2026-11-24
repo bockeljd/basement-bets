@@ -8,6 +8,7 @@ import math
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 
 def dec_from_american(a: int) -> float:
@@ -174,6 +175,153 @@ def evaluate_value_underdog_ml_leg(
         return None
 
 
+_INTERNAL_LEG_KEYS = ("_dk_fd_prices", "_timing_context", "_timing_payload")
+
+
+def _strip_internal_leg_keys(leg: dict) -> dict:
+    return {k: v for k, v in leg.items() if k not in _INTERNAL_LEG_KEYS}
+
+
+def _safe_json_dict(val: Any) -> Optional[dict]:
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str) and val.strip():
+        try:
+            parsed = json.loads(val)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+def _parse_leg_start_utc(val: Any) -> Optional[datetime]:
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        return val if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
+    try:
+        txt = str(val).strip()
+        if not txt:
+            return None
+        dt = datetime.fromisoformat(txt.replace("Z", "+00:00"))
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _dtp_has_contra_risk(dtp_entry: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(dtp_entry, dict):
+        return False
+    rec_obj = dtp_entry.get("rec")
+    if isinstance(rec_obj, dict) and leg_has_contra_risk(rec_obj.get("movement_tags")):
+        return True
+    ctx_obj = dtp_entry.get("context")
+    lean_obj = ctx_obj.get("closest_lean") if isinstance(ctx_obj, dict) else None
+    if isinstance(lean_obj, dict) and leg_has_contra_risk(lean_obj.get("movement_tags")):
+        return True
+    return False
+
+
+def _attach_leg_timing(leg: dict, dtp_entry: Optional[Dict[str, Any]], ref_now: datetime) -> None:
+    from src.utils.bet_timing import VALID_TIMING_ACTIONS, compute_bet_timing
+
+    timing_payload = leg.get("_timing_payload") if isinstance(leg.get("_timing_payload"), dict) else {}
+    ctx_obj = dtp_entry.get("context") if isinstance(dtp_entry, dict) and isinstance(dtp_entry.get("context"), dict) else None
+    rec_obj = dtp_entry.get("rec") if isinstance(dtp_entry, dict) and isinstance(dtp_entry.get("rec"), dict) else None
+
+    leg_mkt = str(leg.get("market_type") or "MONEYLINE").upper().strip()
+    if leg_mkt == "ML":
+        leg_mkt = "MONEYLINE"
+    leg_side = str(leg.get("side") or "").upper().strip()
+
+    rec_matches = False
+    if rec_obj:
+        rec_mkt = str(rec_obj.get("bet_type") or rec_obj.get("market_type") or "").upper().strip()
+        if rec_mkt in ("ML", "H2H"):
+            rec_mkt = "MONEYLINE"
+        rec_side = str(rec_obj.get("side") or "").upper().strip()
+        rec_matches = (rec_mkt == leg_mkt) and (not rec_side or not leg_side or rec_side == leg_side)
+
+    timing_input: Dict[str, Any] = {}
+    if rec_matches and rec_obj:
+        timing_input.update(rec_obj)
+    elif rec_obj and isinstance(rec_obj.get("signals"), dict):
+        timing_input["signals"] = rec_obj["signals"]
+
+    if timing_payload:
+        timing_input.update(timing_payload)
+
+    # Preserve leg-level canonical price/book/ev after DK/FD best-price enrichment
+    for k in (
+        "event_id",
+        "matchup",
+        "away_team",
+        "home_team",
+        "start_time",
+        "team_pick",
+        "pick",
+        "selection",
+        "market_type",
+        "side",
+        "market_line",
+        "price",
+        "book",
+        "win_prob",
+        "ev",
+        "ev_per_unit",
+        "is_smart_risk",
+        "risk_tier",
+        "conviction_sources",
+        "conviction_sources_total",
+    ):
+        if leg.get(k) is not None:
+            timing_input[k] = leg.get(k)
+
+    # Ensure signals dictionary retains game-level injury/public split context when available
+    if not isinstance(timing_input.get("signals"), dict):
+        if isinstance(ctx_obj, dict) and isinstance(ctx_obj.get("signals"), dict):
+            timing_input["signals"] = ctx_obj["signals"]
+
+    precomputed_bt = (
+        timing_payload.get("bet_timing")
+        if isinstance(timing_payload.get("bet_timing"), dict)
+        else (rec_obj.get("bet_timing") if rec_matches and isinstance(rec_obj, dict) else None)
+    )
+    has_rich_inputs = bool(
+        timing_input.get("signals")
+        or timing_input.get("movement_tags")
+        or timing_input.get("sharp_edge_pts") is not None
+    )
+
+    tip_dt = _parse_leg_start_utc(leg.get("start_time"))
+    mins_to_tip = ((tip_dt - ref_now).total_seconds() / 60.0) if tip_dt is not None else None
+    pre_act = str(precomputed_bt.get("action") or "").upper() if isinstance(precomputed_bt, dict) else ""
+
+    if (
+        isinstance(precomputed_bt, dict)
+        and pre_act in VALID_TIMING_ACTIONS
+        and precomputed_bt.get("label")
+        and precomputed_bt.get("reason")
+        and not has_rich_inputs
+        and (mins_to_tip is None or (mins_to_tip > 0 and not (mins_to_tip <= 60.0 and pre_act != "BET_NOW")))
+    ):
+        t_res = dict(precomputed_bt)
+        if mins_to_tip is not None:
+            t_res["minutes_to_tip"] = round(mins_to_tip, 1)
+    else:
+        t_res = compute_bet_timing(
+            timing_input,
+            start_time=leg.get("start_time"),
+            now_utc=ref_now,
+            context=ctx_obj,
+            home_team=leg.get("home_team"),
+            away_team=leg.get("away_team"),
+        )
+
+    if t_res is not None:
+        leg["bet_timing"] = t_res
+
+
 def _price_multi_leg_combo(legs: Sequence[dict]) -> Tuple[List[dict], float, Optional[str], bool]:
     """Compute decimal odds & shared DraftKings/FanDuel book pricing for 2+ legs."""
     shared_dk_fd = []
@@ -192,7 +340,7 @@ def _price_multi_leg_combo(legs: Sequence[dict]) -> Tuple[List[dict], float, Opt
         dec, parlay_book, prices_bk = shared_dk_fd[0]
         clean_legs = []
         for lg, p_i in zip(legs, prices_bk):
-            c_lg = {k: v for k, v in lg.items() if k != "_dk_fd_prices"}
+            c_lg = _strip_internal_leg_keys(lg)
             c_lg["price"] = p_i
             c_lg["book"] = parlay_book
             clean_legs.append(c_lg)
@@ -204,7 +352,7 @@ def _price_multi_leg_combo(legs: Sequence[dict]) -> Tuple[List[dict], float, Opt
     for lg in legs:
         dec *= dec_from_american(int(lg["price"]))
         books.append(str(lg.get("book") or "").strip())
-        clean_legs.append({k: v for k, v in lg.items() if k != "_dk_fd_prices"})
+        clean_legs.append(_strip_internal_leg_keys(lg))
     unique_non_cons = {b.lower() for b in books if b and b.lower() != "consensus"}
     same_book = len(unique_non_cons) == 1 and all(b and b.lower() != "consensus" for b in books)
     parlay_book = books[0] if same_book else None
@@ -219,10 +367,15 @@ def build_three_leg_high_payout_parlays(
     odds_hi: int = 1000,
     limit: int = 3,
     max_source_legs: int = 18,
+    now_utc: Optional[datetime] = None,
 ) -> List[dict]:
     """Build independent 3-leg high-payout parlays (+300 to +1000) from the strongest +EV legs."""
     if not norm_legs or len(norm_legs) < 3:
         return []
+
+    from src.utils.bet_timing import combine_parlay_bet_timing
+
+    ref_now = now_utc or datetime.now(timezone.utc)
 
     ranked_legs = sorted(
         [
@@ -279,6 +432,7 @@ def build_three_leg_high_payout_parlays(
                     "bankroll_pct": min(float(sizing["bankroll_pct"]), 0.5),
                     "sizing_tier": "Quarter-Unit High-Payout Parlay" if float(sizing["units"]) <= 0.3 else "Half-Unit High-Payout Parlay",
                     "kelly": sizing["kelly_fraction"],
+                    "bet_timing": combine_parlay_bet_timing(clean_legs, now_utc=ref_now),
                 })
 
     candidates.sort(
@@ -380,8 +534,49 @@ def compute_ncaam_parlays_today(
             (int(days_ago),),
         ).fetchone()[0]
 
+    now_utc = datetime.now(timezone.utc)
+    today_et = now_utc.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    is_today_et = (int(days_ago or 0) == 0) and (str(resolved_date_et) == str(today_et))
+
+    dtp_rows: List[dict] = []
+    dtp_by_eid: Dict[str, Dict[str, Any]] = {}
+    try:
+        if resolved_date_et:
+            with get_db_connection() as conn:
+                fetched_dtp = _exec(
+                    conn,
+                    """
+                    SELECT d.event_id, d.is_actionable, d.rec_json, d.context_json,
+                           e.away_team, e.home_team, e.start_time
+                    FROM daily_top_picks d
+                    JOIN events e ON e.id = d.event_id
+                    WHERE d.league = 'NCAAM'
+                      AND d.date_et = %s
+                    """,
+                    (resolved_date_et,),
+                ).fetchall()
+            for sr in (fetched_dtp or []):
+                srd = dict(sr)
+                eid_dtp = srd.get("event_id")
+                if not eid_dtp:
+                    continue
+                rj = _safe_json_dict(srd.get("rec_json"))
+                cj = _safe_json_dict(srd.get("context_json"))
+                dtp_rows.append(srd)
+                dtp_by_eid[str(eid_dtp)] = {
+                    "is_actionable": bool(srd.get("is_actionable")),
+                    "rec": rj,
+                    "context": cj,
+                    "row": srd,
+                }
+    except Exception as dtp_e:
+        print(f"[parlays] daily_top_picks preload skipped: {dtp_e}")
+
     norm_legs: List[dict] = []
     for r in legs:
+        eid = r.get("event_id")
+        if _dtp_has_contra_risk(dtp_by_eid.get(str(eid or ""))):
+            continue
         try:
             price = int(r.get("price"))
         except Exception:
@@ -393,7 +588,7 @@ def compute_ncaam_parlays_today(
             wp = float(wp) if wp is not None else None
         except Exception:
             wp = None
-        if wp is None or not (0 < wp < 1.0):
+        if wp is None or not (0.52 <= wp < 1.0):
             continue
 
         home_team = r.get("home_team") or ""
@@ -401,8 +596,10 @@ def compute_ncaam_parlays_today(
         is_home_pick = pick.strip().lower() == home_team.strip().lower()
 
         norm_legs.append({
-            "event_id": r.get("event_id"),
+            "event_id": eid,
             "matchup": f"{r.get('away_team')} @ {r.get('home_team')}",
+            "away_team": r.get("away_team"),
+            "home_team": home_team,
             "team_pick": r.get("selection") or r.get("pick"),
             "market_type": "MONEYLINE",
             "side": "HOME" if is_home_pick else "AWAY",
@@ -415,6 +612,7 @@ def compute_ncaam_parlays_today(
             "is_home_pick": is_home_pick,
             "is_smart_risk": False,
             "risk_tier": "CORE",
+            "is_lean_fallback": False,
         })
 
     # Enrich legs with board spread context and qualifying -4.5 to -9.5 Home Favorites
@@ -531,10 +729,13 @@ def compute_ncaam_parlays_today(
                 ev_leg = wp_cal * (dec_from_american(ml_price) - 1.0) - (1.0 - wp_cal)
                 is_sweet = (
                     (-9.5 <= home_sp <= -4.5)
-                    and (fair_sp_home <= home_sp - 0.5)
+                    and (fair_sp_home <= home_sp - 1.0)
                     and (wp_cal >= 0.68)
-                    and (ev_leg >= 0.005)
+                    and (ev_leg >= 0.015)
                 )
+
+                if _dtp_has_contra_risk(dtp_by_eid.get(str(eid or ""))):
+                    continue
 
                 if eid in existing_by_eid and existing_by_eid[eid].get("is_home_pick"):
                     existing_by_eid[eid]["home_spread"] = round(home_sp, 1)
@@ -552,6 +753,8 @@ def compute_ncaam_parlays_today(
                 norm_legs.append({
                     "event_id": eid,
                     "matchup": f"{away_team} @ {home_team}",
+                    "away_team": away_team,
+                    "home_team": home_team,
                     "team_pick": home_team,
                     "market_type": "MONEYLINE",
                     "side": "HOME",
@@ -566,6 +769,7 @@ def compute_ncaam_parlays_today(
                     "home_spread": round(home_sp, 1),
                     "fair_spread_home": round(fair_sp_home, 1),
                     "is_sweet_spot_7pt": True,
+                    "is_lean_fallback": False,
                 })
     except Exception:
         pass
@@ -579,44 +783,17 @@ def compute_ncaam_parlays_today(
     combos: List[dict] = []
     if _strategy != "home_fav":
         try:
-            sp_date = resolved_date_et or target_date
-            if not sp_date:
-                with get_db_connection() as conn:
-                    sp_date = _exec(conn, "SELECT (NOW() AT TIME ZONE 'America/New_York')::date::text").fetchone()[0]
-            with get_db_connection() as conn:
-                sp_rows = _exec(
-                    conn,
-                    """
-                    SELECT d.event_id, d.is_actionable, d.rec_json, d.context_json,
-                           e.away_team, e.home_team, e.start_time
-                    FROM daily_top_picks d
-                    JOIN events e ON e.id = d.event_id
-                    WHERE d.league = 'NCAAM'
-                      AND d.date_et = %s
-                    """,
-                    (sp_date,),
-                ).fetchall()
             seen_sp_eids = {leg.get("event_id") for leg in norm_legs if leg.get("event_id")}
-            for sr in (sp_rows or []):
+            for srd in dtp_rows:
                 try:
-                    srd = dict(sr)
                     eid = srd.get("event_id")
                     if not eid or eid in seen_sp_eids:
                         continue
 
-                    is_act = bool(srd.get("is_actionable"))
-                    rj = srd.get("rec_json")
-                    if isinstance(rj, str):
-                        try:
-                            rj = json.loads(rj)
-                        except Exception:
-                            rj = None
-                    cj = srd.get("context_json")
-                    if isinstance(cj, str):
-                        try:
-                            cj = json.loads(cj)
-                        except Exception:
-                            cj = None
+                    entry_dtp = dtp_by_eid.get(str(eid)) or {}
+                    is_act = bool(entry_dtp.get("is_actionable"))
+                    rj = entry_dtp.get("rec")
+                    cj = entry_dtp.get("context")
 
                     cand_obj = None
                     leg_smart_risk = False
@@ -679,6 +856,18 @@ def compute_ncaam_parlays_today(
                     risk_tier_val = str(
                         cand_obj.get("risk_tier") or ("SMART_RISK" if leg_smart_risk else "CORE")
                     )
+                    timing_payload = {
+                        k: cand_obj.get(k)
+                        for k in (
+                            "movement_tags",
+                            "signals",
+                            "sharp_edge_pts",
+                            "conviction_sources",
+                            "conviction_sources_total",
+                            "bet_timing",
+                        )
+                        if cand_obj.get(k) is not None
+                    }
                     norm_legs.append({
                         "event_id": eid,
                         "matchup": f"{srd.get('away_team')} @ {srd.get('home_team')}",
@@ -701,6 +890,9 @@ def compute_ncaam_parlays_today(
                         "is_sweet_spot_7pt": False,
                         "is_smart_risk": leg_smart_risk,
                         "risk_tier": risk_tier_val,
+                        "is_lean_fallback": (not is_act),
+                        "_timing_payload": timing_payload,
+                        "_timing_context": cj,
                     })
                     seen_sp_eids.add(eid)
                 except Exception:
@@ -751,6 +943,8 @@ def compute_ncaam_parlays_today(
                         eid = ur.get("event_id")
                         if not eid or eid in seen_ud_eids:
                             continue
+                        if _dtp_has_contra_risk(dtp_by_eid.get(str(eid))):
+                            continue
                         cj_u = ur.get("dtp_context_json")
                         if isinstance(cj_u, str):
                             cj_u = json.loads(cj_u)
@@ -773,6 +967,7 @@ def compute_ncaam_parlays_today(
                             calibrate_fn=cal_model_ud._calibrate_win_prob,
                         )
                         if dog_leg:
+                            dog_leg["is_lean_fallback"] = False
                             norm_legs.append(dog_leg)
                             seen_ud_eids.add(eid)
                     except Exception:
@@ -780,14 +975,25 @@ def compute_ncaam_parlays_today(
         except Exception as ud_e:
             print(f"[parlays] value underdog enrichment skipped: {ud_e}")
 
-    # Attach latest DraftKings & FanDuel prices
+    # Exclude already-started games when building today's parlays (preserve historical viewing/grading)
+    if is_today_et:
+        pre_tip_legs: List[dict] = []
+        for lg in norm_legs:
+            tip_dt = _parse_leg_start_utc(lg.get("start_time"))
+            if tip_dt is not None and tip_dt <= now_utc:
+                continue
+            pre_tip_legs.append(lg)
+        norm_legs = pre_tip_legs
+
+    # Attach latest DraftKings & FanDuel prices (90-min freshness guard for today's slate)
     try:
         leg_eids = list({str(leg.get("event_id")) for leg in norm_legs if leg.get("event_id")})
         if leg_eids:
+            freshness_sql = "AND captured_at >= NOW() - interval '90 minutes'" if is_today_et else ""
             with get_db_connection() as conn:
                 dk_fd_rows = _exec(
                     conn,
-                    """
+                    f"""
                     SELECT DISTINCT ON (event_id, market_type, side,
                       CASE WHEN LOWER(book) LIKE '%%draftkings%%' THEN 'DraftKings' ELSE 'FanDuel' END)
                       event_id,
@@ -798,6 +1004,7 @@ def compute_ncaam_parlays_today(
                       price
                     FROM odds_snapshots
                     WHERE event_id = ANY(%s)
+                      {freshness_sql}
                       AND price IS NOT NULL
                       AND (LOWER(COALESCE(book, '')) LIKE '%%draftkings%%' OR LOWER(COALESCE(book, '')) LIKE '%%fanduel%%')
                     ORDER BY event_id, market_type, side,
@@ -895,6 +1102,12 @@ def compute_ncaam_parlays_today(
 
     _grade_parlay_legs_from_results(norm_legs)
 
+    for leg in norm_legs:
+        if str(leg.get("outcome") or "PENDING").upper() in ("PENDING", ""):
+            _attach_leg_timing(leg, dtp_by_eid.get(str(leg.get("event_id") or "")), now_utc)
+
+    from src.utils.bet_timing import combine_parlay_bet_timing
+
     for i in range(len(norm_legs)):
         for j in range(i + 1, len(norm_legs)):
             a = norm_legs[i]
@@ -919,8 +1132,8 @@ def compute_ncaam_parlays_today(
                 shared_dk_fd.sort(key=lambda x: x[0], reverse=True)
                 dec, parlay_book, price_a, price_b = shared_dk_fd[0]
                 same_book = True
-                leg_a = {k: v for k, v in a.items() if k != "_dk_fd_prices"}
-                leg_b = {k: v for k, v in b.items() if k != "_dk_fd_prices"}
+                leg_a = _strip_internal_leg_keys(a)
+                leg_b = _strip_internal_leg_keys(b)
                 leg_a["price"] = price_a
                 leg_a["book"] = parlay_book
                 leg_b["price"] = price_b
@@ -931,8 +1144,8 @@ def compute_ncaam_parlays_today(
                 b2 = str(b.get("book") or "").strip()
                 same_book = bool(b1 and b2 and b1.lower() == b2.lower() and b1.lower() != "consensus")
                 parlay_book = b1 if same_book else None
-                leg_a = {k: v for k, v in a.items() if k != "_dk_fd_prices"}
-                leg_b = {k: v for k, v in b.items() if k != "_dk_fd_prices"}
+                leg_a = _strip_internal_leg_keys(a)
+                leg_b = _strip_internal_leg_keys(b)
 
             amer = american_from_dec(dec)
             ev = p * (dec - 1.0) - (1.0 - p)
@@ -949,8 +1162,14 @@ def compute_ncaam_parlays_today(
                 )
             except Exception:
                 parlay_sizing = {"units": 0.5, "bankroll_pct": 0.5, "kelly_fraction": 0.005, "sizing_tier": "Half-Unit Play"}
+            combo_legs = [leg_a, leg_b]
+            combo_timing = (
+                combine_parlay_bet_timing(combo_legs, now_utc=now_utc)
+                if str(parlay_outcome).upper() in ("PENDING", "")
+                else None
+            )
             combos.append({
-                "legs": [leg_a, leg_b],
+                "legs": combo_legs,
                 "p_win": p,
                 "decimal_odds": dec,
                 "american_odds": amer,
@@ -958,11 +1177,12 @@ def compute_ncaam_parlays_today(
                 "outcome": parlay_outcome,
                 "same_book": same_book,
                 "parlay_book": parlay_book,
-                "sweet_spot_legs": sum(1 for leg_item in (leg_a, leg_b) if leg_item.get("is_sweet_spot_7pt")),
+                "sweet_spot_legs": sum(1 for leg_item in combo_legs if leg_item.get("is_sweet_spot_7pt")),
                 "suggested_units": parlay_sizing["units"],
                 "bankroll_pct": parlay_sizing["bankroll_pct"],
                 "sizing_tier": parlay_sizing["sizing_tier"],
                 "kelly": parlay_sizing["kelly_fraction"],
+                "bet_timing": combo_timing,
             })
 
     def in_parlay_band(c: dict) -> bool:
@@ -1058,6 +1278,7 @@ def compute_ncaam_parlays_today(
                         pj = json.loads(pj)
                     if isinstance(pj, dict):
                         if isinstance(pj.get("legs"), list) and len(pj["legs"]) == 2:
+                            pj["legs"] = [_strip_internal_leg_keys(lg) for lg in pj["legs"]]
                             _grade_parlay_legs_from_results(pj["legs"])
                             pj["outcome"] = _combine_two_leg_outcome(
                                 pj["legs"][0].get("outcome"),
@@ -1065,95 +1286,113 @@ def compute_ncaam_parlays_today(
                             )
                         pj["is_locked"] = True
                         pj["locked_at"] = str(existing_locked.get("locked_at") or "")
+                        pj["lock_reason"] = pj.get("lock_reason") or "pre_tip_cutoff"
                         pj["is_official_daily"] = True
+                        if str(pj.get("outcome") or "PENDING").upper() in ("PENDING", "") and isinstance(pj.get("legs"), list):
+                            pj["bet_timing"] = combine_parlay_bet_timing(pj["legs"], now_utc=now_utc)
+                        else:
+                            pj["bet_timing"] = None
                         official_daily_parlay = pj
                 except Exception:
                     official_daily_parlay = None
 
             if official_daily_parlay is None and (high_conf or payout_band):
-                chosen = high_conf[0] if high_conf else payout_band[0]
-                earliest_tip = None
-                for lg in (chosen.get("legs") or []):
-                    st_raw = str(lg.get("start_time") or "").strip()
-                    if not st_raw:
-                        continue
-                    try:
-                        st_dt = datetime.fromisoformat(st_raw.replace("Z", "+00:00"))
-                        if st_dt.tzinfo is None:
-                            st_dt = st_dt.replace(tzinfo=timezone.utc)
-                        if earliest_tip is None or st_dt < earliest_tip:
+                def _combo_eligible_for_official(combo: dict) -> bool:
+                    return all(not bool(lg.get("is_lean_fallback")) for lg in (combo.get("legs") or []))
+
+                official_pool = [c for c in high_conf if _combo_eligible_for_official(c)] or [
+                    c for c in payout_band if _combo_eligible_for_official(c)
+                ]
+                chosen = official_pool[0] if official_pool else None
+
+                if chosen is not None:
+                    earliest_tip = None
+                    for lg in (chosen.get("legs") or []):
+                        st_dt = _parse_leg_start_utc(lg.get("start_time"))
+                        if st_dt is not None and (earliest_tip is None or st_dt < earliest_tip):
                             earliest_tip = st_dt
-                    except Exception:
-                        continue
 
-                now_utc = datetime.now(timezone.utc)
-                should_lock = bool(persist) or (
-                    int(days_ago or 0) == 0
-                    and not target_date
-                    and earliest_tip is not None
-                    and (now_utc - timedelta(minutes=15)) <= earliest_tip <= (now_utc + timedelta(minutes=10))
-                )
+                    timing_action = str(((chosen.get("bet_timing") or {}).get("action")) or "").upper()
+                    is_pre_tip = earliest_tip is not None and earliest_tip > now_utc
+                    near_cutoff = is_pre_tip and earliest_tip <= (now_utc + timedelta(minutes=35))
+                    timing_triggers_lock = is_pre_tip and timing_action == "BET_NOW"
+                    should_lock = bool(persist) or (is_today_et and (timing_triggers_lock or near_cutoff))
+                    lock_reason = (
+                        "manual_persist"
+                        if persist
+                        else (
+                            "bet_now"
+                            if timing_triggers_lock and not near_cutoff
+                            else ("pre_tip_cutoff" if near_cutoff else None)
+                        )
+                    )
 
-                official_daily_parlay = {
-                    **chosen,
-                    "is_official_daily": True,
-                    "is_locked": bool(should_lock),
-                    "locked_at": (now_utc.isoformat() if should_lock else None),
-                    "locks_at": ((earliest_tip - timedelta(minutes=10)).isoformat() if earliest_tip else None),
-                }
+                    clean_chosen_legs = [_strip_internal_leg_keys(lg) for lg in (chosen.get("legs") or [])]
+                    official_daily_parlay = {
+                        **chosen,
+                        "legs": clean_chosen_legs,
+                        "is_official_daily": True,
+                        "is_locked": bool(should_lock),
+                        "locked_at": (now_utc.isoformat() if should_lock else None),
+                        "locks_at": ((earliest_tip - timedelta(minutes=30)).isoformat() if earliest_tip else None),
+                        "lock_reason": lock_reason,
+                    }
 
-                if should_lock:
-                    eids = sorted([str(chosen["legs"][0].get("event_id") or ""), str(chosen["legs"][1].get("event_id") or "")])
-                    pair_key = "|".join(eids)
-                    ukey = hashlib.sha256(("NCAAM|ML2|" + pair_key).encode()).hexdigest()
-                    bucket = "high_confidence" if high_conf else "payout_band"
-                    pid = hashlib.sha256((str(date_et_val) + "|" + ukey).encode()).hexdigest()
+                    if should_lock:
+                        eids = sorted([
+                            str(clean_chosen_legs[0].get("event_id") or ""),
+                            str(clean_chosen_legs[1].get("event_id") or ""),
+                        ])
+                        pair_key = "|".join(eids)
+                        ukey = hashlib.sha256(("NCAAM|ML2|" + pair_key).encode()).hexdigest()
+                        bucket = "high_confidence" if chosen in high_conf else "payout_band"
+                        pid = hashlib.sha256((str(date_et_val) + "|" + ukey).encode()).hexdigest()
 
-                    ddl = """
-                      CREATE TABLE IF NOT EXISTS recommended_parlays (
-                        id TEXT PRIMARY KEY,
-                        league TEXT NOT NULL,
-                        date_et TEXT NOT NULL,
-                        kind TEXT NOT NULL,
-                        bucket TEXT,
-                        american_odds INTEGER,
-                        p_win REAL,
-                        ev REAL,
-                        event_id_1 TEXT,
-                        event_id_2 TEXT,
-                        parlay_json TEXT,
-                        locked_at TIMESTAMPTZ,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        UNIQUE(league, date_et, kind, event_id_1, event_id_2)
-                      );
-                    """
-                    try:
-                        with get_admin_db_connection() as conn:
-                            with conn.cursor() as cur:
-                                cur.execute(ddl)
-                                cur.execute("ALTER TABLE recommended_parlays ADD COLUMN IF NOT EXISTS parlay_json TEXT;")
-                                cur.execute("ALTER TABLE recommended_parlays ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;")
-                            conn.commit()
-                    except Exception:
-                        pass
+                        ddl = """
+                          CREATE TABLE IF NOT EXISTS recommended_parlays (
+                            id TEXT PRIMARY KEY,
+                            league TEXT NOT NULL,
+                            date_et TEXT NOT NULL,
+                            kind TEXT NOT NULL,
+                            bucket TEXT,
+                            american_odds INTEGER,
+                            p_win REAL,
+                            ev REAL,
+                            event_id_1 TEXT,
+                            event_id_2 TEXT,
+                            parlay_json TEXT,
+                            locked_at TIMESTAMPTZ,
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            UNIQUE(league, date_et, kind, event_id_1, event_id_2)
+                          );
+                        """
+                        try:
+                            with get_admin_db_connection() as conn:
+                                with conn.cursor() as cur:
+                                    cur.execute(ddl)
+                                    cur.execute("ALTER TABLE recommended_parlays ADD COLUMN IF NOT EXISTS parlay_json TEXT;")
+                                    cur.execute("ALTER TABLE recommended_parlays ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;")
+                                conn.commit()
+                        except Exception:
+                            pass
 
-                    with get_db_connection() as conn:
-                        _exec(conn, """
-                          INSERT INTO recommended_parlays (id, league, date_et, kind, bucket, american_odds, p_win, ev, event_id_1, event_id_2, parlay_json, locked_at)
-                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
-                          ON CONFLICT (league, date_et, kind, event_id_1, event_id_2) DO UPDATE SET
-                            parlay_json = COALESCE(recommended_parlays.parlay_json, EXCLUDED.parlay_json),
-                            locked_at = COALESCE(recommended_parlays.locked_at, EXCLUDED.locked_at)
-                        """, (
-                            pid, "NCAAM", str(date_et_val), "ML2", bucket,
-                            int(chosen.get("american_odds") or 0),
-                            float(chosen.get("p_win") or 0.0),
-                            float(chosen.get("ev") or 0.0),
-                            eids[0], eids[1],
-                            json.dumps(official_daily_parlay, default=str),
-                        ))
-                        if hasattr(conn, "commit"):
-                            conn.commit()
+                        with get_db_connection() as conn:
+                            _exec(conn, """
+                              INSERT INTO recommended_parlays (id, league, date_et, kind, bucket, american_odds, p_win, ev, event_id_1, event_id_2, parlay_json, locked_at)
+                              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                              ON CONFLICT (league, date_et, kind, event_id_1, event_id_2) DO UPDATE SET
+                                parlay_json = COALESCE(recommended_parlays.parlay_json, EXCLUDED.parlay_json),
+                                locked_at = COALESCE(recommended_parlays.locked_at, EXCLUDED.locked_at)
+                            """, (
+                                pid, "NCAAM", str(date_et_val), "ML2", bucket,
+                                int(chosen.get("american_odds") or 0),
+                                float(chosen.get("p_win") or 0.0),
+                                float(chosen.get("ev") or 0.0),
+                                eids[0], eids[1],
+                                json.dumps(official_daily_parlay, default=str),
+                            ))
+                            if hasattr(conn, "commit"):
+                                conn.commit()
     except Exception as e:
         try:
             print(f"[parlays] official daily lock/persist failed: {e}")
@@ -1161,7 +1400,11 @@ def compute_ncaam_parlays_today(
             pass
 
     three_leg_high_payout = (
-        build_three_leg_high_payout_parlays(norm_legs, min_ev=max(0.04, float(min_ev_per_unit)))
+        build_three_leg_high_payout_parlays(
+            norm_legs,
+            min_ev=max(0.04, float(min_ev_per_unit)),
+            now_utc=now_utc,
+        )
         if _strategy != "home_fav"
         else []
     )

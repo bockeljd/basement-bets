@@ -9,6 +9,45 @@ from typing import Any
 
 VALID_TIMING_ACTIONS = ("BET_NOW", "WAIT_LINEUPS", "MONITOR")
 
+_TIMING_ACTION_META: dict[str, dict[str, str]] = {
+    "BET_NOW": {
+        "label": "Bet Now",
+        "short_label": "Bet Now",
+        "tone": "emerald",
+    },
+    "WAIT_LINEUPS": {
+        "label": "Wait · Check Lineups",
+        "short_label": "Wait Lineups",
+        "tone": "amber",
+    },
+    "MONITOR": {
+        "label": "Monitor · May Improve",
+        "short_label": "Monitor",
+        "tone": "blue",
+    },
+}
+
+
+def _pack_timing_payload(
+    action: str,
+    reason: str,
+    drivers: list[str],
+    minutes_to_tip: float | None,
+    **extra: Any,
+) -> dict[str, Any]:
+    meta = _TIMING_ACTION_META[action]
+    payload: dict[str, Any] = {
+        "action": action,
+        "label": meta["label"],
+        "short_label": meta["short_label"],
+        "tone": meta["tone"],
+        "reason": reason,
+        "drivers": drivers,
+        "minutes_to_tip": minutes_to_tip,
+    }
+    payload.update(extra)
+    return payload
+
 DEFAULT_TIMING_THRESHOLDS: dict[str, float] = {
     "imminent_tip_mins": 60.0,
     "sharp_edge_pts_min": 0.5,
@@ -290,32 +329,7 @@ def compute_bet_timing(
     ev_dec = _extract_ev_decimal(rec)
 
     def _pack(action: str, reason: str, drivers: list[str]) -> dict[str, Any]:
-        meta = {
-            "BET_NOW": {
-                "label": "Bet Now",
-                "short_label": "Bet Now",
-                "tone": "emerald",
-            },
-            "WAIT_LINEUPS": {
-                "label": "Wait · Check Lineups",
-                "short_label": "Wait Lineups",
-                "tone": "amber",
-            },
-            "MONITOR": {
-                "label": "Monitor · May Improve",
-                "short_label": "Monitor",
-                "tone": "blue",
-            },
-        }[action]
-        return {
-            "action": action,
-            "label": meta["label"],
-            "short_label": meta["short_label"],
-            "tone": meta["tone"],
-            "reason": reason,
-            "drivers": drivers,
-            "minutes_to_tip": minutes_to_tip,
-        }
+        return _pack_timing_payload(action, reason, drivers, minutes_to_tip)
 
     # 1. Tipoff imminent (<= 60 min)
     if minutes_to_tip is not None and minutes_to_tip <= cfg["imminent_tip_mins"]:
@@ -539,3 +553,167 @@ def summarize_timing_clv(rows: list[dict] | None) -> list[dict[str, Any]]:
             "positive_clv_rate": pos_rate,
         })
     return out
+
+
+_SHARP_URGENCY_DRIVERS = frozenset(
+    ("sharp_price_edge", "lagging_book_edge", "rlm_confirmed", "sharp_backing")
+)
+_SIGNAL_URGENCY_DRIVERS = frozenset(
+    ("our_public_steam", "high_conviction", "strong_ev")
+)
+
+
+def _parlay_leg_label(leg: dict) -> str:
+    return str(leg.get("team_pick") or leg.get("selection") or leg.get("pick") or "Leg").strip() or "Leg"
+
+
+def combine_parlay_bet_timing(
+    legs: list[dict] | tuple[dict, ...] | None,
+    *,
+    now_utc: datetime | None = None,
+    thresholds: dict[str, float] | None = None,
+) -> dict[str, Any] | None:
+    """Aggregate pre-game When-to-Bet timing across parlay legs."""
+    if not legs:
+        return None
+
+    cfg = dict(load_timing_thresholds())
+    if isinstance(thresholds, dict):
+        for k, v in thresholds.items():
+            fv = _to_float(v)
+            if fv is not None:
+                cfg[k] = fv
+
+    ref_now = _parse_dt_utc(now_utc) or datetime.now(timezone.utc)
+    paired: list[tuple[dict, dict[str, Any]]] = []
+
+    for leg in legs:
+        if not isinstance(leg, dict):
+            return None
+        tip_dt = _parse_dt_utc(leg.get("start_time"))
+        leg_mins: float | None = None
+        if tip_dt is not None:
+            leg_mins = round((tip_dt - ref_now).total_seconds() / 60.0, 1)
+            if leg_mins <= 0:
+                return None
+
+        existing = leg.get("bet_timing")
+        existing_act = (
+            str(existing.get("action") or "").strip().upper()
+            if isinstance(existing, dict)
+            else ""
+        )
+        imminent = leg_mins is not None and leg_mins <= cfg["imminent_tip_mins"]
+        if (
+            isinstance(existing, dict)
+            and existing_act in VALID_TIMING_ACTIONS
+            and existing.get("label")
+            and existing.get("reason")
+            and not (imminent and existing_act != "BET_NOW")
+        ):
+            norm_timing = dict(existing)
+            if leg_mins is not None:
+                norm_timing["minutes_to_tip"] = leg_mins
+        else:
+            norm_timing = compute_bet_timing(
+                leg,
+                start_time=leg.get("start_time"),
+                now_utc=ref_now,
+                context=leg.get("_timing_context") if isinstance(leg.get("_timing_context"), dict) else None,
+                home_team=leg.get("home_team"),
+                away_team=leg.get("away_team"),
+                thresholds=cfg,
+            )
+            if not norm_timing:
+                return None
+        paired.append((leg, norm_timing))
+
+    if not paired:
+        return None
+
+    mins_list = [t.get("minutes_to_tip") for _, t in paired if _to_float(t.get("minutes_to_tip")) is not None]
+    earliest_mins = min((float(m) for m in mins_list), default=None)
+
+    drivers: list[str] = []
+    seen_drivers: set[str] = set()
+    for _, t in paired:
+        for drv in (t.get("drivers") or []):
+            d_str = str(drv or "").strip()
+            if d_str and d_str not in seen_drivers:
+                seen_drivers.add(d_str)
+                drivers.append(d_str)
+
+    leg_actions = [str(t["action"]).upper() for _, t in paired]
+
+    # 1. Imminent tip on any leg -> Bet Now
+    if earliest_mins is not None and earliest_mins <= cfg["imminent_tip_mins"]:
+        mins_int = max(1, int(round(earliest_mins)))
+        ordered_drivers = ["tipoff_imminent", *[d for d in drivers if d != "tipoff_imminent"]]
+        inj_leg = next(
+            (lg for lg, t in paired if "uncertain_injury" in (t.get("drivers") or [])),
+            None,
+        )
+        if inj_leg is not None:
+            reason = (
+                f"Earliest leg tips in ~{mins_int} min — confirm lineup status on "
+                f"{_parlay_leg_label(inj_leg)}, then lock in before tip."
+            )
+        elif any(d in ("sharp_price_edge", "lagging_book_edge") for d in ordered_drivers):
+            reason = f"Earliest leg tips in ~{mins_int} min with sharp-book value — lock in before close."
+        else:
+            reason = f"Earliest leg tips in ~{mins_int} min — closing lines are firming up, good time to lock it in."
+        return _pack_timing_payload(
+            "BET_NOW",
+            reason,
+            ordered_drivers,
+            earliest_mins,
+            leg_actions=leg_actions,
+        )
+
+    # 2. Uncertain injury/lineups on any leg -> Wait · Check Lineups
+    wait_pair = next(((lg, t) for lg, t in paired if t["action"] == "WAIT_LINEUPS"), None)
+    if wait_pair is not None:
+        w_leg, w_t = wait_pair
+        return _pack_timing_payload(
+            "WAIT_LINEUPS",
+            f"{_parlay_leg_label(w_leg)}: {w_t['reason']}",
+            drivers,
+            earliest_mins,
+            leg_actions=leg_actions,
+        )
+
+    # 3. Sharp/steam/conviction/strong-EV Bet Now on any leg -> Bet Now
+    bet_now_pairs = [(idx, lg, t) for idx, (lg, t) in enumerate(paired) if t["action"] == "BET_NOW"]
+    if bet_now_pairs:
+        def _urgency_rank(entry: tuple[int, dict, dict[str, Any]]) -> tuple[int, int]:
+            idx, _, t = entry
+            drvs = set(str(d or "") for d in (t.get("drivers") or []))
+            if drvs & _SHARP_URGENCY_DRIVERS:
+                return (0, idx)
+            if drvs & _SIGNAL_URGENCY_DRIVERS:
+                return (1, idx)
+            return (2, idx)
+
+        _, top_leg, top_t = min(bet_now_pairs, key=_urgency_rank)
+        return _pack_timing_payload(
+            "BET_NOW",
+            f"{_parlay_leg_label(top_leg)}: {top_t['reason']}",
+            drivers,
+            earliest_mins,
+            leg_actions=leg_actions,
+        )
+
+    # 4. All legs Monitor
+    def _monitor_rank(entry: tuple[int, tuple[dict, dict[str, Any]]]) -> tuple[float, int]:
+        idx, (_, t) = entry
+        m = _to_float(t.get("minutes_to_tip"))
+        return (m if m is not None else float("inf"), idx)
+
+    _, (mon_leg, mon_t) = min(enumerate(paired), key=_monitor_rank)
+    return _pack_timing_payload(
+        "MONITOR",
+        f"{_parlay_leg_label(mon_leg)}: {mon_t['reason']}",
+        drivers,
+        earliest_mins,
+        leg_actions=leg_actions,
+    )

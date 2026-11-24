@@ -1,5 +1,6 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -407,3 +408,346 @@ def test_history_and_calibration_endpoints_set_no_store(monkeypatch):
         resp = client.get(path, headers={"X-BASEMENT-KEY": "test-secret"})
         assert resp.status_code == 200
         assert (resp.headers.get("cache-control") or "").lower() == "no-store, max-age=0"
+
+
+def test_combine_parlay_bet_timing_precedence_and_started_guard():
+    from src.utils.bet_timing import combine_parlay_bet_timing
+
+    now = datetime(2026, 11, 24, 18, 0, tzinfo=timezone.utc)
+    tip_300 = (now + timedelta(minutes=300)).isoformat()
+    tip_180 = (now + timedelta(minutes=180)).isoformat()
+    tip_45 = (now + timedelta(minutes=45)).isoformat()
+    tip_past = (now - timedelta(minutes=5)).isoformat()
+
+    leg_wait = {
+        "event_id": "e_wait",
+        "team_pick": "Alpha ML",
+        "market_type": "MONEYLINE",
+        "side": "HOME",
+        "start_time": tip_300,
+        "signals": {"injuries": [{"player": "Star Guard", "status": "Questionable"}]},
+    }
+    leg_sharp = {
+        "event_id": "e_sharp",
+        "team_pick": "Beta ML",
+        "market_type": "MONEYLINE",
+        "side": "AWAY",
+        "book": "FanDuel",
+        "sharp_edge_pts": 1.0,
+        "movement_tags": ["sharp_price_edge"],
+        "start_time": tip_180,
+    }
+    leg_mon1 = {
+        "event_id": "e_m1",
+        "team_pick": "Gamma ML",
+        "market_type": "MONEYLINE",
+        "side": "HOME",
+        "start_time": tip_300,
+    }
+    leg_mon2 = {
+        "event_id": "e_m2",
+        "team_pick": "Delta ML",
+        "market_type": "MONEYLINE",
+        "side": "AWAY",
+        "start_time": tip_300,
+    }
+
+    # WAIT_LINEUPS beats BET_NOW outside imminent 60m window
+    t_wait = combine_parlay_bet_timing([leg_wait, leg_sharp], now_utc=now)
+    assert t_wait["action"] == "WAIT_LINEUPS"
+    assert "Alpha ML" in t_wait["reason"]
+
+    # BET_NOW beats MONITOR
+    t_sharp = combine_parlay_bet_timing([leg_mon1, leg_sharp], now_utc=now)
+    assert t_sharp["action"] == "BET_NOW"
+    assert "Beta ML" in t_sharp["reason"]
+
+    # Two distant no-rush legs -> MONITOR
+    t_mon = combine_parlay_bet_timing([leg_mon1, leg_mon2], now_utc=now)
+    assert t_mon["action"] == "MONITOR"
+
+    # Imminent tip (<= 60m) flips to BET_NOW even with injury watch
+    leg_wait_soon = {**leg_wait, "start_time": tip_45}
+    t_soon = combine_parlay_bet_timing([leg_wait_soon, leg_mon1], now_utc=now)
+    assert t_soon["action"] == "BET_NOW"
+    assert "tipoff_imminent" in t_soon["drivers"]
+    assert "45 min" in t_soon["reason"]
+
+    # Started leg -> None
+    leg_started = {**leg_mon1, "start_time": tip_past}
+    assert combine_parlay_bet_timing([leg_started, leg_mon2], now_utc=now) is None
+
+
+def _mock_parlay_db(monkeypatch, *, today_et, ml_rows, dtp_rows, inserts_out):
+    import src.database as db
+
+    class _CommitFakeConn(_FakeConn):
+        def commit(self):
+            pass
+
+        def cursor(self):
+            return _FakeCursor([])
+
+    def fake_exec(_conn, sql, params=None):
+        s = " ".join(sql.split()).lower()
+        if "with latest_preds as" in s:
+            return _FakeCursor(ml_rows)
+        if "select (now() at time zone 'america/new_york'" in s:
+            return _FakeCursor([(today_et,)])
+        if "from daily_top_picks d" in s and "join events e" in s:
+            return _FakeCursor(dtp_rows)
+        if "insert into recommended_parlays" in s:
+            inserts_out.append((sql, params))
+            return _FakeCursor([])
+        return _FakeCursor([])
+
+    monkeypatch.setattr(db, "get_db_connection", lambda: _CommitFakeConn())
+    monkeypatch.setattr(db, "get_admin_db_connection", lambda: _CommitFakeConn())
+    monkeypatch.setattr(db, "_exec", fake_exec)
+
+
+def test_compute_ncaam_parlays_today_locks_on_bet_now_with_explicit_today_date(monkeypatch):
+    from src.services.ncaam_parlay_service import compute_ncaam_parlays_today
+
+    now = datetime.now(timezone.utc)
+    today_et = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    tip_5h = (now + timedelta(minutes=300)).isoformat()
+
+    ml_rows = [
+        {
+            "event_id": "evt_1",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "Duke",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -145,
+            "win_prob": 0.65,
+            "ev_per_unit": 0.095,
+            "selection": "Duke",
+            "away_team": "Siena",
+            "home_team": "Duke",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+    ]
+    dtp_rows = [
+        {
+            "event_id": "evt_2",
+            "is_actionable": True,
+            "away_team": "Marist",
+            "home_team": "Iona",
+            "start_time": tip_5h,
+            "rec_json": {
+                "bet_type": "SPREAD",
+                "side": "HOME",
+                "selection": "Iona -3.5",
+                "market_line": -3.5,
+                "price": -110,
+                "book": "DraftKings",
+                "win_prob": 0.58,
+                "ev": 0.105,
+                "sharp_edge_pts": 1.0,
+                "movement_tags": ["sharp_price_edge"],
+            },
+            "context_json": {},
+        }
+    ]
+    inserts = []
+    _mock_parlay_db(monkeypatch, today_et=today_et, ml_rows=ml_rows, dtp_rows=dtp_rows, inserts_out=inserts)
+
+    res = compute_ncaam_parlays_today(date=today_et, persist=False)
+    odp = res["official_daily_parlay"]
+    assert odp is not None
+    assert odp["is_locked"] is True
+    assert odp["lock_reason"] == "bet_now"
+    assert odp["bet_timing"]["action"] == "BET_NOW"
+    assert len(inserts) == 1
+
+    saved_json = json.loads(inserts[0][1][10])
+    assert saved_json["lock_reason"] == "bet_now"
+    assert saved_json["bet_timing"]["action"] == "BET_NOW"
+    for lg in odp["legs"]:
+        assert "_dk_fd_prices" not in lg
+        assert "_timing_context" not in lg
+        assert "_timing_payload" not in lg
+
+
+def test_compute_ncaam_parlays_today_waits_on_monitor_and_locks_at_30m_cutoff(monkeypatch):
+    from src.services.ncaam_parlay_service import compute_ncaam_parlays_today
+
+    now = datetime.now(timezone.utc)
+    today_et = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    tip_5h = (now + timedelta(minutes=300)).isoformat()
+    tip_25m = (now + timedelta(minutes=25)).isoformat()
+
+    ml_rows_far = [
+        {
+            "event_id": "evt_a",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "UConn",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -150,
+            "win_prob": 0.62,
+            "ev_per_unit": 0.03,
+            "selection": "UConn",
+            "away_team": "Rider",
+            "home_team": "UConn",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+        {
+            "event_id": "evt_b",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "Kansas",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -140,
+            "win_prob": 0.61,
+            "ev_per_unit": 0.03,
+            "selection": "Kansas",
+            "away_team": "Omaha",
+            "home_team": "Kansas",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+    ]
+    inserts_far = []
+    _mock_parlay_db(monkeypatch, today_et=today_et, ml_rows=ml_rows_far, dtp_rows=[], inserts_out=inserts_far)
+
+    res_far = compute_ncaam_parlays_today(date=today_et, persist=False)
+    odp_far = res_far["official_daily_parlay"]
+    assert odp_far is not None
+    assert odp_far["is_locked"] is False
+    assert odp_far["lock_reason"] is None
+    assert odp_far["bet_timing"]["action"] == "MONITOR"
+    assert len(inserts_far) == 0
+
+    ml_rows_cutoff = [
+        {**ml_rows_far[0], "start_time": tip_25m},
+        ml_rows_far[1],
+    ]
+    inserts_cutoff = []
+    _mock_parlay_db(monkeypatch, today_et=today_et, ml_rows=ml_rows_cutoff, dtp_rows=[], inserts_out=inserts_cutoff)
+
+    res_cutoff = compute_ncaam_parlays_today(date=today_et, persist=False)
+    odp_cutoff = res_cutoff["official_daily_parlay"]
+    assert odp_cutoff is not None
+    assert odp_cutoff["is_locked"] is True
+    assert odp_cutoff["lock_reason"] == "pre_tip_cutoff"
+    assert len(inserts_cutoff) == 1
+
+
+def test_compute_ncaam_parlays_today_excludes_started_games_contra_sharp_and_leans_from_official(monkeypatch):
+    from src.services.ncaam_parlay_service import compute_ncaam_parlays_today
+
+    now = datetime.now(timezone.utc)
+    today_et = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    tip_past = (now - timedelta(minutes=20)).isoformat()
+    tip_4h = (now + timedelta(minutes=240)).isoformat()
+
+    ml_rows = [
+        {
+            "event_id": "evt_started",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "StartedTeam",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -150,
+            "win_prob": 0.90,
+            "ev_per_unit": 0.25,
+            "selection": "StartedTeam",
+            "away_team": "Visitor",
+            "home_team": "StartedTeam",
+            "start_time": tip_past,
+            "day_et": today_et,
+        },
+        {
+            "event_id": "evt_contra",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "ContraTeam",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -130,
+            "win_prob": 0.72,
+            "ev_per_unit": 0.14,
+            "selection": "ContraTeam",
+            "away_team": "AwayX",
+            "home_team": "ContraTeam",
+            "start_time": tip_4h,
+            "day_et": today_et,
+        },
+    ]
+    dtp_rows = [
+        {
+            "event_id": "evt_contra",
+            "is_actionable": True,
+            "away_team": "AwayX",
+            "home_team": "ContraTeam",
+            "start_time": tip_4h,
+            "rec_json": {
+                "bet_type": "SPREAD",
+                "side": "HOME",
+                "selection": "ContraTeam -2.5",
+                "movement_tags": ["contra_sharp_money"],
+            },
+            "context_json": {},
+        },
+        {
+            "event_id": "evt_lean1",
+            "is_actionable": False,
+            "away_team": "LeanA",
+            "home_team": "HomeA",
+            "start_time": tip_4h,
+            "rec_json": None,
+            "context_json": {
+                "closest_lean": {
+                    "bet_type": "SPREAD",
+                    "side": "HOME",
+                    "selection": "HomeA -4.5",
+                    "market_line": -4.5,
+                    "price": -110,
+                    "win_prob": 0.56,
+                    "ev": 0.04,
+                }
+            },
+        },
+        {
+            "event_id": "evt_lean2",
+            "is_actionable": False,
+            "away_team": "LeanB",
+            "home_team": "HomeB",
+            "start_time": tip_4h,
+            "rec_json": None,
+            "context_json": {
+                "closest_lean": {
+                    "bet_type": "TOTAL",
+                    "side": "UNDER",
+                    "selection": "UNDER 142.5",
+                    "market_line": 142.5,
+                    "price": -110,
+                    "win_prob": 0.57,
+                    "ev": 0.05,
+                }
+            },
+        },
+    ]
+    inserts = []
+    _mock_parlay_db(monkeypatch, today_et=today_et, ml_rows=ml_rows, dtp_rows=dtp_rows, inserts_out=inserts)
+
+    res = compute_ncaam_parlays_today(date=today_et, persist=False)
+    all_leg_eids = {
+        lg["event_id"]
+        for c in (res["high_confidence"] + res["payout_band"])
+        for lg in c["legs"]
+    }
+    assert "evt_started" not in all_leg_eids
+    assert "evt_contra" not in all_leg_eids
+    assert "evt_lean1" in all_leg_eids and "evt_lean2" in all_leg_eids
+    assert res["official_daily_parlay"] is None
+    assert len(inserts) == 0

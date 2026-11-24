@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
-import { Zap, Target, Home, TrendingUp, Percent, RefreshCw, PlusCircle, Lock, Clock } from 'lucide-react';
-import { getRecommendedBetSize, getOutcomeOutlineClasses } from './today/todayHelpers';
+import { Zap, Target, Home, TrendingUp, Percent, RefreshCw, PlusCircle, Lock, Clock, Eye } from 'lucide-react';
+import { getRecommendedBetSize, getOutcomeOutlineClasses, getParlayTimingGuidance } from './today/todayHelpers';
 
 const fmtPct = (x) => {
   const n = Number(x);
@@ -28,6 +28,24 @@ const ACCENT = {
   orange: { text: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20', head: 'border-orange-500/30 text-orange-300' },
 };
 
+const PARLAY_TIMING_STYLE = {
+  BET_NOW: {
+    boxCls: 'border-emerald-500/40 bg-emerald-950/35',
+    badgeCls: 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200',
+    Icon: Zap,
+  },
+  WAIT_LINEUPS: {
+    boxCls: 'border-amber-500/40 bg-amber-950/35',
+    badgeCls: 'bg-amber-500/20 border-amber-400/50 text-amber-200',
+    Icon: Clock,
+  },
+  MONITOR: {
+    boxCls: 'border-sky-500/40 bg-sky-950/35',
+    badgeCls: 'bg-sky-500/20 border-sky-400/50 text-sky-200',
+    Icon: Eye,
+  },
+};
+
 function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
   const legs = c?.legs || [];
   const ac = ACCENT[color] || ACCENT.amber;
@@ -45,14 +63,21 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
 
   const out = c?.outcome;
   const surface = getOutcomeOutlineClasses(out, 'bet');
+  const timing = getParlayTimingGuidance(c);
+  const timingUi = timing ? PARLAY_TIMING_STYLE[timing.action] || PARLAY_TIMING_STYLE.BET_NOW : null;
 
   return (
     <div className={`relative overflow-hidden p-4 rounded-xl shadow-lg flex flex-col gap-3 transition-colors ${surface.cardCls}`}>
       {/* Header row */}
-      <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
-        <div className="flex items-baseline gap-2">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-800/60 pb-3">
+        <div className="flex items-baseline gap-2 flex-wrap">
           <span className="text-2xl font-black text-white">{fmtOdds(c?.american_odds)}</span>
           <span className="text-xs font-bold text-slate-500">Parlay Odds</span>
+          {c?.parlay_book && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-300">
+              {c.parlay_book}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {out && out !== 'PENDING' && (
@@ -71,6 +96,24 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
         </div>
       </div>
 
+      {/* Pre-game When-to-Bet strip */}
+      {timing && timingUi && (
+        <div className={`rounded-xl border px-3 py-2 flex flex-wrap items-center gap-2 text-xs ${timingUi.boxCls}`}>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+            When to Bet
+          </span>
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-bold ${timingUi.badgeCls}`}
+          >
+            <timingUi.Icon size={12} aria-hidden="true" />
+            <span>{timing.label}</span>
+          </span>
+          <span className="text-[11px] text-slate-200 leading-snug">
+            {timing.reason}
+          </span>
+        </div>
+      )}
+
       {/* Legs */}
       <div className="flex flex-col gap-3">
         {legs.map((leg, li) => {
@@ -78,6 +121,8 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
           const legSurface = getOutcomeOutlineClasses(lOut, 'bet');
           const lWon = legSurface.outcome === 'WON';
           const lLoss = legSurface.outcome === 'LOST';
+          const legAct = !legSurface.outcome && leg?.bet_timing?.action ? String(leg.bet_timing.action).toUpperCase() : '';
+          const legTimingUi = legAct ? PARLAY_TIMING_STYLE[legAct] : null;
 
           return (
             <div
@@ -114,6 +159,15 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                {legTimingUi && (
+                  <span
+                    title={leg.bet_timing.reason || leg.bet_timing.label}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[9px] font-bold uppercase tracking-wider ${legTimingUi.badgeCls}`}
+                  >
+                    <legTimingUi.Icon size={10} aria-hidden="true" />
+                    <span>{leg.bet_timing.short_label || leg.bet_timing.label}</span>
+                  </span>
+                )}
                 {legSurface.outcome && (
                   <span className={`px-1.5 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider ${legSurface.badgeCls}`}>
                     {legSurface.outcome}
@@ -337,13 +391,18 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
                         <Lock size={10} aria-hidden="true" />
                         <span>
                           LOCKED{officialParlay.locked_at ? ` · ${fmtTime(officialParlay.locked_at)} ET` : ''}
+                          {officialParlay.lock_reason === 'bet_now'
+                            ? ' · Bet Now'
+                            : officialParlay.lock_reason === 'pre_tip_cutoff'
+                              ? ' · 30m cutoff'
+                              : ''}
                         </span>
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/35 text-amber-200 text-[10px] font-bold">
                         <Clock size={10} aria-hidden="true" />
                         <span>
-                          Locks 10m before tip{officialParlay.locks_at ? ` (${fmtTime(officialParlay.locks_at)} ET)` : ''}
+                          Locks on Bet Now or 30m before tip{officialParlay.locks_at ? ` (${fmtTime(officialParlay.locks_at)} ET)` : ''}
                         </span>
                       </span>
                     )}
@@ -357,7 +416,12 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
             );
           })()}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="space-y-3">
+            <p className="text-[11px] text-slate-400">
+              Live pre-tip columns update from current retail sportsbook prices — follow each card&apos;s{' '}
+              <span className="font-semibold text-slate-200">When to Bet</span> badge before placing.
+            </p>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <ParlayColumn
               title="Highest Win Chance"
               icon={Zap}
@@ -385,6 +449,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
               bankroll={bankroll}
               onAddBet={onAddBet}
             />
+            </div>
           </div>
 
           {threeLeg.length > 0 && (
