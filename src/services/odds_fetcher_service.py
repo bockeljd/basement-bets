@@ -76,8 +76,17 @@ class OddsFetcherService:
                 params = {"date": date_str}
 
             try:
-                resp = session.get(url, params=params, headers=self.HEADERS, timeout=15) if api_sport == "ncaab" else requests.get(url, params=params, headers=self.HEADERS, timeout=15)
-                resp.raise_for_status()
+                try:
+                    resp = session.get(url, params=params, headers=self.HEADERS, timeout=15)
+                    resp.raise_for_status()
+                except requests.RequestException:
+                    if api_sport != 'ncaab':
+                        raise
+                    # The full D1 scoreboard can time out even while retail game lines are available.
+                    fallback = {**params, "bookIds": "68,69", "periods": "event"}
+                    resp = session.get(url, params=fallback, headers=self.HEADERS, timeout=15)
+                    resp.raise_for_status()
+                    print(f"[OddsFetcher] Used DraftKings/FanDuel full-game fallback for {date_str}")
                 data = resp.json()
 
                 games = data.get('games', [])
