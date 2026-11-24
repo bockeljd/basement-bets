@@ -253,10 +253,10 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
     if not is_actionable:
         raw_reason = (res.get('block_reason') or res.get('headline') or res.get('recommendation') or res.get('error') or 'No bet') if isinstance(res, dict) else 'No bet'
         r_str = str(raw_reason).strip()
-        if ('Object of type' in r_str and 'serializable' in r_str) or ('Traceback' in r_str) or len(r_str) > 140:
+        if ('Object of type' in r_str and 'serializable' in r_str) or ('Traceback' in r_str) :
             reason = 'Analysis unavailable — click Details to retry'
         else:
-            reason = r_str or 'No bet'
+            reason = r_str[:300] or 'No bet'
 
     sql = """
     INSERT INTO daily_top_picks(date_et, event_id, league, computed_at, model_version, is_actionable, reason, rec_json, context_json)

@@ -3373,6 +3373,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             pass
 
         if ev < min_ev:
+            rec["_publish_pass_reason"] = f"EV {ev:+.1%} below required {min_ev:.1%}"
             return False
 
         lb10 = rec.get("win_prob_lb10")
@@ -3410,11 +3411,13 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     min_lb10 = min(min_lb10, 0.506)
             lb10_val = float(lb10)
             if lb10_val < min_lb10:
+                rec["_publish_pass_reason"] = f"Lower win probability {lb10_val:.1%} below required {min_lb10:.1%}"
                 return False
             if lb10_val < base_min_lb10:
                 is_smart_risk_play = True
 
         if (stats.get("n") or 0) < min_n:
+            rec["_publish_pass_reason"] = f"Comparable bets {stats.get('n') or 0} below required {min_n}"
             return False
 
         n = int(stats.get("n") or 0)
@@ -3444,6 +3447,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         override_ok = (ev >= override_ev) and (edge_pts >= override_edge) and (n >= min_n)
 
         if lb < 0.0 and not override_ok:
+            rec["_publish_pass_reason"] = f"Comparable bets have a negative lower ROI bound ({lb:.1%})"
             return False
 
         # attach risk tier + stats for debugging/UI
@@ -4795,6 +4799,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 gate_msg = None
 
             ev_f = float(top_cand.get('ev') or 0.0)
+            gate_msg = gate_msg or top_cand.get('_publish_pass_reason')
             if not gate_msg:
                 gate_msg = (
                     f"EV {ev_f * 100:+.1f}% / edge {edge_val if edge_val is not None else 0:+.1f} pts below strict publish gate"
