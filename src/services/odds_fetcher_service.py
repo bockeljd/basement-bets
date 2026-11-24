@@ -51,7 +51,15 @@ class OddsFetcherService:
                     except Exception:
                         pass
 
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
         all_games = []
+        session = requests.Session()
+        if api_sport == "ncaab":
+            retries = Retry(total=2, backoff_factor=0.5, status_forcelist=(429, 500, 502, 503, 504),
+                            allowed_methods={"GET"}, respect_retry_after_header=False)
+            session.mount("https://", HTTPAdapter(max_retries=retries))
         for date_str in dates:
             # Prefer the newer v2 endpoint for NCAAM/NCAAB so we get the full D1 slate.
             # v1 often returns a subset.
@@ -68,7 +76,7 @@ class OddsFetcherService:
                 params = {"date": date_str}
 
             try:
-                resp = requests.get(url, params=params, headers=self.HEADERS, timeout=15)
+                resp = session.get(url, params=params, headers=self.HEADERS, timeout=15) if api_sport == "ncaab" else requests.get(url, params=params, headers=self.HEADERS, timeout=15)
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -80,6 +88,7 @@ class OddsFetcherService:
             except Exception as e:
                 print(f"[OddsFetcher] Error fetching {league} on {date_str}: {e}")
 
+        session.close()
         return all_games
 
     ACTION_BOOK_NAMES = {
