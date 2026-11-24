@@ -25,9 +25,12 @@ import {
   normalizeOutcome,
   normalizeMarketType,
   formatMarketLabel,
+  formatAmericanOdds,
+  toEtDay,
   getNumericEdge,
   normalizeSport,
 } from '../utils/modelPerformance';
+import { getOutcomeOutlineClasses } from './today/todayHelpers';
 
 const TOOLTIP_STYLE = {
   backgroundColor: '#020617',
@@ -116,10 +119,81 @@ const ModelPerformanceAnalytics = ({
   scopeLabel = 'all recommended picks',
   filterSummary = 'All Sports • All Time',
   liveCalibration = null,
+  parlayReport = null,
+  modelLearning = null,
+  selectedSeason = 'ALL',
+  windowFilter = 'ALL',
   slateAndRankSlot = null,
 }) => {
   const [trendTab, setTrendTab] = useState('cumulative');
   const [edgeTab, setEdgeTab] = useState('chart');
+
+  const parlayAnalytics = useMemo(() => {
+    const rawItems = Array.isArray(parlayReport?.items) ? parlayReport.items : [];
+    const todayEt = toEtDay(new Date()) || new Date().toISOString().slice(0, 10);
+    const daysBack =
+      windowFilter === '7' ? 7 : windowFilter === '30' ? 30 : windowFilter === '90' ? 90 : null;
+    let cutoffEt = null;
+    if (daysBack) {
+      const dt = new Date(`${todayEt}T12:00:00Z`);
+      dt.setUTCDate(dt.getUTCDate() - daysBack);
+      cutoffEt = dt.toISOString().slice(0, 10);
+    }
+
+    const filtered = rawItems.filter((item) => {
+      if (!item) return false;
+      if (selectedSeason && selectedSeason !== 'ALL' && item.season && item.season !== selectedSeason) {
+        return false;
+      }
+      if (cutoffEt && item.date_et && String(item.date_et).slice(0, 10) < cutoffEt) {
+        return false;
+      }
+      return true;
+    });
+
+    let wins = 0;
+    let losses = 0;
+    let pushes = 0;
+    let voids = 0;
+    let pending = 0;
+    let profitUnits = 0;
+
+    for (const item of filtered) {
+      const rawOut = String(item.outcome || 'PENDING').toUpperCase();
+      const norm = rawOut === 'WON (PARTIAL)' ? 'WON' : normalizeOutcome(rawOut);
+      if (norm === 'WON') wins += 1;
+      else if (norm === 'LOST') losses += 1;
+      else if (norm === 'PUSH') pushes += 1;
+      else if (norm === 'VOID') voids += 1;
+      else pending += 1;
+
+      if (
+        (norm === 'WON' || norm === 'LOST' || norm === 'PUSH') &&
+        item.roi_per_unit !== null &&
+        item.roi_per_unit !== undefined &&
+        Number.isFinite(Number(item.roi_per_unit))
+      ) {
+        profitUnits += Number(item.roi_per_unit);
+      }
+    }
+
+    const decided = wins + losses;
+    const settled = decided + pushes;
+    return {
+      items: filtered,
+      wins,
+      losses,
+      pushes,
+      voids,
+      pending,
+      decided,
+      settled,
+      recordText: `${wins}-${losses}${pushes > 0 ? `-${pushes}` : ''}`,
+      winRate: decided > 0 ? (wins / decided) * 100 : 0,
+      profitUnits: Number(profitUnits.toFixed(2)),
+      roiPct: settled > 0 ? (profitUnits / settled) * 100 : 0,
+    };
+  }, [parlayReport, selectedSeason, windowFilter]);
 
   const analytics = useMemo(() => {
     const safeHistory = Array.isArray(history) ? history : [];
@@ -368,19 +442,24 @@ const ModelPerformanceAnalytics = ({
       MONITOR: createBucketAccumulator('Monitor · May Improve'),
     };
     const timingClvPos = { BET_NOW: 0, WAIT_LINEUPS: 0, MONITOR: 0 };
+    const timingOpen = { BET_NOW: 0, WAIT_LINEUPS: 0, MONITOR: 0 };
 
-    for (const h of graded) {
+    for (const h of safeHistory) {
       const tAct = String(
         h?.bet_timing_action || h?.bet_timing?.action || h?.rec_json?.bet_timing?.action || ''
       )
         .trim()
         .toUpperCase();
-      if (timingAcc[tAct]) {
+      if (!timingAcc[tAct]) continue;
+      const normOut = normalizeOutcome(getRawOutcome(h));
+      if (normOut === 'WON' || normOut === 'LOST' || normOut === 'PUSH') {
         accumulateRowInto(timingAcc[tAct], h);
         const clv = parseFloat(h?.clv_points);
         if (Number.isFinite(clv) && clv > 0) {
           timingClvPos[tAct] += 1;
         }
+      } else if (normOut !== 'VOID') {
+        timingOpen[tAct] += 1;
       }
     }
 
@@ -450,24 +529,35 @@ const ModelPerformanceAnalytics = ({
       benchmark,
     });
 
+    const adaptiveDesc = (section, key, fallbackText) => {
+      const bucket = modelLearning?.[section]?.[key];
+      if (bucket && Number(bucket.n || 0) >= 3 && bucket.win_rate != null && bucket.roi != null) {
+        const wr = (Number(bucket.win_rate) * 100).toFixed(1);
+        const roiNum = Number(bucket.roi) * 100;
+        const roiStr = `${roiNum >= 0 ? '+' : ''}${roiNum.toFixed(1)}%`;
+        return `Season Adaptive: ${wr}% WR · ${roiStr} ROI (${bucket.n} graded)`;
+      }
+      return fallbackText;
+    };
+
     const ncaamEdgeInsights = {
       sampleCount: ncaamGraded.length,
       spreadRoles: [
-        withMeta(roleAcc.away_dog, 'Sweet Spot', 'emerald', 'Backtest: 63.5% WR · +20.9% ROI'),
-        withMeta(roleAcc.home_dog, 'Strong Edge', 'emerald', 'Backtest: 61.4% WR · +16.8% ROI'),
-        withMeta(roleAcc.home_fav, 'Solid', 'sky', 'Backtest: 56.7% WR · +8.2% ROI'),
-        withMeta(roleAcc.away_fav, 'Guarded', 'amber', 'Backtest: 39.5% WR · -24.6% ROI (Tight EV Gate)'),
+        withMeta(roleAcc.away_dog, 'Sweet Spot', 'emerald', adaptiveDesc('by_spread_role', 'away_dog', 'Away Dog quality boost · Clamped early season')),
+        withMeta(roleAcc.home_dog, 'Strong Edge', 'emerald', adaptiveDesc('by_spread_role', 'home_dog', 'Home Dog quality boost · Lower upset juice')),
+        withMeta(roleAcc.home_fav, 'Solid', 'sky', adaptiveDesc('by_spread_role', 'home_fav', 'Home Favorite · Balanced consensus gate')),
+        withMeta(roleAcc.away_fav, 'Guarded', 'amber', adaptiveDesc('by_spread_role', 'away_fav', 'Road Favorite guard · Extra EV & quality damping')),
       ],
       lineZones: [
-        withMeta(zoneAcc.tight_sp, 'Best Spread Zone', 'emerald', 'Backtest: 55.3% WR · +5.6% ROI'),
-        withMeta(zoneAcc.mid_tot, 'Best Total Zone', 'emerald', 'Backtest: 69.4% WR · +31.7% ROI'),
-        withMeta(zoneAcc.high_under, 'Pace Ceiling', 'sky', 'Backtest: 58.3% WR · +11.4% ROI'),
-        withMeta(zoneAcc.mid_sp, 'Damped / High-Bar', 'amber', 'Raised EV bar & shrink vs backdoor risk'),
-        withMeta(zoneAcc.high_over, 'Damped / High-Bar', 'amber', 'Backtest: 51.7% WR · -1.3% ROI (Capped Over)'),
+        withMeta(zoneAcc.tight_sp, 'Best Spread Zone', 'emerald', adaptiveDesc('by_spread_bucket', 'under_6', 'Tight Spread (<6) · +0.005 quality bonus')),
+        withMeta(zoneAcc.mid_tot, 'Best Total Zone', 'emerald', adaptiveDesc('by_total_zone', 'under_mid_140_152', 'Mid Totals (140–151.5) · Peak pacing zone')),
+        withMeta(zoneAcc.high_under, 'Pace Ceiling', 'sky', adaptiveDesc('by_total_zone', 'under_high_152+', 'High-Total Under · Curated pace regression')),
+        withMeta(zoneAcc.mid_sp, 'Mid Range', 'sky', adaptiveDesc('by_spread_bucket', 'mid_6_14', 'Mid Spread (6–13.5) · Quality boosted over 14+ blowouts')),
+        withMeta(zoneAcc.high_over, 'Capped / Guarded', 'amber', adaptiveDesc('by_total_zone', 'over_high_152+', 'High-Total Over · Tight edge cap vs inflated lines')),
       ],
       conviction: [
-        withMeta(convAcc.sharp, 'Top Multiplier', 'emerald', 'Backtest: 65.5% WR · +24.5% ROI'),
-        withMeta(convAcc.high_conf, 'Top Tier', 'sky', 'Filtered to highest lower-bound win chance'),
+        withMeta(convAcc.sharp, 'Top Multiplier', 'emerald', 'Sharp / RLM backed · 2+ sources required on Smart Risk'),
+        withMeta(convAcc.high_conf, 'Top Tier', 'sky', 'Filtered to highest lower-bound win probability'),
         withMeta(convAcc.med_conf, 'Baseline', 'slate', 'Standard qualifying picks (50–79 score)'),
       ],
     };
@@ -479,6 +569,7 @@ const ModelPerformanceAnalytics = ({
       return {
         ...fin,
         action,
+        openCount: timingOpen[action] || 0,
         posClvRate: posRate,
       };
     });
@@ -497,7 +588,7 @@ const ModelPerformanceAnalytics = ({
       timingBuckets,
       latestCumulativeUnits: settledDays.length > 0 ? settledDays[settledDays.length - 1].cumulativeUnits : 0,
     };
-  }, [history, allHistory, preConfHistory, preMarketHistory]);
+  }, [history, allHistory, preConfHistory, preMarketHistory, modelLearning]);
 
   return (
     <section className="space-y-6" aria-label="Model Performance Charts and Breakdowns">
@@ -839,7 +930,7 @@ const ModelPerformanceAnalytics = ({
                 Performance by Bet Type
               </h3>
               <p className="text-xs text-slate-400">
-                Return on 1-unit bets across Spreads, Over/Under Totals, Moneylines, and Parlays. Click a row to filter.
+                Return on 1-unit straight bets across Spreads, 1H Spreads, Over/Under Totals, 1H Totals, and Moneylines. Official Parlays are tracked separately below. Click a row to filter.
               </p>
             </div>
             {selectedMarket !== 'ALL' && onSelectMarket && (
@@ -889,6 +980,7 @@ const ModelPerformanceAnalytics = ({
 
               <div role="region" aria-labelledby="bet-type-heading" tabIndex={0} className="perf-table-wrapper">
                 <table className="perf-sticky-table w-full text-left border-collapse text-xs">
+                  <caption className="sr-only">Straight bet performance breakdown by bet type</caption>
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
                       <th scope="col" className="py-1.5 pr-3 font-medium">Bet Type</th>
@@ -1031,6 +1123,7 @@ const ModelPerformanceAnalytics = ({
             <div id="edge-panel-table" role="tabpanel" aria-labelledby="edge-tab-table">
               <div role="region" aria-labelledby="edge-cal-heading" tabIndex={0} className="perf-table-wrapper">
                 <table className="perf-sticky-table w-full text-left border-collapse text-xs">
+                  <caption className="sr-only">Win rate and ROI by projected edge bucket</caption>
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
                       <th scope="col" className="py-2 pr-3 font-medium">Edge Size</th>
@@ -1183,6 +1276,7 @@ const ModelPerformanceAnalytics = ({
             </h4>
             <div role="region" aria-labelledby="recent-form-heading" tabIndex={0} className="perf-table-wrapper">
               <table className="perf-sticky-table w-full text-left border-collapse text-xs">
+                <caption className="sr-only">Recent model performance across calendar timeframes</caption>
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
                     <th scope="col" className="py-2 pr-3 font-medium">Timeframe</th>
@@ -1214,6 +1308,186 @@ const ModelPerformanceAnalytics = ({
           </div>
         </div>
       </article>
+
+      {/* Row 3.25: Official Daily Parlay Performance (NCAAM) */}
+      {(selectedSport === 'NCAAM' || selectedSport === 'ALL') && (
+        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="parlay-perf-heading">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 id="parlay-perf-heading" className="text-base font-bold text-slate-100">
+                Official Daily Parlay Performance
+              </h3>
+              <p className="text-xs text-slate-400">
+                2-leg Official Parlays locked automatically 10 minutes before first leg tip-off. Tracked separately from straight 52.4% KPIs.
+              </p>
+            </div>
+            <span className="px-2.5 py-1 rounded-full border border-indigo-500/35 bg-indigo-500/15 text-indigo-200 text-xs font-semibold shrink-0">
+              {parlayAnalytics.settled > 0
+                ? `${parlayAnalytics.recordText} · ${formatSignedPct(parlayAnalytics.roiPct)} ROI`
+                : parlayAnalytics.pending > 0
+                  ? `${parlayAnalytics.pending} open`
+                  : 'Official Daily Parlay'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Parlay Record</div>
+              <div className="text-base font-mono font-extrabold text-slate-100">
+                {parlayAnalytics.recordText}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                {parlayAnalytics.pending > 0 ? `${parlayAnalytics.pending} open` : `${parlayAnalytics.settled} settled`}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Win %</div>
+              <div className="text-base font-mono font-extrabold text-slate-100">
+                {parlayAnalytics.decided > 0 ? formatPct(parlayAnalytics.winRate) : '—'}
+              </div>
+              <div className="text-[11px] text-slate-400">Plus-money combo odds</div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net Profit</div>
+              <div
+                className={`text-base font-mono font-extrabold ${
+                  parlayAnalytics.settled === 0
+                    ? 'text-slate-200'
+                    : parlayAnalytics.profitUnits >= 0
+                      ? 'text-emerald-400'
+                      : 'text-rose-400'
+                }`}
+              >
+                {parlayAnalytics.settled > 0 ? formatUnits(parlayAnalytics.profitUnits) : '—'}
+              </div>
+              <div className="text-[11px] text-slate-400">1u flat per official parlay</div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">ROI</div>
+              <div
+                className={`text-base font-mono font-extrabold ${
+                  parlayAnalytics.settled === 0
+                    ? 'text-slate-200'
+                    : parlayAnalytics.roiPct >= 0
+                      ? 'text-emerald-400'
+                      : 'text-rose-400'
+                }`}
+              >
+                {parlayAnalytics.settled > 0 ? formatSignedPct(parlayAnalytics.roiPct) : '—'}
+              </div>
+              <div className="text-[11px] text-slate-400">Supports partial pushes</div>
+            </div>
+          </div>
+
+          {parlayAnalytics.items.length === 0 ? (
+            <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 px-4 py-4 text-xs text-slate-400">
+              No Official Daily Parlays recorded for this filter yet. Once an official parlay reaches its 10-minute pre-tip lock window (or is locked from the Parlays tab), its legs, odds, and graded ROI appear here automatically.
+            </div>
+          ) : (
+            <div role="region" aria-labelledby="parlay-perf-heading" tabIndex={0} className="perf-table-wrapper max-h-[340px] rounded-xl border border-slate-800/80">
+              <table className="perf-sticky-table w-full text-left border-collapse text-xs">
+                <caption className="sr-only">Official Daily Parlay results and leg breakdown</caption>
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400">
+                    <th scope="col" className="py-2 px-3 font-medium">Date</th>
+                    <th scope="col" className="py-2 px-3 font-medium">Legs &amp; Scores</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Odds</th>
+                    <th scope="col" className="py-2 px-3 font-medium">Result</th>
+                    <th scope="col" className="py-2 px-3 font-medium text-right">Profit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {parlayAnalytics.items.slice(0, 25).map((item, idx) => {
+                    const outKey = String(item.outcome || 'PENDING').toUpperCase();
+                    const normKey = outKey === 'WON (PARTIAL)' ? 'WON' : (normalizeOutcome(outKey) || 'PENDING');
+                    const rowSurface = getOutcomeOutlineClasses(normKey, 'bet');
+                    const badgeCls =
+                      normKey === 'WON'
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                        : normKey === 'LOST'
+                          ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
+                          : normKey === 'PUSH'
+                            ? 'bg-slate-600/25 text-slate-300 border-slate-500/40'
+                            : normKey === 'VOID'
+                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                              : 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+                    const outLabel =
+                      outKey === 'WON (PARTIAL)'
+                        ? 'Won (Partial)'
+                        : normKey === 'WON'
+                          ? 'Won'
+                          : normKey === 'LOST'
+                            ? 'Lost'
+                            : normKey === 'PUSH'
+                              ? 'Push'
+                              : normKey === 'VOID'
+                                ? 'Void'
+                                : 'Pending';
+                    const oddsStr = formatAmericanOdds(item.american_odds) || '—';
+                    const legs = Array.isArray(item.legs) ? item.legs : [];
+
+                    return (
+                      <tr
+                        key={item.id || `${item.date_et}-${idx}`}
+                        className={`${rowSurface.outcome ? rowSurface.rowCls : 'hover:bg-slate-900/50'} transition-colors`}
+                      >
+                        <th scope="row" className={`py-2.5 px-3 font-mono text-slate-300 whitespace-nowrap font-normal ${rowSurface.stripeCls}`}>
+                          {item.date_et || '—'}
+                        </th>
+                        <td className="py-2.5 px-3 min-w-[240px]">
+                          <div className="space-y-1">
+                            {legs.map((lg, lIdx) => {
+                              const lgOut = String(lg?.outcome || 'PENDING').toUpperCase();
+                              const lgCls =
+                                lgOut === 'WON'
+                                  ? 'text-emerald-300'
+                                  : lgOut === 'LOST'
+                                    ? 'text-rose-300'
+                                    : lgOut === 'PUSH'
+                                      ? 'text-slate-400'
+                                      : 'text-sky-300';
+                              const lgOdds = formatAmericanOdds(lg?.price);
+                              return (
+                                <div key={lg?.event_id || lIdx} className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                  <span className="font-semibold text-slate-100">
+                                    {lg?.team_pick || lg?.matchup || `Leg ${lIdx + 1}`}
+                                  </span>
+                                  {lgOdds && <span className="font-mono text-slate-400">({lgOdds})</span>}
+                                  <span className={`font-mono font-bold ${lgCls}`}>{lgOut}</span>
+                                  {lg?.score && <span className="font-mono text-slate-500">{lg.score}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-semibold text-indigo-200 whitespace-nowrap">
+                          {oddsStr}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badgeCls}`}>
+                            {outLabel}
+                          </span>
+                        </td>
+                        <td
+                          className={`py-2.5 px-3 text-right font-mono font-bold whitespace-nowrap ${
+                            normKey === 'WON'
+                              ? 'text-emerald-400'
+                              : normKey === 'LOST'
+                                ? 'text-rose-400'
+                                : 'text-slate-400'
+                          }`}
+                        >
+                          {normKey === 'PENDING' || item.roi_per_unit == null ? '—' : formatUnits(item.roi_per_unit)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </article>
+      )}
 
       {/* Row 3.5: NCAAM Model Insights & Sweet Spots */}
       {(selectedSport === 'NCAAM' || selectedSport === 'ALL') && (() => {
@@ -1280,11 +1554,16 @@ const ModelPerformanceAnalytics = ({
                   NCAAM Model Insights &amp; Sweet Spots
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Compares your live graded NCAAM picks ({insights.sampleCount.toLocaleString()} settled in current filter) against 1,600-game walk-forward benchmarks so you know which spots deserve trust.
+                  Live graded NCAAM picks ({insights.sampleCount.toLocaleString()} settled in current filter) broken down across role edges, active Early-Season &amp; Smart Risk (0.5u) guardrails, and Sharp/RLM multipliers.
                 </p>
               </div>
-              <span className="px-2.5 py-1 rounded-full border border-indigo-500/35 bg-indigo-500/15 text-indigo-200 text-xs font-semibold">
-                NCAAM Strategy Intel
+              <span
+                className="px-2.5 py-1 rounded-full border border-indigo-500/35 bg-indigo-500/15 text-indigo-200 text-xs font-semibold shrink-0"
+                title={modelLearning?.updated_at ? `Last adaptive learning sync: ${modelLearning.updated_at}` : undefined}
+              >
+                {modelLearning?.status === 'active'
+                  ? `Adaptive Learning · ${Number(modelLearning.total_graded || 0).toLocaleString()} graded`
+                  : 'NCAAM Strategy Intel'}
               </span>
             </div>
 
@@ -1309,8 +1588,8 @@ const ModelPerformanceAnalytics = ({
         );
       })()}
 
-      {/* When to Bet · Closing Line Check (shown once graded rows have timing tags) */}
-      {analytics.timingBuckets.some((b) => b.settled > 0) && (
+      {/* When to Bet · Closing Line Check (shown when graded or open rows have timing tags) */}
+      {analytics.timingBuckets.some((b) => b.settled > 0 || b.openCount > 0) && (
         <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="timing-clv-heading">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
@@ -1318,7 +1597,7 @@ const ModelPerformanceAnalytics = ({
                 When to Bet · Closing Line Check
               </h3>
               <p className="text-xs text-slate-400">
-                Tracks whether &ldquo;Bet Now&rdquo; calls beat the final closing line and how each timing signal performs.
+                Tracks whether &ldquo;Bet Now&rdquo; calls beat the final closing line and shows open &amp; settled timing signals.
               </p>
             </div>
             <span className="px-2.5 py-1 rounded-full border border-emerald-500/35 bg-emerald-500/15 text-emerald-200 text-xs font-semibold">
@@ -1333,6 +1612,7 @@ const ModelPerformanceAnalytics = ({
                 <tr className="border-b border-slate-800 text-slate-400">
                   <th scope="col" className="py-2 pr-3 font-medium">Timing Signal</th>
                   <th scope="col" className="py-2 px-3 font-medium text-right">Settled</th>
+                  <th scope="col" className="py-2 px-3 font-medium text-right">Open</th>
                   <th scope="col" className="py-2 px-3 font-medium">Record</th>
                   <th scope="col" className="py-2 px-3 font-medium text-right">Win %</th>
                   <th scope="col" className="py-2 px-3 font-medium text-right">ROI</th>
@@ -1342,7 +1622,7 @@ const ModelPerformanceAnalytics = ({
               </thead>
               <tbody className="divide-y divide-slate-800/70">
                 {analytics.timingBuckets
-                  .filter((b) => b.settled > 0)
+                  .filter((b) => b.settled > 0 || b.openCount > 0)
                   .map((b) => {
                     const clvCls =
                       b.avgClv === null
@@ -1366,7 +1646,8 @@ const ModelPerformanceAnalytics = ({
                           </span>
                         </th>
                         <td className="py-2 px-3 text-right text-slate-300">{b.settled}</td>
-                        <td className="py-2 px-3 font-mono text-slate-200">{b.recordText}</td>
+                        <td className="py-2 px-3 text-right font-mono text-sky-300">{b.openCount || 0}</td>
+                        <td className="py-2 px-3 font-mono text-slate-200">{b.settled > 0 ? b.recordText : 'Pending'}</td>
                         <td className={`py-2 px-3 text-right font-mono font-semibold ${b.winRate >= 52.4 ? 'text-emerald-300' : 'text-slate-200'}`}>
                           {b.decided > 0 ? formatPct(b.winRate) : '—'}
                         </td>
@@ -1399,6 +1680,14 @@ const ModelPerformanceAnalytics = ({
         const liveWtPct = Math.round((Number(params.live_weight_scale ?? 0.85)) * 100);
         const sigmaSpread = Number(params.sigma_spread_rem ?? 10.5).toFixed(1);
         const sigmaTotal = Number(params.sigma_total_rem ?? 13.5).toFixed(1);
+        const firstHalfPct = Math.round(Number(params.first_half_share ?? 0.47) * 100);
+        const secondHalfPct = 100 - firstHalfPct;
+        const foulBoost = Number(params.late_foul_boost_pts ?? 4.5).toFixed(1);
+        const blowoutDrag = Number(params.late_blowout_drag_pts ?? 3.0).toFixed(1);
+        const otExtra = Number(params.ot_extra_pts ?? 14.5).toFixed(1);
+        const calUpdatedLabel = cal.updated_at
+          ? new Date(cal.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' })
+          : null;
         const bins = Array.isArray(cal.bins) ? cal.bins : [];
 
         return (
@@ -1409,7 +1698,7 @@ const ModelPerformanceAnalytics = ({
                   Live Win-Chance Accuracy
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Checks whether our live in-game win % predictions match how games actually finish.
+                  Checks whether our live in-game win % and CBB pacing curves match how games actually finish.
                 </p>
               </div>
               <span
@@ -1461,8 +1750,13 @@ const ModelPerformanceAnalytics = ({
                 <div className="text-sm font-mono font-bold text-indigo-300">
                   {liveWtPct}% live weight · ±{sigmaSpread} spread · ±{sigmaTotal} total
                 </div>
+                <div className="text-[11px] font-mono text-slate-300">
+                  {firstHalfPct}%/{secondHalfPct}% 1H/2H · +{foulBoost} foul · -{blowoutDrag} blowout · +{otExtra} OT
+                </div>
                 <div className="text-[11px] text-slate-400">
-                  {cal.active ? 'Auto-tuned from finished live games' : 'Using default pregame + live blend'}
+                  {cal.active
+                    ? `Auto-tuned from finished live games${calUpdatedLabel ? ` (${calUpdatedLabel})` : ''}`
+                    : 'Using CBB 1H/2H & late-game defaults'}
                 </div>
               </div>
             </div>
@@ -1501,6 +1795,7 @@ const ModelPerformanceAnalytics = ({
 
                 <div role="region" aria-labelledby="live-cal-heading" tabIndex={0} className="perf-table-wrapper">
                 <table className="perf-sticky-table w-full text-left border-collapse text-xs">
+                  <caption className="sr-only">Live win probability calibration bins vs actual outcomes</caption>
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400">
                       <th scope="col" className="py-1.5 pr-3 font-medium">Predicted Chance</th>

@@ -1827,6 +1827,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         rsi.rank,
         rsi.prediction_id,
         rsi.event_id,
+        rsi.snapshot AS snapshot,
         COALESCE(NULLIF(TRIM(rsi.market_type), ''), m1.market_type, m2.market_type) AS market_type,
         COALESCE(NULLIF(TRIM(rsi.selection), ''), m1.selection, m2.selection) AS selection,
         COALESCE(rsi.bet_line, m1.bet_line, m2.bet_line) AS bet_line,
@@ -1839,6 +1840,8 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         (CASE WHEN COALESCE(gr.away_score, e.away_score) IS NOT NULL AND COALESCE(gr.home_score, e.home_score) IS NOT NULL
               THEN (COALESCE(gr.away_score, e.away_score) || '-' || COALESCE(gr.home_score, e.home_score))
               ELSE NULL END) AS score,
+        gr.home_score_1h,
+        gr.away_score_1h,
         COALESCE(gr.final, FALSE) AS final,
         COALESCE(m1.id, m2.id) AS id,
         COALESCE(m1.analyzed_at, m2.analyzed_at) AS analyzed_at,
@@ -1848,6 +1851,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
         COALESCE(m1.confidence_0_100, m2.confidence_0_100) AS confidence_0_100,
         COALESCE(m1.outcome, m2.outcome) AS outcome,
         COALESCE(m1.clv_points, m2.clv_points) AS clv_points,
+        COALESCE(m1.close_line, m2.close_line) AS close_line,
         COALESCE(m1.edge_points, m2.edge_points) AS edge_points,
         COALESCE(m1.pick, m2.pick) AS pick,
         ws.source,
@@ -1858,7 +1862,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
     LEFT JOIN game_results gr ON gr.event_id = e.id
     LEFT JOIN model_predictions m1 ON rsi.prediction_id = m1.id
     LEFT JOIN LATERAL (
-        SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100, outcome, clv_points, edge_points, pick,
+        SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100, outcome, clv_points, close_line, edge_points, pick,
                market_type, selection, bet_line, bet_price, price
         FROM model_predictions m
         WHERE m.event_id = rsi.event_id
@@ -1914,6 +1918,8 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                 (CASE WHEN COALESCE(gr.away_score, e.away_score) IS NOT NULL AND COALESCE(gr.home_score, e.home_score) IS NOT NULL
                       THEN (COALESCE(gr.away_score, e.away_score) || '-' || COALESCE(gr.home_score, e.home_score))
                       ELSE NULL END) AS score,
+                gr.home_score_1h,
+                gr.away_score_1h,
                 COALESCE(gr.final, FALSE) AS final,
                 m.id AS id,
                 m.id AS prediction_id,
@@ -1924,6 +1930,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                 m.confidence_0_100 AS pred_conf,
                 m.outcome AS pred_outcome,
                 m.clv_points,
+                m.close_line,
                 m.edge_points,
                 m.bet_line AS pred_line,
                 COALESCE(m.bet_price, m.price) AS pred_price,
@@ -1935,7 +1942,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
             LEFT JOIN game_results gr ON gr.event_id = d.event_id
             LEFT JOIN LATERAL (
                 SELECT id, analyzed_at, mu_final, win_prob, ev_per_unit, confidence_0_100,
-                       outcome, clv_points, edge_points, bet_line, bet_price, price,
+                       outcome, clv_points, close_line, edge_points, bet_line, bet_price, price,
                        selection, market_type, pick
                 FROM model_predictions mp
                 WHERE mp.event_id = d.event_id
@@ -2035,6 +2042,7 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                     "win_prob_lb10": rec.get("win_prob_lb10"),
                     "confidence_0_100": conf_val,
                     "clv_points": rd.get("clv_points") if mkt_matches else None,
+                    "close_line": rd.get("close_line") if mkt_matches else None,
                     "edge_points": rd.get("edge_points") if mkt_matches else None,
                     "outcome": rd.get("pred_outcome") if mkt_matches else "PENDING",
                     "away_team": rd.get("away_team"),
@@ -2043,11 +2051,18 @@ def fetch_recommended_history_canonical(limit=100, league=None, user_id=None, lo
                     "analyzed_at": rd.get("analyzed_at") or rd.get("computed_at"),
                     "created_at": rd.get("computed_at"),
                     "score": rd.get("score"),
+                    "home_score_1h": rd.get("home_score_1h"),
+                    "away_score_1h": rd.get("away_score_1h"),
                     "final": rd.get("final"),
                     "movement_tags": rec.get("movement_tags"),
                     "bet_timing": rec.get("bet_timing"),
                     "top6_eligible": rec.get("top6_eligible"),
                     "quality_score": rec.get("quality_score"),
+                    "is_smart_risk": rec.get("is_smart_risk"),
+                    "risk_tier": rec.get("risk_tier"),
+                    "suggested_units": rec.get("suggested_units") if rec.get("suggested_units") is not None else rec.get("recommended_units"),
+                    "conviction_sources": rec.get("conviction_sources"),
+                    "conviction_sources_total": rec.get("conviction_sources_total"),
                     "source": "daily_top_picks",
                     "canonical_source": "daily_top_picks",
                 })

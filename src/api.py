@@ -1,5 +1,5 @@
 from src.auth import get_current_user
-from fastapi import FastAPI, HTTPException, Request, Security, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, Response, Security, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -1986,6 +1986,7 @@ async def grade_research_history(
 
 @app.get("/api/research/history")
 async def get_history(
+    response: Response,
     limit: int = 2000,
     lookback_days: int = 400,
     sport: Optional[str] = None,
@@ -2003,6 +2004,7 @@ async def get_history(
     Notes:
       We fall back to unscoped history to support legacy single-user rows.
     """
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     user_id = user.get("sub")
     try:
         limit = int(limit)
@@ -2584,6 +2586,34 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
                     stale_refresh_needed = True
     res = publish_slate() if due else {"status": "no_cutoffs_due"}
     res["stale_refresh_needed"] = stale_refresh_needed
+    parlay_locked = False
+    try:
+        with get_db_connection() as conn:
+            has_locked = False
+            try:
+                lk = _exec(
+                    conn,
+                    """
+                    SELECT 1 FROM recommended_parlays
+                    WHERE league = 'NCAAM'
+                      AND date_et = (NOW() AT TIME ZONE 'America/New_York')::date::text
+                      AND kind = 'ML2'
+                      AND locked_at IS NOT NULL
+                    LIMIT 1
+                    """,
+                ).fetchone()
+                has_locked = bool(lk)
+            except Exception:
+                has_locked = False
+        if has_locked:
+            parlay_locked = True
+        else:
+            parlay_res = _compute_ncaam_parlays_today(persist=False)
+            odp = parlay_res.get("official_daily_parlay") if isinstance(parlay_res, dict) else None
+            parlay_locked = bool(isinstance(odp, dict) and odp.get("is_locked"))
+    except Exception:
+        parlay_locked = False
+    res["parlay_locked"] = parlay_locked
     return res
 
 
@@ -5215,13 +5245,14 @@ def _yesterday_items_from_predictions(conn, yday: str):
 
 
 @app.get("/api/ncaam/recommended-slate/yesterday")
-async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current_user)):
+async def get_ncaam_recommended_slate_yesterday(response: Response, user: dict = Depends(get_current_user)):
     """Return yesterday's recommended picks (Top N) and their outcomes.
 
     Selection rule:
     - Read the persisted recommended_slates row for yesterday.
     - Fall back cleanly to yesterday's actionable daily_top_picks, then model_predictions.
     """
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     from src.database import get_db_connection, _exec
     from src.utils.model_performance import (
         is_decided,
@@ -5250,29 +5281,34 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
             rows = _exec(conn, """
               SELECT r.rank,
                      r.prediction_id,
+                     r.snapshot AS snapshot,
                      COALESCE(m1.id, m2.id) as linked_prediction_id,
                      COALESCE(m1.event_id, m2.event_id, r.event_id) as event_id,
                      COALESCE(NULLIF(TRIM(r.market_type), ''), m1.market_type, m2.market_type) as market_type,
                      COALESCE(NULLIF(TRIM(r.selection), ''), m1.selection, m2.selection) as selection,
                      COALESCE(r.bet_line, m1.bet_line, m2.bet_line) as bet_line,
                      COALESCE(r.bet_price, m1.bet_price, m1.price, m2.bet_price, m2.price) as price,
-                     COALESCE((to_jsonb(r)->'snapshot'->>'ev')::float,m1.ev_per_unit, m2.ev_per_unit) as ev_per_unit,
-                     COALESCE((to_jsonb(r)->'snapshot'->>'confidence_0_100')::int,m1.confidence_0_100, m2.confidence_0_100) as confidence_0_100,
+                     COALESCE((to_jsonb(r)->'snapshot'->>'ev_per_unit')::float, (to_jsonb(r)->'snapshot'->>'ev')::float, m1.ev_per_unit, m2.ev_per_unit) as ev_per_unit,
+                     COALESCE((to_jsonb(r)->'snapshot'->>'confidence_0_100')::int, m1.confidence_0_100, m2.confidence_0_100) as confidence_0_100,
                      COALESCE(m1.clv_points, m2.clv_points) as clv_points,
                      COALESCE(m1.outcome, m2.outcome) as outcome,
                      COALESCE(m1.pick, m2.pick) as pick,
                      e.league as sport,
                      e.away_team, e.home_team, e.start_time,
+                     COALESCE(gr.final, FALSE) AS final,
+                     gr.home_score_1h,
+                     gr.away_score_1h,
                      (CASE WHEN gr.away_score IS NOT NULL AND gr.home_score IS NOT NULL THEN (gr.away_score || '-' || gr.home_score) ELSE NULL END) as score
               FROM recommended_slate_items r
               LEFT JOIN model_predictions m1 ON m1.id=r.prediction_id
               LEFT JOIN LATERAL (
                 SELECT m.*
                 FROM model_predictions m
-                WHERE m1.id IS NULL AND to_jsonb(r)->>'snapshot' IS NULL
+                WHERE m1.id IS NULL
                   AND r.event_id IS NOT NULL AND m.event_id=r.event_id
-                  AND (r.bet_line IS NULL OR m.bet_line=r.bet_line)
-                  AND (NULLIF(TRIM(r.market_type), '') IS NULL OR UPPER(COALESCE(m.market_type, ''))=UPPER(TRIM(r.market_type)))
+                  AND (r.bet_line IS NULL OR ABS(m.bet_line - r.bet_line) < 0.01)
+                  AND (NULLIF(TRIM(r.market_type), '') IS NULL OR UPPER(COALESCE(m.market_type, ''))=UPPER(TRIM(r.market_type))
+                       OR (UPPER(TRIM(r.market_type)) IN ('H2H','ML','MONEYLINE') AND UPPER(COALESCE(m.market_type, '')) IN ('H2H','ML','MONEYLINE')))
                   AND (r.selection IS NULL OR m.selection=r.selection)
                   AND (r.bet_price IS NULL OR COALESCE(m.bet_price, m.price)=r.bet_price)
                 ORDER BY
@@ -5293,9 +5329,9 @@ async def get_ncaam_recommended_slate_yesterday(user: dict = Depends(get_current
 
     def classify(mt: str) -> str:
         norm = normalize_market_type(mt)
-        return norm if norm in ('SPREAD', 'TOTAL', 'MONEYLINE', 'PARLAY') else 'OTHER'
+        return norm if norm in ('SPREAD', 'SPREAD_1H', 'TOTAL', 'TOTAL_1H', 'MONEYLINE', 'PARLAY') else 'OTHER'
 
-    straight = [x for x in items if classify(x.get('market_type')) in ('SPREAD', 'TOTAL')]
+    straight = [x for x in items if classify(x.get('market_type')) in ('SPREAD', 'SPREAD_1H', 'TOTAL', 'TOTAL_1H')]
     ml_parlay = [x for x in items if classify(x.get('market_type')) in ('MONEYLINE', 'PARLAY')]
 
     def record(xs):
@@ -5783,8 +5819,7 @@ async def get_ncaam_anchor_ml_today(
     }
 
 
-@app.get("/api/ncaam/parlays/today")
-async def get_ncaam_parlays_today(
+def _compute_ncaam_parlays_today(
     min_ev_per_unit: float = 0.02,
     parlay_odds_lo: int = -120,
     parlay_odds_hi: int = 800,
@@ -5795,18 +5830,7 @@ async def get_ncaam_parlays_today(
     date: Optional[str] = None,
     persist: bool = False,
 ):
-    """2-leg ML parlay recommendations for today's NCAAM slate.
-
-    Source: model_predictions (Moneyline only). Read-only.
-
-    strategy='all'     : all ML picks that pass EV gate (default)
-    strategy='home_fav': only home-team favorites (pick==home_team, price<0)
-                         Combined odds band defaults to -180..+250
-
-    Returns two lists:
-    - high_confidence: highest P(win) combos
-    - payout_band: best EV combos within a reasonable payout range
-    """
+    """Compute (and optionally lock/persist) 2-leg and 3-leg NCAAM parlays."""
     import re
     if int(max_legs) not in (2, 3):
         raise HTTPException(status_code=400, detail="Only 2-leg and 3-leg parlays are supported")
@@ -6615,7 +6639,10 @@ async def get_ncaam_parlays_today(
 
                 now_utc = datetime.now(_tz.utc)
                 should_lock = bool(persist) or (
-                    earliest_tip is not None and earliest_tip <= (now_utc + _td(minutes=10))
+                    int(days_ago or 0) == 0
+                    and not target_date
+                    and earliest_tip is not None
+                    and (now_utc - _td(minutes=15)) <= earliest_tip <= (now_utc + _td(minutes=10))
                 )
 
                 official_daily_parlay = {
@@ -6708,147 +6735,344 @@ async def get_ncaam_parlays_today(
     }
 
 
+@app.get("/api/ncaam/parlays/today")
+async def get_ncaam_parlays_today(
+    response: Response,
+    min_ev_per_unit: float = 0.02,
+    parlay_odds_lo: int = -120,
+    parlay_odds_hi: int = 800,
+    max_legs: int = 2,
+    limit_legs: int = 80,
+    strategy: str = "all",  # 'all' | 'home_fav'
+    days_ago: int = 0,
+    date: Optional[str] = None,
+    persist: bool = False,
+):
+    """2-leg and 3-leg parlay recommendations for today's NCAAM slate."""
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return _compute_ncaam_parlays_today(
+        min_ev_per_unit=min_ev_per_unit,
+        parlay_odds_lo=parlay_odds_lo,
+        parlay_odds_hi=parlay_odds_hi,
+        max_legs=max_legs,
+        limit_legs=limit_legs,
+        strategy=strategy,
+        days_ago=days_ago,
+        date=date,
+        persist=persist,
+    )
+
+
 @app.get("/api/ncaam/parlays/performance-report")
-async def ncaam_parlay_performance_report(days: int = 30):
-    """Performance for *recommended* 2-leg ML parlays.
-
-    Uses recommended_parlays table (populated by /api/ncaam/parlays/today?persist=1).
-    """
+async def ncaam_parlay_performance_report(
+    response: Response,
+    days: int = 400,
+    season: Optional[str] = None,
+):
+    """Performance report for Official Daily 2-leg NCAAM parlays (spread/total/ML/1H legs)."""
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     from src.database import get_db_connection, _exec
-
-    def payout_per_unit(price: int) -> float:
-        if price is None:
-            return 0.0
-        p = int(price)
-        # payout when risking 1u
-        return (p / 100.0) if p > 0 else (100.0 / abs(p))
-
-    def parlay_outcome(o1: str, o2: str):
-        a = (o1 or '').upper()
-        b = (o2 or '').upper()
-        decided = {'WON','LOST','PUSH'}
-        if a not in decided or b not in decided:
-            return 'PENDING'
-        if a == 'LOST' or b == 'LOST':
-            return 'LOST'
-        # ML legs generally don't push; keep PUSH logic for completeness
-        if a == 'PUSH' and b == 'PUSH':
-            return 'PUSH'
-        if a == 'PUSH' or b == 'PUSH':
-            return 'PUSH'
-        return 'WON'
+    from src.services.ncaam_parlay_service import (
+        combine_leg_outcomes,
+        dec_from_american,
+        grade_parlay_leg_from_scores,
+    )
+    from src.utils.model_performance import get_row_season, payout_per_unit
 
     try:
         days = int(days)
     except Exception:
-        days = 30
-    days = max(3, min(days, 180))
+        days = 400
+    days = max(1, min(days, 1200))
 
+    season_filter = (
+        str(season).strip()
+        if season is not None and str(season).strip() and str(season).strip().upper() != "ALL"
+        else None
+    )
+
+    rows = []
     with get_db_connection() as conn:
-        rows = _exec(conn, """
-          SELECT
-            p.id,
-            p.date_et,
-            p.american_odds,
-            p.p_win,
-            p.ev,
-            p.bucket,
-            p.event_id_1,
-            p.event_id_2,
-            e1.away_team AS away1,
-            e1.home_team AS home1,
-            e2.away_team AS away2,
-            e2.home_team AS home2,
-            COALESCE(
-              m1.outcome,
-              CASE
-                WHEN COALESCE(g1.final, FALSE) = TRUE AND g1.home_score IS NOT NULL AND g1.away_score IS NOT NULL THEN
-                  CASE WHEN g1.home_score > g1.away_score THEN 'WON'
-                       WHEN g1.home_score < g1.away_score THEN 'LOST'
-                       ELSE 'PUSH' END
-                ELSE NULL
-              END
-            ) AS o1,
-            COALESCE(
-              m2.outcome,
-              CASE
-                WHEN COALESCE(g2.final, FALSE) = TRUE AND g2.home_score IS NOT NULL AND g2.away_score IS NOT NULL THEN
-                  CASE WHEN g2.home_score > g2.away_score THEN 'WON'
-                       WHEN g2.home_score < g2.away_score THEN 'LOST'
-                       ELSE 'PUSH' END
-                ELSE NULL
-              END
-            ) AS o2
-          FROM recommended_parlays p
-          JOIN events e1 ON e1.id=p.event_id_1
-          JOIN events e2 ON e2.id=p.event_id_2
-          LEFT JOIN game_results g1 ON g1.event_id=p.event_id_1
-          LEFT JOIN game_results g2 ON g2.event_id=p.event_id_2
-          LEFT JOIN LATERAL (
-            SELECT outcome
-            FROM model_predictions
-            WHERE event_id=p.event_id_1 AND UPPER(COALESCE(market_type,'')) IN ('MONEYLINE','ML')
-            ORDER BY analyzed_at DESC
-            LIMIT 1
-          ) m1 ON TRUE
-          LEFT JOIN LATERAL (
-            SELECT outcome
-            FROM model_predictions
-            WHERE event_id=p.event_id_2 AND UPPER(COALESCE(market_type,'')) IN ('MONEYLINE','ML')
-            ORDER BY analyzed_at DESC
-            LIMIT 1
-          ) m2 ON TRUE
-          WHERE p.league='NCAAM' AND p.kind='ML2'
-            AND p.created_at > NOW() - (%(d)s || ' days')::interval
-          ORDER BY p.created_at DESC
-          LIMIT 1000
-        """, {"d": int(days)}).fetchall()
+        try:
+            rows = _exec(
+                conn,
+                """
+                SELECT
+                  p.id,
+                  p.date_et,
+                  p.american_odds,
+                  p.p_win,
+                  p.ev,
+                  p.bucket,
+                  p.event_id_1,
+                  p.event_id_2,
+                  p.parlay_json,
+                  p.locked_at,
+                  p.created_at
+                FROM recommended_parlays p
+                WHERE p.league = 'NCAAM'
+                  AND p.kind = 'ML2'
+                  AND (
+                    p.date_et >= (NOW() AT TIME ZONE 'America/New_York' - (%(d)s || ' days')::interval)::date::text
+                    OR p.created_at >= NOW() - (%(d)s || ' days')::interval
+                  )
+                ORDER BY p.date_et DESC, COALESCE(p.locked_at, p.created_at) DESC
+                LIMIT 1000
+                """,
+                {"d": int(days)},
+            ).fetchall()
+        except Exception:
+            rows = []
+
+        parsed_rows = []
+        event_ids_set = set()
+        legacy_event_ids_set = set()
+
+        for raw_r in rows or []:
+            d = dict(raw_r)
+            pj = d.get("parlay_json")
+            if isinstance(pj, str):
+                try:
+                    pj = json.loads(pj)
+                except Exception:
+                    pj = None
+            raw_legs = pj.get("legs") if isinstance(pj, dict) and isinstance(pj.get("legs"), list) else None
+            if raw_legs:
+                for lg in raw_legs:
+                    if isinstance(lg, dict) and lg.get("event_id"):
+                        event_ids_set.add(str(lg["event_id"]))
+            else:
+                for eid_col in ("event_id_1", "event_id_2"):
+                    if d.get(eid_col):
+                        eid_s = str(d[eid_col])
+                        event_ids_set.add(eid_s)
+                        legacy_event_ids_set.add(eid_s)
+            parsed_rows.append((d, pj if isinstance(pj, dict) else {}, raw_legs))
+
+        gr_map = {}
+        if event_ids_set:
+            try:
+                gr_rows = _exec(
+                    conn,
+                    """
+                    SELECT
+                      e.id AS event_id,
+                      e.home_team,
+                      e.away_team,
+                      e.start_time,
+                      gr.home_score,
+                      gr.away_score,
+                      gr.home_score_1h,
+                      gr.away_score_1h,
+                      COALESCE(gr.final, FALSE) AS final
+                    FROM events e
+                    LEFT JOIN game_results gr ON gr.event_id = e.id
+                    WHERE e.id = ANY(%s)
+                    """,
+                    (list(event_ids_set),),
+                ).fetchall()
+                for gr in gr_rows or []:
+                    gd = dict(gr)
+                    gr_map[str(gd["event_id"])] = gd
+            except Exception:
+                gr_map = {}
+
+        legacy_pred_map = {}
+        if legacy_event_ids_set:
+            try:
+                mp_rows = _exec(
+                    conn,
+                    """
+                    SELECT DISTINCT ON (event_id)
+                      event_id, pick, selection, price, bet_price, outcome
+                    FROM model_predictions
+                    WHERE event_id = ANY(%s)
+                      AND UPPER(COALESCE(market_type, '')) IN ('MONEYLINE', 'ML', 'H2H')
+                    ORDER BY event_id, analyzed_at DESC
+                    """,
+                    (list(legacy_event_ids_set),),
+                ).fetchall()
+                for mr in mp_rows or []:
+                    md = dict(mr)
+                    legacy_pred_map[str(md["event_id"])] = md
+            except Exception:
+                legacy_pred_map = {}
 
     items = []
-    for r in rows or []:
-        d = dict(r)
-        out = parlay_outcome(d.get('o1'), d.get('o2'))
-        price = d.get('american_odds')
+    for d, pj, raw_legs in parsed_rows:
+        date_et_val = str(d.get("date_et") or "")[:10]
+        if not date_et_val and d.get("created_at"):
+            date_et_val = str(d.get("created_at"))[:10]
+        row_season = get_row_season({"sport": "NCAAM", "day_et": date_et_val})
+        if season_filter and row_season != season_filter:
+            continue
+
+        graded_legs = []
+        if raw_legs:
+            for lg in raw_legs:
+                if not isinstance(lg, dict):
+                    continue
+                eid_s = str(lg.get("event_id") or "")
+                gr = gr_map.get(eid_s) or {}
+                mkt_u = str(lg.get("market_type") or "MONEYLINE").upper()
+                existing_out = str(lg.get("outcome") or "PENDING").upper()
+                leg_out = existing_out if existing_out in ("WON", "LOST", "PUSH", "VOID") else "PENDING"
+
+                is_1h = "1H" in mkt_u
+                if is_1h:
+                    if gr.get("home_score_1h") is not None and gr.get("away_score_1h") is not None:
+                        scored_out = grade_parlay_leg_from_scores(lg, gr)
+                        if scored_out in ("WON", "LOST", "PUSH", "VOID"):
+                            leg_out = scored_out
+                elif bool(gr.get("final")) and gr.get("home_score") is not None and gr.get("away_score") is not None:
+                    scored_out = grade_parlay_leg_from_scores(lg, gr)
+                    if scored_out in ("WON", "LOST", "PUSH", "VOID"):
+                        leg_out = scored_out
+
+                score_txt = None
+                if is_1h and gr.get("away_score_1h") is not None and gr.get("home_score_1h") is not None:
+                    score_txt = f"{gr['away_score_1h']}-{gr['home_score_1h']}"
+                elif gr.get("away_score") is not None and gr.get("home_score") is not None:
+                    score_txt = f"{gr['away_score']}-{gr['home_score']}"
+
+                away_nm = lg.get("away_team") or gr.get("away_team") or ""
+                home_nm = lg.get("home_team") or gr.get("home_team") or ""
+                matchup_txt = lg.get("matchup") or (f"{away_nm} @ {home_nm}" if away_nm and home_nm else "")
+                team_pick_txt = lg.get("team_pick") or lg.get("selection") or lg.get("pick") or matchup_txt
+
+                graded_legs.append({
+                    "event_id": eid_s or None,
+                    "matchup": matchup_txt,
+                    "team_pick": team_pick_txt,
+                    "market_type": lg.get("market_type") or "MONEYLINE",
+                    "side": lg.get("side"),
+                    "market_line": lg.get("market_line"),
+                    "price": lg.get("price"),
+                    "book": lg.get("book"),
+                    "outcome": leg_out,
+                    "score": score_txt,
+                })
+        else:
+            for eid_col in ("event_id_1", "event_id_2"):
+                eid_s = str(d.get(eid_col) or "")
+                gr = gr_map.get(eid_s) or {}
+                mp = legacy_pred_map.get(eid_s) or {}
+                home_nm = gr.get("home_team") or ""
+                away_nm = gr.get("away_team") or ""
+                matchup_txt = f"{away_nm} @ {home_nm}" if away_nm and home_nm else eid_s
+                pick_txt = mp.get("selection") or mp.get("pick") or home_nm or matchup_txt
+                mp_out = str(mp.get("outcome") or "").upper()
+                leg_out = mp_out if mp_out in ("WON", "LOST", "PUSH", "VOID") else "PENDING"
+                if leg_out == "PENDING" and bool(gr.get("final")) and gr.get("home_score") is not None and gr.get("away_score") is not None:
+                    leg_spec = {
+                        "market_type": "MONEYLINE",
+                        "team_pick": pick_txt,
+                        "selection": pick_txt,
+                        "is_home_pick": (bool(home_nm) and pick_txt.strip().lower() == home_nm.strip().lower()) if mp else True,
+                    }
+                    scored_out = grade_parlay_leg_from_scores(leg_spec, gr)
+                    if scored_out in ("WON", "LOST", "PUSH", "VOID"):
+                        leg_out = scored_out
+                score_txt = (
+                    f"{gr['away_score']}-{gr['home_score']}"
+                    if gr.get("away_score") is not None and gr.get("home_score") is not None
+                    else None
+                )
+                graded_legs.append({
+                    "event_id": eid_s or None,
+                    "matchup": matchup_txt,
+                    "team_pick": pick_txt,
+                    "market_type": "MONEYLINE",
+                    "side": None,
+                    "market_line": None,
+                    "price": mp.get("bet_price") if mp.get("bet_price") is not None else mp.get("price"),
+                    "book": None,
+                    "outcome": leg_out,
+                    "score": score_txt,
+                })
+
+        parlay_out = combine_leg_outcomes([lg["outcome"] for lg in graded_legs])
+        price = d.get("american_odds") if d.get("american_odds") is not None else pj.get("american_odds")
         roi = None
-        if out == 'WON':
-            roi = payout_per_unit(price)
-        elif out == 'LOST':
+        if parlay_out == "WON":
+            roi = round(payout_per_unit(price), 4)
+        elif parlay_out == "LOST":
             roi = -1.0
-        elif out == 'PUSH':
+        elif parlay_out == "WON (partial)":
+            won_prices = []
+            for lg in graded_legs:
+                if lg["outcome"] == "WON" and lg.get("price") is not None:
+                    try:
+                        pr_i = int(lg["price"])
+                        if abs(pr_i) >= 100:
+                            won_prices.append(pr_i)
+                    except Exception:
+                        continue
+            if won_prices:
+                dec_won = 1.0
+                for pr_i in won_prices:
+                    dec_won *= dec_from_american(pr_i)
+                roi = round(dec_won - 1.0, 4)
+            else:
+                roi = 0.0
+        elif parlay_out in ("PUSH", "VOID"):
             roi = 0.0
 
+        lk_raw = d.get("locked_at") or pj.get("locked_at") or d.get("created_at")
+        if hasattr(lk_raw, "isoformat"):
+            lk_raw = lk_raw.isoformat().replace("+00:00", "Z")
+
         items.append({
-            "date_et": d.get('date_et'),
-            "bucket": d.get('bucket'),
-            "legs": [
-                f"{d.get('away1')} @ {d.get('home1')}",
-                f"{d.get('away2')} @ {d.get('home2')}",
-            ],
-            "american_odds": d.get('american_odds'),
-            "p_win": float(d.get('p_win') or 0.0),
-            "ev": float(d.get('ev') or 0.0),
-            "outcome": out,
+            "id": d.get("id"),
+            "date_et": date_et_val,
+            "season": row_season,
+            "bucket": d.get("bucket") or ("high_confidence" if graded_legs else None),
+            "american_odds": price,
+            "p_win": float(d.get("p_win") or pj.get("p_win") or 0.0),
+            "ev": float(d.get("ev") or pj.get("ev") or 0.0),
+            "outcome": parlay_out,
             "roi_per_unit": roi,
+            "locked_at": lk_raw,
+            "legs": graded_legs,
         })
 
-    decided = [x for x in items if x['outcome'] in ('WON','LOST','PUSH')]
-    won = sum(1 for x in decided if x['outcome'] == 'WON')
-    lost = sum(1 for x in decided if x['outcome'] == 'LOST')
-    push = sum(1 for x in decided if x['outcome'] == 'PUSH')
-    pending = sum(1 for x in items if x['outcome'] == 'PENDING')
+    won = sum(1 for x in items if x["outcome"] in ("WON", "WON (partial)"))
+    lost = sum(1 for x in items if x["outcome"] == "LOST")
+    push = sum(1 for x in items if x["outcome"] == "PUSH")
+    void = sum(1 for x in items if x["outcome"] == "VOID")
+    pending = sum(1 for x in items if x["outcome"] == "PENDING")
 
-    roi_vals = [x['roi_per_unit'] for x in decided if x['roi_per_unit'] is not None]
-    roi_pct = (sum(roi_vals) / len(roi_vals) * 100.0) if roi_vals else 0.0
+    decided = won + lost
+    settled = decided + push
+    win_rate = round((won / decided) * 100.0, 1) if decided > 0 else 0.0
+
+    roi_vals = [
+        float(x["roi_per_unit"])
+        for x in items
+        if x["outcome"] in ("WON", "WON (partial)", "LOST", "PUSH") and x["roi_per_unit"] is not None
+    ]
+    profit_units = round(sum(roi_vals), 2)
+    roi_pct = round((sum(roi_vals) / settled) * 100.0, 2) if settled > 0 else 0.0
 
     return {
-        "generated_at": datetime.utcnow().isoformat() + 'Z',
+        "generated_at": datetime.utcnow().isoformat() + "Z",
         "league": "NCAAM",
         "kind": "ML2",
         "days": int(days),
-        "record": {"won": won, "lost": lost, "push": push},
+        "season": season_filter,
+        "record": {
+            "won": won,
+            "lost": lost,
+            "push": push,
+            "void": void,
+            "decided": decided,
+            "settled": settled,
+        },
         "pending": pending,
-        "roi_pct": round(roi_pct, 2),
-        "items": items[:50],
+        "win_rate": win_rate,
+        "profit_units": profit_units,
+        "roi_pct": roi_pct,
+        "items": items[:100],
     }
 
 
@@ -6942,16 +7166,18 @@ async def get_ncaam_model_performance_series(days: int = 30, min_ev_per_unit: fl
 
 
 @app.get("/api/ncaam/live-calibration")
-async def get_ncaam_live_calibration():
+async def get_ncaam_live_calibration(response: Response):
     """Return live in-game win-probability calibration status, reliability buckets, and fitted parameters."""
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     from src.services.live_calibration_service import get_live_calibration_summary
 
     return get_live_calibration_summary()
 
 
 @app.get("/api/ncaam/model-learning")
-async def get_ncaam_model_learning():
+async def get_ncaam_model_learning(response: Response):
     """Return self-learning adaptive archetype stats, ROI buckets, and bias adjustments."""
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     from src.services.archetype_learning_service import load_adaptive_model_learning
 
     data = load_adaptive_model_learning()

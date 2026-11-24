@@ -83,6 +83,12 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python3 -c "import json; from src.services.ncaam_publisher import publish_slate; res = publish_slate(); print('[TOP6_PUBLISH]', json.dumps(res, default=str))"
 
+      - name: Sync Official Daily Parlay
+        if: ${{ !inputs.backfill_pending }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python3 -c "import json; from src.api import _compute_ncaam_parlays_today; res = _compute_ncaam_parlays_today(persist=False); odp = res.get('official_daily_parlay') or {}; print('[PARLAY_SYNC]', json.dumps({'date_et': res.get('date_et'), 'has_parlay': bool(odp), 'is_locked': odp.get('is_locked'), 'locks_at': odp.get('locks_at'), 'odds': odp.get('american_odds')}, default=str))" || echo "⚠️ Official parlay sync warning (continuing)"
+
       - name: Verify Daily Top Picks & Live Top 6 (today ET)
         if: ${{ !inputs.backfill_pending }}
         env:

@@ -178,6 +178,11 @@ def normalize_market_type(market_type, *, is_parlay: bool = False, bet_type=None
         return "OTHER"
     if raw in ("H2H", "ML", "MONEYLINE", "MONEY LINE") or "MONEYLINE" in raw:
         return "MONEYLINE"
+    if "1H" in raw:
+        if "SPREAD" in raw:
+            return "SPREAD_1H"
+        if "TOTAL" in raw or "OVER" in raw or "UNDER" in raw:
+            return "TOTAL_1H"
     if "SPREAD" in raw:
         return "SPREAD"
     if "TOTAL" in raw or raw in ("OVER", "UNDER", "OU", "O/U"):
@@ -230,13 +235,32 @@ def _meaningful_pick_text(val) -> str:
     return s
 
 
+def _as_dict(val) -> dict:
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str):
+        txt = val.strip()
+        if txt.startswith("{"):
+            try:
+                import json as _json
+                parsed = _json.loads(txt)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+    return {}
+
+
 def _extract_movement_tags(row: dict) -> list[str]:
-    """Extract normalized movement/risk tags from row or nested rec_json."""
+    """Extract normalized movement/risk tags from row, rec_json, or snapshot."""
     if not isinstance(row, dict):
         return []
     raw_tags = row.get("movement_tags") or row.get("sanity_reasons")
-    if not raw_tags and isinstance(row.get("rec_json"), dict):
-        raw_tags = row["rec_json"].get("movement_tags") or row["rec_json"].get("sanity_reasons")
+    for container_key in ("rec_json", "snapshot"):
+        if raw_tags:
+            break
+        container = _as_dict(row.get(container_key))
+        if container:
+            raw_tags = container.get("movement_tags") or container.get("sanity_reasons")
     if isinstance(raw_tags, str):
         return [t.strip() for t in raw_tags.split(",") if t.strip()]
     if isinstance(raw_tags, (list, tuple, set)):
@@ -250,8 +274,10 @@ def has_top6_risk_flag(row: dict) -> bool:
         return False
     if row.get("top6_eligible") is False:
         return True
-    if isinstance(row.get("rec_json"), dict) and row["rec_json"].get("top6_eligible") is False:
-        return True
+    for container_key in ("rec_json", "snapshot"):
+        container = _as_dict(row.get(container_key))
+        if container.get("top6_eligible") is False:
+            return True
     for tag in _extract_movement_tags(row):
         low = tag.lower()
         if low in ("contra_sharp_money", "contra_sharp_line") or low.startswith("reverse_steam="):
@@ -454,6 +480,24 @@ def rank_top6_items(rows: list, limit: int | None = 6) -> list:
 def normalize_history_row(row: dict) -> dict:
     """Normalize a single history/slate pick row for consistent analytics and UI rendering."""
     out = dict(row or {})
+    snap_obj = _as_dict(out.get("snapshot"))
+    rec_obj = _as_dict(out.get("rec_json"))
+    inp_obj = _as_dict(out.get("inputs_json"))
+
+    def _from_containers(*keys):
+        for k in keys:
+            v = out.get(k)
+            if v is not None and (not isinstance(v, str) or v.strip()):
+                return v
+        for c in (rec_obj, snap_obj, inp_obj):
+            if not c:
+                continue
+            for k in keys:
+                v = c.get(k)
+                if v is not None and (not isinstance(v, str) or v.strip()):
+                    return v
+        return None
+
     out["market_type"] = normalize_market_type(
         _first_present(out.get("market_type"), out.get("market"), out.get("bet_type")),
         is_parlay=bool(out.get("is_parlay")),
@@ -496,12 +540,36 @@ def normalize_history_row(row: dict) -> dict:
         if not bet_on:
             out["bet_on"] = best_pick
 
-    conf = normalize_confidence_pct(out.get("confidence_0_100") if out.get("confidence_0_100") is not None else out.get("confidence"))
+    conf = normalize_confidence_pct(
+        _from_containers("confidence_0_100", "confidence")
+    )
     if conf is not None:
         out["confidence_0_100"] = conf
 
-    if out.get("ev_per_unit") is None and out.get("ev") is not None:
-        out["ev_per_unit"] = out.get("ev")
+    ev_raw = _from_containers("ev_per_unit", "ev")
+    if ev_raw is None:
+        edge_str = _from_containers("edge")
+        if edge_str is not None:
+            try:
+                ev_raw = float(str(edge_str).replace("%", "").replace("+", "").strip()) / 100.0
+            except Exception:
+                ev_raw = None
+    if ev_raw is not None:
+        out["ev_per_unit"] = ev_raw
+
+    for meta_key, alias_keys in (
+        ("side", ("side",)),
+        ("win_prob_lb10", ("win_prob_lb10",)),
+        ("suggested_units", ("suggested_units", "recommended_units")),
+        ("bet_timing", ("bet_timing",)),
+        ("bet_timing_action", ("bet_timing_action",)),
+        ("conviction_sources", ("conviction_sources",)),
+        ("conviction_sources_total", ("conviction_sources_total",)),
+    ):
+        if out.get(meta_key) is None:
+            meta_val = _from_containers(*alias_keys)
+            if meta_val is not None:
+                out[meta_key] = meta_val
 
     if (out["market_type"] in ("OTHER", "AUTO", "") or out.get("bet_line") is None) and best_pick:
         try:
@@ -527,14 +595,18 @@ def normalize_history_row(row: dict) -> dict:
     tags = _extract_movement_tags(out)
     if tags:
         out["movement_tags"] = tags
-    rec_obj = out.get("rec_json") if isinstance(out.get("rec_json"), dict) else {}
-    inp_obj = out.get("inputs_json") if isinstance(out.get("inputs_json"), dict) else {}
     raw_tier = str(
-        _first_present(out.get("risk_tier"), rec_obj.get("risk_tier"), inp_obj.get("risk_tier")) or ""
+        _first_present(
+            out.get("risk_tier"),
+            rec_obj.get("risk_tier"),
+            snap_obj.get("risk_tier"),
+            inp_obj.get("risk_tier"),
+        ) or ""
     ).strip().upper()
     is_sr = (
         bool(out.get("is_smart_risk"))
         or bool(rec_obj.get("is_smart_risk"))
+        or bool(snap_obj.get("is_smart_risk"))
         or bool(inp_obj.get("is_smart_risk"))
         or raw_tier == "SMART_RISK"
         or any(str(t).strip().lower() == "smart_risk_high_return" for t in tags)
@@ -581,11 +653,40 @@ def normalize_history_row(row: dict) -> dict:
         from datetime import datetime, timedelta, timezone
         from src.services.grading_backfill import _parse_dt_utc
 
+        mkt = out["market_type"]
         has_score = bool(out.get("score") and "-" in str(out.get("score")))
         ref_dt = _parse_dt_utc(out.get("start_time")) or _parse_dt_utc(out.get("day_et"))
         now_utc = datetime.now(timezone.utc)
 
-        if has_score:
+        if mkt in ("SPREAD_1H", "TOTAL_1H"):
+            h1h = out.get("home_score_1h")
+            a1h = out.get("away_score_1h")
+            if h1h is not None and a1h is not None:
+                try:
+                    h1_int = int(float(h1h))
+                    a1_int = int(float(a1h))
+                    if h1_int >= 0 and a1_int >= 0 and (h1_int + a1_int) > 0:
+                        from src.services.grading_backfill import grade_score_prediction
+
+                        base_mkt = "SPREAD" if mkt == "SPREAD_1H" else "TOTAL"
+                        clean_pick = str(out.get("pick") or "").replace(" 1H", "").replace("1H ", "").strip()
+                        clean_sel = str(out.get("selection") or "").replace(" 1H", "").replace("1H ", "").strip()
+                        graded = grade_score_prediction(
+                            market_type=base_mkt,
+                            pick=clean_pick,
+                            selection=clean_sel,
+                            bet_line=out.get("bet_line"),
+                            home_team=out.get("home_team"),
+                            away_team=out.get("away_team"),
+                            home_score=h1_int,
+                            away_score=a1_int,
+                            is_mlb=False,
+                        )
+                        if graded in ("WON", "LOST", "PUSH", "VOID"):
+                            out["outcome"] = graded
+                except Exception:
+                    pass
+        elif has_score:
             is_final = out.get("final") is True or (ref_dt is not None and ref_dt < now_utc - timedelta(hours=8))
             if is_final:
                 try:
@@ -595,7 +696,6 @@ def normalize_history_row(row: dict) -> dict:
                     from src.services.grading_backfill import grade_score_prediction, is_valid_final_score
 
                     if is_valid_final_score(h_sc, a_sc, league=out.get("sport")):
-                        mkt = out["market_type"]
                         if mkt in ("SPREAD", "TOTAL", "MONEYLINE"):
                             is_mlb = str(out.get("sport") or "").upper() == "MLB" or str(out.get("event_id") or "").startswith(("mlb:", "action:mlb:"))
                             graded = grade_score_prediction(
@@ -617,6 +717,7 @@ def normalize_history_row(row: dict) -> dict:
             # Genuinely postponed/cancelled legacy slate items (>14d old with no score reported)
             out["outcome"] = "VOID"
 
+    out.pop("snapshot", None)
     return out
 
 

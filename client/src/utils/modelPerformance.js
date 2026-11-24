@@ -141,6 +141,10 @@ export const normalizeMarketType = (rowOrType) => {
   if (raw === 'H2H' || raw === 'ML' || raw === 'MONEYLINE' || raw === 'MONEY LINE' || raw.includes('MONEYLINE')) {
     return 'MONEYLINE';
   }
+  if (raw.includes('1H')) {
+    if (raw.includes('SPREAD')) return 'SPREAD_1H';
+    if (raw.includes('TOTAL') || raw.includes('OVER') || raw.includes('UNDER')) return 'TOTAL_1H';
+  }
   if (raw.includes('SPREAD')) return 'SPREAD';
   if (raw.includes('TOTAL') || raw === 'OVER' || raw === 'UNDER' || raw === 'OU' || raw === 'O/U') {
     return 'TOTAL';
@@ -152,7 +156,9 @@ export const normalizeMarketType = (rowOrType) => {
 export const formatMarketLabel = (rowOrType) => {
   const norm = normalizeMarketType(rowOrType);
   if (norm === 'SPREAD') return 'Spread';
+  if (norm === 'SPREAD_1H') return '1H Spread';
   if (norm === 'TOTAL') return 'Over / Under';
+  if (norm === 'TOTAL_1H') return '1H Over / Under';
   if (norm === 'MONEYLINE') return 'Moneyline';
   if (norm === 'PARLAY') return 'Parlay';
   if (norm === 'OTHER') return 'Other';
@@ -208,8 +214,8 @@ export const formatLineAndOdds = (row) => {
   if (rawLine !== null && rawLine !== undefined && rawLine !== '') {
     const n = Number(rawLine);
     if (Number.isFinite(n)) {
-      if (mt === 'SPREAD') lineStr = n > 0 ? `+${n}` : `${n}`;
-      else if (mt === 'TOTAL') lineStr = `${n}`;
+      if (mt === 'SPREAD' || mt === 'SPREAD_1H') lineStr = n > 0 ? `+${n}` : `${n}`;
+      else if (mt === 'TOTAL' || mt === 'TOTAL_1H') lineStr = `${n}`;
       else lineStr = `${n}`;
     } else {
       lineStr = String(rawLine).trim();
@@ -398,6 +404,15 @@ export const hasTop6RiskFlag = (row) => {
 export const getQualityRankScore = (row) => {
   if (!row) return -999;
 
+  if (
+    row.quality_score !== null &&
+    row.quality_score !== undefined &&
+    row.quality_score !== '' &&
+    Number.isFinite(Number(row.quality_score))
+  ) {
+    return Number(row.quality_score);
+  }
+
   const evRaw = getNumericEdge(row);
   const ev = evRaw !== null && Number.isFinite(evRaw) ? evRaw : 0;
   const effEv =
@@ -422,20 +437,19 @@ export const getQualityRankScore = (row) => {
   const sideText = `${row.side || ''} ${row.selection || ''} ${row.pick || ''}`.toUpperCase();
   const rawLine = row.market_line ?? row.bet_line ?? row.line;
   const parsedLine = rawLine !== null && rawLine !== undefined && rawLine !== '' ? Number(rawLine) : NaN;
-  if (mkt === 'TOTAL') {
-    if (sideText.includes('OVER')) score -= 0.015;
-    else if (sideText.includes('UNDER')) score += 0.008;
+  if (mkt === 'TOTAL' || mkt === 'TOTAL_1H') {
+    if (sideText.includes('UNDER')) score += 0.003;
     if (Number.isFinite(parsedLine)) {
       const totLine = Math.abs(parsedLine);
-      if (totLine >= 140 && totLine < 152) score += 0.005;
-      else if (totLine >= 152 && sideText.includes('OVER')) score -= 0.012;
+      if (totLine >= 138 && totLine <= 156) score += 0.004;
     }
-  } else if (mkt === 'SPREAD') {
+  } else if (mkt === 'SPREAD' || mkt === 'SPREAD_1H') {
     if (Number.isFinite(parsedLine)) {
       const absLine = Math.abs(parsedLine);
       if (absLine < 6) score += 0.005;
-      else if (absLine >= 14 && absLine < 22) score -= 0.012;
-      else if (absLine >= 6 && absLine < 14) score -= 0.022;
+      else if (absLine >= 6 && absLine < 14) score += 0.003;
+      else if (absLine >= 14 && absLine < 22) score -= 0.018;
+      else if (absLine >= 22) score -= 0.03;
 
       const sideHint = String(row.side || '').trim().toLowerCase();
       let isAway = null;
@@ -459,6 +473,16 @@ export const getQualityRankScore = (row) => {
     }
   }
 
+  const rawAgree =
+    mkt === 'TOTAL' || mkt === 'TOTAL_1H'
+      ? (row.conviction_sources_total ?? row.context?.conviction_sources_total)
+      : (row.conviction_sources ?? row.context?.conviction_sources);
+  const agreeN = rawAgree !== null && rawAgree !== undefined && rawAgree !== '' ? Number(rawAgree) : NaN;
+  if (Number.isFinite(agreeN)) {
+    if (agreeN >= 3) score += 0.012;
+    else if (agreeN === 2) score += 0.006;
+  }
+
   const rawTags = row.movement_tags || row.sanity_reasons;
   const tagList = Array.isArray(rawTags)
     ? rawTags
@@ -473,7 +497,13 @@ export const getQualityRankScore = (row) => {
   if (tags.includes('contra_sharp_line')) score -= 0.018;
   if (tags.some((t) => t.startsWith('reverse_steam='))) score -= 0.02;
 
-  return score;
+  const isSmartRisk =
+    Boolean(row.is_smart_risk) ||
+    String(row.risk_tier || '').trim().toUpperCase() === 'SMART_RISK' ||
+    tags.includes('smart_risk_high_return');
+  if (isSmartRisk) score -= 0.015;
+
+  return Number(score.toFixed(6));
 };
 
 const isCanonicalSlateRow = (row) => {

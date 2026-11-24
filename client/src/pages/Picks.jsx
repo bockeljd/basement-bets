@@ -102,6 +102,9 @@ export default function Picks() {
   const [gradeMessage, setGradeMessage] = useState(null);
   const [yesterdayReco, setYesterdayReco] = useState(null);
   const [liveCalibration, setLiveCalibration] = useState(null);
+  const [parlayReport, setParlayReport] = useState(null);
+  const [modelLearning, setModelLearning] = useState(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
 
   const defaultNcaamSeason = useMemo(() => getCurrentNcaamSeasonShort(), []);
 
@@ -121,44 +124,113 @@ export default function Picks() {
   const load = async () => {
     setLoading(true);
     setErr(null);
+    const cacheHeaders = { 'Cache-Control': 'no-cache' };
+    const ts = Date.now();
     try {
-      const res = await api.get('/api/research/history', { params: { limit: 20000, lookback_days: 400 } });
-      let rows = res.data || [];
+      const [res, ysRes, liveCalRes, parlayRes, learningRes] = await Promise.all([
+        api.get('/api/research/history', {
+          params: { limit: 20000, lookback_days: 400, _t: ts },
+          headers: cacheHeaders,
+        }),
+        api
+          .get('/api/ncaam/recommended-slate/yesterday', {
+            params: { _t: ts },
+            headers: cacheHeaders,
+          })
+          .catch(() => ({ data: null })),
+        api
+          .get('/api/ncaam/live-calibration', {
+            params: { _t: ts },
+            headers: cacheHeaders,
+          })
+          .catch(() => ({ data: null })),
+        api
+          .get('/api/ncaam/parlays/performance-report', {
+            params: { days: 400, _t: ts },
+            headers: cacheHeaders,
+          })
+          .catch(() => ({ data: null })),
+        api
+          .get('/api/ncaam/model-learning', {
+            params: { _t: ts },
+            headers: cacheHeaders,
+          })
+          .catch(() => ({ data: null })),
+      ]);
 
-      try {
-        const [ys, liveCalRes] = await Promise.all([
-          api.get('/api/ncaam/recommended-slate/yesterday').catch(() => ({ data: null })),
-          api.get('/api/ncaam/live-calibration').catch(() => ({ data: null })),
-        ]);
-        setYesterdayReco(ys?.data || null);
-        setLiveCalibration(liveCalRes?.data || null);
-      } catch (e) {
-        setYesterdayReco(null);
-      }
+      let rows = res.data || [];
+      setYesterdayReco(ysRes?.data || null);
+      setLiveCalibration(liveCalRes?.data || null);
+      setParlayReport(parlayRes?.data || null);
+      setModelLearning(learningRes?.data || null);
 
       if (!(Array.isArray(rows) && rows.length > 0)) {
-        const n = await api.get('/api/ncaam/history', { params: { limit: 2000 } }).catch(() => ({ data: [] }));
+        const n = await api
+          .get('/api/ncaam/history', { params: { limit: 2000, _t: ts }, headers: cacheHeaders })
+          .catch(() => ({ data: [] }));
         rows = n.data || [];
       }
 
-      // Ensure yesterday's pending picks are auto-graded once per day if scores are available
+      // Auto-grade once per 15-minute cooldown if yesterday or finished today (>3.5h since tip) still has open picks
       try {
+        const todayEtStr = toEtDay(new Date());
         const yesterdayEtStr = toEtDay(new Date(Date.now() - 86400000));
-        const pendingYesterday = (rows || []).filter(
-          (h) => getPerformanceDay(h) === yesterdayEtStr && !isGradedOutcome(getRawOutcome(h)) && normalizeOutcome(getRawOutcome(h)) !== 'VOID'
-        ).length;
-        const k = `grade_yesterday_attempt_${yesterdayEtStr}`;
-        if (pendingYesterday > 0 && !localStorage.getItem(k)) {
-          localStorage.setItem(k, '1');
-          await api.post('/api/research/grade');
-          const res2 = await api.get('/api/research/history', { params: { limit: 20000, lookback_days: 400 } });
+        const nowMs = Date.now();
+        const needsGrade = (rows || []).some((h) => {
+          const norm = normalizeOutcome(getRawOutcome(h));
+          if (norm !== null) return false; // already WON/LOST/PUSH/VOID
+          const day = getPerformanceDay(h);
+          if (day === yesterdayEtStr) return true;
+          if (day === todayEtStr && h.start_time) {
+            const stMs = Date.parse(h.start_time);
+            if (Number.isFinite(stMs) && nowMs - stMs > 3.5 * 3600 * 1000) return true;
+          }
+          return false;
+        });
+
+        const cooldownKey = 'grade_auto_attempt_ts';
+        const lastAttemptMs = Number(sessionStorage.getItem(cooldownKey) || 0);
+        if (needsGrade && (!lastAttemptMs || nowMs - lastAttemptMs > 15 * 60 * 1000)) {
+          sessionStorage.setItem(cooldownKey, String(nowMs));
+          await api.post('/api/research/grade', null, {
+            params: { backfill_pending: true, backfill_days: 7, max_grade_rows: 1000 },
+          });
+          const ts2 = Date.now();
+          const [res2, ys2, liveCal2, parlay2] = await Promise.all([
+            api.get('/api/research/history', {
+              params: { limit: 20000, lookback_days: 400, _t: ts2 },
+              headers: cacheHeaders,
+            }),
+            api
+              .get('/api/ncaam/recommended-slate/yesterday', {
+                params: { _t: ts2 },
+                headers: cacheHeaders,
+              })
+              .catch(() => ({ data: ysRes?.data || null })),
+            api
+              .get('/api/ncaam/live-calibration', {
+                params: { _t: ts2 },
+                headers: cacheHeaders,
+              })
+              .catch(() => ({ data: liveCalRes?.data || null })),
+            api
+              .get('/api/ncaam/parlays/performance-report', {
+                params: { days: 400, _t: ts2 },
+                headers: cacheHeaders,
+              })
+              .catch(() => ({ data: parlayRes?.data || null })),
+          ]);
           rows = res2.data || rows;
+          if (ys2?.data) setYesterdayReco(ys2.data);
+          if (liveCal2?.data) setLiveCalibration(liveCal2.data);
+          if (parlay2?.data) setParlayReport(parlay2.data);
         }
       } catch (e) {
         // non-blocking
       }
 
       setHistory(rows);
+      setLastRefreshedAt(new Date());
     } catch (e) {
       if (e?.response?.status === 403) {
         const pass = prompt('Authentication failed. Please enter the Basement Password:');
@@ -187,6 +259,11 @@ export default function Picks() {
       setIsGrading(true);
       setGradeMessage(null);
       setErr(null);
+      try {
+        sessionStorage.setItem('grade_auto_attempt_ts', String(Date.now()));
+      } catch {
+        // ignore storage errors
+      }
       const res = await api.post('/api/research/grade', null, {
         params: {
           backfill_pending: true,
@@ -923,6 +1000,17 @@ export default function Picks() {
                 </span>
               </span>
             )}
+            {lastRefreshedAt && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-slate-700/80 bg-slate-900/75 text-slate-300 text-[11px] font-mono">
+                Updated{' '}
+                {lastRefreshedAt.toLocaleTimeString('en-US', {
+                  timeZone: 'America/New_York',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}{' '}
+                ET
+              </span>
+            )}
           </div>
           <h1>Model Performance</h1>
           <p className="text-sm text-slate-300/90 max-w-2xl">
@@ -990,21 +1078,21 @@ export default function Picks() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-300 leading-relaxed">
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
-              <div className="font-bold text-indigo-300">1. Which Picks Count</div>
+              <div className="font-bold text-indigo-300">1. Straight Bets, 1H &amp; Risk Tiers</div>
               <p className="text-xs text-slate-300">
-                Only picks with a real projected edge (<strong className="text-slate-100">Spreads +2.0%+</strong>, <strong className="text-slate-100">Totals +3.5% Under / +4.1%+ Over</strong>, and <strong className="text-slate-100">Moneylines +5.0% &amp; 52%+ win chance</strong>) are tracked. Passed games (<strong className="text-slate-100">No Bet</strong>) are excluded.
+                Tracks actionable <strong className="text-slate-100">Spreads, 1H Spreads, Totals, 1H Totals, and Moneylines</strong> using <strong className="text-emerald-300">Core</strong> (up to 1.0u) and <strong className="text-indigo-300">Smart Risk</strong> (0.5u risk cap) filters plus early-season situational guardrails. Passed games (<strong className="text-slate-100">No Bet</strong>) are excluded.
               </p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
-              <div className="font-bold text-emerald-300">2. What Each Result Means</div>
+              <div className="font-bold text-emerald-300">2. Straight KPIs vs. Parlays</div>
               <p className="text-xs text-slate-300">
-                <strong className="text-emerald-300">Won / Lost</strong> set Win % and flat 1-unit profit using the posted odds. <strong className="text-slate-100">Push</strong> ties (<code className="text-slate-200">0.00u</code>, ignored in Win %). <strong className="text-amber-300">Void</strong> marks canceled games (<code className="text-slate-200">0.00u</code>, ignored in ROI).
+                <strong className="text-emerald-300">Won / Lost</strong> set flat 1-unit profit vs. the <strong className="text-slate-100">52.4%</strong> (-110) break-even line (<strong className="text-slate-100">Push / Void</strong> = <code className="text-slate-200">0.00u</code>). Higher-odds <strong className="text-indigo-200">Official Daily Parlays</strong> are tracked in their own section so longshot variance never skews straight Win %.
               </p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-1.5">
-              <div className="font-bold text-sky-300">3. Top 6 / Day vs. All Picks</div>
+              <div className="font-bold text-sky-300">3. Top 6 / Day &amp; When to Bet</div>
               <p className="text-xs text-slate-300">
-                By default you see <strong className="text-slate-100">Top 6 / Day</strong>: the single best pick per game for up to 6 games each day. Switch to <strong className="text-slate-100">All Picks</strong> to inspect every recommended bet.
+                <strong className="text-slate-100">Top 6 / Day</strong> keeps the single highest-quality play per game up to 6 games daily, alongside <strong className="text-emerald-300">When to Bet</strong> closing-line validation. Switch to <strong className="text-slate-100">All Picks</strong> to inspect every recommended bet.
               </p>
             </div>
           </div>
@@ -1584,6 +1672,10 @@ export default function Picks() {
         scopeLabel={historyScope === 'top6' ? 'Top 6 daily picks' : 'all recommended picks'}
         filterSummary={filterSummaryText}
         liveCalibration={liveCalibration}
+        parlayReport={parlayReport}
+        modelLearning={modelLearning}
+        selectedSeason={selectedSeason}
+        windowFilter={windowFilter}
         slateAndRankSlot={(
           <section aria-label="Yesterday Slate Recap and Daily Rank Performance" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Yesterday / Most Recent Active Slate Recap */}
