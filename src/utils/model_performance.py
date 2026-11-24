@@ -416,6 +416,14 @@ def compute_top6_quality_score(row: dict) -> float:
         score -= 0.018
     if any(t.startswith("reverse_steam=") for t in tags):
         score -= 0.020
+    is_sr = (
+        bool(row.get("is_smart_risk"))
+        or bool(rec_obj.get("is_smart_risk"))
+        or str(_first_present(row.get("risk_tier"), rec_obj.get("risk_tier")) or "").strip().upper() == "SMART_RISK"
+        or ("smart_risk_high_return" in tags)
+    )
+    if is_sr:
+        score -= 0.015
 
     return round(score, 6)
 

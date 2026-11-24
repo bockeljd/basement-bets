@@ -275,6 +275,11 @@ export const getRecQualityScore = (rec) => {
   if (tags.includes('contra_sharp_money')) score -= 0.03;
   if (tags.includes('contra_sharp_line')) score -= 0.018;
   if (tags.some((t) => t.startsWith('reverse_steam='))) score -= 0.02;
+  const isSmartRisk =
+    Boolean(rec.is_smart_risk) ||
+    String(rec.risk_tier || '').trim().toUpperCase() === 'SMART_RISK' ||
+    tags.includes('smart_risk_high_return');
+  if (isSmartRisk) score -= 0.015;
 
   return score;
 };

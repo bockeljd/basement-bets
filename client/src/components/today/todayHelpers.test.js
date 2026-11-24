@@ -40,6 +40,29 @@ describe('Today recommendations', () => {
     const comp = getRecQualityScore({ bet_type: 'SPREAD', side: 'home', market_line: -8.5, ev: 0.045, win_prob_lb10: 0.53, conviction_sources: 3 });
     const blowout = getRecQualityScore({ bet_type: 'SPREAD', side: 'home', market_line: -23.5, ev: 0.045, win_prob_lb10: 0.53, conviction_sources: 1 });
     expect(comp).toBeGreaterThan(blowout);
+
+    const coreConsensus = getRecQualityScore({
+      bet_type: 'SPREAD',
+      side: 'away',
+      market_line: 1.5,
+      ev: 0.05,
+      win_prob_lb10: 0.523,
+      conviction_sources: 3,
+      is_smart_risk: false,
+      risk_tier: 'CORE',
+    });
+    const smartRiskLow = getRecQualityScore({
+      bet_type: 'SPREAD',
+      side: 'home',
+      market_line: -1.5,
+      ev: 0.0736,
+      win_prob_lb10: 0.513,
+      conviction_sources: 0,
+      is_smart_risk: true,
+      risk_tier: 'SMART_RISK',
+      movement_tags: ['smart_risk_high_return', 'sharp_price_edge'],
+    });
+    expect(coreConsensus).toBeGreaterThan(smartRiskLow);
   });
 
   it('tracks 1H bets against the 20-minute first half clock instead of 40-minute full game', () => {

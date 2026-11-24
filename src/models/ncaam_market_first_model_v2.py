@@ -1738,6 +1738,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # sanity scoring (sigma inflation / higher EV thresholds) rather than forcing caps.
         
         # --- Feature: Advanced Home Court (Geo) ---
+        # Capture pre-situational spread baseline so stacked heuristic adjustments
+        # cannot fabricate synthetic spread edge when rating feeds agree with the market.
+        mu_spread_pre_situational = mu_spread_final
+
         # Altitude
         try:
             altitude_adj = (
@@ -1813,13 +1817,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
         fatigue_adj = max(-1.0, min(1.0, h_fatigue - a_fatigue)) * situational_scale
         mu_spread_final -= fatigue_adj
 
-        # -- Automated Player-Level Injury Impact (bounded) --
+        # -- Automated Player-Level Injury Impact (computed here, applied outside situational cap) --
         inj_spread_adj = float((injury_context or {}).get('spread_adj') or 0.0)
         inj_total_adj = float((injury_context or {}).get('total_adj') or 0.0)
         inj_spread_adj = max(-3.0, min(3.0, inj_spread_adj))
         inj_total_adj = max(-3.0, min(0.5, inj_total_adj))
-        if inj_spread_adj != 0.0:
-            mu_spread_final += inj_spread_adj
         if inj_total_adj != 0.0 and mu_total_final is not None:
             mu_total_final += inj_total_adj
 
@@ -1858,6 +1860,20 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         # Positive sos_adj / mom_adj / kp_style_adj favors home team -> lower (more negative) home spread
         mu_spread_final -= (sos_adj + mom_adj + kp_style_adj) * situational_scale
+
+        # Clamp stacked non-injury situational spread shift tightly so heuristics cannot manufacture
+        # synthetic spread edges on zero-consensus early-season games, then apply verified injury impact.
+        net_situational_delta = mu_spread_final - mu_spread_pre_situational
+        if game_month == 11 or low_sample_teams:
+            max_sit_delta = 0.50 if agree_count == 0 else 0.75
+        elif game_month == 12:
+            max_sit_delta = 1.00 if agree_count == 0 else 1.35
+        else:
+            max_sit_delta = 1.85
+        clamped_sit_delta = max(-max_sit_delta, min(max_sit_delta, net_situational_delta))
+        mu_spread_final = mu_spread_pre_situational + clamped_sit_delta
+        if inj_spread_adj != 0.0:
+            mu_spread_final += inj_spread_adj
 
         # Re-clamp automated spread adjustments (allow up to effective_cap + buffer,
         # keeping tighter buffers in early season and on 15+ / 25+ pt blowouts)
@@ -2268,6 +2284,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
             from src.utils.model_performance import compute_top6_quality_score, has_top6_risk_flag
 
+            is_smart_risk = bool(r.get('is_smart_risk', False))
+            risk_tier = str(r.get('risk_tier') or ('SMART_RISK' if is_smart_risk else 'CORE'))
             quality_input = {
                 "market_type": r['market'],
                 "side": r.get('side'),
@@ -2283,11 +2301,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 "conviction_sources_total": int(agree_count_total),
                 "movement_tags": r.get('movement_tags') or [],
                 "sanity_reasons": r.get('sanity_reasons') or [],
+                "is_smart_risk": is_smart_risk,
+                "risk_tier": risk_tier,
             }
             top6_eligible = not has_top6_risk_flag(quality_input)
             quality_score = compute_top6_quality_score(quality_input)
-            is_smart_risk = bool(r.get('is_smart_risk', False))
-            risk_tier = str(r.get('risk_tier') or ('SMART_RISK' if is_smart_risk else 'CORE'))
             r['top6_eligible'] = top6_eligible
             r['quality_score'] = quality_score
             r['is_smart_risk'] = is_smart_risk
@@ -3368,17 +3386,18 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 t in ("contra_sharp_money", "contra_sharp_line") or t.startswith("reverse_steam=")
                 for t in tags
             )
-            # High-return Smart Risk tier: unlock strong-EV + consensus/sharp plays down to 50.6% lb10
-            # Never relax lb10 when sharp money/line movement is actively against the pick.
+            # High-return Smart Risk tier: unlock strong-EV + consensus or pro-steam plays down to 50.6% lb10.
+            # Never relax lb10 for 0-consensus plays on retail book lag alone, or when sharp money/line is against us.
+            has_sharp_steam = ("rlm_confirmed" in tags) or ("sharp_backing" in tags)
             if not has_contra:
                 if market == "SPREAD" and ev >= 0.035 and (
                     (agree_sp is not None and int(agree_sp) >= 3)
                     or (agree_sp is not None and int(agree_sp) >= 2 and (ev >= 0.036 or has_sharp))
-                    or (has_sharp and ev >= 0.038)
+                    or (has_sharp_steam and ev >= 0.038)
                 ):
                     min_lb10 = min(min_lb10, 0.506)
                 elif market == "TOTAL" and ev >= 0.040 and (
-                    (agree_tot is not None and int(agree_tot) >= 2) or has_sharp
+                    (agree_tot is not None and int(agree_tot) >= 2) or (has_sharp_steam and ev >= 0.042)
                 ):
                     min_lb10 = min(min_lb10, 0.506)
             lb10_val = float(lb10)
@@ -4533,6 +4552,39 @@ class NCAAMMarketFirstModelV2(BaseModel):
             return list(by_book.values())
 
         min_1h_lb10 = float(getattr(self, "PUBLISH_MIN_WINPROB_LB10", 0.52))
+        is_h1_early = bool(g_is_early or (g_min_games is not None and int(g_min_games) < 6))
+        try:
+            learned_ms_bumps = ((self._load_adaptive_learning() or {}).get("learned_adjustments") or {}).get("market_side_ev_bump") or {}
+        except Exception:
+            learned_ms_bumps = {}
+
+        def _h1_side_passes(
+            base_ev: float,
+            market_key: str,
+            side_key: str,
+            price_val: int,
+            ev_val: float,
+            prob_val: float,
+            min_prob: float,
+            edge_val: float,
+            min_edge: float,
+            lb10_val: float,
+            agree_val: Optional[int],
+        ) -> bool:
+            if not relax_gates and is_h1_early and int(agree_val or 0) < 2:
+                return False
+            if not relax_gates and lb10_val < min_1h_lb10:
+                return False
+            min_ev_req = float(base_ev)
+            if is_h1_early:
+                min_ev_req += 0.010
+            if int(price_val) < -118:
+                min_ev_req += 0.010
+            bump = float(learned_ms_bumps.get(f"{market_key}:{side_key}") or 0.0)
+            if bump > 0.0:
+                min_ev_req += bump
+            return (ev_val >= min_ev_req) and (prob_val >= min_prob) and (edge_val >= min_edge)
+
         raw_snaps_list = [
             s for s in ((snap.get('_raw_snaps') or []) if isinstance(snap, dict) else [])
             if recent_retail_quote(s, quote_time) and s.get('price') is not None
@@ -4571,7 +4623,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             )
                             lb10_h1 = float(b1h['lb10']) if b1h.get('lb10') is not None else max(0.50, prob_h1 - 0.02)
                             ub90_h1 = float(b1h['ub90']) if b1h.get('ub90') is not None else min(0.95, prob_h1 + 0.02)
-                            if (relax_gates or lb10_h1 >= min_1h_lb10) and ev_h1 >= 0.03 and prob_h1 >= 0.54 and edge_h1 >= 1.2:
+                            if _h1_side_passes(0.03, 'SPREAD', 'home', ph, ev_h1, prob_h1, 0.54, edge_h1, 1.2, lb10_h1, g_agree_sp):
                                 best_1h_cands.append({
                                     "market": "SPREAD_1H", "side": "home", "team": f"{event['home_team']} 1H",
                                     "raw_win_prob": raw_h1, "line": lh, "price": ph, "prob": round(prob_h1, 3), "win_prob": round(prob_h1, 3),
@@ -4606,7 +4658,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             )
                             lb10_a1 = float(b1a['lb10']) if b1a.get('lb10') is not None else max(0.50, prob_a1 - 0.02)
                             ub90_a1 = float(b1a['ub90']) if b1a.get('ub90') is not None else min(0.95, prob_a1 + 0.02)
-                            if (relax_gates or lb10_a1 >= min_1h_lb10) and ev_a1 >= 0.03 and prob_a1 >= 0.54 and edge_a1 >= 1.2:
+                            if _h1_side_passes(0.03, 'SPREAD', 'away', pa, ev_a1, prob_a1, 0.54, edge_a1, 1.2, lb10_a1, g_agree_sp):
                                 best_1h_cands.append({
                                     "market": "SPREAD_1H", "side": "away", "team": f"{event['away_team']} 1H",
                                     "raw_win_prob": raw_a1, "line": la, "price": pa, "prob": round(prob_a1, 3), "win_prob": round(prob_a1, 3),
@@ -4657,7 +4709,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             )
                             lb10_u1 = float(b1u['lb10']) if b1u.get('lb10') is not None else max(0.50, prob_u1 - 0.02)
                             ub90_u1 = float(b1u['ub90']) if b1u.get('ub90') is not None else min(0.95, prob_u1 + 0.02)
-                            if (relax_gates or lb10_u1 >= min_1h_lb10) and ev_u1 >= 0.038 and prob_u1 >= 0.545 and edge_u1 >= 1.5:
+                            if _h1_side_passes(0.038, 'TOTAL', 'under', pu, ev_u1, prob_u1, 0.545, edge_u1, 1.5, lb10_u1, g_agree_tot):
                                 best_1h_tot.append({
                                     "market": "TOTAL_1H", "side": "under", "team": "1H UNDER",
                                     "raw_win_prob": raw_u1, "line": lu, "price": pu, "prob": round(prob_u1, 3), "win_prob": round(prob_u1, 3),
@@ -4692,7 +4744,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             )
                             lb10_o1 = float(b1o['lb10']) if b1o.get('lb10') is not None else max(0.50, prob_o1 - 0.02)
                             ub90_o1 = float(b1o['ub90']) if b1o.get('ub90') is not None else min(0.95, prob_o1 + 0.02)
-                            if (relax_gates or lb10_o1 >= min_1h_lb10) and ev_o1 >= 0.045 and prob_o1 >= 0.55 and edge_o1 >= 1.8:
+                            if _h1_side_passes(0.045, 'TOTAL', 'over', po, ev_o1, prob_o1, 0.55, edge_o1, 1.8, lb10_o1, g_agree_tot):
                                 best_1h_tot.append({
                                     "market": "TOTAL_1H", "side": "over", "team": "1H OVER",
                                     "raw_win_prob": raw_o1, "line": lo, "price": po, "prob": round(prob_o1, 3), "win_prob": round(prob_o1, 3),

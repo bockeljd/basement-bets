@@ -2563,14 +2563,15 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
                       AND (eo.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date) AS latest_odds_at
             FROM events e
             LEFT JOIN daily_top_picks d ON d.event_id = e.id AND d.league = 'NCAAM'
-                AND d.date_et = (NOW() AT TIME ZONE 'America/New_York')::date::text
+                AND d.date_et = (NOW() AT TIME ZONE 'America/New_York')::date
             WHERE e.league = 'NCAAM'
               AND (e.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date
         """).fetchone()
+        stale_row = dict(stale_check) if (stale_check and not isinstance(stale_check, dict) and hasattr(stale_check, "keys")) else stale_check
         stale_refresh_needed = False
-        if stale_check and int(stale_check.get("upcoming_pre_cutoff") or 0) > 0:
-            lc = stale_check.get("latest_computed_at")
-            lo = stale_check.get("latest_odds_at")
+        if stale_row and int((stale_row.get("upcoming_pre_cutoff") if isinstance(stale_row, dict) else stale_row[0]) or 0) > 0:
+            lc = stale_row.get("latest_computed_at") if isinstance(stale_row, dict) else stale_row[1]
+            lo = stale_row.get("latest_odds_at") if isinstance(stale_row, dict) else stale_row[2]
             now_utc = datetime.now(timezone.utc)
             if lc is None or lo is None:
                 stale_refresh_needed = True
