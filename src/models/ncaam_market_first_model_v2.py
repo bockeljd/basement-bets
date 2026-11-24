@@ -2167,11 +2167,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         # If we produced no actionable recommendations, capture why (for UI).
         block_reason = None
-        try:
-            if not recs and isinstance(market_snapshot, dict):
-                block_reason = market_snapshot.get('_no_bet_reason_spread') or market_snapshot.get('_no_bet_reason_total')
-        except Exception:
-            block_reason = None
+        if not recs and isinstance(market_snapshot, dict):
+            from src.utils.ncaam_quotes import recent_retail_quote
+            as_of = market_snapshot.get('_quote_as_of') or datetime.now(timezone.utc)
+            offered = [q for q in raw_snaps if q.get('price') is not None
+                       and str(q.get('book') or '').lower() not in ('', 'open', 'action_open', 'consensus', 'unknown')
+                       and not str(q.get('book')).lower().startswith('action_book_')]
+            if closest_lean:
+                block_reason = f"{closest_lean['selection']} · {closest_lean['reason']}"
+            elif offered and not any(recent_retail_quote(q, as_of) for q in offered):
+                block_reason = "Stale sportsbook odds · no quote inside the 90-minute window"
+            else:
+                block_reason = (market_snapshot.get('_no_bet_reason_spread') or market_snapshot.get('_no_bet_reason_total')
+                                or ("No eligible spread, total or first-half offer" if offered else "No named sportsbook price available"))
 
         # Basic game script (team-efficiency driven; Torvik)
         game_script = []

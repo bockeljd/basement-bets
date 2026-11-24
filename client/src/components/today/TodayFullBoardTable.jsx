@@ -523,8 +523,8 @@ const TodayFullBoardTable = ({
                               {liveInfo.trendDetail}
                             </span>
                           )}
-                          {!liveInfo.isLive && !isLeanSettled && cleanReason && (
-                            <span className="text-[11px] text-slate-400 line-clamp-1">{cleanReason}</span>
+                          {!isActionable && cleanReason && (
+                            <span className="text-[11px] text-slate-400">{cleanReason}</span>
                           )}
                         </div>
                       )}

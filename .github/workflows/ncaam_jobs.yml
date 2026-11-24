@@ -163,6 +163,27 @@ jobs:
             raise SystemExit(2)
           PY
 
+      - name: Verify fresh NCAAM sportsbook prices
+        if: ${{ !inputs.backfill_pending }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python3 - <<'PYTHON'
+          import os, psycopg2
+          with psycopg2.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
+              cur.execute("""SELECT count(DISTINCT e.id), count(DISTINCT o.event_id)
+                  FROM events e LEFT JOIN odds_snapshots o ON o.event_id=e.id
+                   AND o.price IS NOT NULL AND o.captured_at BETWEEN now()-interval '15 minutes' AND now()
+                   AND lower(o.book) NOT IN ('','open','action_open','consensus','unknown')
+                   AND lower(o.book) NOT LIKE 'action_book_%'
+                  WHERE e.league='NCAAM' AND e.start_time>now()+interval '30 minutes'
+                  AND (e.start_time AT TIME ZONE 'America/New_York')::date=(now() AT TIME ZONE 'America/New_York')::date""")
+              upcoming, covered = cur.fetchone()
+              print(f"Fresh named sportsbook coverage: {covered}/{upcoming} upcoming event records")
+              if upcoming and not covered:
+                  raise SystemExit("Odds ingestion produced no fresh sportsbook prices")
+          PYTHON
+
       - name: Ingest Results
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

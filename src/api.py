@@ -2561,7 +2561,9 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
             SELECT COUNT(*) FILTER (WHERE e.start_time > NOW() + interval '30 minutes') AS upcoming_pre_cutoff,
                    MAX(d.computed_at) AS latest_computed_at,
                    (SELECT MAX(o.captured_at) FROM odds_snapshots o JOIN events eo ON eo.id = o.event_id
-                    WHERE eo.league = 'NCAAM'
+                    WHERE eo.league = 'NCAAM' AND eo.start_time > NOW() + interval '30 minutes'
+                      AND o.price IS NOT NULL AND lower(o.book) NOT IN ('','consensus','unknown','action_open','open')
+                      AND lower(o.book) NOT LIKE 'action_book_%'
                       AND (eo.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date) AS latest_odds_at
             FROM events e
             LEFT JOIN daily_top_picks d ON d.event_id = e.id AND d.league = 'NCAAM'
