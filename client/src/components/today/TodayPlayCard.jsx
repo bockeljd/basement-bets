@@ -27,6 +27,7 @@ import {
   getModelSignalData,
   getRecommendedBetSize,
   getBetTimingGuidance,
+  getOutcomeOutlineClasses,
 } from './todayHelpers';
 
 const TONE_BADGES = {
@@ -110,6 +111,7 @@ const TodayPlayCard = ({
   const isBetLost = liveInfo.trendVerdict === 'LOST';
   const isBetPush = liveInfo.trendVerdict === 'PUSH';
   const isBetSettled = isBetWon || isBetLost || isBetPush;
+  const betSurface = getOutcomeOutlineClasses(liveInfo.trendVerdict, 'bet');
   const timing = !liveInfo.isLive && !liveInfo.isFinal && !isBetSettled ? getBetTimingGuidance(rec, game, context) : null;
   const timingUi = timing ? TIMING_STYLE[timing.action] || TIMING_STYLE.BET_NOW : null;
   const liveBadgeText = isBetSettled
@@ -122,13 +124,7 @@ const TodayPlayCard = ({
       ? `${liveInfo.isBetSettled ? (liveInfo.isFirstHalfBet ? '1H Final' : 'Final') : (liveInfo.isFirstHalfBet ? 'Proj. 1H Finish' : 'Proj. Finish')}: ${game?.away_team} ${liveInfo.liveProjAwayScore} – ${game?.home_team} ${liveInfo.liveProjHomeScore}`
       : liveInfo.gameTrendText;
 
-  const cardSurfaceCls = isBetWon
-    ? 'border-2 border-emerald-500/80 bg-gradient-to-br from-emerald-950/75 via-emerald-950/40 to-slate-950 shadow-[0_0_28px_rgba(16,185,129,0.22)] hover:border-emerald-400'
-    : isBetLost
-      ? 'border-2 border-rose-500/80 bg-gradient-to-br from-rose-950/75 via-rose-950/40 to-slate-950 shadow-[0_0_28px_rgba(244,63,94,0.22)] hover:border-rose-400'
-      : isBetPush
-        ? 'border-2 border-slate-500/75 bg-gradient-to-br from-slate-800/75 via-slate-900 to-slate-950 hover:border-slate-400'
-        : 'border border-slate-700/80 bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 hover:border-indigo-500/40';
+  const cardSurfaceCls = betSurface.cardCls;
 
   const pickLabel = rec?.selection || rec?.pick || game?.home_team || 'Pick';
   const matchupLabel = `${game?.away_team || 'Away'} at ${game?.home_team || 'Home'}`;
@@ -165,13 +161,7 @@ const TodayPlayCard = ({
             <span>·</span>
             {isBetSettled ? (
               <span
-                className={`px-2.5 py-0.5 rounded-full border font-extrabold text-[11px] uppercase tracking-wider ${
-                  isBetWon
-                    ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200'
-                    : isBetLost
-                      ? 'bg-rose-500/25 border-rose-400/60 text-rose-200'
-                      : 'bg-slate-700/80 border-slate-500 text-slate-200'
-                }`}
+                className={`px-2.5 py-0.5 rounded-full border font-extrabold text-[11px] uppercase tracking-wider ${betSurface.badgeCls}`}
               >
                 {liveInfo.isFirstHalfBet ? '1H ' : ''}
                 {isBetWon ? 'BET WON' : isBetLost ? 'BET LOST' : 'PUSH'}

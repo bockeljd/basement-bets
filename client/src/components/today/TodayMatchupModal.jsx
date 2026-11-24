@@ -27,6 +27,7 @@ import {
   getLiveGameStatus,
   getModelSignalData,
   getRecommendedBetSize,
+  getOutcomeOutlineClasses,
 } from './todayHelpers';
 
 const TodayMatchupModal = ({
@@ -144,8 +145,19 @@ const TodayMatchupModal = ({
   const projectedScore = getProjectedScore(game, analysisResult, topRec);
   const visualData = buildVisualModelData(topRec, game, analysisResult);
   const effectiveContext = analysisResult?.context || cachedMeta?.context || null;
+  const isOfficialBet = Boolean(topRec || (cachedMeta?.isActionable && cachedMeta?.rec));
   const liveTargetPick = topRec || cachedMeta?.rec || effectiveContext?.closest_lean || null;
   const liveInfo = getLiveGameStatus(game, liveTargetPick, effectiveContext);
+  const modalSurface = getOutcomeOutlineClasses(liveInfo.trendVerdict, isOfficialBet ? 'bet' : 'lean');
+  const modalBorderCls = modalSurface.outcome ? modalSurface.borderCls : 'border border-slate-700/80';
+  const modalHeaderBgCls =
+    modalSurface.outcome === 'WON'
+      ? 'bg-emerald-950/45 border-emerald-500/35'
+      : modalSurface.outcome === 'LOST'
+        ? 'bg-rose-950/45 border-rose-500/35'
+        : modalSurface.outcome === 'PUSH'
+          ? 'bg-slate-900/90 border-slate-600/60'
+          : 'bg-slate-950/90 border-slate-800';
   const modelSignals = getModelSignalData(topRec, analysisResult?.context, dbg, game);
   const fmtStat = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(1) : '—');
   const bookSpreadHome =
@@ -204,12 +216,12 @@ const TodayMatchupModal = ({
         onClose?.();
       }}
       onClick={handleBackdropClick}
-      className="today-modal w-[94dvw] bg-slate-900 text-slate-100 border border-slate-700/80 rounded-2xl shadow-2xl p-0 overflow-hidden m-auto"
+      className={`today-modal w-[94dvw] bg-slate-900 text-slate-100 rounded-2xl shadow-2xl p-0 overflow-hidden m-auto ${modalBorderCls}`}
     >
       {game && (
         <div className="flex flex-col min-h-0 max-h-[90dvh]">
           {/* Header */}
-          <div className="flex items-start justify-between gap-4 px-5 py-4 bg-slate-950/90 border-b border-slate-800 shrink-0">
+          <div className={`flex items-start justify-between gap-4 px-5 py-4 border-b shrink-0 ${modalHeaderBgCls}`}>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span className="px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 font-bold uppercase">

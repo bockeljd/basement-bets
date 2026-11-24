@@ -2217,3 +2217,91 @@ export const getBetTimingGuidance = (rec, game = null, context = null, nowMs = D
 
   return pack('BET_NOW', 'Clean number with no lineup flags — good to lock in now.', ['clean_number']);
 };
+
+const OUTCOME_SURFACE_MAP = {
+  bet: {
+    WON: {
+      borderCls: 'border-2 border-emerald-500/80 hover:border-emerald-400',
+      tintCls: 'bg-gradient-to-br from-emerald-950/75 via-emerald-950/40 to-slate-950 shadow-[0_0_24px_rgba(16,185,129,0.20)]',
+      rowCls: 'bg-emerald-950/40 hover:bg-emerald-950/55',
+      stripeCls: 'border-l-4 border-l-emerald-400',
+      badgeCls: 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200',
+    },
+    LOST: {
+      borderCls: 'border-2 border-rose-500/80 hover:border-rose-400',
+      tintCls: 'bg-gradient-to-br from-rose-950/75 via-rose-950/40 to-slate-950 shadow-[0_0_24px_rgba(244,63,94,0.20)]',
+      rowCls: 'bg-rose-950/40 hover:bg-rose-950/55',
+      stripeCls: 'border-l-4 border-l-rose-400',
+      badgeCls: 'bg-rose-500/25 border-rose-400/60 text-rose-200',
+    },
+    PUSH: {
+      borderCls: 'border-2 border-slate-500/75 hover:border-slate-400',
+      tintCls: 'bg-gradient-to-br from-slate-800/75 via-slate-900 to-slate-950',
+      rowCls: 'bg-slate-800/55 hover:bg-slate-800/70',
+      stripeCls: 'border-l-4 border-l-slate-400',
+      badgeCls: 'bg-slate-700/80 border-slate-500 text-slate-200',
+    },
+    DEFAULT: {
+      borderCls: 'border border-slate-700/80 hover:border-indigo-500/40',
+      tintCls: 'bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950',
+      rowCls: 'hover:bg-slate-800/40',
+      stripeCls: '',
+      badgeCls: 'bg-slate-800 border-slate-700 text-slate-300',
+    },
+  },
+  lean: {
+    WON: {
+      borderCls: 'border-2 border-dashed border-emerald-400/75 hover:border-emerald-300',
+      tintCls: 'bg-gradient-to-br from-emerald-950/45 via-emerald-950/20 to-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.14)]',
+      rowCls: 'bg-emerald-950/20 hover:bg-emerald-950/30',
+      stripeCls: 'border-l-2 border-dashed border-l-emerald-400/70',
+      badgeCls: 'bg-emerald-500/15 border-dashed border-emerald-400/60 text-emerald-200',
+    },
+    LOST: {
+      borderCls: 'border-2 border-dashed border-rose-400/75 hover:border-rose-300',
+      tintCls: 'bg-gradient-to-br from-rose-950/45 via-rose-950/20 to-slate-950 shadow-[0_0_18px_rgba(244,63,94,0.14)]',
+      rowCls: 'bg-rose-950/20 hover:bg-rose-950/30',
+      stripeCls: 'border-l-2 border-dashed border-l-rose-400/70',
+      badgeCls: 'bg-rose-500/15 border-dashed border-rose-400/60 text-rose-200',
+    },
+    PUSH: {
+      borderCls: 'border-2 border-dashed border-slate-400/70 hover:border-slate-300',
+      tintCls: 'bg-gradient-to-br from-slate-800/55 via-slate-900 to-slate-950',
+      rowCls: 'bg-slate-800/35 hover:bg-slate-800/50',
+      stripeCls: 'border-l-2 border-dashed border-l-slate-400/60',
+      badgeCls: 'bg-slate-800/80 border-dashed border-slate-500/60 text-slate-200',
+    },
+    DEFAULT: {
+      borderCls: 'border border-slate-800 hover:border-indigo-500/40',
+      tintCls: 'bg-slate-900/75',
+      rowCls: 'hover:bg-slate-800/40',
+      stripeCls: '',
+      badgeCls: 'bg-indigo-500/15 border-indigo-400/30 text-indigo-200',
+    },
+  },
+};
+
+/**
+ * Shared settled-outcome border/background/stripe/badge styling across cards, tables, parlays, and ledgers.
+ */
+export const getOutcomeOutlineClasses = (rawVerdict, variant = 'bet') => {
+  const s = String(rawVerdict || '').trim().toUpperCase();
+  const outcome =
+    s === 'WON' || s === 'WIN' || s === 'WON (PARTIAL)'
+      ? 'WON'
+      : s === 'LOST' || s === 'LOSE' || s === 'LOSS'
+        ? 'LOST'
+        : s === 'PUSH'
+          ? 'PUSH'
+          : null;
+  const group = OUTCOME_SURFACE_MAP[variant === 'lean' ? 'lean' : 'bet'];
+  const entry = (outcome && group[outcome]) || group.DEFAULT;
+  return {
+    outcome,
+    cardCls: `${entry.borderCls} ${entry.tintCls}`,
+    borderCls: entry.borderCls,
+    rowCls: entry.rowCls,
+    stripeCls: entry.stripeCls,
+    badgeCls: entry.badgeCls,
+  };
+};

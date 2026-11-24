@@ -5,6 +5,7 @@ import { Trash, DollarSign, Activity, Pencil, CheckCircle2 } from 'lucide-react'
 import EditBetModal from './EditBetModal';
 import SportAuditorModal from './SportAuditorModal';
 import ManualAddBetModal from './ManualAddBetModal';
+import { getOutcomeOutlineClasses } from './today/todayHelpers';
 
 const normalizeAccountKey = (rawAcc) => {
     const s = String(rawAcc || '').trim().toLowerCase();
@@ -1148,10 +1149,17 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                                 const isTxn = (bet.category === 'Transaction');
                                 const isDeposit = isTxn && (Number(bet.wager) < 0 || (bet.description || '').toLowerCase().includes('deposit'));
                                 const isSelected = false;
+                                const rowSurface = !isTxn ? getOutcomeOutlineClasses(bet.status, 'bet') : { outcome: null, rowCls: 'hover:bg-gray-800/40', stripeCls: '' };
                                 return (
                                     <tr
                                         key={bet.id || bet.txn_id}
-                                        className={`transition duration-150 cursor-pointer border-b border-gray-800/30 ${isSelected ? 'bg-blue-500/10 hover:bg-blue-500/20' : 'hover:bg-gray-800/40'}`}
+                                        className={`transition duration-150 cursor-pointer border-b border-gray-800/30 ${
+                                          isSelected
+                                            ? 'bg-blue-500/10 hover:bg-blue-500/20'
+                                            : rowSurface.outcome
+                                              ? rowSurface.rowCls
+                                              : 'hover:bg-gray-800/40'
+                                        }`}
                                         onClick={() => {
                                             if (!bet.id) return;
                                             setEditBet({
@@ -1173,7 +1181,7 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                                         }}
                                     >
                                         <td
-                                            className="px-3 py-3 text-gray-400 font-mono text-[10px] whitespace-nowrap opacity-60"
+                                            className={`px-3 py-3 text-gray-400 font-mono text-[10px] whitespace-nowrap opacity-80 ${rowSurface.stripeCls}`}
                                             title={formatDateMDY(bet.sort_date || bet.date)}
                                         >
                                             {formatDateMDY(bet.sort_date || bet.date)}

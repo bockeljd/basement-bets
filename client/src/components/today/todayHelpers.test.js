@@ -3,6 +3,7 @@ import {
   getBetTimingGuidance,
   getConfidenceMeta,
   getLiveGameStatus,
+  getOutcomeOutlineClasses,
   getRecEv,
   getRecQualityScore,
   hasTop6RiskFlag,
@@ -285,5 +286,46 @@ describe('Today recommendations', () => {
     expect(convTiming.action).toBe('BET_NOW');
     expect(getBetTimingGuidance({ bet_type: 'TOTAL' }, { start_time: tipIn(30), status: 'LIVE' }, null, nowMs)).toBeNull();
     expect(getBetTimingGuidance({ bet_type: 'TOTAL' }, { start_time: tipIn(-5), status: 'SCHEDULED' }, null, nowMs)).toBeNull();
+  });
+
+  it('builds consistent red/green/push outline classes across official bets and Close Call leans', () => {
+    const betWin = getOutcomeOutlineClasses('WON', 'bet');
+    expect(betWin.outcome).toBe('WON');
+    expect(betWin.cardCls).toContain('border-emerald-500/80');
+    expect(betWin.cardCls).not.toContain('border-dashed');
+    expect(betWin.rowCls).toContain('bg-emerald-950/40');
+    expect(betWin.stripeCls).toContain('border-l-emerald-400');
+
+    expect(getOutcomeOutlineClasses('WIN', 'bet').outcome).toBe('WON');
+    expect(getOutcomeOutlineClasses('WON (partial)', 'bet').outcome).toBe('WON');
+
+    const betLoss = getOutcomeOutlineClasses('LOST', 'bet');
+    expect(betLoss.outcome).toBe('LOST');
+    expect(betLoss.cardCls).toContain('border-rose-500/80');
+    expect(betLoss.stripeCls).toContain('border-l-rose-400');
+    expect(getOutcomeOutlineClasses('LOSE', 'bet').outcome).toBe('LOST');
+
+    const betPush = getOutcomeOutlineClasses('PUSH', 'bet');
+    expect(betPush.outcome).toBe('PUSH');
+    expect(betPush.cardCls).toContain('border-slate-500/75');
+
+    const betPending = getOutcomeOutlineClasses('PENDING', 'bet');
+    expect(betPending.outcome).toBeNull();
+    expect(betPending.stripeCls).toBe('');
+
+    const leanWin = getOutcomeOutlineClasses('WON', 'lean');
+    expect(leanWin.outcome).toBe('WON');
+    expect(leanWin.cardCls).toContain('border-dashed');
+    expect(leanWin.cardCls).toContain('border-emerald-400/75');
+    expect(leanWin.badgeCls).toContain('border-dashed');
+
+    const leanLoss = getOutcomeOutlineClasses('LOST', 'lean');
+    expect(leanLoss.outcome).toBe('LOST');
+    expect(leanLoss.cardCls).toContain('border-dashed');
+    expect(leanLoss.cardCls).toContain('border-rose-400/75');
+
+    const leanPending = getOutcomeOutlineClasses(null, 'lean');
+    expect(leanPending.outcome).toBeNull();
+    expect(leanPending.cardCls).toContain('border-slate-800');
   });
 });

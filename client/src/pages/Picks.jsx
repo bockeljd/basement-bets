@@ -55,6 +55,7 @@ import {
   getRowSeason,
 } from '../utils/modelPerformance';
 import { getCurrentNcaamSeasonShort, formatSeasonLabel } from '../utils/ncaamSeason';
+import { getOutcomeOutlineClasses } from '../components/today/todayHelpers';
 
 const TOOLTIP_STYLE = {
   backgroundColor: '#020617',
@@ -1623,10 +1624,13 @@ export default function Picks() {
                     const rowPl = item.profitUnits ?? computeRowProfitUnits(item);
                     const confTier = getConfidenceBucket(item);
                     const confScore = Math.round(getNumericConfidence(item));
+                    const cardSurface = getOutcomeOutlineClasses(badge.key, 'bet');
                     return (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/90 bg-slate-950/60 px-3.5 py-2.5"
+                        className={`flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 transition-colors ${
+                          cardSurface.outcome ? cardSurface.cardCls : 'border border-slate-800/90 bg-slate-950/60'
+                        }`}
                       >
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
@@ -1890,6 +1894,7 @@ export default function Picks() {
                   const confTier = getConfidenceBucket(h);
                   const confScore = Math.round(getNumericConfidence(h));
                   const badge = formatOutcomeBadge(getRawOutcome(h));
+                  const rowSurface = getOutcomeOutlineClasses(badge.key, 'bet');
                   const profitUnits = computeRowProfitUnits(h);
                   const rankNum = rankByRowKey.get(h);
 
@@ -1901,8 +1906,8 @@ export default function Picks() {
                         : 'text-slate-300 bg-slate-800/80 border-slate-700';
 
                   return (
-                    <tr key={h.id || h.prediction_id || `${h.event_id}-${idx}`} className="hover:bg-slate-900/55 transition-colors">
-                      <td className="py-2.5 px-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{day}</td>
+                    <tr key={h.id || h.prediction_id || `${h.event_id}-${idx}`} className={`${rowSurface.outcome ? rowSurface.rowCls : 'hover:bg-slate-900/55'} transition-colors`}>
+                      <td className={`py-2.5 px-2.5 font-mono text-xs text-slate-300 whitespace-nowrap ${rowSurface.stripeCls}`}>{day}</td>
                       <td className="py-2.5 px-2.5 whitespace-nowrap">
                         <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 text-xs font-bold">
                           {sp}

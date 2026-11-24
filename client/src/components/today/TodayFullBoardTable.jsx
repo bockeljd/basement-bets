@@ -13,6 +13,7 @@ import {
   getModelSignalData,
   getRecommendedBetSize,
   getBetTimingGuidance,
+  getOutcomeOutlineClasses,
 } from './todayHelpers';
 
 const TABLE_TIMING_STYLES = {
@@ -300,32 +301,13 @@ const TodayFullBoardTable = ({
                 const leanCoverDisplay = (liveInfo.coverText || liveInfo.gameTrendText || '')
                   .replace(/^Bet Won\b/i, 'Lean Hit')
                   .replace(/^Bet Lost\b/i, 'Lean Missed');
-                const rowHighlightCls = isBetWon
-                  ? 'bg-emerald-950/50 hover:bg-emerald-950/65'
-                  : isBetLost
-                    ? 'bg-rose-950/50 hover:bg-rose-950/65'
-                    : isBetPush
-                      ? 'bg-slate-800/60 hover:bg-slate-800/75'
-                      : isLeanHit
-                        ? 'bg-emerald-950/20 hover:bg-emerald-950/30'
-                        : isLeanMiss
-                          ? 'bg-rose-950/20 hover:bg-rose-950/30'
-                          : isLeanPush
-                            ? 'bg-slate-800/35 hover:bg-slate-800/50'
-                            : 'hover:bg-slate-800/40';
-                const leftStripeCls = isBetWon
-                  ? 'border-l-4 border-l-emerald-400'
-                  : isBetLost
-                    ? 'border-l-4 border-l-rose-400'
-                    : isBetPush
-                      ? 'border-l-4 border-l-slate-400'
-                      : isLeanHit
-                        ? 'border-l-2 border-dashed border-l-emerald-400/60'
-                        : isLeanMiss
-                          ? 'border-l-2 border-dashed border-l-rose-400/60'
-                          : isLeanPush
-                            ? 'border-l-2 border-dashed border-l-slate-400/60'
-                            : '';
+                const rowSurface = isBetSettled
+                  ? getOutcomeOutlineClasses(liveInfo.trendVerdict, 'bet')
+                  : isLeanSettled
+                    ? getOutcomeOutlineClasses(liveInfo.trendVerdict, 'lean')
+                    : getOutcomeOutlineClasses(null, 'bet');
+                const rowHighlightCls = rowSurface.rowCls;
+                const leftStripeCls = rowSurface.stripeCls;
 
                 return (
                   <tr
@@ -336,13 +318,7 @@ const TodayFullBoardTable = ({
                       {isBetSettled && (
                         <div className="mb-1">
                           <span
-                            className={`inline-flex px-1.5 py-0.5 rounded border text-[9px] font-sans font-extrabold uppercase tracking-wider ${
-                              isBetWon
-                                ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200'
-                                : isBetLost
-                                  ? 'bg-rose-500/25 border-rose-400/60 text-rose-200'
-                                  : 'bg-slate-700/80 border-slate-500 text-slate-200'
-                            }`}
+                            className={`inline-flex px-1.5 py-0.5 rounded border text-[9px] font-sans font-extrabold uppercase tracking-wider ${rowSurface.badgeCls}`}
                           >
                             {liveInfo.isFirstHalfBet ? '1H ' : ''}
                             {isBetWon ? 'WON' : isBetLost ? 'LOST' : 'PUSH'}
@@ -352,13 +328,7 @@ const TodayFullBoardTable = ({
                       {isLeanSettled && (
                         <div className="mb-1">
                           <span
-                            className={`inline-flex px-1.5 py-0.5 rounded border border-dashed text-[9px] font-sans font-bold uppercase tracking-wider ${
-                              isLeanHit
-                                ? 'bg-emerald-500/10 border-emerald-400/50 text-emerald-300/90'
-                                : isLeanMiss
-                                  ? 'bg-rose-500/10 border-rose-400/50 text-rose-300/90'
-                                  : 'bg-slate-800/80 border-slate-500/60 text-slate-300'
-                            }`}
+                            className={`inline-flex px-1.5 py-0.5 rounded border border-dashed text-[9px] font-sans font-bold uppercase tracking-wider ${rowSurface.badgeCls}`}
                           >
                             {isLeanHit ? 'Lean Hit' : isLeanMiss ? 'Lean Miss' : 'Lean Push'}
                           </span>

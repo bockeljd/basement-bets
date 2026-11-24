@@ -40,6 +40,7 @@ import {
   getProjectedScore,
   getLiveGameStatus,
   dedupeBoardGames,
+  getOutcomeOutlineClasses,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
 
@@ -1345,10 +1346,15 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                   const reasonTxt = safeReasonText(lean.reason || meta?.reason);
                   const projScore = getProjectedScore(game, { context: ctx }, lean);
                   const liveInfo = getLiveGameStatus(game, lean, ctx);
+                  const leanSurface = getOutcomeOutlineClasses(liveInfo.trendVerdict, 'lean');
+                  const isLeanSettled = Boolean(leanSurface.outcome);
+                  const leanCoverDisplay = (liveInfo.coverText || '')
+                    .replace(/^Bet Won\b/i, 'Lean Hit')
+                    .replace(/^Bet Lost\b/i, 'Lean Missed');
                   return (
                     <article
                       key={id}
-                      className="rounded-2xl border border-slate-800 bg-slate-900/75 p-4 flex flex-col justify-between gap-3"
+                      className={`rounded-2xl p-4 flex flex-col justify-between gap-3 transition-colors ${leanSurface.cardCls}`}
                     >
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
@@ -1365,27 +1371,35 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                           ) : (
                             <span>{fmtTimeEt(game.start_time)} ET</span>
                           )}
-                          <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-indigo-200 font-bold text-[10px]">
-                            Close Call
+                          <span className={`px-2 py-0.5 rounded-full border font-bold text-[10px] ${leanSurface.badgeCls}`}>
+                            {leanSurface.outcome === 'WON'
+                              ? 'Close Call · Lean Hit'
+                              : leanSurface.outcome === 'LOST'
+                                ? 'Close Call · Lean Miss'
+                                : leanSurface.outcome === 'PUSH'
+                                  ? 'Close Call · Push'
+                                  : 'Close Call'}
                           </span>
                         </div>
                         <div className="text-xs font-semibold text-slate-200 truncate">
                           {game.away_team} @ {game.home_team}
                         </div>
-                        {(liveInfo.isLive || liveInfo.isFinal) && liveInfo.coverText && (
+                        {(liveInfo.isLive || liveInfo.isFinal || isLeanSettled) && leanCoverDisplay && (
                           <div className="space-y-1">
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-bold ${
-                                liveInfo.coverTone === 'win'
-                                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                                  : liveInfo.coverTone === 'loss'
-                                    ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-                                    : liveInfo.coverTone === 'tossup'
-                                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
-                                      : 'bg-slate-800 border-slate-700 text-slate-200'
+                                isLeanSettled
+                                  ? leanSurface.badgeCls
+                                  : liveInfo.coverTone === 'win'
+                                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                    : liveInfo.coverTone === 'loss'
+                                      ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                                      : liveInfo.coverTone === 'tossup'
+                                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                                        : 'bg-slate-800 border-slate-700 text-slate-200'
                               }`}
                             >
-                              {liveInfo.coverText}
+                              {leanCoverDisplay}
                             </span>
                             {liveInfo.trendDetail && (
                               <p className="text-[11px] text-slate-300 leading-snug">{liveInfo.trendDetail}</p>
@@ -1411,7 +1425,7 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
                           <span>·</span>
                           <span className="text-indigo-300">Our Line: {lean.fair_line != null ? lean.fair_line : '—'}</span>
                         </div>
-                        {(() => {
+                        {!liveInfo.isLive && !liveInfo.isFinal && !isLeanSettled && (() => {
                           const mkt = Number(lean.market_line);
                           const fair = Number(lean.fair_line);
                           const bt = String(lean.bet_type || '').toUpperCase();

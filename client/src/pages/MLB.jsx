@@ -13,6 +13,7 @@ import {
   isWinOutcome,
   isLossOutcome,
 } from '../utils/modelPerformance';
+import { getOutcomeOutlineClasses } from '../components/today/todayHelpers';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -137,10 +138,11 @@ function PredictionRow({ pred }) {
   // Parse inputs for weather/park context
   let inputs = {};
   try { inputs = JSON.parse(pred.inputs_json || '{}'); } catch (e) {}
+  const rowSurface = getOutcomeOutlineClasses(outcome, 'bet');
 
   return (
-    <tr className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-      <td className="py-2.5 px-2.5 sm:px-3 text-xs text-slate-400 whitespace-nowrap font-mono tabular-nums">{pred.day_et || pred.analyzed_at?.slice(0, 10) || '—'}</td>
+    <tr className={`border-b border-slate-800/50 transition-colors ${rowSurface.outcome ? rowSurface.rowCls : 'hover:bg-slate-800/20'}`}>
+      <td className={`py-2.5 px-2.5 sm:px-3 text-xs text-slate-400 whitespace-nowrap font-mono tabular-nums ${rowSurface.stripeCls}`}>{pred.day_et || pred.analyzed_at?.slice(0, 10) || '—'}</td>
       <td className="py-2.5 px-2.5 sm:px-3 min-w-[140px]">
         <div className="text-xs font-black text-slate-100">
           {formatMatchup(pred) || pred.matchup || (pred.away_team && pred.home_team ? `${pred.away_team} @ ${pred.home_team}` : '—')}

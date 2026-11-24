@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
 import { Zap, Target, Home, TrendingUp, Percent, RefreshCw, PlusCircle, Lock, Clock } from 'lucide-react';
-import { getRecommendedBetSize } from './today/todayHelpers';
+import { getRecommendedBetSize, getOutcomeOutlineClasses } from './today/todayHelpers';
 
 const fmtPct = (x) => {
   const n = Number(x);
@@ -44,17 +44,10 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
   );
 
   const out = c?.outcome;
-  const isWon = out === 'WON' || out === 'WON (partial)';
-  const isLoss = out === 'LOST';
-  const isPush = out === 'PUSH';
-
-  let borderCls = 'border-slate-700/60';
-  if (isWon) borderCls = 'border-green-500/50 bg-green-950/20';
-  else if (isLoss) borderCls = 'border-red-500/50 bg-red-950/20';
-  else if (isPush) borderCls = 'border-slate-500/50 bg-slate-900/40';
+  const surface = getOutcomeOutlineClasses(out, 'bet');
 
   return (
-    <div className={`relative overflow-hidden p-4 rounded-xl border bg-gradient-to-br from-slate-900 to-slate-950 shadow-lg flex flex-col gap-3 transition hover:border-slate-500/50 ${borderCls}`}>
+    <div className={`relative overflow-hidden p-4 rounded-xl shadow-lg flex flex-col gap-3 transition-colors ${surface.cardCls}`}>
       {/* Header row */}
       <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
         <div className="flex items-baseline gap-2">
@@ -63,7 +56,7 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
         </div>
         <div className="flex items-center gap-2">
           {out && out !== 'PENDING' && (
-            <div className={`flex items-center gap-1 px-2 py-1 rounded-md border font-black text-[10px] uppercase tracking-wider ${isWon ? 'text-green-300 border-green-500/30 bg-green-500/10' : isLoss ? 'text-red-300 border-red-500/30 bg-red-500/10' : 'text-slate-300 border-slate-500/30 bg-slate-500/10'}`}>
+            <div className={`flex items-center gap-1 px-2 py-1 rounded-md border font-black text-[10px] uppercase tracking-wider ${surface.badgeCls}`}>
               {out}
             </div>
           )}
@@ -82,11 +75,15 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
       <div className="flex flex-col gap-3">
         {legs.map((leg, li) => {
           const lOut = leg.outcome ? String(leg.outcome).toUpperCase() : 'PENDING';
-          const lWon = lOut === 'WON';
-          const lLoss = lOut === 'LOST';
+          const legSurface = getOutcomeOutlineClasses(lOut, 'bet');
+          const lWon = legSurface.outcome === 'WON';
+          const lLoss = legSurface.outcome === 'LOST';
 
           return (
-            <div key={li} className="flex items-start justify-between gap-3">
+            <div
+              key={li}
+              className={`flex items-start justify-between gap-3 ${legSurface.outcome ? `${legSurface.stripeCls} pl-2` : ''}`}
+            >
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[10px] text-slate-500 font-bold uppercase">{fmtTime(leg.start_time)}</span>
@@ -113,10 +110,17 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-bold leading-tight ${lWon ? 'text-green-300' : lLoss ? 'text-red-300' : 'text-slate-200'}`}>{leg.team_pick}</span>
+                  <span className={`text-sm font-bold leading-tight ${lWon ? 'text-emerald-300' : lLoss ? 'text-rose-300' : 'text-slate-200'}`}>{leg.team_pick}</span>
                 </div>
               </div>
-              <span className="text-sm font-mono font-bold text-slate-500 shrink-0">{fmtOdds(leg.price)}</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {legSurface.outcome && (
+                  <span className={`px-1.5 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider ${legSurface.badgeCls}`}>
+                    {legSurface.outcome}
+                  </span>
+                )}
+                <span className="text-sm font-mono font-bold text-slate-400">{fmtOdds(leg.price)}</span>
+              </div>
             </div>
           );
         })}
@@ -305,36 +309,53 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
         </div>
       ) : (
         <div className="space-y-5">
-          {officialParlay && (
-            <section className="rounded-2xl border border-emerald-500/35 bg-emerald-950/15 p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
-                    Official Daily Parlay
+          {officialParlay && (() => {
+            const officialSurface = getOutcomeOutlineClasses(officialParlay.outcome, 'bet');
+            const officialSectionCls =
+              officialSurface.outcome === 'LOST'
+                ? 'border-rose-500/45 bg-rose-950/15'
+                : officialSurface.outcome === 'PUSH'
+                  ? 'border-slate-500/45 bg-slate-900/35'
+                  : 'border-emerald-500/35 bg-emerald-950/15';
+            return (
+              <section className={`rounded-2xl border p-4 space-y-3 ${officialSectionCls}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-xs font-black uppercase tracking-wider ${
+                        officialSurface.outcome === 'LOST'
+                          ? 'text-rose-300'
+                          : officialSurface.outcome === 'PUSH'
+                            ? 'text-slate-300'
+                            : 'text-emerald-300'
+                      }`}
+                    >
+                      Official Daily Parlay
+                    </span>
+                    {officialParlay.is_locked ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[10px] font-bold">
+                        <Lock size={10} aria-hidden="true" />
+                        <span>
+                          LOCKED{officialParlay.locked_at ? ` · ${fmtTime(officialParlay.locked_at)} ET` : ''}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/35 text-amber-200 text-[10px] font-bold">
+                        <Clock size={10} aria-hidden="true" />
+                        <span>
+                          Locks 10m before tip{officialParlay.locks_at ? ` (${fmtTime(officialParlay.locks_at)} ET)` : ''}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    Pinned daily pick graded in Model Performance · All other qualifying parlays shown below
                   </span>
-                  {officialParlay.is_locked ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[10px] font-bold">
-                      <Lock size={10} aria-hidden="true" />
-                      <span>
-                        LOCKED{officialParlay.locked_at ? ` · ${fmtTime(officialParlay.locked_at)} ET` : ''}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/35 text-amber-200 text-[10px] font-bold">
-                      <Clock size={10} aria-hidden="true" />
-                      <span>
-                        Locks 10m before tip{officialParlay.locks_at ? ` (${fmtTime(officialParlay.locks_at)} ET)` : ''}
-                      </span>
-                    </span>
-                  )}
                 </div>
-                <span className="text-[11px] text-slate-400">
-                  Pinned daily pick graded in Model Performance · All other qualifying parlays shown below
-                </span>
-              </div>
-              <ComboCard c={officialParlay} color="amber" bankroll={bankroll} onAddBet={onAddBet} />
-            </section>
-          )}
+                <ComboCard c={officialParlay} color="amber" bankroll={bankroll} onAddBet={onAddBet} />
+              </section>
+            );
+          })()}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <ParlayColumn
