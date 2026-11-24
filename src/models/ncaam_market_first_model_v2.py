@@ -2828,6 +2828,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
             "context_json": context_json_str,
             "is_actionable": bool(ui_recs),
             "block_reason": block_reason,
+            "ev_observations": [
+                {**{k: c.get(k) for k in ("market", "side", "line", "price", "book",
+                                           "ev_cutoff", "gate_ev", "win_prob")}, "cohort": cohort}
+                for cohort, group in (("qualified", recs), ("near_miss", market_snapshot.get("_ev_near_misses", [])))
+                for c in group if c.get("ev_cutoff") is not None and not relax_gates
+            ],
             "recommendations": ui_recs,
             "torvik_view": torvik_view,
             "torvik_team_stats": torvik_team_stats,
@@ -3372,6 +3378,8 @@ class NCAAMMarketFirstModelV2(BaseModel):
         except Exception:
             pass
 
+        rec["ev_cutoff"] = min_ev
+        rec["gate_ev"] = ev
         if ev < min_ev:
             rec["_publish_pass_reason"] = f"EV {ev:+.1%} below required {min_ev:.1%}"
             return False
@@ -4775,7 +4783,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 pass
 
         if candidates_eval and isinstance(snap, dict):
-            top_cand = max(candidates_eval, key=lambda c: float(c.get('ev') or -999.0))
+            top_cand = max(candidates_eval, key=lambda c: float(c['ev']) if c.get('ev') is not None else -999.0)
             mkt = str(top_cand.get('market') or '').upper()
             side = str(top_cand.get('side') or '').lower()
             line_val = _safe_float(top_cand.get('line'))
@@ -4836,6 +4844,12 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 ),
                 'reason': gate_msg,
             }
+
+        if not relax_gates:
+            snap['_ev_near_misses'] = [
+                c for c in candidates_eval if c.get('ev_cutoff') is not None
+                and 0 < c['ev_cutoff'] - c['gate_ev'] <= 0.010000000001
+            ]
 
         return self._apply_split_and_injury_signals(
             recs,

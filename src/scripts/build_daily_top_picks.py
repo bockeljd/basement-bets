@@ -30,6 +30,14 @@ def ensure_table():
       PRIMARY KEY(date_et, event_id)
     );
 
+    CREATE TABLE IF NOT EXISTS ncaam_ev_observations (
+        event_id text NOT NULL, model_version text NOT NULL, market text NOT NULL,
+        side text NOT NULL, cohort text NOT NULL, observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+        tip_at timestamptz NOT NULL, quote_at timestamptz NOT NULL, book text NOT NULL,
+        line double precision NOT NULL, price integer NOT NULL, ev double precision NOT NULL,
+        ev_cutoff double precision NOT NULL, win_prob double precision,
+        PRIMARY KEY (event_id, model_version, market, side, cohort)
+    );
     CREATE INDEX IF NOT EXISTS ix_daily_top_picks_date_league ON daily_top_picks(date_et, league);
     """
     with get_admin_db_connection() as conn:
@@ -293,6 +301,23 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
         _exec(conn, sql, payload)
 
 
+def archive_ev_observations(conn, event_id, result):
+    for observation in result.get("ev_observations", []):
+        params = {**observation, "event_id": event_id, "version": result["model_version"]}
+        _exec(conn, """INSERT INTO ncaam_ev_observations
+            (event_id,model_version,market,side,cohort,tip_at,quote_at,book,line,price,ev,ev_cutoff,win_prob)
+            SELECT e.id,%(version)s,%(market)s,%(side)s,%(cohort)s,e.start_time,q.captured_at,
+                   q.book,q.line_value,q.price,%(gate_ev)s,%(ev_cutoff)s,%(win_prob)s
+            FROM events e JOIN LATERAL (
+                SELECT * FROM odds_snapshots WHERE event_id=e.id AND market_type=%(market)s
+                  AND side=upper(%(side)s) AND lower(book)=lower(%(book)s)
+                  AND captured_at BETWEEN clock_timestamp()-interval '90 minutes' AND clock_timestamp()
+                ORDER BY captured_at DESC,id DESC LIMIT 1
+            ) q ON true WHERE e.id=%(event_id)s AND e.start_time>clock_timestamp()+interval '30 minutes'
+              AND q.price=%(price)s AND q.line_value=%(line)s
+            ON CONFLICT DO NOTHING""", params)
+
+
 def main():
     # date comes from env or argv
     date_et = None
@@ -389,6 +414,7 @@ def main():
                     pass
 
                 upsert_pick(ev_day_et, eid, res if isinstance(res, dict) else {}, conn=conn)
+                archive_ev_observations(conn, eid, res or {})
                 ok += 1
             except Exception as e:
                 print(f"[build_daily_top_picks] error on {eid}: {e}")
