@@ -90,8 +90,8 @@ jobs:
         run: |
           python3 - <<'PY' || echo "⚠️ Official parlay sync warning (continuing)"
           import json
-          from src.api import _compute_ncaam_parlays_today
-          res = _compute_ncaam_parlays_today(persist=False)
+          from src.services.ncaam_parlay_service import compute_ncaam_parlays_today
+          res = compute_ncaam_parlays_today(persist=False)
           odp = res.get("official_daily_parlay") or {}
           print(
               "[PARLAY_SYNC]",
