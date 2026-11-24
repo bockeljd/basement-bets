@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api/axios';
 import {
   RefreshCw,
@@ -15,6 +15,7 @@ import {
   Activity,
   Flame,
   Sparkles,
+  Layers,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -28,6 +29,7 @@ import {
   Cell,
 } from 'recharts';
 import ModelPerformanceAnalytics from '../components/ModelPerformanceAnalytics';
+import ParlayPerformanceSection from '../components/ParlayPerformanceSection';
 import {
   normalizeOutcome,
   isGradedOutcome,
@@ -54,6 +56,7 @@ import {
   computeRankBreakdown,
   getRowSeason,
 } from '../utils/modelPerformance';
+import { computeParlayAnalytics } from '../utils/parlayPerformance';
 import { getCurrentNcaamSeasonShort, formatSeasonLabel } from '../utils/ncaamSeason';
 import { getOutcomeOutlineClasses } from '../components/today/todayHelpers';
 
@@ -119,6 +122,8 @@ export default function Picks() {
   const [searchQuery, setSearchQuery] = useState('');
   const [historyRowLimit, setHistoryRowLimit] = useState(100);
   const [showExplainer, setShowExplainer] = useState(false);
+  const [activeSection, setActiveSection] = useState('all'); // 'all' | 'core' | 'parlays'
+  const focusTabRefs = useRef({});
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
   const load = async () => {
@@ -564,6 +569,11 @@ export default function Picks() {
       smartRisk: { ...computeRecordStats(smartRiskRows), clv: summarizeClv(smartRiskRows) },
     };
   }, [scopedHistory]);
+
+  const parlayAnalytics = useMemo(
+    () => computeParlayAnalytics(parlayReport, { selectedSeason, windowFilter }),
+    [parlayReport, selectedSeason, windowFilter]
+  );
 
   const executiveMetrics = useMemo(() => {
     const graded = (scopedHistory || [])
@@ -1111,6 +1121,82 @@ export default function Picks() {
         </div>
       )}
 
+      {/* Section Focus Switcher + Unified Visual Filter Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+        <div
+          role="tablist"
+          aria-label="Model performance section view"
+          className="perf-tablist border-slate-800/90"
+        >
+          {[
+            { id: 'all', label: 'All (Grouped)', pill: null },
+            {
+              id: 'core',
+              label: 'Core Model',
+              pill:
+                scopedStats.decided > 0
+                  ? `${scopedStats.wins}-${scopedStats.losses}`
+                  : null,
+            },
+            {
+              id: 'parlays',
+              label: 'Parlays',
+              pill:
+                parlayAnalytics.settled > 0
+                  ? parlayAnalytics.recordText
+                  : parlayAnalytics.pending > 0
+                    ? `${parlayAnalytics.pending} open`
+                    : null,
+            },
+          ].map((tab, idx, arr) => {
+            const active = activeSection === tab.id;
+            const onKeyDown = (e) => {
+              let nextIdx = null;
+              if (e.key === 'ArrowRight') nextIdx = (idx + 1) % arr.length;
+              else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + arr.length) % arr.length;
+              else if (e.key === 'Home') nextIdx = 0;
+              else if (e.key === 'End') nextIdx = arr.length - 1;
+              if (nextIdx !== null) {
+                e.preventDefault();
+                const targetTab = arr[nextIdx];
+                setActiveSection(targetTab.id);
+                focusTabRefs.current[targetTab.id]?.focus();
+              }
+            };
+            return (
+              <button
+                key={tab.id}
+                ref={(el) => {
+                  focusTabRefs.current[tab.id] = el;
+                }}
+                id={`perf-focus-tab-${tab.id}`}
+                role="tab"
+                type="button"
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                onKeyDown={onKeyDown}
+                onClick={() => setActiveSection(tab.id)}
+                className="perf-tab text-xs sm:text-sm"
+              >
+                <span>{tab.label}</span>
+                {tab.pill && (
+                  <span className="px-1.5 py-0.5 rounded-full border border-slate-700/80 bg-slate-900/90 text-[10px] font-mono text-slate-300">
+                    {tab.pill}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <span className="text-[11px] text-slate-400">
+          {activeSection === 'all'
+            ? 'Core Straight Bets & Official Parlays grouped separately below'
+            : activeSection === 'core'
+              ? 'Focused on straight bets, CLV, and live model calibration'
+              : 'Focused on Official 2-Leg Daily Parlays and leg analytics'}
+        </span>
+      </div>
+
       {/* Unified Visual Filter Toolbar (only 1 dropdown: Season) */}
       <search aria-label="Filter model performance" className="ui-card p-4 sm:p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
@@ -1175,111 +1261,117 @@ export default function Picks() {
               </select>
             </div>
 
-            <fieldset className="space-y-1.5">
-              <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Pick Scope
-              </legend>
-              <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
-                {[
-                  { val: 'top6', label: 'Top 6 / Day' },
-                  { val: 'all', label: 'All Picks' },
-                ].map((opt) => {
-                  const active = historyScope === opt.val;
-                  return (
-                    <label
-                      key={opt.val}
-                      className={`perf-radio-pill flex items-center justify-center min-h-[28px] px-2.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-                        active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="perf-scope"
-                        value={opt.val}
-                        checked={active}
-                        onChange={() => setHistoryScope(opt.val)}
-                        className="sr-only"
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </fieldset>
+            {activeSection !== 'parlays' && (
+              <fieldset className="space-y-1.5">
+                <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Pick Scope
+                </legend>
+                <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+                  {[
+                    { val: 'top6', label: 'Top 6 / Day' },
+                    { val: 'all', label: 'All Picks' },
+                  ].map((opt) => {
+                    const active = historyScope === opt.val;
+                    return (
+                      <label
+                        key={opt.val}
+                        className={`perf-radio-pill flex items-center justify-center min-h-[28px] px-2.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                          active ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="perf-scope"
+                          value={opt.val}
+                          checked={active}
+                          onChange={() => setHistoryScope(opt.val)}
+                          className="sr-only"
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 items-end pt-1">
-          {/* Bet Type Pills */}
-          <div className="space-y-1.5">
-            <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Bet Type
-            </span>
-            <div role="group" aria-label="Filter by bet type" className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                aria-pressed={marketFilter === 'ALL'}
-                onClick={() => setMarketFilter('ALL')}
-                className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
-                  marketFilter === 'ALL'
-                    ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                }`}
-              >
-                All Types
-              </button>
-              {availableMarkets.map((m) => {
-                const active = marketFilter === m;
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setMarketFilter(active ? 'ALL' : m)}
-                    className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
-                      active
-                        ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                    }`}
-                  >
-                    {formatMarketLabel(m)}
-                  </button>
-                );
-              })}
+        <div className={`grid grid-cols-1 ${activeSection !== 'parlays' ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-1 max-w-xs'} gap-3.5 items-end pt-1`}>
+          {/* Bet Type Pills (Straight bets only) */}
+          {activeSection !== 'parlays' && (
+            <div className="space-y-1.5">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Bet Type
+              </span>
+              <div role="group" aria-label="Filter by bet type" className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-pressed={marketFilter === 'ALL'}
+                  onClick={() => setMarketFilter('ALL')}
+                  className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                    marketFilter === 'ALL'
+                      ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  All Types
+                </button>
+                {availableMarkets.map((m) => {
+                  const active = marketFilter === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setMarketFilter(active ? 'ALL' : m)}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      }`}
+                    >
+                      {formatMarketLabel(m)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Confidence Pills */}
-          <div className="space-y-1.5">
-            <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Confidence
-            </span>
-            <div role="group" aria-label="Filter by confidence level" className="flex flex-wrap items-center gap-1.5">
-              {[
-                { key: 'ALL', label: 'All Levels' },
-                { key: 'HIGH', label: 'High (80+)' },
-                { key: 'MEDIUM', label: 'Medium (50–79)' },
-                { key: 'LOW', label: 'Low (<50)' },
-              ].map((opt) => {
-                const active = confFilter === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setConfFilter(active && opt.key !== 'ALL' ? 'ALL' : opt.key)}
-                    className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
-                      active
-                        ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
+          {/* Confidence Pills (Straight bets only) */}
+          {activeSection !== 'parlays' && (
+            <div className="space-y-1.5">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Confidence
+              </span>
+              <div role="group" aria-label="Filter by confidence level" className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { key: 'ALL', label: 'All Levels' },
+                  { key: 'HIGH', label: 'High (80+)' },
+                  { key: 'MEDIUM', label: 'Medium (50–79)' },
+                  { key: 'LOW', label: 'Low (<50)' },
+                ].map((opt) => {
+                  const active = confFilter === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setConfFilter(active && opt.key !== 'ALL' ? 'ALL' : opt.key)}
+                      className={`min-h-[34px] px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-indigo-500/25 border-indigo-400 text-indigo-100'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Time Window Radio Group */}
           <fieldset className="space-y-1.5">
@@ -1320,12 +1412,20 @@ export default function Picks() {
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs text-slate-400">
           <div className="flex flex-wrap items-center gap-2">
             <Filter className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
-            <span>
-              Showing <strong className="text-slate-200">{filterSummaryText}</strong> •{' '}
-              <span className="font-mono text-slate-200">{scopedStats.settled.toLocaleString()}</span> graded out of{' '}
-              <span className="font-mono text-slate-200">{scopedStats.total.toLocaleString()}</span> picks
-              {historyScope === 'top6' && ' • 1 best pick per game'}
-            </span>
+            {activeSection === 'parlays' ? (
+              <span>
+                Showing <strong className="text-slate-200">{sportLabel} • {seasonLabel} • {windowLabel}</strong> •{' '}
+                <span className="font-mono text-slate-200">{parlayAnalytics.settled}</span> settled out of{' '}
+                <span className="font-mono text-slate-200">{parlayAnalytics.items.length}</span> official parlays
+              </span>
+            ) : (
+              <span>
+                Showing <strong className="text-slate-200">{filterSummaryText}</strong> •{' '}
+                <span className="font-mono text-slate-200">{scopedStats.settled.toLocaleString()}</span> graded out of{' '}
+                <span className="font-mono text-slate-200">{scopedStats.total.toLocaleString()}</span> picks
+                {historyScope === 'top6' && ' • 1 best pick per game'}
+              </span>
+            )}
           </div>
           {hasNonDefaultFilters && (
             <button
@@ -1340,11 +1440,50 @@ export default function Picks() {
         </div>
       </search>
 
-      {/* Top KPI Summary Cards + Actionable Key Takeaways */}
-      <section aria-labelledby="kpi-summary-heading" className="space-y-4">
-        <h2 id="kpi-summary-heading" className="sr-only">
-          Key Performance Summary
-        </h2>
+      <div
+        id="perf-focus-panel"
+        role="tabpanel"
+        aria-labelledby={`perf-focus-tab-${activeSection}`}
+        className="space-y-10"
+      >
+        {/* GROUP 1: CORE MODEL DATA & INSIGHTS */}
+        {(activeSection === 'all' || activeSection === 'core') && (
+          <section aria-labelledby="core-group-heading" className="space-y-6">
+            <div className="rounded-2xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/10 via-slate-900/70 to-indigo-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 p-2 rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 shrink-0">
+                  <Target className="w-4 h-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <h2 id="core-group-heading" className="text-base sm:text-lg font-bold text-slate-100">
+                    Core Model Data &amp; Insights
+                  </h2>
+                  <p className="text-xs text-slate-300/90">
+                    Straight-bet profit, Core vs. Smart Risk tiers, closing-line edge, strategy sweet spots, and pick log.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-mono shrink-0">
+                <span className="px-2.5 py-1 rounded-full border border-slate-700 bg-slate-950/80 text-slate-200 font-bold">
+                  {scopedStats.wins}-{scopedStats.losses}
+                  {scopedStats.pushes > 0 ? `-${scopedStats.pushes}` : ''}
+                </span>
+                {scopedStats.settled > 0 && (
+                  <span
+                    className={`px-2.5 py-1 rounded-full border font-bold ${
+                      scopedStats.profitUnits >= 0
+                        ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300'
+                        : 'border-rose-500/35 bg-rose-500/15 text-rose-300'
+                    }`}
+                  >
+                    {formatUnits(scopedStats.profitUnits)} · {formatSignedPct(scopedStats.roiPct)} ROI
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Top KPI Summary Cards + Actionable Key Takeaways */}
+            <div className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {/* Card 1: Net Profit & ROI + Inline Equity Sparkline */}
           <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
@@ -1654,10 +1793,9 @@ export default function Picks() {
             ))}
           </div>
         )}
-      </section>
+      </div>
 
       {/* Main Recharts Visualizations & Breakdowns */}
-      <h2 className="sr-only">Model Performance Charts and Breakdowns</h2>
       <ModelPerformanceAnalytics
         history={scopedHistory}
         preConfHistory={scopePreConfHistory}
@@ -1672,19 +1810,16 @@ export default function Picks() {
         scopeLabel={historyScope === 'top6' ? 'Top 6 daily picks' : 'all recommended picks'}
         filterSummary={filterSummaryText}
         liveCalibration={liveCalibration}
-        parlayReport={parlayReport}
         modelLearning={modelLearning}
-        selectedSeason={selectedSeason}
-        windowFilter={windowFilter}
         slateAndRankSlot={(
-          <section aria-label="Yesterday Slate Recap and Daily Rank Performance" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Yesterday / Most Recent Active Slate Recap */}
             <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="recent-slate-heading">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h2 id="recent-slate-heading" className="text-base font-bold text-slate-100">
+                  <h3 id="recent-slate-heading" className="text-base font-bold text-slate-100">
                     {recentSlateDisplay.title}
-                  </h2>
+                  </h3>
                   <p className="text-xs text-slate-400">{recentSlateDisplay.subtitle}</p>
                 </div>
                 {recentSlateDisplay.rows.length > 0 && recentSlateDisplay.stats?.settled > 0 && (
@@ -1783,9 +1918,9 @@ export default function Picks() {
             <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="rank-breakdown-heading">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h2 id="rank-breakdown-heading" className="text-base font-bold text-slate-100">
+                  <h3 id="rank-breakdown-heading" className="text-base font-bold text-slate-100">
                     Daily Best Picks by Rank (#1 to #6)
-                  </h2>
+                  </h3>
                   <p className="text-xs text-slate-400">
                     1 best pick per game each day for {sportLabel}, ordered from #1 (highest-rated pick) to #6.
                   </p>
@@ -1851,7 +1986,7 @@ export default function Picks() {
                 </>
               )}
             </article>
-          </section>
+          </div>
         )}
       />
 
@@ -1859,9 +1994,9 @@ export default function Picks() {
       <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="pick-history-heading">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
-            <h2 id="pick-history-heading" className="text-lg font-bold text-slate-100">
+            <h3 id="pick-history-heading" className="text-lg font-bold text-slate-100">
               Pick History &amp; Results
-            </h2>
+            </h3>
             <p className="text-xs text-slate-400">
               Showing {visibleTableRows.length.toLocaleString()} of {filteredAndSortedTableRows.length.toLocaleString()} matching picks ({filterSummaryText}).
             </p>
@@ -2078,6 +2213,57 @@ export default function Picks() {
           </div>
         )}
       </article>
+          </section>
+        )}
+
+        {/* GROUP 2: PARLAY DATA & INSIGHTS */}
+        {(activeSection === 'all' || activeSection === 'parlays') && (
+          <section aria-labelledby="parlay-group-heading" className="space-y-6">
+            <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-500/12 via-slate-900/75 to-amber-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 p-2 rounded-xl border border-indigo-400/35 bg-indigo-500/15 text-indigo-300 shrink-0">
+                  <Layers className="w-4 h-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <h2 id="parlay-group-heading" className="text-base sm:text-lg font-bold text-slate-100">
+                    Parlay Data &amp; Insights
+                  </h2>
+                  <p className="text-xs text-slate-300/90">
+                    Official 2-leg daily parlays locked 10m pre-tip — leg hit rates, strategy &amp; odds bands, and running equity curve.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-mono shrink-0">
+                <span className="px-2.5 py-1 rounded-full border border-slate-700 bg-slate-950/80 text-slate-200 font-bold">
+                  {parlayAnalytics.recordText}
+                </span>
+                {parlayAnalytics.settled > 0 ? (
+                  <span
+                    className={`px-2.5 py-1 rounded-full border font-bold ${
+                      parlayAnalytics.profitUnits >= 0
+                        ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300'
+                        : 'border-rose-500/35 bg-rose-500/15 text-rose-300'
+                    }`}
+                  >
+                    {formatUnits(parlayAnalytics.profitUnits)} · {formatSignedPct(parlayAnalytics.roiPct)} ROI
+                  </span>
+                ) : parlayAnalytics.pending > 0 ? (
+                  <span className="px-2.5 py-1 rounded-full border border-sky-500/35 bg-sky-500/15 text-sky-300 font-bold">
+                    {parlayAnalytics.pending} open
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <ParlayPerformanceSection
+              parlayAnalytics={parlayAnalytics}
+              selectedSport={selectedSport}
+              onSwitchToNcaam={() => handleSportChange('NCAAM')}
+              filterSummary={`${sportLabel} • ${seasonLabel} • ${windowLabel}`}
+            />
+          </section>
+        )}
+      </div>
     </div>
   );
 }

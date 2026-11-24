@@ -25,12 +25,9 @@ import {
   normalizeOutcome,
   normalizeMarketType,
   formatMarketLabel,
-  formatAmericanOdds,
-  toEtDay,
   getNumericEdge,
   normalizeSport,
 } from '../utils/modelPerformance';
-import { getOutcomeOutlineClasses } from './today/todayHelpers';
 
 const TOOLTIP_STYLE = {
   backgroundColor: '#020617',
@@ -119,81 +116,11 @@ const ModelPerformanceAnalytics = ({
   scopeLabel = 'all recommended picks',
   filterSummary = 'All Sports • All Time',
   liveCalibration = null,
-  parlayReport = null,
   modelLearning = null,
-  selectedSeason = 'ALL',
-  windowFilter = 'ALL',
   slateAndRankSlot = null,
 }) => {
   const [trendTab, setTrendTab] = useState('cumulative');
   const [edgeTab, setEdgeTab] = useState('chart');
-
-  const parlayAnalytics = useMemo(() => {
-    const rawItems = Array.isArray(parlayReport?.items) ? parlayReport.items : [];
-    const todayEt = toEtDay(new Date()) || new Date().toISOString().slice(0, 10);
-    const daysBack =
-      windowFilter === '7' ? 7 : windowFilter === '30' ? 30 : windowFilter === '90' ? 90 : null;
-    let cutoffEt = null;
-    if (daysBack) {
-      const dt = new Date(`${todayEt}T12:00:00Z`);
-      dt.setUTCDate(dt.getUTCDate() - daysBack);
-      cutoffEt = dt.toISOString().slice(0, 10);
-    }
-
-    const filtered = rawItems.filter((item) => {
-      if (!item) return false;
-      if (selectedSeason && selectedSeason !== 'ALL' && item.season && item.season !== selectedSeason) {
-        return false;
-      }
-      if (cutoffEt && item.date_et && String(item.date_et).slice(0, 10) < cutoffEt) {
-        return false;
-      }
-      return true;
-    });
-
-    let wins = 0;
-    let losses = 0;
-    let pushes = 0;
-    let voids = 0;
-    let pending = 0;
-    let profitUnits = 0;
-
-    for (const item of filtered) {
-      const rawOut = String(item.outcome || 'PENDING').toUpperCase();
-      const norm = rawOut === 'WON (PARTIAL)' ? 'WON' : normalizeOutcome(rawOut);
-      if (norm === 'WON') wins += 1;
-      else if (norm === 'LOST') losses += 1;
-      else if (norm === 'PUSH') pushes += 1;
-      else if (norm === 'VOID') voids += 1;
-      else pending += 1;
-
-      if (
-        (norm === 'WON' || norm === 'LOST' || norm === 'PUSH') &&
-        item.roi_per_unit !== null &&
-        item.roi_per_unit !== undefined &&
-        Number.isFinite(Number(item.roi_per_unit))
-      ) {
-        profitUnits += Number(item.roi_per_unit);
-      }
-    }
-
-    const decided = wins + losses;
-    const settled = decided + pushes;
-    return {
-      items: filtered,
-      wins,
-      losses,
-      pushes,
-      voids,
-      pending,
-      decided,
-      settled,
-      recordText: `${wins}-${losses}${pushes > 0 ? `-${pushes}` : ''}`,
-      winRate: decided > 0 ? (wins / decided) * 100 : 0,
-      profitUnits: Number(profitUnits.toFixed(2)),
-      roiPct: settled > 0 ? (profitUnits / settled) * 100 : 0,
-    };
-  }, [parlayReport, selectedSeason, windowFilter]);
 
   const analytics = useMemo(() => {
     const safeHistory = Array.isArray(history) ? history : [];
@@ -1308,186 +1235,6 @@ const ModelPerformanceAnalytics = ({
           </div>
         </div>
       </article>
-
-      {/* Row 3.25: Official Daily Parlay Performance (NCAAM) */}
-      {(selectedSport === 'NCAAM' || selectedSport === 'ALL') && (
-        <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="parlay-perf-heading">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <h3 id="parlay-perf-heading" className="text-base font-bold text-slate-100">
-                Official Daily Parlay Performance
-              </h3>
-              <p className="text-xs text-slate-400">
-                2-leg Official Parlays locked automatically 10 minutes before first leg tip-off. Tracked separately from straight 52.4% KPIs.
-              </p>
-            </div>
-            <span className="px-2.5 py-1 rounded-full border border-indigo-500/35 bg-indigo-500/15 text-indigo-200 text-xs font-semibold shrink-0">
-              {parlayAnalytics.settled > 0
-                ? `${parlayAnalytics.recordText} · ${formatSignedPct(parlayAnalytics.roiPct)} ROI`
-                : parlayAnalytics.pending > 0
-                  ? `${parlayAnalytics.pending} open`
-                  : 'Official Daily Parlay'}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Parlay Record</div>
-              <div className="text-base font-mono font-extrabold text-slate-100">
-                {parlayAnalytics.recordText}
-              </div>
-              <div className="text-[11px] text-slate-400">
-                {parlayAnalytics.pending > 0 ? `${parlayAnalytics.pending} open` : `${parlayAnalytics.settled} settled`}
-              </div>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Win %</div>
-              <div className="text-base font-mono font-extrabold text-slate-100">
-                {parlayAnalytics.decided > 0 ? formatPct(parlayAnalytics.winRate) : '—'}
-              </div>
-              <div className="text-[11px] text-slate-400">Plus-money combo odds</div>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net Profit</div>
-              <div
-                className={`text-base font-mono font-extrabold ${
-                  parlayAnalytics.settled === 0
-                    ? 'text-slate-200'
-                    : parlayAnalytics.profitUnits >= 0
-                      ? 'text-emerald-400'
-                      : 'text-rose-400'
-                }`}
-              >
-                {parlayAnalytics.settled > 0 ? formatUnits(parlayAnalytics.profitUnits) : '—'}
-              </div>
-              <div className="text-[11px] text-slate-400">1u flat per official parlay</div>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-0.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">ROI</div>
-              <div
-                className={`text-base font-mono font-extrabold ${
-                  parlayAnalytics.settled === 0
-                    ? 'text-slate-200'
-                    : parlayAnalytics.roiPct >= 0
-                      ? 'text-emerald-400'
-                      : 'text-rose-400'
-                }`}
-              >
-                {parlayAnalytics.settled > 0 ? formatSignedPct(parlayAnalytics.roiPct) : '—'}
-              </div>
-              <div className="text-[11px] text-slate-400">Supports partial pushes</div>
-            </div>
-          </div>
-
-          {parlayAnalytics.items.length === 0 ? (
-            <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 px-4 py-4 text-xs text-slate-400">
-              No Official Daily Parlays recorded for this filter yet. Once an official parlay reaches its 10-minute pre-tip lock window (or is locked from the Parlays tab), its legs, odds, and graded ROI appear here automatically.
-            </div>
-          ) : (
-            <div role="region" aria-labelledby="parlay-perf-heading" tabIndex={0} className="perf-table-wrapper max-h-[340px] rounded-xl border border-slate-800/80">
-              <table className="perf-sticky-table w-full text-left border-collapse text-xs">
-                <caption className="sr-only">Official Daily Parlay results and leg breakdown</caption>
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th scope="col" className="py-2 px-3 font-medium">Date</th>
-                    <th scope="col" className="py-2 px-3 font-medium">Legs &amp; Scores</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Odds</th>
-                    <th scope="col" className="py-2 px-3 font-medium">Result</th>
-                    <th scope="col" className="py-2 px-3 font-medium text-right">Profit</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/70">
-                  {parlayAnalytics.items.slice(0, 25).map((item, idx) => {
-                    const outKey = String(item.outcome || 'PENDING').toUpperCase();
-                    const normKey = outKey === 'WON (PARTIAL)' ? 'WON' : (normalizeOutcome(outKey) || 'PENDING');
-                    const rowSurface = getOutcomeOutlineClasses(normKey, 'bet');
-                    const badgeCls =
-                      normKey === 'WON'
-                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
-                        : normKey === 'LOST'
-                          ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
-                          : normKey === 'PUSH'
-                            ? 'bg-slate-600/25 text-slate-300 border-slate-500/40'
-                            : normKey === 'VOID'
-                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                              : 'bg-sky-500/15 text-sky-300 border-sky-500/30';
-                    const outLabel =
-                      outKey === 'WON (PARTIAL)'
-                        ? 'Won (Partial)'
-                        : normKey === 'WON'
-                          ? 'Won'
-                          : normKey === 'LOST'
-                            ? 'Lost'
-                            : normKey === 'PUSH'
-                              ? 'Push'
-                              : normKey === 'VOID'
-                                ? 'Void'
-                                : 'Pending';
-                    const oddsStr = formatAmericanOdds(item.american_odds) || '—';
-                    const legs = Array.isArray(item.legs) ? item.legs : [];
-
-                    return (
-                      <tr
-                        key={item.id || `${item.date_et}-${idx}`}
-                        className={`${rowSurface.outcome ? rowSurface.rowCls : 'hover:bg-slate-900/50'} transition-colors`}
-                      >
-                        <th scope="row" className={`py-2.5 px-3 font-mono text-slate-300 whitespace-nowrap font-normal ${rowSurface.stripeCls}`}>
-                          {item.date_et || '—'}
-                        </th>
-                        <td className="py-2.5 px-3 min-w-[240px]">
-                          <div className="space-y-1">
-                            {legs.map((lg, lIdx) => {
-                              const lgOut = String(lg?.outcome || 'PENDING').toUpperCase();
-                              const lgCls =
-                                lgOut === 'WON'
-                                  ? 'text-emerald-300'
-                                  : lgOut === 'LOST'
-                                    ? 'text-rose-300'
-                                    : lgOut === 'PUSH'
-                                      ? 'text-slate-400'
-                                      : 'text-sky-300';
-                              const lgOdds = formatAmericanOdds(lg?.price);
-                              return (
-                                <div key={lg?.event_id || lIdx} className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                                  <span className="font-semibold text-slate-100">
-                                    {lg?.team_pick || lg?.matchup || `Leg ${lIdx + 1}`}
-                                  </span>
-                                  {lgOdds && <span className="font-mono text-slate-400">({lgOdds})</span>}
-                                  <span className={`font-mono font-bold ${lgCls}`}>{lgOut}</span>
-                                  {lg?.score && <span className="font-mono text-slate-500">{lg.score}</span>}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono font-semibold text-indigo-200 whitespace-nowrap">
-                          {oddsStr}
-                        </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span className={`inline-block px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badgeCls}`}>
-                            {outLabel}
-                          </span>
-                        </td>
-                        <td
-                          className={`py-2.5 px-3 text-right font-mono font-bold whitespace-nowrap ${
-                            normKey === 'WON'
-                              ? 'text-emerald-400'
-                              : normKey === 'LOST'
-                                ? 'text-rose-400'
-                                : 'text-slate-400'
-                          }`}
-                        >
-                          {normKey === 'PENDING' || item.roi_per_unit == null ? '—' : formatUnits(item.roi_per_unit)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </article>
-      )}
 
       {/* Row 3.5: NCAAM Model Insights & Sweet Spots */}
       {(selectedSport === 'NCAAM' || selectedSport === 'ALL') && (() => {
