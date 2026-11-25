@@ -1909,7 +1909,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.85)
 
         if game_month == 11 and has_spread:
-            mu_spread_final += 0.25 * (mu_market_spread - mu_spread_final)
+            mu_spread_final += 0.25 * (float(raw_sp) - mu_spread_final)
 
         # --- Feature: Live Injury Impact Toggle (applied after automated clamp) ---
         if self.manual_adjustments:
