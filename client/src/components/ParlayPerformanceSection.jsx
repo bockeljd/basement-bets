@@ -212,7 +212,7 @@ export default function ParlayPerformanceSection({
             {renderParlaySparkline(stats.sparkPoints, stats.profitUnits >= 0)}
           </div>
           <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/70">
-            Official 2-leg parlays lock 10m pre-tip
+            Official 2-leg parlays lock at least 30m pre-tip
           </div>
         </article>
 
@@ -635,7 +635,7 @@ export default function ParlayPerformanceSection({
 
         {filteredItems.length === 0 ? (
           <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 px-4 py-5 text-xs text-slate-400">
-            No Official Daily Parlays match the active filters. Once an official parlay reaches its 10-minute pre-tip lock window, its legs, odds, and graded ROI appear here automatically.
+            No Official Daily Parlays match the active filters. Tickets must lock at least 30 minutes before the first tip to count.
           </div>
         ) : (
           <div

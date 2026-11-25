@@ -417,7 +417,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
                     )}
                   </div>
                   <span className="text-[11px] text-slate-400">
-                    Pinned daily pick graded in Model Performance · All other qualifying parlays shown below
+                    Pinned daily pick graded in Model Performance · Combined odds calculated from leg prices
                   </span>
                 </div>
                 <ComboCard c={officialParlay} color="amber" bankroll={bankroll} onAddBet={onAddBet} />

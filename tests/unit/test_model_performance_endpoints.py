@@ -1845,9 +1845,7 @@ def test_parlays_today_hardening_official_daily_days_ago_and_ev_floor(monkeypatc
     body = resp.json()
     assert seen_dtp_dates == ["2026-11-21"]
     assert body["legs_considered"] == 2
-    assert body["official_daily_parlay"] is not None
-    assert body["official_daily_parlay"]["is_official_daily"] is True
-    assert body["official_daily_parlay"]["is_locked"] is False
+    assert body["official_daily_parlay"] is None  # Historical previews cannot become official picks.
     assert all(c["ev"] >= 0.02 for c in (body["high_confidence"] + body["payout_band"]))
 
 

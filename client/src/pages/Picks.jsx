@@ -2234,7 +2234,7 @@ export default function Picks() {
                     Parlay Data &amp; Insights
                   </h2>
                   <p className="text-xs text-slate-300/90">
-                    Official 2-leg daily parlays locked 10m pre-tip — leg hit rates, strategy &amp; odds bands, and running equity curve.
+                    Official 2-leg daily parlays locked at least 30 minutes before tip — leg hit rates, strategy &amp; odds bands, and running equity curve.
                   </p>
                 </div>
               </div>
@@ -2268,6 +2268,21 @@ export default function Picks() {
               onSwitchToNcaam={() => handleSportChange('NCAAM')}
               filterSummary={`${sportLabel} • ${seasonLabel} • ${windowLabel}`}
             />}
+            {(selectedSport === 'NCAAM' || selectedSport === 'ALL') &&
+              parlayReport?.audit_items?.length > 0 && (
+              <details className="rounded-xl border border-slate-700 p-4">
+                <summary className="cursor-pointer">Publication audit · excluded from official results (all dates)</summary>
+                <ul>{parlayReport.audit_items.map(item => (
+                  <li key={item.id} className="mt-2 text-sm">
+                    {item.date_et} · {item.outcome} · {{
+                      after_tip: 'Saved after tipoff',
+                      late_pregame: 'Saved less than 30 minutes before tipoff',
+                      unverified: 'Publication time could not be verified',
+                    }[item.publication_timing]}
+                  </li>
+                ))}</ul>
+              </details>
+            )}
           </section>
         )}
       </div>

@@ -186,8 +186,8 @@ def test_parlay_performance_report_grades_away_ml_spread_total_and_partial_push(
             "bucket": "high_confidence",
             "event_id_1": "e1",
             "event_id_2": "e2",
-            "locked_at": datetime(2026, 11, 22, 18, 50, tzinfo=timezone.utc),
-            "created_at": datetime(2026, 11, 22, 18, 50, tzinfo=timezone.utc),
+            "locked_at": datetime(2026, 11, 22, 18, 25, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 11, 22, 18, 25, tzinfo=timezone.utc),
             "parlay_json": json.dumps({
                 "american_odds": 260,
                 "legs": [
@@ -224,8 +224,8 @@ def test_parlay_performance_report_grades_away_ml_spread_total_and_partial_push(
             "bucket": "payout_band",
             "event_id_1": "e3",
             "event_id_2": "e4",
-            "locked_at": datetime(2026, 11, 21, 17, 50, tzinfo=timezone.utc),
-            "created_at": datetime(2026, 11, 21, 17, 50, tzinfo=timezone.utc),
+            "locked_at": datetime(2026, 11, 21, 17, 25, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 11, 21, 17, 25, tzinfo=timezone.utc),
             "parlay_json": json.dumps({
                 "american_odds": 264,
                 "legs": [
@@ -261,8 +261,8 @@ def test_parlay_performance_report_grades_away_ml_spread_total_and_partial_push(
             "bucket": "high_confidence",
             "event_id_1": "e5",
             "event_id_2": "e6",
-            "locked_at": datetime(2026, 11, 20, 17, 50, tzinfo=timezone.utc),
-            "created_at": datetime(2026, 11, 20, 17, 50, tzinfo=timezone.utc),
+            "locked_at": datetime(2026, 11, 20, 17, 25, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 11, 20, 17, 25, tzinfo=timezone.utc),
             "parlay_json": json.dumps({
                 "american_odds": 250,
                 "legs": [
@@ -502,9 +502,17 @@ def _mock_parlay_db(monkeypatch, *, today_et, ml_rows, dtp_rows, inserts_out):
             return _FakeCursor([(today_et,)])
         if "from daily_top_picks d" in s and "join events e" in s:
             return _FakeCursor(dtp_rows)
+        if "canon_book" in s:
+            quotes = [dict(event_id=r["event_id"], market_type="MONEYLINE", side="HOME",
+                           canon_book="DraftKings", line_value=None, price=r["price"]) for r in ml_rows]
+            quotes += [dict(event_id=r["event_id"], market_type=r["rec_json"]["bet_type"],
+                            side=r["rec_json"]["side"], canon_book="DraftKings",
+                            line_value=r["rec_json"]["market_line"], price=r["rec_json"]["price"])
+                       for r in dtp_rows if isinstance(r.get("rec_json"), dict) and r["rec_json"].get("market_line") is not None]
+            return _FakeCursor([{**r, "captured_at": datetime.now(timezone.utc)} for r in quotes])
         if "insert into recommended_parlays" in s:
             inserts_out.append((sql, params))
-            return _FakeCursor([])
+            return _FakeCursor([{"locked_at": datetime.now(timezone.utc)}])
         return _FakeCursor([])
 
     monkeypatch.setattr(db, "get_db_connection", lambda: _CommitFakeConn())
@@ -641,10 +649,10 @@ def test_compute_ncaam_parlays_today_waits_on_monitor_and_locks_at_30m_cutoff(mo
 
     res_cutoff = compute_ncaam_parlays_today(date=today_et, persist=False)
     odp_cutoff = res_cutoff["official_daily_parlay"]
-    assert odp_cutoff is not None
-    assert odp_cutoff["is_locked"] is True
-    assert odp_cutoff["lock_reason"] == "pre_tip_cutoff"
-    assert len(inserts_cutoff) == 1
+    assert odp_cutoff is None
+    assert not inserts_cutoff
+    assert compute_ncaam_parlays_today(date=today_et, persist=True)["official_daily_parlay"] is None
+    assert not inserts_cutoff
 
 
 def test_compute_ncaam_parlays_today_excludes_started_games_contra_sharp_and_leans_from_official(monkeypatch):
@@ -897,10 +905,10 @@ def test_secondary_parlay_ranking_relaxes_same_book_thrashing(monkeypatch):
             return _FakeCursor([(today_et,)])
         if "from odds_snapshots" in s and "canon_book" in s:
             return _FakeCursor([
-                {"event_id": "evt_m1", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "DraftKings", "line_value": None, "price": -145},
-                {"event_id": "evt_m2", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "FanDuel", "line_value": None, "price": -145},
-                {"event_id": "evt_s1", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "DraftKings", "line_value": None, "price": -110},
-                {"event_id": "evt_s2", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "DraftKings", "line_value": None, "price": -110},
+                {"event_id": "evt_m1", "market_type": "MONEYLINE", "side": "HOME", "captured_at": datetime.now(timezone.utc), "canon_book": "DraftKings", "line_value": None, "price": -145},
+                {"event_id": "evt_m2", "market_type": "MONEYLINE", "side": "HOME", "captured_at": datetime.now(timezone.utc), "canon_book": "FanDuel", "line_value": None, "price": -145},
+                {"event_id": "evt_s1", "market_type": "MONEYLINE", "side": "HOME", "captured_at": datetime.now(timezone.utc), "canon_book": "DraftKings", "line_value": None, "price": -110},
+                {"event_id": "evt_s2", "market_type": "MONEYLINE", "side": "HOME", "captured_at": datetime.now(timezone.utc), "canon_book": "DraftKings", "line_value": None, "price": -110},
             ])
         return _FakeCursor([])
 
@@ -919,3 +927,15 @@ def test_secondary_parlay_ranking_relaxes_same_book_thrashing(monkeypatch):
     assert odp is not None
     assert odp["same_book"] is True
     assert {lg["event_id"] for lg in odp["legs"]} == {"evt_s1", "evt_s2"}
+
+
+def test_publication_timing_uses_earliest_tip_and_requires_a_verified_lock():
+    from src.services.ncaam_parlay_service import publication_timing
+
+    tip = datetime(2026, 11, 25, 0, 0, tzinfo=timezone.utc)
+    starts = [tip + timedelta(hours=2), tip]
+    assert publication_timing(tip - timedelta(minutes=30), starts) == "on_time"
+    assert publication_timing(tip - timedelta(minutes=29, seconds=59), starts) == "late_pregame"
+    assert publication_timing(tip, starts) == "after_tip"
+    assert publication_timing(None, starts) == "unverified"
+    assert publication_timing(tip, [None, tip]) == "unverified"

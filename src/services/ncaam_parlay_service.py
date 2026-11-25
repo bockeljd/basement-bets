@@ -130,6 +130,17 @@ def _parse_leg_start_utc(val: Any) -> Optional[datetime]:
         return None
 
 
+def publication_timing(locked_at, starts):
+    locked = _parse_leg_start_utc(locked_at)
+    tips = [_parse_leg_start_utc(value) for value in starts]
+    if locked is None or len(tips) != 2 or None in tips:
+        return "unverified"
+    lead = min(tips) - locked
+    if lead <= timedelta(0):
+        return "after_tip"
+    return "on_time" if lead >= timedelta(minutes=30) else "late_pregame"
+
+
 def ml_win_prob_from_spread(
     fair_spread_home: float,
     sigma_spread: float,
@@ -231,7 +242,7 @@ def evaluate_value_underdog_ml_leg(
         return None
 
 
-_INTERNAL_LEG_KEYS = ("_dk_fd_prices", "_timing_context", "_timing_payload")
+_INTERNAL_LEG_KEYS = ("_book_times", "_dk_fd_prices", "_timing_context", "_timing_payload")
 
 
 def _strip_internal_leg_keys(leg: dict) -> dict:
@@ -972,12 +983,15 @@ def compute_ncaam_parlays_today(
               JOIN daily_top_picks dtp
                 ON dtp.event_id = e.id AND dtp.league = 'NCAAM' AND dtp.date_et = %(sp_date)s
               JOIN LATERAL (
-                SELECT side, price, book
-                FROM odds_snapshots
-                WHERE event_id = e.id AND market_type = 'MONEYLINE'
-                  AND COALESCE(book, '') NOT IN ('action_open', 'open')
-                  AND price BETWEEN 110 AND 220
-                ORDER BY (CASE WHEN LOWER(COALESCE(book,'')) LIKE '%%draftkings%%' OR LOWER(COALESCE(book,'')) LIKE '%%fanduel%%' THEN 0 ELSE 1 END), price DESC, captured_at DESC
+                SELECT side, price, book FROM (
+                  SELECT DISTINCT ON (lower(book), side) side, price, book, captured_at
+                  FROM odds_snapshots
+                  WHERE event_id=e.id AND market_type='MONEYLINE'
+                    AND lower(book) IN ('draftkings','fanduel')
+                    AND captured_at BETWEEN LEAST(NOW(), e.start_time)-interval '90 minutes' AND LEAST(NOW(), e.start_time)
+                  ORDER BY lower(book), side, captured_at DESC, id DESC
+                ) latest WHERE price BETWEEN 110 AND 220
+                ORDER BY price DESC, captured_at DESC
                 LIMIT 1
               ) ml_dog ON TRUE
               WHERE e.league = 'NCAAM'
@@ -1043,7 +1057,7 @@ def compute_ncaam_parlays_today(
     try:
         leg_eids = list({str(leg.get("event_id")) for leg in norm_legs if leg.get("event_id")})
         if leg_eids:
-            freshness_sql = "AND captured_at >= NOW() - interval '90 minutes'" if is_today_et else ""
+            freshness_sql = "AND captured_at BETWEEN NOW() - interval '90 minutes' AND NOW()" if is_today_et else ""
             with get_db_connection() as conn:
                 dk_fd_rows = _exec(
                     conn,
@@ -1054,25 +1068,27 @@ def compute_ncaam_parlays_today(
                       market_type,
                       side,
                       CASE WHEN LOWER(book) LIKE '%%draftkings%%' THEN 'DraftKings' ELSE 'FanDuel' END AS canon_book,
-                      line_value,
+                      line_value, captured_at,
                       price
                     FROM odds_snapshots
                     WHERE event_id = ANY(%s)
                       {freshness_sql}
-                      AND price IS NOT NULL
-                      AND (LOWER(COALESCE(book, '')) LIKE '%%draftkings%%' OR LOWER(COALESCE(book, '')) LIKE '%%fanduel%%')
+                      AND LOWER(book) IN ('draftkings','fanduel')
                     ORDER BY event_id, market_type, side,
                       CASE WHEN LOWER(book) LIKE '%%draftkings%%' THEN 'DraftKings' ELSE 'FanDuel' END,
-                      captured_at DESC
+                      captured_at DESC, id DESC
                     """,
                     (leg_eids,),
                 ).fetchall()
             dk_fd_map: Dict[Tuple[str, str, str], Dict[str, Dict[str, Any]]] = {}
             for r in (dk_fd_rows or []):
                 rd = dict(r)
+                if rd.get("price") is None or abs(rd["price"]) < 100:
+                    continue
                 k = (str(rd["event_id"]), str(rd["market_type"]).upper(), str(rd["side"]).upper())
                 dk_fd_map.setdefault(k, {})[rd["canon_book"]] = {
                     "price": int(rd["price"]),
+                    "captured_at": str(rd.get("captured_at") or ""),
                     "line_value": (float(rd["line_value"]) if rd.get("line_value") is not None else None),
                 }
             for leg in norm_legs:
@@ -1089,11 +1105,10 @@ def compute_ncaam_parlays_today(
                     bk_lv = bk_info.get("line_value")
                     if (
                         mkt_k in ("MONEYLINE", "ML")
-                        or leg_line is None
-                        or bk_lv is None
-                        or abs(float(bk_lv) - float(leg_line)) < 0.01
+                        or (leg_line is not None and bk_lv is not None and abs(float(bk_lv) - float(leg_line)) < 0.01)
                     ):
                         prices_by_book[bk_name] = int(bk_info["price"])
+                leg["_book_times"] = {bk: raw_bk_map[bk]["captured_at"] for bk in prices_by_book}
                 leg["_dk_fd_prices"] = prices_by_book
                 if prices_by_book:
                     best_bk, best_pr = max(prices_by_book.items(), key=lambda kv: dec_from_american(kv[1]))
@@ -1192,6 +1207,8 @@ def compute_ncaam_parlays_today(
                 leg_a["book"] = parlay_book
                 leg_b["price"] = price_b
                 leg_b["book"] = parlay_book
+                leg_a["quote_at"] = a["_book_times"][parlay_book]
+                leg_b["quote_at"] = b["_book_times"][parlay_book]
             else:
                 dec = dec_from_american(a["price"]) * dec_from_american(b["price"])
                 b1 = str(a.get("book") or "").strip()
@@ -1372,14 +1389,15 @@ def compute_ncaam_parlays_today(
 
             if official_daily_parlay is None and (high_conf or payout_band):
                 def _combo_eligible_for_official(combo: dict) -> bool:
-                    return all(not bool(lg.get("is_lean_fallback")) for lg in (combo.get("legs") or []))
+                    legs = combo["legs"]
+                    return (
+                        is_today_et and combo.get("same_book")
+                        and publication_timing(now_utc, [leg.get("start_time") for leg in legs]) == "on_time"
+                        and all(leg.get("quote_at") and not leg.get("is_lean_fallback") for leg in legs)
+                    )
 
-                official_pool = [c for c in high_conf if _combo_eligible_for_official(c)] or [
-                    c for c in payout_band if _combo_eligible_for_official(c)
-                ]
-                same_book_official = [c for c in official_pool if c.get("same_book")]
-                chosen = (same_book_official[0] if same_book_official else (official_pool[0] if official_pool else None))
-
+                chosen = next((c for pool in (high_conf, payout_band, sorted_by_win) for c in pool
+                               if _combo_eligible_for_official(c)), None)
                 if chosen is not None:
                     earliest_tip = None
                     for lg in (chosen.get("legs") or []):
@@ -1405,6 +1423,7 @@ def compute_ncaam_parlays_today(
                     clean_chosen_legs = [_strip_internal_leg_keys(lg) for lg in (chosen.get("legs") or [])]
                     official_daily_parlay = {
                         **chosen,
+                        "price_source": "calculated_from_same_book_legs",
                         "legs": clean_chosen_legs,
                         "is_official_daily": True,
                         "is_locked": bool(should_lock),
@@ -1452,23 +1471,48 @@ def compute_ncaam_parlays_today(
                             pass
 
                         with get_db_connection() as conn:
-                            _exec(conn, """
+                            _exec(conn, "SELECT pg_advisory_xact_lock(hashtext(%s))", ("NCAAM:ML2:" + date_et_val,))
+                            saved = _exec(conn, """
                               INSERT INTO recommended_parlays (id, league, date_et, kind, bucket, american_odds, p_win, ev, event_id_1, event_id_2, parlay_json, locked_at)
-                              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
-                              ON CONFLICT (league, date_et, kind, event_id_1, event_id_2) DO UPDATE SET
-                                parlay_json = COALESCE(recommended_parlays.parlay_json, EXCLUDED.parlay_json),
-                                locked_at = COALESCE(recommended_parlays.locked_at, EXCLUDED.locked_at)
+                              SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,stamp FROM (SELECT clock_timestamp() AS stamp) t
+                              WHERE stamp <= %s::timestamptz - interval '30 minutes'
+                                AND stamp <= %s::timestamptz + interval '90 minutes'
+                                AND 2 = (
+                                  SELECT count(*) FROM jsonb_array_elements(%s::jsonb) leg
+                                  JOIN events e ON e.id=leg->>'event_id'
+                                  JOIN LATERAL (
+                                    SELECT price,line_value,captured_at FROM odds_snapshots
+                                    WHERE event_id=e.id AND market_type=leg->>'market_type'
+                                      AND side=upper(leg->>'side') AND lower(book)=lower(leg->>'book')
+                                      AND captured_at BETWEEN stamp-interval '90 minutes' AND stamp
+                                    ORDER BY captured_at DESC,id DESC LIMIT 1
+                                  ) quote ON true
+                                  WHERE e.start_time >= stamp+interval '30 minutes'
+                                    AND quote.price=(leg->>'price')::numeric
+                                    AND quote.captured_at=(leg->>'quote_at')::timestamptz
+                                    AND (leg->>'market_type'='MONEYLINE' OR quote.line_value=(leg->>'market_line')::numeric)
+                                )
+                                AND NOT EXISTS (SELECT 1 FROM recommended_parlays
+                                  WHERE league='NCAAM' AND date_et=%s AND kind='ML2' AND locked_at IS NOT NULL)
+                              ON CONFLICT DO NOTHING RETURNING locked_at
                             """, (
                                 pid, "NCAAM", str(date_et_val), "ML2", bucket,
                                 int(chosen.get("american_odds") or 0),
                                 float(chosen.get("p_win") or 0.0),
                                 float(chosen.get("ev") or 0.0),
                                 eids[0], eids[1],
-                                json.dumps(official_daily_parlay, default=str),
-                            ))
+                                json.dumps(official_daily_parlay, default=str), earliest_tip,
+                                min(_parse_leg_start_utc(lg["quote_at"]) for lg in clean_chosen_legs),
+                                json.dumps(clean_chosen_legs, default=str), date_et_val,
+                            )).fetchone()
+                            if saved:
+                                official_daily_parlay["locked_at"] = str(saved["locked_at"])
+                            else:
+                                official_daily_parlay = None
                             if hasattr(conn, "commit"):
                                 conn.commit()
     except Exception as e:
+        official_daily_parlay = None
         try:
             print(f"[parlays] official daily lock/persist failed: {e}")
         except Exception:

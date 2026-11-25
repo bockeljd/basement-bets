@@ -5898,6 +5898,7 @@ async def ncaam_parlay_performance_report(
         combine_leg_outcomes,
         dec_from_american,
         grade_parlay_leg_from_scores,
+        publication_timing,
     )
     from src.utils.bet_timing import extract_bet_timing_action
     from src.utils.model_performance import get_row_season, payout_per_unit
@@ -6149,7 +6150,12 @@ async def ncaam_parlay_performance_report(
         if hasattr(lk_raw, "isoformat"):
             lk_raw = lk_raw.isoformat().replace("+00:00", "Z")
 
+        ids = [d.get("event_id_1"), d.get("event_id_2")]
+        stamps = [d.get("locked_at"), d.get("created_at")]
+        timing = publication_timing(max(filter(None, stamps)) if d.get("locked_at") else None,
+                                    [gr_map.get(str(eid), {}).get("start_time") for eid in ids])
         items.append({
+            "publication_timing": timing,
             "id": d.get("id"),
             "date_et": date_et_val,
             "season": row_season,
@@ -6164,6 +6170,9 @@ async def ncaam_parlay_performance_report(
             "bet_timing_action": extract_bet_timing_action(pj),
             "legs": graded_legs,
         })
+
+    audit_items = [item for item in items if item["publication_timing"] != "on_time"]
+    items = [item for item in items if item["publication_timing"] == "on_time"]
 
     won = sum(1 for x in items if x["outcome"] in ("WON", "WON (partial)"))
     lost = sum(1 for x in items if x["outcome"] == "LOST")
@@ -6202,6 +6211,7 @@ async def ncaam_parlay_performance_report(
         "profit_units": profit_units,
         "roi_pct": roi_pct,
         "items": items[:100],
+        "audit_items": audit_items[:100],
     }
 
 
