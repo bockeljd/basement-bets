@@ -2747,7 +2747,7 @@ def _ingest_league_odds_window(league: str, start_date, end_date) -> int:
         adapter = OddsAdapter()
         raw_games = fetcher.fetch_odds(league, start_date=s_str, end_date=e_str)
         if raw_games:
-            return int(adapter.normalize_and_store(raw_games, league) or 0)
+            return int(adapter.normalize_and_store(raw_games, league, provider="action_network") or 0)
     except Exception as e:
         print(f"[OddsAutoIngest] Failed for {league} ({start_date}..{end_date}): {e}")
     return 0
@@ -2764,8 +2764,13 @@ async def trigger_odds_ingestion(request: Request, authorized: bool = Depends(ve
             today_et = datetime.now(ZoneInfo("America/New_York")).date()
             end_et = today_et + timedelta(days=2)
             counts = {}
-            for lg in ("NCAAM", "NBA", "NFL"):
-                counts[lg] = _ingest_league_odds_window(lg, today_et, end_et)
+            if request.query_params.get("scope") == "ncaam_today":
+                counts["NCAAM"] = _ingest_league_odds_window("NCAAM", today_et, today_et)
+                if not counts["NCAAM"]:
+                    raise ValueError("No NCAAM data received for today's slate")
+            else:
+                for lg in ("NCAAM", "NBA", "NFL"):
+                    counts[lg] = _ingest_league_odds_window(lg, today_et, end_et)
             ctx.state["last_run_date"] = today_et.strftime("%Y-%m-%d")
             ctx.state["counts"] = counts
             return {"status": "success", "counts": counts}
@@ -4950,21 +4955,26 @@ def ncaam_publication_status(date: str):
                        AND LOWER(COALESCE(d.reason, '')) NOT LIKE '%%market data waiting%%'
                        AND LOWER(COALESCE(d.reason, '')) NOT LIKE '%%stale%%'
                    ) AS true_no_bet_games,
-                   (SELECT max(o.captured_at)
-                    FROM odds_snapshots o
-                    JOIN events eo ON eo.id = o.event_id
-                    WHERE eo.league = 'NCAAM'
-                      AND (eo.start_time AT TIME ZONE 'America/New_York')::date = %s) AS latest_odds_at
-            FROM daily_top_picks d WHERE d.league='NCAAM' AND d.date_et=%s
-        """, (day, day)).fetchone()
+                   count(*) FILTER (WHERE e.start_time > now()+interval '30 minutes') AS upcoming_games,
+                   max(q.captured_at) AS latest_odds_at,
+                   max(q.captured_at) FILTER (WHERE e.start_time > now()+interval '30 minutes') AS upcoming_odds_at
+            FROM daily_top_picks d JOIN events e ON e.id=d.event_id
+            LEFT JOIN LATERAL (
+                SELECT o.captured_at FROM odds_snapshots o WHERE o.event_id=d.event_id
+                AND o.price IS NOT NULL AND o.captured_at <= now()
+                AND lower(o.book) NOT IN ('','consensus','open','action_open','unknown')
+                AND lower(o.book) NOT LIKE 'action\_book\_%%'
+                ORDER BY o.captured_at DESC LIMIT 1
+            ) q ON true WHERE d.league='NCAAM' AND d.date_et=%s
+        """, (day,)).fetchone()
         evaluation = dict(cache)
         from zoneinfo import ZoneInfo
         is_today_eval = day == datetime.now(ZoneInfo("America/New_York")).date()
-        lo_at = evaluation.get("latest_odds_at")
+        lo_at = evaluation.get("upcoming_odds_at")
         if lo_at is not None and getattr(lo_at, "tzinfo", None) is None:
             lo_at = lo_at.replace(tzinfo=timezone.utc)
         evaluation["is_odds_feed_stale"] = bool(
-            is_today_eval and (lo_at is None or (datetime.now(timezone.utc) - lo_at) > timedelta(minutes=90))
+            is_today_eval and evaluation["upcoming_games"] > 0 and (lo_at is None or (datetime.now(timezone.utc) - lo_at) > timedelta(minutes=90))
         )
         slate = _exec(conn, """
             SELECT id,created_at,to_jsonb(recommended_slates)->'rolling_board' AS board FROM recommended_slates
@@ -4985,13 +4995,8 @@ def ncaam_publication_status(date: str):
             board = slate['board']
             if board is not None:
                 is_today = day == datetime.now(ZoneInfo("America/New_York")).date()
-                active = board.get('open') and is_today
-                stale_holds = board.get('stale_holds') or {}
-                provisional_list = board.get('provisional') or []
-                if active:
-                    status_val = "stale_odds" if (not provisional_list and not picks and stale_holds) else "rolling"
-                else:
-                    status_val = "locked" if picks else ("stale_odds" if stale_holds else "no_eligible_picks")
+                active = board.get('open') and is_today and evaluation["upcoming_games"] > 0
+                status_val = "rolling" if active else ("locked" if picks else "no_eligible_picks")
                 return {"day": day, "evaluation": evaluation, **board,
                         "status": status_val,
                         "locked_at": max((r["locked_at"] for r in picks if r["locked_at"]), default=None),

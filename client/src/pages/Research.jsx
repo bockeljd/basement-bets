@@ -449,17 +449,15 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
     try {
       let offset = 0;
       let done = false;
-      let loops = 0;
+      let failedGames = 0;
       let totalOk = 0;
       let eventsTotal = 0;
-      setRescoreProgress('Refreshing live sportsbook odds...');
-      try {
-        await api.post('/api/jobs/ingest_odds');
-      } catch {
-        // continue with existing odds if cron auth is required on ingest_odds
+      if (selectedDate === getTodayEtStr()) {
+        setRescoreProgress('Refreshing live sportsbook odds...');
+        const { data } = await api.post('/api/jobs/ingest_odds?scope=ncaam_today');
+        if (data.status !== 'success' || !data.counts?.NCAAM) throw new Error('Odds refresh did not complete.');
       }
-      while (!done && loops < 10) {
-        loops += 1;
+      while (!done) {
         const res = await api.post('/api/jobs/build_daily_top_picks', null, {
           params: {
             date: selectedDate,
@@ -473,20 +471,21 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         eventsTotal = Number(d.events_total || eventsTotal || 0);
         totalOk += Number(d.ok || 0);
         const nextOffset = Number(d.next_offset ?? offset + Number(d.processed || 0));
-        done = Boolean(d.done) || nextOffset <= offset;
+        failedGames += Number(d.err || 0);
+        done = Boolean(d.done);
+        if (!done && nextOffset <= offset) throw new Error("Scoring stopped before the full slate was evaluated.");
         offset = nextOffset;
         if (eventsTotal > 0) {
           setRescoreProgress(`Re-scoring ${Math.min(offset, eventsTotal)}/${eventsTotal}...`);
         }
       }
-      try {
-        await api.post('/api/jobs/lock_morning_slate');
-      } catch {
-        // best-effort rolling Top 6 refresh
+      if (selectedDate === getTodayEtStr()) {
+        const { data } = await api.post('/api/jobs/lock_morning_slate');
+        if (data.status === 'skipped') throw new Error('Publication is already in progress.');
       }
       setToast({
-        tone: 'ok',
-        text: `Slate re-scored (${totalOk} games evaluated). Refreshing Top Plays & Full Board...`,
+        tone: failedGames ? 'warn' : 'ok',
+        text: `Slate re-scored (${totalOk} games evaluated${failedGames ? `, ${failedGames} failed` : ''}). Refreshing Top Plays & Full Board...`,
       });
       await fetchSchedule({ forceRefresh: true });
     } catch (err) {
@@ -1242,26 +1241,13 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
               ))}
             </div>
           ) : filteredTopPlays.length === 0 ? (
-            <div
-              className={`rounded-2xl border p-8 text-center space-y-3 ${
-                actionablePlays.length === 0 && slateSummary.staleOddsCount > 0
-                  ? 'border-amber-500/40 bg-amber-950/15'
-                  : 'border-slate-800 bg-slate-900/60'
-              }`}
-            >
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-3">
               <h3 className="text-base font-bold text-slate-200">
-                {actionablePlays.length === 0
-                  ? slateSummary.staleOddsCount > 0
-                    ? `Waiting on Fresh Odds for ${slateSummary.staleOddsCount} Game${slateSummary.staleOddsCount === 1 ? '' : 's'}`
-                    : `No Bets Today Yet — Checked All ${slateSummary.trueNoBetCount || slateSummary.totalGames} Games With Odds`
-                  : 'No Bets Match This Filter'}
+                {actionablePlays.length ? 'No Bets Match This Filter' : 'No bets qualified in the latest evaluation'}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                {actionablePlays.length === 0
-                  ? slateSummary.staleOddsCount > 0
-                    ? `${slateSummary.staleOddsCount} game${slateSummary.staleOddsCount === 1 ? ' has' : 's have'} odds older than 90 minutes. Click Recalculate Picks below to refresh lines before tip-off.`
-                    : `All ${slateSummary.trueNoBetCount || slateSummary.totalGames} games with sportsbook odds have been checked and none have a strong enough edge right now${slateSummary.unlinedCount > 0 ? ` (${slateSummary.unlinedCount} games don't have sportsbook odds posted)` : ''}. Check Close Calls below or browse All Games.`
-                  : 'Switch back to All bets or browse All Games to inspect every matchup.'}
+                {actionablePlays.length ? 'Switch back to All bets or browse All Games.' :
+                  'Open All Games to see the recorded reason for each pass.'}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                 {pickTypeFilter !== 'all' && (

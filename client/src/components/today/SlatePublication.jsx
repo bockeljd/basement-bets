@@ -40,10 +40,7 @@ export default function SlatePublication({ day }) {
     unconfirmed: 'Status not confirmed yet',
     unavailable: 'Status unavailable',
   };
-  const isStale =
-    slate?.status === 'stale_odds' ||
-    Boolean(slate?.evaluation?.is_odds_feed_stale) ||
-    Object.keys(slate?.stale_holds || {}).length > 0;
+  const isStale = Boolean(slate?.evaluation?.is_odds_feed_stale);
   const linedEvaluated =
     Number(slate?.evaluation?.actionable_games || 0) + Number(slate?.evaluation?.true_no_bet_games || 0);
   const unlinedGames = Number(slate?.evaluation?.unlined_games ?? slate?.evaluation?.stale_or_missing_odds_games ?? 0);
@@ -59,20 +56,21 @@ export default function SlatePublication({ day }) {
       {slate?.evaluation && (
         <p className="mt-1 text-xs text-slate-400">
           {linedEvaluated > 0
-            ? `${linedEvaluated} games checked (${slate.evaluation.actionable_games} bets · ${slate.evaluation.true_no_bet_games} passed)`
-            : `${slate.evaluation.cached_games} games checked · ${slate.evaluation.actionable_games} bets`}
+            ? `${linedEvaluated} model records evaluated (${slate.evaluation.actionable_games} bets · ${slate.evaluation.true_no_bet_games} passed)`
+            : `${slate.evaluation.cached_games} cached model records · ${slate.evaluation.actionable_games} bets`}
           {unlinedGames > 0 && ` · ${unlinedGames} without sportsbook odds`}
-          {(staleGames > 0 || isStale) && (
+          {staleGames > 0 && (
             <span className="text-amber-300 font-semibold">
-              {staleGames > 0 ? ` · ${staleGames} waiting on fresh odds (>90 min)` : ' · Odds >90 min old'}
+              { ` · ${staleGames} stale at evaluation` }
             </span>
           )}
+          {isStale && <span> · No recent sportsbook prices for upcoming games</span>}
           {slate.evaluation.latest_computed_at && ` · Model ${fmtTimeEt(slate.evaluation.latest_computed_at)} ET`}
           {slate.evaluation.latest_odds_at && ` · Odds ${fmtTimeEt(slate.evaluation.latest_odds_at)} ET`}
         </p>
       )}
       {Object.entries(slate?.stale_holds || {}).map(([event, reason]) => (
-        <p key={event} className="text-amber-300 text-xs mt-1">Waiting on fresh odds · {reason}</p>
+        <p key={event} className="text-amber-300 text-xs mt-1">Held at last publication · {reason}</p>
       ))}
       {Object.entries(slate?.passes || {}).map(([event, reason]) => (
         <p key={event} className="text-xs text-slate-400 mt-1">Skipped · {reason}</p>

@@ -148,9 +148,6 @@ def publish_slate(date_et=None):
         _exec(conn,"UPDATE recommended_slates SET rolling_board=%s WHERE id=%s",(Json(board),slate_id))
         items = _slate_items(conn, slate_id)
         conn.commit()
-        if board["open"]:
-            status = "stale_odds" if (not provisional and not items and stale_holds) else "rolling"
-        else:
-            status = "locked" if items else ("stale_odds" if stale_holds else "no_eligible_picks")
+        status = "rolling" if board["open"] else ("locked" if items else "no_eligible_picks")
         return {"status": status,
                 "slate_id": slate_id, "items": items, **board}
