@@ -2558,12 +2558,20 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
               AND EXISTS (SELECT 1 FROM jsonb_array_elements(to_jsonb(s)->'rolling_board'->'provisional') p
                           WHERE (p->>'locks_at')::timestamptz <= NOW()+interval '10 minutes')""").fetchone()
         # Give the scheduled worker a chance to observe the book just before each boundary.
-        checkpoint_refresh_due = bool(_exec(conn, """
-            SELECT 1 FROM events e WHERE e.league='NCAAM' AND (
-              e.start_time BETWEEN now() AND now()+interval '10 minutes' OR
-              e.start_time BETWEEN now()+interval '30 minutes' AND now()+interval '50 minutes')
-            LIMIT 1
-        """).fetchone())
+        timing = _exec(conn, """
+            SELECT COALESCE(bool_or(
+                (e.start_time<=now()+interval '10 minutes' OR e.start_time BETWEEN
+                    now()+interval '30 minutes' AND now()+interval '50 minutes')
+                AND NOT EXISTS (SELECT 1 FROM odds_snapshots o WHERE o.event_id=e.id
+                    AND lower(o.book) IN ('draftkings','fanduel') AND o.price IS NOT NULL
+                    AND o.captured_at BETWEEN now()-interval '3 minutes' AND now())
+            ),false) AS refresh_due,
+            LEAST(now()+interval '30 minutes', COALESCE(min(CASE
+                WHEN e.start_time>now()+interval '50 minutes' THEN e.start_time-interval '50 minutes'
+                WHEN e.start_time>now()+interval '30 minutes' THEN now()
+                ELSE e.start_time-interval '10 minutes' END),now()+interval '30 minutes')) AS next_check
+            FROM events e WHERE e.league='NCAAM' AND e.start_time>now()
+        """).fetchone()
         stale_check = _exec(conn, """
             SELECT COUNT(*) FILTER (WHERE e.start_time > NOW() + interval '30 minutes') AS upcoming_pre_cutoff,
                    MAX(d.computed_at) AS latest_computed_at,
@@ -2595,7 +2603,8 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
                     stale_refresh_needed = True
     res = publish_slate() if due else {"status": "no_cutoffs_due"}
     res["stale_refresh_needed"] = stale_refresh_needed
-    res["checkpoint_refresh_due"] = checkpoint_refresh_due
+    res["checkpoint_refresh_due"] = bool(timing and dict(timing).get("refresh_due"))
+    res["next_checkpoint_check_at"] = dict(timing).get("next_check") if timing else None
     parlay_locked = False
     try:
         with get_db_connection() as conn:
