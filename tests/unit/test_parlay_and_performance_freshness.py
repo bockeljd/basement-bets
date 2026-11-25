@@ -939,3 +939,18 @@ def test_publication_timing_uses_earliest_tip_and_requires_a_verified_lock():
     assert publication_timing(tip, starts) == "after_tip"
     assert publication_timing(None, starts) == "unverified"
     assert publication_timing(tip, [None, tip]) == "unverified"
+
+
+def test_ticket_prices_apply_leg_floor_before_maximizing_payout():
+    from src.services.ncaam_parlay_service import _price_multi_leg_combo
+
+    legs = [
+        {"win_prob": 0.55, "price": 120, "_dk_fd_prices": {"DraftKings": -150, "FanDuel": -105}},
+        {"win_prob": 0.55, "price": 170, "_dk_fd_prices": {"DraftKings": 170, "FanDuel": -105}},
+    ]
+    priced, _, book, _ = _price_multi_leg_combo(legs, 0.02)
+    assert book == "FanDuel"
+    for leg in priced:
+        assert abs(leg["ev_per_unit"] - (0.55 * (1 + 100 / 105) - 1)) < 1e-10
+        assert leg["ev"] == leg["ev_per_unit"]
+    assert _price_multi_leg_combo(legs, 0.1) is None

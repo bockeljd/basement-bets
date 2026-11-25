@@ -4,9 +4,17 @@ import {
   formatMarketLabel,
   getQualityRankScore,
   normalizeMarketType,
+  performanceGroup,
 } from './modelPerformance';
 
 describe('modelPerformance helpers', () => {
+  it('keeps parlay tickets separate from risk-tiered straight picks', () => {
+    expect(performanceGroup({ market_type: 'ML', is_smart_risk: 'false' })).toBe('core');
+    expect(performanceGroup({ market_type: 'ML', risk_tier: 'SMART_RISK' })).toBe('smart');
+    expect(performanceGroup({ movement_tags: ['smart_risk_high_return'] })).toBe('smart');
+    expect(performanceGroup({ market_type: 'Parlay', is_smart_risk: true })).toBe('parlays');
+  });
+
   it('keeps 1H spread and total markets distinct and formats their labels and lines', () => {
     expect(normalizeMarketType('SPREAD_1H')).toBe('SPREAD_1H');
     expect(normalizeMarketType('TOTAL_1H')).toBe('TOTAL_1H');

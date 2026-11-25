@@ -401,6 +401,16 @@ export const hasTop6RiskFlag = (row) => {
   });
 };
 
+export const performanceGroup = (row) => {
+  if (normalizeMarketType(row) === 'PARLAY') return 'parlays';
+  const flag = String(row?.is_smart_risk ?? '').toLowerCase();
+  const tags = row?.movement_tags || row?.sanity_reasons || [];
+  const smart = flag === 'true' || flag === '1' ||
+    String(row?.risk_tier || '').trim().toUpperCase() === 'SMART_RISK' ||
+    String(tags).split(',').some(tag => tag.trim().toLowerCase() === 'smart_risk_high_return');
+  return smart ? 'smart' : 'core';
+};
+
 export const getQualityRankScore = (row) => {
   if (!row) return -999;
 

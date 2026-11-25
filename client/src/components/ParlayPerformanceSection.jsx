@@ -89,6 +89,7 @@ const renderParlaySparkline = (points, isPositive) => {
 
 export default function ParlayPerformanceSection({
   parlayAnalytics = null,
+  onAddBet,
   selectedSport = 'NCAAM',
   onSwitchToNcaam = null,
   filterSummary = 'All Time',
@@ -746,6 +747,11 @@ export default function ParlayPerformanceSection({
                         }`}
                       >
                         {normKey === 'PENDING' || item.roi_per_unit == null ? '—' : formatUnits(item.roi_per_unit)}
+                        {onAddBet && normKey !== 'VOID' && outKey !== 'WON (PARTIAL)' && <button type="button" className="block ml-auto text-xs text-indigo-300 underline" onClick={() => onAddBet({
+                          sport: 'NCAAM', market: 'Parlay', odds: item.american_odds, placed_at: item.date_et,
+                          game: legs.map(leg => leg.matchup).join(' + '), pick: legs.map(leg => leg.team_pick).join(' + '),
+                          status: normKey, book: legs[0]?.book,
+                        })}>Log bet</button>}
                       </td>
                     </tr>
                   );

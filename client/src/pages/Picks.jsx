@@ -42,6 +42,7 @@ import {
   getEffectivePrice,
   roiPerUnit,
   normalizeMarketType,
+  performanceGroup,
   formatMarketLabel,
   formatMatchup,
   formatPickLabel,
@@ -97,7 +98,7 @@ const etDaysAgoIso = (days) => {
   return dt.toISOString().slice(0, 10);
 };
 
-export default function Picks() {
+export default function Picks({ onAddBet }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
@@ -124,7 +125,17 @@ export default function Picks() {
   const [searchQuery, setSearchQuery] = useState('');
   const [historyRowLimit, setHistoryRowLimit] = useState(100);
   const [showExplainer, setShowExplainer] = useState(false);
-  const [activeSection, setActiveSection] = useState('all'); // 'all' | 'core' | 'parlays'
+  const [activeSection, setActiveSection] = useState('core');
+  const selectSection = (section) => {
+    setActiveSection(section);
+    if (section === 'parlays') setSelectedSport('NCAAM');
+    if (section === 'smart') setHistoryScope('all');
+    if (section === 'core') setHistoryScope('top6');
+    setMarketFilter('ALL');
+    setConfFilter('ALL');
+    setOutcomeFilter('ALL');
+    setSearchQuery('');
+  };
   const focusTabRefs = useRef({});
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
@@ -402,6 +413,7 @@ export default function Picks() {
   // 2. Filter by selected Sport + Season (still before Top 6, Bet Type, and Confidence)
   const sportSeasonWindowHistory = useMemo(() => {
     return windowAllHistory.filter((h) => {
+      if (performanceGroup(h) === 'parlays') return false;
       if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) return false;
       if (selectedSeason !== 'ALL' && getRowSeason(h) !== selectedSeason) return false;
       return true;
@@ -422,11 +434,9 @@ export default function Picks() {
   // 3. Apply Pick Scope (All Recommended vs Top 6 / Day) BEFORE Bet Type & Confidence
   // so Spread + Over / Under + ML === All and High + Medium + Low === All under Top 6 / Day.
   const scopeBaseAllMarketsHistory = useMemo(() => {
-    if (historyScope === 'top6') {
-      return selectTopPicksPerDay(sportSeasonWindowHistory, 6);
-    }
-    return sportSeasonWindowHistory;
-  }, [historyScope, sportSeasonWindowHistory]);
+    const rows = historyScope === 'top6' ? selectTopPicksPerDay(sportSeasonWindowHistory, 6) : sportSeasonWindowHistory;
+    return rows.filter(row => performanceGroup(row) === activeSection);
+  }, [activeSection, historyScope, sportSeasonWindowHistory]);
 
   const scopePreConfHistory = useMemo(() => {
     if (marketFilter === 'ALL') return scopeBaseAllMarketsHistory;
@@ -466,11 +476,9 @@ export default function Picks() {
       computeRankBreakdown(
         sportSeasonWindowHistory,
         6,
-        marketFilter === 'ALL' && confFilter === 'ALL'
-          ? null
-          : (row) => matchesMarketFilter(row, marketFilter) && matchesConfFilter(row, confFilter)
+        (row) => performanceGroup(row) === activeSection && matchesMarketFilter(row, marketFilter) && matchesConfFilter(row, confFilter)
       ),
-    [sportSeasonWindowHistory, marketFilter, confFilter]
+    [sportSeasonWindowHistory, marketFilter, confFilter, activeSection]
   );
 
   // Overall KPI stats (settled + pending + void + profit)
@@ -490,12 +498,12 @@ export default function Picks() {
   const scopeComparison = useMemo(() => {
     const top6AllMarkets = selectTopPicksPerDay(sportSeasonWindowHistory, 6);
     const applySubFilters = (rows) =>
-      rows.filter((h) => matchesMarketFilter(h, marketFilter) && matchesConfFilter(h, confFilter));
+      rows.filter((h) => performanceGroup(h) === activeSection && matchesMarketFilter(h, marketFilter) && matchesConfFilter(h, confFilter));
     return {
       allStats: computeRecordStats(applySubFilters(sportSeasonWindowHistory)),
       top6Stats: computeRecordStats(applySubFilters(top6AllMarkets)),
     };
-  }, [sportSeasonWindowHistory, marketFilter, confFilter]);
+  }, [sportSeasonWindowHistory, marketFilter, confFilter, activeSection]);
 
   const bestMarketTakeaway = useMemo(() => {
     const map = {};
@@ -547,32 +555,6 @@ export default function Picks() {
       }
     }
     return { count, beatCount, avg: count > 0 ? sum / count : null };
-  }, [scopedHistory]);
-
-  const riskTierBreakdown = useMemo(() => {
-    const coreRows = [];
-    const smartRiskRows = [];
-    for (const h of scopedHistory) {
-      const isSmart = Boolean(h?.is_smart_risk) || String(h?.risk_tier || '').toUpperCase() === 'SMART_RISK';
-      if (isSmart) smartRiskRows.push(h);
-      else coreRows.push(h);
-    }
-    const summarizeClv = (rows) => {
-      let sum = 0;
-      let count = 0;
-      for (const r of rows) {
-        const v = parseFloat(r?.clv_points);
-        if (Number.isFinite(v)) {
-          sum += v;
-          count += 1;
-        }
-      }
-      return { count, avg: count > 0 ? sum / count : null };
-    };
-    return {
-      core: { ...computeRecordStats(coreRows), clv: summarizeClv(coreRows) },
-      smartRisk: { ...computeRecordStats(smartRiskRows), clv: summarizeClv(smartRiskRows) },
-    };
   }, [scopedHistory]);
 
   const parlayAnalytics = useMemo(
@@ -687,6 +669,7 @@ export default function Picks() {
       recoStraight.length + recoMlParlay.length > 0;
 
     if (ncaamYesterdayActive) {
+      const tiers = new Map(sportSeasonWindowHistory.map(h => [h.prediction_id || h.id, performanceGroup(h)]));
       const combined = [...recoStraight, ...recoMlParlay].slice().sort((a, b) => {
         const rkA = Number(a?.rank) > 0 ? Number(a.rank) : 999;
         const rkB = Number(b?.rank) > 0 ? Number(b.rank) : 999;
@@ -694,6 +677,7 @@ export default function Picks() {
         return (getNumericEdge(b) ?? -999) - (getNumericEdge(a) ?? -999);
       });
       const normalized = combined
+        .filter(p => (tiers.get(p.prediction_id || p.id) || performanceGroup(p)) === activeSection)
         .map((p, idx) => {
           const marketKey = normalizeMarketType(p);
           return {
@@ -724,7 +708,7 @@ export default function Picks() {
         title: `Yesterday's Top Recommended Slate (${yesterdayReco?.date_et || yesterdayEt})`,
         subtitle:
           marketFilter === 'ALL' && confFilter === 'ALL'
-            ? `${recoStraight.length} straight • ${recoMlParlay.length} ML/parlay picks • ${historyScope === 'top6' ? 'Matches Top 6 / Day' : 'Recommended Top 6 slate'}`
+            ? `${normalized.length} picks • ${historyScope === 'top6' ? 'Matches Top 6 / Day' : 'Recommended Top 6 slate'}`
             : `Filtered view showing ${normalized.length} of ${combined.length} slate picks`,
         rows: normalized,
         stats,
@@ -743,7 +727,7 @@ export default function Picks() {
     const latestDay = sortedDays.find((d) => dayRowsMap[d].some((r) => isGradedOutcome(getRawOutcome(r)))) || sortedDays[0];
     const dayTopPicks = latestDay ? dedupeDayRowsByEvent(dayRowsMap[latestDay]).filter((r) => !hasTop6RiskFlag(r)).slice(0, 6) : [];
     const picks = dayTopPicks.filter(
-      (r) => matchesMarketFilter(r, marketFilter) && matchesConfFilter(r, confFilter)
+      (r) => performanceGroup(r) === activeSection && matchesMarketFilter(r, marketFilter) && matchesConfFilter(r, confFilter)
     );
     const isActuallyYesterday = latestDay === yesterdayEt;
     const normalized = picks.map((h, i) => ({
@@ -777,7 +761,7 @@ export default function Picks() {
       rows: normalized,
       stats: computeRecordStats(normalized),
     };
-  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportSeasonWindowHistory, marketFilter, confFilter, historyScope, rankByRowKey]);
+  }, [selectedSport, selectedSeason, defaultNcaamSeason, hasReco, recoStraight, recoMlParlay, yesterdayReco, yesterdayEt, sportSeasonWindowHistory, marketFilter, confFilter, historyScope, rankByRowKey, activeSection]);
 
   const handleSort = (key) => {
     setSortConfig((prev) => ({
@@ -873,7 +857,7 @@ export default function Picks() {
     windowFilter !== 'ALL' ||
     marketFilter !== 'ALL' ||
     confFilter !== 'ALL' ||
-    historyScope !== 'top6' ||
+    historyScope !== (activeSection === 'smart' ? 'all' : 'top6') ||
     outcomeFilter !== 'ALL' ||
     searchQuery.trim() !== '';
 
@@ -883,7 +867,7 @@ export default function Picks() {
     setWindowFilter('ALL');
     setMarketFilter('ALL');
     setConfFilter('ALL');
-    setHistoryScope('top6');
+    setHistoryScope(activeSection === 'smart' ? 'all' : 'top6');
     setOutcomeFilter('ALL');
     setSearchQuery('');
   };
@@ -984,22 +968,6 @@ export default function Picks() {
       <header className="perf-hero-surface p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-indigo-400/35 bg-indigo-500/15 text-indigo-200 text-[11px] font-bold uppercase tracking-wider">
-              <Sparkles className="w-3 h-3" aria-hidden="true" />
-              <span>Performance Command Center</span>
-            </span>
-            {scopedStats.decided > 0 && (
-              <span
-                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${
-                  scopedStats.winRate >= 52.38
-                    ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300'
-                    : 'border-amber-500/35 bg-amber-500/15 text-amber-200'
-                }`}
-              >
-                <TrendingUp className="w-3 h-3" aria-hidden="true" />
-                <span>{scopedStats.winRate >= 52.38 ? 'Beating Break-Even' : 'Tracking Below 52.4%'}</span>
-              </span>
-            )}
             {executiveMetrics.streak && executiveMetrics.streak.count >= 2 && (
               <span
                 className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-mono font-bold ${
@@ -1029,7 +997,7 @@ export default function Picks() {
           </div>
           <h1>Model Performance</h1>
           <p className="text-sm text-slate-300/90 max-w-2xl">
-            Live profit curve, drawdown risk, closing-line sharpness, and bet-type intelligence. At standard -110 odds, winning over <strong className="text-white font-semibold">52.4%</strong> generates long-term profit.
+            Review results by pick type, or log a personal bet from its history row.
           </p>
         </div>
 
@@ -1134,25 +1102,9 @@ export default function Picks() {
           className="perf-tablist border-slate-800/90"
         >
           {[
-            { id: 'all', label: 'All (Grouped)', pill: null },
-            {
-              id: 'core',
-              label: 'Core Model',
-              pill:
-                scopedStats.decided > 0
-                  ? `${scopedStats.wins}-${scopedStats.losses}`
-                  : null,
-            },
-            {
-              id: 'parlays',
-              label: 'Parlays',
-              pill:
-                parlayAnalytics.settled > 0
-                  ? parlayAnalytics.recordText
-                  : parlayAnalytics.pending > 0
-                    ? `${parlayAnalytics.pending} open`
-                    : null,
-            },
+            { id: 'core', label: 'Core Picks' },
+            { id: 'smart', label: 'Smart Risk' },
+            { id: 'parlays', label: 'Official Parlays' },
           ].map((tab, idx, arr) => {
             const active = activeSection === tab.id;
             const onKeyDown = (e) => {
@@ -1164,7 +1116,7 @@ export default function Picks() {
               if (nextIdx !== null) {
                 e.preventDefault();
                 const targetTab = arr[nextIdx];
-                setActiveSection(targetTab.id);
+                selectSection(targetTab.id);
                 focusTabRefs.current[targetTab.id]?.focus();
               }
             };
@@ -1177,36 +1129,26 @@ export default function Picks() {
                 id={`perf-focus-tab-${tab.id}`}
                 role="tab"
                 type="button"
+                aria-controls="perf-focus-panel"
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
                 onKeyDown={onKeyDown}
-                onClick={() => setActiveSection(tab.id)}
+                onClick={() => selectSection(tab.id)}
                 className="perf-tab text-xs sm:text-sm"
               >
                 <span>{tab.label}</span>
-                {tab.pill && (
-                  <span className="px-1.5 py-0.5 rounded-full border border-slate-700/80 bg-slate-900/90 text-[10px] font-mono text-slate-300">
-                    {tab.pill}
-                  </span>
-                )}
               </button>
             );
           })}
         </div>
-        <span className="text-[11px] text-slate-400">
-          {activeSection === 'all'
-            ? 'Core Straight Bets & Official Parlays grouped separately below'
-            : activeSection === 'core'
-              ? 'Focused on straight bets, CLV, and live model calibration'
-              : 'Focused on Official 2-Leg Daily Parlays and leg analytics'}
-        </span>
+
       </div>
 
       {/* Unified Visual Filter Toolbar (only 1 dropdown: Season) */}
       <search aria-label="Filter model performance" className="ui-card p-4 sm:p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           {/* Sport Pills */}
-          <div className="space-y-1.5 min-w-0">
+          {activeSection !== 'parlays' && (<div className="space-y-1.5 min-w-0">
             <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               Sport
             </span>
@@ -1242,8 +1184,7 @@ export default function Picks() {
                 );
               })}
             </div>
-          </div>
-
+          </div>)}
           {/* Season Dropdown (only select) + Pick Scope */}
           <div className="flex flex-wrap items-end gap-3 shrink-0">
             <div className="space-y-1.5">
@@ -1452,7 +1393,7 @@ export default function Picks() {
         className="space-y-10"
       >
         {/* GROUP 1: CORE MODEL DATA & INSIGHTS */}
-        {(activeSection === 'all' || activeSection === 'core') && (
+        {activeSection !== 'parlays' && (
           <section aria-labelledby="core-group-heading" className="space-y-6">
             <div className="rounded-2xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/10 via-slate-900/70 to-indigo-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-3">
@@ -1461,10 +1402,10 @@ export default function Picks() {
                 </span>
                 <div>
                   <h2 id="core-group-heading" className="text-base sm:text-lg font-bold text-slate-100">
-                    Core Model Data &amp; Insights
+                    {activeSection === 'smart' ? 'Smart Risk' : 'Core'} straight bets
                   </h2>
                   <p className="text-xs text-slate-300/90">
-                    Straight-bet profit, Core vs. Smart Risk tiers, closing-line edge, strategy sweet spots, and pick log.
+                    Results assume one unit risked per pick.
                   </p>
                 </div>
               </div>
@@ -1714,90 +1655,6 @@ export default function Picks() {
           </article>
         </div>
 
-        {/* Core vs. Smart Risk Visual Breakdown */}
-        {scopedStats.settled > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            {[
-              {
-                key: 'core',
-                title: 'Core Picks',
-                subtitle: 'Full-confidence plays (up to 1.0u)',
-                badgeCls: 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300',
-                barCls: 'bg-gradient-to-r from-emerald-500 to-teal-400',
-                stats: riskTierBreakdown.core,
-              },
-              {
-                key: 'smart',
-                title: 'Smart Risk Picks',
-                subtitle: 'Higher-upside plays (0.5u risk cap)',
-                badgeCls: 'border-indigo-400/35 bg-indigo-500/15 text-indigo-200',
-                barCls: 'bg-gradient-to-r from-indigo-500 to-purple-400',
-                stats: riskTierBreakdown.smartRisk,
-              },
-            ].map((tier) => (
-              <div
-                key={tier.key}
-                className="perf-chart-card px-4 py-3.5 space-y-2.5"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${tier.badgeCls}`}>
-                      {tier.title}
-                    </span>
-                    <span className="text-[11px] text-slate-400">{tier.subtitle}</span>
-                  </div>
-                  {tier.stats.settled > 0 && (
-                    <div className="text-right font-mono">
-                      <span className={`text-sm font-extrabold ${tier.stats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {formatUnits(tier.stats.profitUnits)}
-                      </span>
-                      <span className="text-[10px] text-slate-400 ml-1.5">
-                        ({formatSignedPct(tier.stats.roiPct)} ROI)
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {tier.stats.settled > 0 ? (
-                  <>
-                    <div className="relative h-2 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
-                      <div
-                        className={`h-full rounded-full ${tier.barCls}`}
-                        style={{ width: `${Math.max(4, Math.min(100, tier.stats.winRate))}%` }}
-                      />
-                      <div className="absolute top-0 bottom-0 w-0.5 bg-amber-300/90" style={{ left: '52.4%' }} />
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-slate-300 font-mono text-[11px]">
-                      <span>
-                        Record:{' '}
-                        <strong className="text-white">
-                          {tier.stats.wins}-{tier.stats.losses}
-                          {tier.stats.pushes > 0 ? `-${tier.stats.pushes}` : ''}
-                        </strong>{' '}
-                        · Win %:{' '}
-                        <strong className={tier.stats.winRate >= 52.38 ? 'text-emerald-300' : 'text-rose-300'}>
-                          {tier.stats.decided > 0 ? `${tier.stats.winRate.toFixed(1)}%` : '—'}
-                        </strong>
-                      </span>
-                      {tier.stats.clv.avg !== null && (
-                        <span>
-                          Avg CLV:{' '}
-                          <strong className={tier.stats.clv.avg >= 0 ? 'text-emerald-300' : 'text-amber-300'}>
-                            {tier.stats.clv.avg > 0 ? '+' : ''}{tier.stats.clv.avg.toFixed(2)} pts
-                          </strong>
-                        </span>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="font-sans text-slate-500 text-xs">
-                    No graded picks in this tier for current filters yet
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Main Recharts Visualizations & Breakdowns */}
@@ -2193,6 +2050,10 @@ export default function Picks() {
                         }`}
                       >
                         {badge.key === 'PENDING' ? '—' : formatUnits(profitUnits)}
+                        {onAddBet && badge.key !== 'VOID' && <button type="button" className="block ml-auto text-xs text-indigo-300 underline" onClick={() => onAddBet({
+                          sport: sp, market, game: matchup, pick: pickLabel, odds: getEffectivePrice(h),
+                          book: h.book, status: badge.key, placed_at: getPerformanceDay(h),
+                        })}>Log bet</button>}
                       </td>
                     </tr>
                   );
@@ -2222,7 +2083,7 @@ export default function Picks() {
         )}
 
         {/* GROUP 2: PARLAY DATA & INSIGHTS */}
-        {(activeSection === 'all' || activeSection === 'parlays') && (
+        {activeSection === 'parlays' && (
           <section aria-labelledby="parlay-group-heading" className="space-y-6">
             <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-500/12 via-slate-900/75 to-amber-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-3">
@@ -2263,6 +2124,7 @@ export default function Picks() {
             {parlayError && <p role="alert">Couldn’t refresh parlay results. Use Refresh to retry.</p>}
             {!parlayReport && !parlayError && <p role="status">Loading parlay results…</p>}
             {parlayReport && <ParlayPerformanceSection
+              onAddBet={onAddBet}
               parlayAnalytics={parlayAnalytics}
               selectedSport={selectedSport}
               onSwitchToNcaam={() => handleSportChange('NCAAM')}

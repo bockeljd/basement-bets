@@ -242,7 +242,7 @@ def evaluate_value_underdog_ml_leg(
         return None
 
 
-_INTERNAL_LEG_KEYS = ("_book_times", "_dk_fd_prices", "_timing_context", "_timing_payload")
+_INTERNAL_LEG_KEYS = ("_min_leg_ev", "_book_times", "_dk_fd_prices", "_timing_context", "_timing_payload")
 
 
 def _strip_internal_leg_keys(leg: dict) -> dict:
@@ -378,41 +378,38 @@ def _attach_leg_timing(leg: dict, dtp_entry: Optional[Dict[str, Any]], ref_now: 
         leg["bet_timing"] = t_res
 
 
-def _price_multi_leg_combo(legs: Sequence[dict]) -> Tuple[List[dict], float, Optional[str], bool]:
-    """Compute decimal odds & shared DraftKings/FanDuel book pricing for 2+ legs."""
-    shared_dk_fd = []
-    for bk_name in ("DraftKings", "FanDuel"):
-        if all(bk_name in (lg.get("_dk_fd_prices") or {}) for lg in legs):
-            dec_bk = 1.0
-            prices_bk = []
-            for lg in legs:
-                p_i = int((lg.get("_dk_fd_prices") or {})[bk_name])
-                prices_bk.append(p_i)
-                dec_bk *= dec_from_american(p_i)
-            shared_dk_fd.append((dec_bk, bk_name, prices_bk))
-
-    if shared_dk_fd:
-        shared_dk_fd.sort(key=lambda x: x[0], reverse=True)
-        dec, parlay_book, prices_bk = shared_dk_fd[0]
-        clean_legs = []
-        for lg, p_i in zip(legs, prices_bk):
-            c_lg = _strip_internal_leg_keys(lg)
-            c_lg["price"] = p_i
-            c_lg["book"] = parlay_book
-            clean_legs.append(c_lg)
-        return clean_legs, dec, parlay_book, True
-
-    dec = 1.0
-    books = []
-    clean_legs = []
-    for lg in legs:
-        dec *= dec_from_american(int(lg["price"]))
-        books.append(str(lg.get("book") or "").strip())
-        clean_legs.append(_strip_internal_leg_keys(lg))
-    unique_non_cons = {b.lower() for b in books if b and b.lower() != "consensus"}
-    same_book = len(unique_non_cons) == 1 and all(b and b.lower() != "consensus" for b in books)
-    parlay_book = books[0] if same_book else None
-    return clean_legs, dec, parlay_book, same_book
+def _price_multi_leg_combo(legs, min_leg_ev):
+    """Select the highest payout whose individual legs qualify at the quoted prices."""
+    shared = [book for book in ("DraftKings", "FanDuel")
+              if all(book in leg.get("_dk_fd_prices", {}) for leg in legs)]
+    best = None
+    for book in shared or [None]:
+        priced = []
+        decimal = 1.0
+        for leg in legs:
+            price = int(leg["_dk_fd_prices"][book] if book else leg["price"])
+            odds = dec_from_american(price)
+            probability = float(leg["win_prob"])
+            ev = probability * odds - 1
+            floor = max(min_leg_ev, leg.get("_min_leg_ev", 0))
+            if ev < floor:
+                break
+            if leg.get("is_value_underdog") and (
+                not 110 <= price <= 220 or probability - 1 / odds < 0.03 or ev < 0.035
+            ):
+                break
+            item = _strip_internal_leg_keys(leg)
+            item.update(price=price, ev=ev, ev_per_unit=ev)
+            if book:
+                item.update(book=book, quote_at=leg.get("_book_times", {}).get(book))
+            priced.append(item)
+            decimal *= odds
+        if len(priced) != len(legs) or (best and decimal <= best[1]):
+            continue
+        names = {str(item.get("book") or "").strip().lower() for item in priced}
+        same_book = len(names) == 1 and not names.intersection({"", "consensus"})
+        best = priced, decimal, priced[0].get("book") if same_book else None, same_book
+    return best
 
 
 def build_three_leg_high_payout_parlays(
@@ -461,7 +458,10 @@ def build_three_leg_high_payout_parlays(
                     continue
                 trio = (ranked_legs[i], ranked_legs[j], ranked_legs[k])
                 p = float(trio[0]["win_prob"]) * float(trio[1]["win_prob"]) * float(trio[2]["win_prob"])
-                clean_legs, dec, parlay_book, same_book = _price_multi_leg_combo(trio)
+                priced = _price_multi_leg_combo(trio, 0.015)
+                if priced is None:
+                    continue
+                clean_legs, dec, parlay_book, same_book = priced
                 amer = american_from_dec(dec)
                 ev = p * (dec - 1.0) - (1.0 - p)
                 if ev < float(min_ev) or not (int(odds_lo) <= amer <= int(odds_hi)):
@@ -570,11 +570,11 @@ def compute_ncaam_parlays_today(
         WHERE e.league = 'NCAAM'
           AND UPPER(COALESCE(m.market_type,'')) IN ('MONEYLINE','ML')
           AND {date_predicate}
-          AND COALESCE(m.ev_per_unit, 0) >= %(min_ev)s
-          AND COALESCE(m.bet_price, m.price) IS NOT NULL
-        ORDER BY m.event_id, m.analyzed_at DESC
+          AND m.analyzed_at <= LEAST(NOW(), e.start_time)
+        ORDER BY m.event_id, m.analyzed_at DESC, m.id DESC
       )
       SELECT * FROM latest_preds
+      WHERE ev_per_unit >= %(min_ev)s AND price IS NOT NULL
       ORDER BY win_prob DESC
       LIMIT %(lim)s
     """
@@ -668,6 +668,7 @@ def compute_ncaam_parlays_today(
             "win_prob": wp,
             "ev_per_unit": float(r.get("ev_per_unit") or 0),
             "outcome": r.get("outcome"),
+            "_min_leg_ev": float(min_ev_per_unit),
             "model_version": r.get("model_version"),
             "start_time": str(r.get("start_time") or ""),
             "is_home_pick": is_home_pick,
@@ -1053,6 +1054,7 @@ def compute_ncaam_parlays_today(
             pre_tip_legs.append(lg)
         norm_legs = pre_tip_legs
 
+    min_leg_ev_post = 0.005 if _strategy == "home_fav" else 0.0
     # Attach latest DraftKings & FanDuel prices (90-min freshness guard for today's slate)
     try:
         leg_eids = list({str(leg.get("event_id")) for leg in norm_legs if leg.get("event_id")})
@@ -1119,7 +1121,6 @@ def compute_ncaam_parlays_today(
                             float(leg["win_prob"]) * (dec_from_american(best_pr) - 1.0) - (1.0 - float(leg["win_prob"])),
                             4,
                         )
-            min_leg_ev_post = 0.005 if _strategy == "home_fav" else 0.0
             norm_legs = [
                 lg for lg in norm_legs
                 if float(lg.get("ev_per_unit") if lg.get("ev_per_unit") is not None else 0.0) >= min_leg_ev_post
@@ -1187,36 +1188,10 @@ def compute_ncaam_parlays_today(
             parlay_outcome = _combine_two_leg_outcome(a.get("outcome"), b.get("outcome"))
             p = float(a["win_prob"]) * float(b["win_prob"])
 
-            a_books = a.get("_dk_fd_prices") or {}
-            b_books = b.get("_dk_fd_prices") or {}
-            shared_dk_fd = []
-            for bk_name in ("DraftKings", "FanDuel"):
-                if bk_name in a_books and bk_name in b_books:
-                    p1 = int(a_books[bk_name])
-                    p2 = int(b_books[bk_name])
-                    d_bk = dec_from_american(p1) * dec_from_american(p2)
-                    shared_dk_fd.append((d_bk, bk_name, p1, p2))
-
-            if shared_dk_fd:
-                shared_dk_fd.sort(key=lambda x: x[0], reverse=True)
-                dec, parlay_book, price_a, price_b = shared_dk_fd[0]
-                same_book = True
-                leg_a = _strip_internal_leg_keys(a)
-                leg_b = _strip_internal_leg_keys(b)
-                leg_a["price"] = price_a
-                leg_a["book"] = parlay_book
-                leg_b["price"] = price_b
-                leg_b["book"] = parlay_book
-                leg_a["quote_at"] = a["_book_times"][parlay_book]
-                leg_b["quote_at"] = b["_book_times"][parlay_book]
-            else:
-                dec = dec_from_american(a["price"]) * dec_from_american(b["price"])
-                b1 = str(a.get("book") or "").strip()
-                b2 = str(b.get("book") or "").strip()
-                same_book = bool(b1 and b2 and b1.lower() == b2.lower() and b1.lower() != "consensus")
-                parlay_book = b1 if same_book else None
-                leg_a = _strip_internal_leg_keys(a)
-                leg_b = _strip_internal_leg_keys(b)
+            priced = _price_multi_leg_combo((a, b), min_leg_ev_post)
+            if priced is None:
+                continue
+            (leg_a, leg_b), dec, parlay_book, same_book = priced
 
             amer = american_from_dec(dec)
             ev = p * (dec - 1.0) - (1.0 - p)

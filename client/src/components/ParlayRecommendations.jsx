@@ -122,6 +122,10 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
       <div className="flex flex-col gap-3">
         {legs.map((leg, li) => {
           const lOut = leg.outcome ? String(leg.outcome).toUpperCase() : 'PENDING';
+          const price = Number(leg.price);
+          const legEv = leg.win_prob != null && Math.abs(price) >= 100
+            ? Number(leg.win_prob) * (1 + (price > 0 ? price / 100 : -100 / price)) - 1
+            : null;
           const legSurface = getOutcomeOutlineClasses(lOut, 'bet');
           const lWon = legSurface.outcome === 'WON';
           const lLoss = legSurface.outcome === 'LOST';
@@ -159,6 +163,7 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  {Number.isFinite(legEv) && <span className="text-xs text-slate-400">{(legEv * 100).toFixed(1)}% EV</span>}
                   <span className={`text-sm font-bold leading-tight ${lWon ? 'text-emerald-300' : lLoss ? 'text-rose-300' : 'text-slate-200'}`}>{leg.team_pick}</span>
                 </div>
               </div>
