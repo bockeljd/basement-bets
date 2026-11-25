@@ -461,16 +461,16 @@ class OddsAdapter:
                         })
             tot = payload.get('total_score')
             if tot is not None:
-                if payload.get('over_odds') is not None:
+                if payload.get('over_odds') is not None and payload.get('over_line', tot) is not None:
                     out.append({
                         "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                        "market_type": tot_mkt, "side": "OVER", "line_value": tot,
+                        "market_type": tot_mkt, "side": "OVER", "line_value": payload.get("over_line", tot),
                         "price": payload.get('over_odds'), "captured_at": captured_at,
                     })
-                if payload.get('under_odds') is not None:
+                if payload.get('under_odds') is not None and payload.get('under_line', tot) is not None:
                     out.append({
                         "event_id": event_id, "provider": "ACTION_NETWORK", "book": book_name,
-                        "market_type": tot_mkt, "side": "UNDER", "line_value": tot,
+                        "market_type": tot_mkt, "side": "UNDER", "line_value": payload.get("under_line", tot),
                         "price": payload.get('under_odds'), "captured_at": captured_at,
                     })
             if not mkt_suffix:

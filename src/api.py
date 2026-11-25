@@ -2556,14 +2556,21 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
         due = _exec(conn, """SELECT 1 FROM recommended_slates s
             WHERE s.id='NCAAM:'||(NOW() AT TIME ZONE 'America/New_York')::date::text||':cached'
               AND EXISTS (SELECT 1 FROM jsonb_array_elements(to_jsonb(s)->'rolling_board'->'provisional') p
-                          WHERE (p->>'locks_at')::timestamptz <= NOW())""").fetchone()
+                          WHERE (p->>'locks_at')::timestamptz <= NOW()+interval '10 minutes')""").fetchone()
+        # Give the scheduled worker a chance to observe the book just before each boundary.
+        checkpoint_refresh_due = bool(_exec(conn, """
+            SELECT 1 FROM events e WHERE e.league='NCAAM' AND (
+              e.start_time BETWEEN now() AND now()+interval '10 minutes' OR
+              e.start_time BETWEEN now()+interval '30 minutes' AND now()+interval '50 minutes')
+            LIMIT 1
+        """).fetchone())
         stale_check = _exec(conn, """
             SELECT COUNT(*) FILTER (WHERE e.start_time > NOW() + interval '30 minutes') AS upcoming_pre_cutoff,
                    MAX(d.computed_at) AS latest_computed_at,
                    (SELECT MAX(o.captured_at) FROM odds_snapshots o JOIN events eo ON eo.id = o.event_id
                     WHERE eo.league = 'NCAAM' AND eo.start_time > NOW() + interval '30 minutes'
                       AND o.price IS NOT NULL AND lower(o.book) NOT IN ('','consensus','unknown','action_open','open')
-                      AND lower(o.book) NOT LIKE 'action_book_%'
+                      AND lower(o.book) NOT LIKE 'action\_book\_%%'
                       AND (eo.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date) AS latest_odds_at
             FROM events e
             LEFT JOIN daily_top_picks d ON d.event_id = e.id AND d.league = 'NCAAM'
@@ -2588,6 +2595,7 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
                     stale_refresh_needed = True
     res = publish_slate() if due else {"status": "no_cutoffs_due"}
     res["stale_refresh_needed"] = stale_refresh_needed
+    res["checkpoint_refresh_due"] = checkpoint_refresh_due
     parlay_locked = False
     try:
         with get_db_connection() as conn:
@@ -2764,7 +2772,26 @@ async def trigger_odds_ingestion(request: Request, authorized: bool = Depends(ve
             today_et = datetime.now(ZoneInfo("America/New_York")).date()
             end_et = today_et + timedelta(days=2)
             counts = {}
-            if request.query_params.get("scope") == "ncaam_today":
+            if request.query_params.get("scope") == "ncaam_checkpoints":
+                from src.services.odds_fetcher_service import OddsFetcherService
+                from src.services.odds_adapter import OddsAdapter
+                from src.database import get_db_connection, _exec
+                with get_db_connection() as conn:
+                    due = _exec(conn, """SELECT id,(start_time AT TIME ZONE 'America/New_York')::date
+                        FROM events WHERE league='NCAAM' AND start_time>now() AND
+                        (start_time<=now()+interval '10 minutes' OR start_time BETWEEN
+                         now()+interval '30 minutes' AND now()+interval '50 minutes')""").fetchall()
+                ids = {row[0] for row in due}
+                counts["NCAAM"] = 0
+                fetcher, adapter = OddsFetcherService(), OddsAdapter()
+                for day in sorted({row[1] for row in due}):
+                    games = fetcher.fetch_odds("NCAAM", str(day), str(day))
+                    selected = [g for g in games if f"action:ncaam:{g['game_id']}" in ids]
+                    if selected:
+                        counts["NCAAM"] += adapter.normalize_and_store(selected,"NCAAM",provider="action_network") or 0
+                if any(event_id.startswith("action:ncaam:") for event_id in ids) and not counts["NCAAM"]:
+                    raise ValueError("Checkpoint refresh received no sportsbook prices for the due games")
+            elif request.query_params.get("scope") == "ncaam_today":
                 counts["NCAAM"] = _ingest_league_odds_window("NCAAM", today_et, today_et)
                 if not counts["NCAAM"]:
                     raise ValueError("No NCAAM data received for today's slate")
@@ -4988,7 +5015,10 @@ def ncaam_publication_status(date: str):
                        e.home_team,e.away_team,to_jsonb(i)->'snapshot'->>'locked_at' AS locked_at,
                        to_jsonb(i)->'snapshot'->>'locks_at' AS locks_at,to_jsonb(i)->'snapshot'->'referees' AS referees,
                        to_jsonb(i)->'snapshot'->>'computed_at' AS computed_at,
-                       to_jsonb(i)->'snapshot'->>'quote_captured_at' AS quote_captured_at
+                       to_jsonb(i)->'snapshot'->>'quote_captured_at' AS quote_captured_at,
+                       i.market_type,i.snapshot->>'book' AS book,i.snapshot->'first_qualifying_quote' AS first_qualifying_quote,
+                       i.snapshot->'lock_quotes' AS lock_quotes,
+                       i.snapshot->'close_quotes' AS close_quotes
                 FROM recommended_slate_items i LEFT JOIN events e ON e.id=i.event_id
                 WHERE i.slate_id=%s AND i.rank BETWEEN 1 AND 6 ORDER BY i.rank
             """, (slate['id'],)).fetchall()

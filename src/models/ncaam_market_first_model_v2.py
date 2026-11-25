@@ -2463,7 +2463,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 if getattr(st, 'tzinfo', None) is None:
                     st = st.replace(tzinfo=timezone.utc)
                 now_dt = datetime.now(timezone.utc)
-                if now_dt >= (st - timedelta(minutes=10)):
+                if now_dt >= (st - timedelta(minutes=30)):
                     within_lock_window = True
         except Exception:
             within_lock_window = False
@@ -2978,7 +2978,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             if getattr(st, 'tzinfo', None) is None:
                                 st = st.replace(tzinfo=timezone.utc)
                             now_dt = datetime.now(timezone.utc)
-                            if now_dt >= (st - timedelta(minutes=10)):
+                            if now_dt >= (st - timedelta(minutes=30)):
                                 should_persist_ml = False
                     except Exception:
                         pass
@@ -3027,6 +3027,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             "clv_method": ("home_fav_7pt_parlay_v1" if (side == 'HOME' and is_home_fav_parlay_leg) else "odds_selector_v1"),
                         }
                         insert_model_prediction(doc_ml)
+                        if not relax_gates:
+                            cutoff_ev = (0.015 if is_home_fav_parlay_leg and side == 'HOME'
+                                         else 0.06 if price > self.MAX_ML_UNDERDOG_PRICE else self.PUBLISH_MIN_EV_ML)
+                            res["ev_observations"].append({
+                                "market": "MONEYLINE", "side": side.lower(), "line": None,
+                                "cohort": "qualified_parlay_leg" if is_home_fav_parlay_leg else "qualified",
+                                "price": price, "book": book, "gate_ev": ev, "ev_cutoff": cutoff_ev, "win_prob": wp,
+                            })
         except Exception as e:
             # never block analyze() on ML persistence
             try:

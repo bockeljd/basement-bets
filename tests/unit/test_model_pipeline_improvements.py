@@ -2014,7 +2014,7 @@ def test_backtest_stress_improvements_one_to_three(monkeypatch):
     captured_sql = []
     monkeypatch.setattr(bdtp, "_exec", lambda c, sql, p: captured_sql.append(sql))
     bdtp.upsert_pick("2026-11-16", "action:ncaam:lock_test", {"recommendations": []}, conn=MagicMock())
-    assert captured_sql and "e.start_time <= (NOW() + INTERVAL '10 minutes')" in captured_sql[0]
+    assert captured_sql and "e.start_time <= (clock_timestamp() + INTERVAL '30 minutes')" in captured_sql[0]
 
 
 def test_kenpom_fanmatch_total_ff_and_hasla_pace_sigma(monkeypatch):

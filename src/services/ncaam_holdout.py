@@ -1,6 +1,6 @@
 """Score frozen, pregame Top 6 snapshots on the same settled rows for all baselines."""
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 
 from src.database import _exec, get_db_connection
@@ -19,7 +19,7 @@ def score_published(rows):
         if row["outcome"] not in ("WON", "LOST"):
             coverage["pending_push_or_void"] += 1
             continue
-        if row["published_at"] >= row["start_time"]:
+        if row["published_at"] > row["start_time"] - timedelta(minutes=30):
             coverage["late_publication"] += 1
             continue
         calibration = snap.get("calibration") or {}
@@ -58,7 +58,7 @@ def score_published(rows):
 def published_holdout(days):
     with get_db_connection() as conn:
         rows = _exec(conn, """SELECT i.market_type,i.bet_price,to_jsonb(i)->'snapshot' AS snapshot,
-                m.outcome,e.start_time,i.created_at AS published_at
+                m.outcome,e.start_time,COALESCE((i.snapshot->>'locked_at')::timestamptz,i.created_at) AS published_at
             FROM recommended_slates s JOIN recommended_slate_items i ON i.slate_id=s.id
             JOIN events e ON e.id=i.event_id LEFT JOIN model_predictions m ON m.id=i.prediction_id
             WHERE s.league='NCAAM' AND s.source='cached' AND s.id='NCAAM:'||s.date_et||':cached'

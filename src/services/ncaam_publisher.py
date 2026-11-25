@@ -76,47 +76,9 @@ def publish_slate(date_et=None):
         locked = _slate_items(conn, slate_id)
         seen = {item["event_id"] for item in locked}
         passes = dict(previous.get("passes", {}))
-        current = {row["event_id"]: row for row in rows}
-        for item in sorted(previous.get("provisional", []), key=lambda p: (p["locks_at"], p["rank"])):
-            eid = item["event_id"]
-            cutoff = datetime.fromisoformat(item["locks_at"])
-            if now < cutoff or eid in seen:
-                continue
-            row = current.get(eid)
-            if not row or row["start_time"] - timedelta(minutes=30) != cutoff:
-                continue
-            reason = None
-            if not is_retail_book(item.get("book")):
-                reason = "No executable retail price at cutoff"
-            elif now >= row["start_time"]:
-                reason = "Missed pregame lock"
-            elif cutoff - datetime.fromisoformat(item["computed_at"]) > timedelta(minutes=90):
-                reason = "Model forecast stale at cutoff"
-            elif row["computed_at"] <= cutoff and (
-                not row["is_actionable"] or row["id"] != item["id"]
-                or row["computed_at"] > datetime.fromisoformat(item["computed_at"])
-            ):
-                reason = "Forecast changed before cutoff"
-            quote = _exec(conn, """SELECT price,line_value,captured_at FROM odds_snapshots
-                WHERE event_id=%s AND LOWER(COALESCE(book,''))=LOWER(COALESCE(%s,'')) AND market_type=%s AND side=%s
-                  AND captured_at BETWEEN %s - interval '90 minutes' AND %s
-                ORDER BY captured_at DESC,id DESC LIMIT 1""",
-                (eid,item["book"],item["market_type"],item["side"].upper(),cutoff,cutoff)).fetchone()
-            if not quote:
-                reason = "Odds stale at cutoff (>90m old)"
-            elif quote["price"] != item["bet_price"] or quote["line_value"] != item["bet_line"]:
-                reason = "Price changed at cutoff"
-            if reason:
-                passes[eid] = reason
-                continue
-            snapshot = {**item, "locked_at": now.isoformat(),
-                        "quote_captured_at": quote["captured_at"].isoformat()}
-            _exec(conn, """INSERT INTO recommended_slate_items
-                (slate_id,prediction_id,rank,event_id,selection,bet_price,bet_line,market_type,snapshot)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (slate_id,item["id"],len(seen)+1,eid,item["selection"],item["bet_price"],
-                 item["bet_line"],item["market_type"],Json(snapshot)))
-            seen.add(eid)
+        for item in previous.get("provisional", []):
+            if item["event_id"] not in seen and now >= datetime.fromisoformat(item["locks_at"]):
+                passes[item["event_id"]] = "Missed 30-minute publication deadline"
 
         candidates = []
         stale_holds = {}
@@ -150,6 +112,58 @@ def publish_slate(date_et=None):
                 item.update(opposite_price=row["opposite_price"], opposite_captured_at=row["opposite_at"].isoformat())
             candidates.append(item)
         provisional = rank_top6_items(candidates, limit=6-len(seen)) if len(seen)<6 else []
+        pending = []
+        for item in provisional:
+            deadline = datetime.fromisoformat(item["locks_at"])
+            if deadline - now > timedelta(minutes=10):
+                pending.append(item)
+                continue
+            # The scheduled checker runs every five minutes. Never backdate a late run.
+            opposite = {"HOME": "AWAY", "AWAY": "HOME", "OVER": "UNDER", "UNDER": "OVER"}[item["side"].upper()]
+            params = {**item, "slate": slate_id, "rank": len(seen)+1, "side": item["side"].upper(),
+                      "opposite": opposite, "snapshot": Json(item), "deadline": deadline}
+            saved = _exec(conn, """
+                WITH stamp AS MATERIALIZED (SELECT clock_timestamp() AS published),
+                latest AS (
+                    SELECT DISTINCT ON (o.side) o.side,o.price,o.line_value,o.captured_at
+                    FROM odds_snapshots o CROSS JOIN stamp
+                    WHERE o.event_id=%(event_id)s AND o.market_type=%(market_type)s
+                      AND lower(o.book)=lower(%(book)s)
+                      AND o.captured_at BETWEEN published-interval '90 minutes' AND published
+                    ORDER BY o.side,o.captured_at DESC,o.id DESC
+                )
+                INSERT INTO recommended_slate_items
+                    (slate_id,prediction_id,rank,event_id,selection,bet_price,bet_line,market_type,snapshot)
+                SELECT %(slate)s,%(id)s,%(rank)s,%(event_id)s,%(selection)s,%(bet_price)s,%(bet_line)s,
+                       %(market_type)s,%(snapshot)s::jsonb || jsonb_build_object(
+                         'locked_at',published,'quote_captured_at',q.captured_at,
+                         'first_qualifying_quote',(
+                           SELECT jsonb_build_object('book',a.book,'line',a.line,'price',a.price,
+                             'quote_at',a.quote_at,'observed_at',a.observed_at,'ev_cutoff',a.ev_cutoff)
+                           FROM ncaam_ev_observations a WHERE a.event_id=%(event_id)s
+                             AND a.model_version=%(model_version)s AND a.market=%(market_type)s
+                             AND upper(a.side)=%(side)s AND a.cohort='qualified'
+                             AND a.observed_at<=published ORDER BY a.observed_at LIMIT 1),
+                         'opposite_price',opp.price,'opposite_captured_at',opp.captured_at,
+                         'lock_quotes',jsonb_build_object(q.side,to_jsonb(q),opp.side,to_jsonb(opp)))
+                FROM stamp JOIN latest q ON q.side=%(side)s JOIN latest opp ON opp.side=%(opposite)s
+                JOIN events e ON e.id=%(event_id)s
+                WHERE published <= %(deadline)s AND e.start_time-interval '30 minutes'=%(deadline)s
+                  AND q.price=%(bet_price)s AND abs(opp.price)>=100
+                  AND q.line_value IS NOT DISTINCT FROM %(bet_line)s
+                  AND opp.line_value IS NOT DISTINCT FROM
+                      (CASE WHEN %(market_type)s LIKE 'SPREAD%%' THEN -q.line_value ELSE q.line_value END)
+                RETURNING event_id
+            """, params).fetchone()
+            if saved:
+                seen.add(item["event_id"])
+                passes.pop(item["event_id"], None)
+            else:
+                pending.append(item)
+                stale_holds[item["event_id"]] = "Waiting for a verified same-book pair before deadline"
+        for rank, item in enumerate(pending, start=len(seen)+1):
+            item["rank"] = rank
+        provisional = pending
         board = {"provisional": provisional, "passes": passes, "stale_holds": stale_holds, "updated_at": now.isoformat(),
                  "open": len(seen)<6 and any(r["start_time"]-timedelta(minutes=30)>now for r in rows)}
         _exec(conn,"UPDATE recommended_slates SET rolling_board=%s WHERE id=%s",(Json(board),slate_id))

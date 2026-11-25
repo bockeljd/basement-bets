@@ -31,3 +31,7 @@ jobs:
               echo "ncaam_jobs.yml already running/queued (${active} active)."
             fi
           fi
+          if echo "${resp}" | grep -q '"checkpoint_refresh_due": *true'; then
+            curl --fail-with-body --silent --show-error --max-time 55 --retry 1 \
+              -H "Authorization: Bearer ${CRON_SECRET}" "${BASE_URL%/}/api/jobs/ingest_odds?scope=ncaam_checkpoints"
+          fi

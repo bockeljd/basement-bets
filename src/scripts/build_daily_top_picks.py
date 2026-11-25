@@ -35,9 +35,25 @@ def ensure_table():
         event_id text NOT NULL, model_version text NOT NULL, market text NOT NULL,
         side text NOT NULL, cohort text NOT NULL, observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
         tip_at timestamptz NOT NULL, quote_at timestamptz NOT NULL, book text NOT NULL,
-        line double precision NOT NULL, price integer NOT NULL, ev double precision NOT NULL,
+        line double precision, price integer NOT NULL, ev double precision NOT NULL,
         ev_cutoff double precision NOT NULL, win_prob double precision,
         PRIMARY KEY (event_id, model_version, market, side, cohort)
+    );
+    ALTER TABLE ncaam_ev_observations ALTER COLUMN line DROP NOT NULL;
+    ALTER TABLE ncaam_ev_observations ADD COLUMN IF NOT EXISTS lock_quotes jsonb;
+    ALTER TABLE ncaam_ev_observations ADD COLUMN IF NOT EXISTS close_quotes jsonb;
+    CREATE TABLE IF NOT EXISTS ncaam_market_checkpoints (
+        event_id text NOT NULL, stage text NOT NULL, as_of timestamptz NOT NULL,
+        saved_at timestamptz NOT NULL DEFAULT clock_timestamp(), quotes jsonb NOT NULL,
+        PRIMARY KEY(event_id,stage,as_of)
+    );
+    CREATE TABLE IF NOT EXISTS ncaam_ev_quote_history (
+        event_id text NOT NULL, model_version text NOT NULL, market text NOT NULL,
+        side text NOT NULL, cohort text NOT NULL, book text NOT NULL,
+        quote_at timestamptz NOT NULL, observed_at timestamptz NOT NULL, line double precision,
+        price integer NOT NULL, ev double precision NOT NULL, ev_cutoff double precision NOT NULL,
+        win_prob double precision,
+        PRIMARY KEY(event_id,model_version,market,side,cohort,book,quote_at)
     );
     CREATE INDEX IF NOT EXISTS ix_daily_top_picks_date_league ON daily_top_picks(date_et, league);
     """
@@ -228,7 +244,7 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
       SELECT 1 FROM events e
       WHERE e.id = daily_top_picks.event_id
         AND e.start_time IS NOT NULL
-        AND e.start_time <= (NOW() + INTERVAL '10 minutes')
+        AND e.start_time <= (clock_timestamp() + INTERVAL '30 minutes')
     )
     """
     payload = {
@@ -244,26 +260,44 @@ def upsert_pick(date_et: str, event_id: str, res: dict, conn=None):
     if conn is None:
         with get_db_connection() as conn2:
             _exec(conn2, sql, payload)
+            archive_ev_observations(conn2, event_id, res)
             conn2.commit()
     else:
         _exec(conn, sql, payload)
+        archive_ev_observations(conn, event_id, res)
 
 
 def archive_ev_observations(conn, event_id, result):
+    from src.utils.ncaam_quotes import is_retail_book
     for observation in result.get("ev_observations", []):
+        if not is_retail_book(observation.get("book")):
+            continue
         params = {**observation, "event_id": event_id, "version": result["model_version"]}
-        _exec(conn, """INSERT INTO ncaam_ev_observations
-            (event_id,model_version,market,side,cohort,tip_at,quote_at,book,line,price,ev,ev_cutoff,win_prob)
-            SELECT e.id,%(version)s,%(market)s,%(side)s,%(cohort)s,e.start_time,q.captured_at,
-                   q.book,q.line_value,q.price,%(gate_ev)s,%(ev_cutoff)s,%(win_prob)s
+        _exec(conn, """WITH verified AS MATERIALIZED (SELECT e.id AS event_id,e.start_time AS tip_at,q.captured_at AS quote_at,
+                   q.book,q.line_value AS line,q.price,clock_timestamp() AS observed_at
             FROM events e JOIN LATERAL (
                 SELECT * FROM odds_snapshots WHERE event_id=e.id AND market_type=%(market)s
                   AND side=upper(%(side)s) AND lower(book)=lower(%(book)s)
                   AND captured_at BETWEEN clock_timestamp()-interval '90 minutes' AND clock_timestamp()
                 ORDER BY captured_at DESC,id DESC LIMIT 1
             ) q ON true WHERE e.id=%(event_id)s AND e.start_time>clock_timestamp()+interval '30 minutes'
-              AND q.price=%(price)s AND q.line_value=%(line)s
-            ON CONFLICT DO NOTHING""", params)
+              AND q.price=%(price)s AND (q.line_value IS NOT DISTINCT FROM %(line)s
+                  OR (%(market)s='MONEYLINE' AND %(line)s IS NULL))
+            ), history AS (
+                INSERT INTO ncaam_ev_quote_history(event_id,model_version,market,side,cohort,book,quote_at,
+                    observed_at,line,price,ev,ev_cutoff,win_prob)
+                SELECT event_id,%(version)s,%(market)s,upper(%(side)s),%(cohort)s,book,quote_at,observed_at,
+                       line,price,%(gate_ev)s,%(ev_cutoff)s,%(win_prob)s FROM verified ON CONFLICT DO NOTHING
+            )
+            INSERT INTO ncaam_ev_observations(event_id,model_version,market,side,cohort,tip_at,quote_at,
+                book,line,price,ev,ev_cutoff,win_prob,observed_at)
+            SELECT event_id,%(version)s,%(market)s,%(side)s,%(cohort)s,tip_at,quote_at,book,line,price,
+                   %(gate_ev)s,%(ev_cutoff)s,%(win_prob)s,observed_at FROM verified
+            ON CONFLICT (event_id,model_version,market,side,cohort) DO UPDATE SET
+                (observed_at,quote_at,book,line,price,ev,ev_cutoff,win_prob,tip_at)=
+                (EXCLUDED.observed_at,EXCLUDED.quote_at,EXCLUDED.book,EXCLUDED.line,EXCLUDED.price,
+                 EXCLUDED.ev,EXCLUDED.ev_cutoff,EXCLUDED.win_prob,EXCLUDED.tip_at)
+            WHERE EXCLUDED.observed_at < ncaam_ev_observations.observed_at""", params)
 
 
 def main():
@@ -284,6 +318,12 @@ def main():
 
     print(f"[{dt.now().isoformat()}] build_daily_top_picks date_et={date_et} limit_games={limit_games}")
     ensure_table()
+    from src.database import ensure_recommended_slates_tables
+    ensure_recommended_slates_tables()
+    from src.services.ncaam_quote_tracking import capture_due_quotes
+    with get_db_connection() as checkpoint_conn:
+        capture_due_quotes(checkpoint_conn)
+        checkpoint_conn.commit()
 
     # Pre-flight data quality checks (and optional ingestion) so we don't skip games due to missing data.
     try:
@@ -362,7 +402,6 @@ def main():
                     pass
 
                 upsert_pick(ev_day_et, eid, res if isinstance(res, dict) else {}, conn=conn)
-                archive_ev_observations(conn, eid, res or {})
                 ok += 1
             except Exception as e:
                 print(f"[build_daily_top_picks] error on {eid}: {e}")

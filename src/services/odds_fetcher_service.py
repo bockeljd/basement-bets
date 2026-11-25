@@ -123,7 +123,7 @@ class OddsFetcherService:
         home_ml = away_ml = None
         home_sp = away_sp = None
         home_sp_odds = away_sp_odds = None
-        total_line = over_odds = under_odds = None
+        total_line = over_line = under_line = over_odds = under_odds = None
 
         for it in (ev.get('moneyline') or []):
             side = it.get('side')
@@ -146,8 +146,10 @@ class OddsFetcherService:
             if total_line is None and it.get('value') is not None:
                 total_line = it.get('value')
             if side == 'over':
+                over_line = it.get('value')
                 over_odds = it.get('odds')
             elif side == 'under':
+                under_line = it.get('value')
                 under_odds = it.get('odds')
 
         if (
@@ -166,6 +168,8 @@ class OddsFetcherService:
             'home_spread_odds': home_sp_odds,
             'away_spread_odds': away_sp_odds,
             'total_score': total_line,
+            'over_line': over_line,
+            'under_line': under_line,
             'over_odds': over_odds,
             'under_odds': under_odds,
         }

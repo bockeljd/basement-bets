@@ -104,8 +104,8 @@ def test_november_situational_clamp_bounds_heuristic_noise_while_keeping_injurie
 
     with_inj = _make_model(-1.2).analyze("evt_nov_sit", event_context=ev, market_snapshot=snap, relax_gates=True, persist=False)
     mu_with_inj = with_inj["debug"]["mu_spread_final"]
-    # Real injury shift (-1.2) is applied outside the 0.50 situational clamp cleanly
-    assert abs((mu_with_inj - mu_no_inj) - (-1.2)) < 0.05
+    # The injury shift bypasses the situational clamp, then November market anchoring retains 75%.
+    assert abs((mu_with_inj - mu_no_inj) - (-1.2 * 0.75)) < 0.05
 
 
 def test_smart_risk_rejects_zero_consensus_retail_lag_but_allows_consensus_or_steam(monkeypatch):

@@ -28,7 +28,7 @@ export default function SlatePublication({ day }) {
   const hasLockedPicks = (slate?.picks?.length || 0) > 0;
   const labels = {
     rolling: hasProvisional
-      ? `${slate.provisional.length} pick${slate.provisional.length === 1 ? '' : 's'} ready (lock 30 min before tip)`
+      ? `${slate.provisional.length} pick${slate.provisional.length === 1 ? '' : 's'} ready (lock 30–40 min before tip)`
       : hasLockedPicks
         ? `${slate.picks.length} locked · Watching remaining games`
         : "0 Recommended Bets Right Now · Checking live odds until 30 min before each tip",

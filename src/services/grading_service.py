@@ -424,6 +424,8 @@ class GradingService:
             m.id,
             m.event_id,
             m.market_type,
+            m.book,
+            e.league,
             m.pick,
             m.selection,
             COALESCE(m.bet_line, m.open_line) AS base_line,
@@ -485,7 +487,8 @@ class GradingService:
               AND market_type = c.market_type
               AND side = c.side
               AND COALESCE(book, '') NOT IN ('action_open', 'open')
-              AND captured_at <= c.start_time
+              AND (c.league <> 'NCAAM' OR (lower(book)=lower(c.book) AND abs(price)>=100))
+              AND captured_at < c.start_time
               AND (
                 (c.market_type IN ('SPREAD', 'TOTAL') AND line_value IS NOT NULL)
                 OR (c.market_type = 'MONEYLINE' AND price IS NOT NULL AND price != 0)
@@ -494,7 +497,7 @@ class GradingService:
               captured_at DESC,
               (CASE WHEN LOWER(COALESCE(book, '')) IN ('pinnacle', 'circa sports', 'bookmaker') THEN 0
                     WHEN LOWER(COALESCE(book, '')) = 'consensus' THEN 1
-                    ELSE 2 END) ASC
+                    ELSE 2 END) ASC, id DESC
             LIMIT 1
           ) s ON TRUE
           WHERE c.side IS NOT NULL
