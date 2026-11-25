@@ -954,3 +954,126 @@ def test_ticket_prices_apply_leg_floor_before_maximizing_payout():
         assert abs(leg["ev_per_unit"] - (0.55 * (1 + 100 / 105) - 1)) < 1e-10
         assert leg["ev"] == leg["ev_per_unit"]
     assert _price_multi_leg_combo(legs, 0.1) is None
+
+
+def test_compute_ncaam_parlays_today_recovers_concurrent_locked_parlay(monkeypatch):
+    from src.services.ncaam_parlay_service import compute_ncaam_parlays_today
+    import src.database as db
+
+    now = datetime.now(timezone.utc)
+    today_et = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    tip_5h = (now + timedelta(minutes=300)).isoformat()
+
+    ml_rows = [
+        {
+            "event_id": "evt_r1",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "Duke",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -145,
+            "win_prob": 0.65,
+            "ev_per_unit": 0.095,
+            "selection": "Duke",
+            "away_team": "Siena",
+            "home_team": "Duke",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+        {
+            "event_id": "evt_r2",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "UConn",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -145,
+            "win_prob": 0.66,
+            "ev_per_unit": 0.11,
+            "selection": "UConn",
+            "away_team": "Rider",
+            "home_team": "UConn",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+    ]
+
+    raced_locked_at = (now - timedelta(seconds=2)).isoformat()
+    raced_payload = {
+        "american_odds": 215,
+        "p_win": 0.43,
+        "ev": 0.09,
+        "lock_reason": "bet_now",
+        "legs": [
+            {
+                "event_id": "evt_r1",
+                "matchup": "Siena @ Duke",
+                "team_pick": "Duke",
+                "market_type": "MONEYLINE",
+                "side": "HOME",
+                "price": -145,
+                "start_time": tip_5h,
+                "outcome": "PENDING",
+            },
+            {
+                "event_id": "evt_r2",
+                "matchup": "Rider @ UConn",
+                "team_pick": "UConn",
+                "market_type": "MONEYLINE",
+                "side": "HOME",
+                "price": -145,
+                "start_time": tip_5h,
+                "outcome": "PENDING",
+            },
+        ],
+    }
+
+    select_locked_calls = {"n": 0}
+
+    class _CommitFakeConn(_FakeConn):
+        def commit(self):
+            pass
+
+        def cursor(self):
+            return _FakeCursor([])
+
+    def fake_exec(_conn, sql, params=None):
+        s = " ".join(sql.split()).lower()
+        if "with latest_preds as" in s:
+            return _FakeCursor(ml_rows)
+        if "select (now() at time zone 'america/new_york'" in s:
+            return _FakeCursor([(today_et,)])
+        if "from odds_snapshots" in s and "canon_book" in s:
+            return _FakeCursor([
+                {"event_id": "evt_r1", "market_type": "MONEYLINE", "side": "HOME", "captured_at": now, "canon_book": "DraftKings", "line_value": None, "price": -145},
+                {"event_id": "evt_r2", "market_type": "MONEYLINE", "side": "HOME", "captured_at": now, "canon_book": "DraftKings", "line_value": None, "price": -145},
+            ])
+        if "insert into recommended_parlays" in s:
+            return _FakeCursor([])  # Lost race via ON CONFLICT DO NOTHING
+        if "select parlay_json, locked_at" in s and "from recommended_parlays" in s:
+            select_locked_calls["n"] += 1
+            if select_locked_calls["n"] == 1:
+                return _FakeCursor([])  # Not yet locked before race
+            return _FakeCursor([{
+                "parlay_json": json.dumps(raced_payload),
+                "locked_at": raced_locked_at,
+                "american_odds": 215,
+                "p_win": 0.43,
+                "ev": 0.09,
+                "bucket": "high_confidence",
+            }])
+        return _FakeCursor([])
+
+    monkeypatch.setattr(db, "get_db_connection", lambda: _CommitFakeConn())
+    monkeypatch.setattr(db, "get_admin_db_connection", lambda: _CommitFakeConn())
+    monkeypatch.setattr(db, "_exec", fake_exec)
+
+    res = compute_ncaam_parlays_today(date=today_et, persist=False)
+    odp = res["official_daily_parlay"]
+    assert select_locked_calls["n"] == 2
+    assert odp is not None
+    assert odp["is_locked"] is True
+    assert odp["locked_at"] == raced_locked_at
+    assert odp["american_odds"] == 215
+    assert odp["lock_reason"] == "bet_now"

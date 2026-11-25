@@ -53,7 +53,7 @@ def capture_due_quotes(conn):
                             WHERE event_id=d.event_id AND captured_at {comparison} d.as_of
                               AND market_type IN ('SPREAD','TOTAL','MONEYLINE') AND abs(price)>=100
                               AND lower(book) NOT IN ('','consensus','unknown','action_open','open')
-                              AND lower(book) NOT LIKE 'action\_book\_%%'
+                              AND lower(book) NOT LIKE 'action\\_book\\_%%'
                             ORDER BY lower(book),market_type,side,captured_at DESC,id DESC
                         ) latest GROUP BY book,market_type
                     ) by_market GROUP BY book

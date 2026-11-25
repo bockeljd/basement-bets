@@ -320,10 +320,15 @@ export default function Picks({ onAddBet }) {
     return usable.length > 0 ? usable : base;
   }, [history]);
 
-  // Dynamic sport options with counts
+  const sectionHistory = useMemo(() => {
+    if (activeSection === 'parlays') return [];
+    return recommendedHistory.filter((h) => performanceGroup(h) === activeSection);
+  }, [recommendedHistory, activeSection]);
+
+  // Dynamic sport options with counts (scoped to the active core/smart section)
   const availableSports = useMemo(() => {
     const counts = {};
-    for (const h of recommendedHistory) {
+    for (const h of sectionHistory) {
       const sp = normalizeSport(h);
       counts[sp] = (counts[sp] || 0) + 1;
     }
@@ -333,24 +338,35 @@ export default function Picks({ onAddBet }) {
     return Object.entries(counts)
       .map(([sport, count]) => ({ sport, count }))
       .sort((a, b) => b.count - a.count);
-  }, [recommendedHistory, selectedSport]);
+  }, [sectionHistory, selectedSport]);
 
-  // Dynamic season options scoped to the selected sport (descending, newest first)
+  // Dynamic season options scoped to the active section & sport (descending, newest first)
   const availableSeasons = useMemo(() => {
     const counts = {};
-    for (const h of recommendedHistory) {
-      if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) continue;
-      const se = getRowSeason(h);
-      if (!se) continue;
-      counts[se] = (counts[se] || 0) + 1;
-    }
-    if (selectedSport === 'NCAAM' && counts[defaultNcaamSeason] === undefined) {
-      counts[defaultNcaamSeason] = 0;
+    if (activeSection === 'parlays') {
+      for (const item of Array.isArray(parlayReport?.items) ? parlayReport.items : []) {
+        const se = String(item?.season || '').trim();
+        if (!se) continue;
+        counts[se] = (counts[se] || 0) + 1;
+      }
+      if (counts[defaultNcaamSeason] === undefined) {
+        counts[defaultNcaamSeason] = 0;
+      }
+    } else {
+      for (const h of sectionHistory) {
+        if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) continue;
+        const se = getRowSeason(h);
+        if (!se) continue;
+        counts[se] = (counts[se] || 0) + 1;
+      }
+      if (selectedSport === 'NCAAM' && counts[defaultNcaamSeason] === undefined) {
+        counts[defaultNcaamSeason] = 0;
+      }
     }
     return Object.entries(counts)
       .map(([season, count]) => ({ season, count }))
       .sort((a, b) => b.season.localeCompare(a.season));
-  }, [recommendedHistory, selectedSport, defaultNcaamSeason]);
+  }, [activeSection, parlayReport, sectionHistory, selectedSport, defaultNcaamSeason]);
 
   const handleSportChange = (nextSport) => {
     setSelectedSport(nextSport);
@@ -361,7 +377,7 @@ export default function Picks({ onAddBet }) {
     if (selectedSeason === 'ALL') return;
     const sportSeasons = Array.from(
       new Set(
-        recommendedHistory
+        sectionHistory
           .filter((h) => normalizeSport(h) === nextSport)
           .map((h) => getRowSeason(h))
           .filter(Boolean)
@@ -375,16 +391,16 @@ export default function Picks({ onAddBet }) {
     }
   };
 
-  // Dynamic bet type options within active sport & season
+  // Dynamic bet type options within active section, sport & season
   const availableMarkets = useMemo(() => {
     const set = new Set();
-    for (const h of recommendedHistory) {
+    for (const h of sectionHistory) {
       if (selectedSport !== 'ALL' && normalizeSport(h) !== selectedSport) continue;
       if (selectedSeason !== 'ALL' && getRowSeason(h) !== selectedSeason) continue;
       set.add(normalizeMarketType(h));
     }
     return Array.from(set).sort();
-  }, [recommendedHistory, selectedSport, selectedSeason]);
+  }, [sectionHistory, selectedSport, selectedSeason]);
 
   useEffect(() => {
     if (marketFilter !== 'ALL' && availableMarkets.length > 0 && !availableMarkets.includes(marketFilter)) {
@@ -1163,7 +1179,7 @@ export default function Picks({ onAddBet }) {
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
                 }`}
               >
-                All Sports ({recommendedHistory.length.toLocaleString()})
+                All Sports ({sectionHistory.length.toLocaleString()})
               </button>
               {availableSports.map((s) => {
                 const active = selectedSport === s.sport;

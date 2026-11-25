@@ -2578,7 +2578,7 @@ def ncaam_top6_cutoffs(authorized: bool = Depends(verify_cron_secret)):
                    (SELECT MAX(o.captured_at) FROM odds_snapshots o JOIN events eo ON eo.id = o.event_id
                     WHERE eo.league = 'NCAAM' AND eo.start_time > NOW() + interval '30 minutes'
                       AND o.price IS NOT NULL AND lower(o.book) NOT IN ('','consensus','unknown','action_open','open')
-                      AND lower(o.book) NOT LIKE 'action\_book\_%%'
+                      AND lower(o.book) NOT LIKE 'action\\_book\\_%%'
                       AND (eo.start_time AT TIME ZONE 'America/New_York')::date = (NOW() AT TIME ZONE 'America/New_York')::date) AS latest_odds_at
             FROM events e
             LEFT JOIN daily_top_picks d ON d.event_id = e.id AND d.league = 'NCAAM'
@@ -5000,7 +5000,7 @@ def ncaam_publication_status(date: str):
                 SELECT o.captured_at FROM odds_snapshots o WHERE o.event_id=d.event_id
                 AND o.price IS NOT NULL AND o.captured_at <= now()
                 AND lower(o.book) NOT IN ('','consensus','open','action_open','unknown')
-                AND lower(o.book) NOT LIKE 'action\_book\_%%'
+                AND lower(o.book) NOT LIKE 'action\\_book\\_%%'
                 ORDER BY o.captured_at DESC LIMIT 1
             ) q ON true WHERE d.league='NCAAM' AND d.date_et=%s
         """, (day, day, day)).fetchone()

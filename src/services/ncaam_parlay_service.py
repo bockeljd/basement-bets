@@ -1317,6 +1317,31 @@ def compute_ncaam_parlays_today(
                 except Exception:
                     date_et_val = datetime.now(timezone.utc).date().isoformat()
 
+            def _hydrate_locked_parlay(locked_row: dict) -> Optional[dict]:
+                if not locked_row or not locked_row.get("parlay_json"):
+                    return None
+                pj = locked_row["parlay_json"]
+                if isinstance(pj, str):
+                    pj = json.loads(pj)
+                if not isinstance(pj, dict):
+                    return None
+                if isinstance(pj.get("legs"), list) and len(pj["legs"]) == 2:
+                    pj["legs"] = [_strip_internal_leg_keys(lg) for lg in pj["legs"]]
+                    _grade_parlay_legs_from_results(pj["legs"])
+                    pj["outcome"] = _combine_two_leg_outcome(
+                        pj["legs"][0].get("outcome"),
+                        pj["legs"][1].get("outcome"),
+                    )
+                pj["is_locked"] = True
+                pj["locked_at"] = str(locked_row.get("locked_at") or "")
+                pj["lock_reason"] = pj.get("lock_reason") or "pre_tip_cutoff"
+                pj["is_official_daily"] = True
+                if str(pj.get("outcome") or "PENDING").upper() in ("PENDING", "") and isinstance(pj.get("legs"), list):
+                    pj["bet_timing"] = combine_parlay_bet_timing(pj["legs"], now_utc=now_utc)
+                else:
+                    pj["bet_timing"] = None
+                return pj
+
             existing_locked = None
             try:
                 with get_db_connection() as conn:
@@ -1339,26 +1364,7 @@ def compute_ncaam_parlays_today(
 
             if existing_locked and existing_locked.get("parlay_json"):
                 try:
-                    pj = existing_locked["parlay_json"]
-                    if isinstance(pj, str):
-                        pj = json.loads(pj)
-                    if isinstance(pj, dict):
-                        if isinstance(pj.get("legs"), list) and len(pj["legs"]) == 2:
-                            pj["legs"] = [_strip_internal_leg_keys(lg) for lg in pj["legs"]]
-                            _grade_parlay_legs_from_results(pj["legs"])
-                            pj["outcome"] = _combine_two_leg_outcome(
-                                pj["legs"][0].get("outcome"),
-                                pj["legs"][1].get("outcome"),
-                            )
-                        pj["is_locked"] = True
-                        pj["locked_at"] = str(existing_locked.get("locked_at") or "")
-                        pj["lock_reason"] = pj.get("lock_reason") or "pre_tip_cutoff"
-                        pj["is_official_daily"] = True
-                        if str(pj.get("outcome") or "PENDING").upper() in ("PENDING", "") and isinstance(pj.get("legs"), list):
-                            pj["bet_timing"] = combine_parlay_bet_timing(pj["legs"], now_utc=now_utc)
-                        else:
-                            pj["bet_timing"] = None
-                        official_daily_parlay = pj
+                    official_daily_parlay = _hydrate_locked_parlay(existing_locked)
                 except Exception:
                     official_daily_parlay = None
 
@@ -1483,7 +1489,21 @@ def compute_ncaam_parlays_today(
                             if saved:
                                 official_daily_parlay["locked_at"] = str(saved["locked_at"])
                             else:
-                                official_daily_parlay = None
+                                raced_row = _exec(
+                                    conn,
+                                    """
+                                    SELECT parlay_json, locked_at, american_odds, p_win, ev, bucket
+                                    FROM recommended_parlays
+                                    WHERE league = 'NCAAM' AND date_et = %s AND kind = 'ML2'
+                                      AND locked_at IS NOT NULL AND parlay_json IS NOT NULL
+                                    ORDER BY locked_at ASC
+                                    LIMIT 1
+                                    """,
+                                    (date_et_val,),
+                                ).fetchone()
+                                official_daily_parlay = (
+                                    _hydrate_locked_parlay(dict(raced_row)) if raced_row else None
+                                )
                             if hasattr(conn, "commit"):
                                 conn.commit()
     except Exception as e:
