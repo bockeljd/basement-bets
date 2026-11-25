@@ -4936,7 +4936,8 @@ def ncaam_publication_status(date: str):
     except ValueError:
         raise HTTPException(status_code=422, detail="Expected YYYY-MM-DD")
     with get_db_connection() as conn:
-        cache = _exec(conn, """
+        from src.utils.ncaam_slate import SLATE_CTE
+        cache = _exec(conn, SLATE_CTE + """
             SELECT count(*) AS cached_games,
                    max(d.computed_at) AS latest_computed_at,
                    count(*) FILTER (WHERE d.is_actionable) AS actionable_games,
@@ -4958,7 +4959,7 @@ def ncaam_publication_status(date: str):
                    count(*) FILTER (WHERE e.start_time > now()+interval '30 minutes') AS upcoming_games,
                    max(q.captured_at) AS latest_odds_at,
                    max(q.captured_at) FILTER (WHERE e.start_time > now()+interval '30 minutes') AS upcoming_odds_at
-            FROM daily_top_picks d JOIN events e ON e.id=d.event_id
+            FROM daily_top_picks d JOIN dedup_events e ON e.id=d.event_id
             LEFT JOIN LATERAL (
                 SELECT o.captured_at FROM odds_snapshots o WHERE o.event_id=d.event_id
                 AND o.price IS NOT NULL AND o.captured_at <= now()
@@ -4966,7 +4967,7 @@ def ncaam_publication_status(date: str):
                 AND lower(o.book) NOT LIKE 'action\_book\_%%'
                 ORDER BY o.captured_at DESC LIMIT 1
             ) q ON true WHERE d.league='NCAAM' AND d.date_et=%s
-        """, (day,)).fetchone()
+        """, (day, day, day)).fetchone()
         evaluation = dict(cache)
         from zoneinfo import ZoneInfo
         is_today_eval = day == datetime.now(ZoneInfo("America/New_York")).date()

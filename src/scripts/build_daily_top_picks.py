@@ -7,6 +7,7 @@ from datetime import datetime as dt, timedelta, timezone
 # Allow running from repo root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
+from src.utils.ncaam_slate import SLATE_CTE
 from src.database import get_admin_db_connection, get_db_connection, _exec
 from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
 from src.agents.data_quality_agent import DataQualityAgent
@@ -50,67 +51,14 @@ def fetch_event_ids_for_date(date_et: str, limit_games: int = 250, days: int = 3
     # Use same dedupe logic and 3-day window as /api/board so UI multi-day slate is precomputed.
     start_d = dt.strptime(date_et, "%Y-%m-%d").date()
     end_d = start_d + timedelta(days=max(1, int(days)) - 1)
-    q = """
-    WITH base_events AS (
-      SELECT e.*,
-        DATE(e.start_time AT TIME ZONE 'America/New_York') AS day_et,
-        LOWER(regexp_replace(
-          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
-            replace(replace(replace(replace(replace(replace(COALESCE(e.home_team,''),
-            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-            'St. Francis', 'Saint Francis'),
-            'Delaware Fightin Blue Hens', 'Delaware Blue Hens'),
-            'Tennessee-Martin', 'UT Martin'),
-            'American University Eagles', 'American Eagles'),
-            'Nicholls State', 'Nicholls'),
-            'George Washington Revolutionaries', 'George Washington Colonials'),
-            'San José State', 'San Jose State'),
-          '[^a-z0-9]+', '', 'g'
-        )) AS home_key,
-        LOWER(regexp_replace(
-          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
-            replace(replace(replace(replace(replace(replace(COALESCE(e.away_team,''),
-            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-            'St. Francis', 'Saint Francis'),
-            'Delaware Fightin Blue Hens', 'Delaware Blue Hens'),
-            'Tennessee-Martin', 'UT Martin'),
-            'American University Eagles', 'American Eagles'),
-            'Nicholls State', 'Nicholls'),
-            'George Washington Revolutionaries', 'George Washington Colonials'),
-            'San José State', 'San Jose State'),
-          '[^a-z0-9]+', '', 'g'
-        )) AS away_key,
-        CASE
-          WHEN e.id LIKE 'action:ncaam:%%' THEN 0
-          WHEN e.id LIKE 'espn:ncaam:%%' THEN 1
-          ELSE 2
-        END AS src_rank
-      FROM events e
-      WHERE e.league='NCAAM'
-        AND DATE(e.start_time AT TIME ZONE 'America/New_York') BETWEEN %(start_d)s AND %(end_d)s
-    ),
-    dedup_events AS (
-      SELECT *
-      FROM (
-        SELECT *,
-          ROW_NUMBER() OVER (PARTITION BY league, day_et, home_key, away_key ORDER BY src_rank ASC, start_time ASC) AS rn
-        FROM base_events
-      ) t
-      WHERE rn = 1
-    )
+    q = SLATE_CTE + """
     SELECT id, day_et::text AS day_et
     FROM dedup_events
     ORDER BY start_time ASC
-    LIMIT %(lim)s
+    LIMIT %s
     """
     with get_db_connection() as conn:
-        rows = _exec(conn, q, {"start_d": str(start_d), "end_d": str(end_d), "lim": int(limit_games)}).fetchall()
+        rows = _exec(conn, q, (str(start_d), str(end_d), int(limit_games))).fetchall()
         out = []
         for r in rows:
             if isinstance(r, dict):

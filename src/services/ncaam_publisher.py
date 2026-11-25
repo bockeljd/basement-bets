@@ -36,13 +36,14 @@ def publish_slate(date_et=None):
             return {"status": "already_locked", "slate_id": existing[0], "items": items}
         if day != today:
             raise ValueError("Only today's pregame slate can be published")
-        rows = _exec(conn, """
+        from src.utils.ncaam_slate import SLATE_CTE
+        rows = _exec(conn, SLATE_CTE + """
             SELECT d.event_id,d.is_actionable,d.rec_json,d.computed_at,d.model_version,
                    e.start_time,e.home_team,e.away_team,p.id,p.market_type,p.selection,p.bet_line,p.bet_price,p.book,
                    quote.captured_at,quote.price AS current_price,quote.line_value AS current_line,
                    opposite.price AS opposite_price,opposite.line_value AS opposite_line,
                    opposite.captured_at AS opposite_at
-            FROM daily_top_picks d JOIN events e ON e.id=d.event_id
+            FROM daily_top_picks d JOIN dedup_events e ON e.id=d.event_id
             LEFT JOIN model_predictions p ON p.id=d.rec_json->>'prediction_id'
                 AND p.event_id=d.event_id AND p.model_version=d.model_version
                 AND p.analyzed_at <= NOW() AND p.analyzed_at < e.start_time
@@ -64,7 +65,7 @@ def publish_slate(date_et=None):
             WHERE d.date_et=%s AND d.league='NCAAM' AND e.league='NCAAM'
                 AND (e.start_time AT TIME ZONE 'America/New_York')::date=%s::date
             ORDER BY d.event_id
-        """, (day, day)).fetchall()
+        """, (day, day, day, day)).fetchall()
         if not rows and not existing:
             raise RuntimeError("NCAAM daily cache unavailable")
         now = _exec(conn, "SELECT clock_timestamp()").fetchone()[0]
