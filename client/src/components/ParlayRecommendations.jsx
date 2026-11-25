@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import api from '../api/axios';
 import { Zap, Target, Home, TrendingUp, Percent, RefreshCw, PlusCircle, Lock, Clock, Eye } from 'lucide-react';
 import { getRecommendedBetSize, getOutcomeOutlineClasses, getParlayTimingGuidance } from './today/todayHelpers';
@@ -257,31 +257,61 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
   const [err, setErr] = useState(null);
   const [allData, setAllData] = useState(null);
   const [homeFavData, setHomeFavData] = useState(null);
+  const abortRef = useRef(null);
+  const reqSeqRef = useRef(0);
+  const loadedDateRef = useRef(null);
 
-  const load = async () => {
+  const load = async (targetDate = date) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const reqSeq = ++reqSeqRef.current;
+
+    if (loadedDateRef.current !== targetDate) {
+      setAllData(null);
+      setHomeFavData(null);
+    }
     setLoading(true);
     setErr(null);
+
     try {
-      const dateParams = date ? { date } : {};
+      const dateParams = targetDate ? { date: targetDate } : {};
       const [main, homeFav] = await Promise.all([
         api.get('/api/ncaam/parlays/today', {
           params: { ...dateParams, min_ev_per_unit: 0.02, parlay_odds_lo: -120, parlay_odds_hi: 500 },
+          signal: controller.signal,
         }),
         api.get('/api/ncaam/parlays/today', {
           params: { ...dateParams, strategy: 'home_fav', parlay_odds_lo: -165, parlay_odds_hi: 140 },
-        }).catch(() => ({ data: null })),
+          signal: controller.signal,
+        }).catch((e) => {
+          if (controller.signal.aborted || e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || e?.name === 'AbortError') {
+            throw e;
+          }
+          return { data: null };
+        }),
       ]);
+      if (controller.signal.aborted || reqSeqRef.current !== reqSeq) return;
+      loadedDateRef.current = targetDate;
       setAllData(main.data);
       setHomeFavData(homeFav?.data || null);
     } catch (e) {
+      if (controller.signal.aborted || e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || e?.name === 'AbortError' || reqSeqRef.current !== reqSeq) {
+        return;
+      }
       setErr(e?.response?.data?.detail || e?.message || 'Failed to load parlays');
     } finally {
-      setLoading(false);
+      if (reqSeqRef.current === reqSeq) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    load();
+    load(date);
+    return () => {
+      abortRef.current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
@@ -313,7 +343,7 @@ export default function ParlayRecommendations({ date, onSelectDate, bankroll = n
         </div>
         <button
           type="button"
-          onClick={load}
+          onClick={() => load(date)}
           disabled={loading}
           className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 bg-slate-800/40 hover:bg-slate-700/60 disabled:opacity-50 transition cursor-pointer"
         >

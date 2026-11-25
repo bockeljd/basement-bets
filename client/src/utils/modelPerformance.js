@@ -161,6 +161,8 @@ export const formatMarketLabel = (rowOrType) => {
   if (norm === 'TOTAL_1H') return '1H Over / Under';
   if (norm === 'MONEYLINE') return 'Moneyline';
   if (norm === 'PARLAY') return 'Parlay';
+  if (norm === 'NRFI') return 'NRFI';
+  if (norm === 'YRFI') return 'YRFI';
   if (norm === 'OTHER') return 'Other';
   return norm.charAt(0) + norm.slice(1).toLowerCase();
 };

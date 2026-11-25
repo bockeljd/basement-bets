@@ -1396,7 +1396,7 @@ export default function Picks({ onAddBet }) {
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-300 hover:text-indigo-200 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Reset to Top 6 default</span>
+              <span>{activeSection === 'parlays' ? 'Reset filters' : 'Reset to Top 6 default'}</span>
             </button>
           )}
         </div>

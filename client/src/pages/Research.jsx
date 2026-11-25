@@ -41,6 +41,7 @@ import {
   getLiveGameStatus,
   dedupeBoardGames,
   getOutcomeOutlineClasses,
+  buildCachedAnalysisResult,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
 
@@ -77,12 +78,24 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
   const [analysisResult, setAnalysisResult] = useState(null);
   const [correlationResult, setCorrelationResult] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isRefreshingDetails, setIsRefreshingDetails] = useState(false);
   const [showModelLogicDialog, setShowModelLogicDialog] = useState(false);
   const [rescoringSlate, setRescoringSlate] = useState(false);
   const [rescoreProgress, setRescoreProgress] = useState('');
   const [toolsFallbackOpen, setToolsFallbackOpen] = useState(false);
   const toolsPopoverRef = useRef(null);
   const tablistRef = useRef(null);
+  const scheduleAbortRef = useRef(null);
+  const scheduleReqSeqRef = useRef(0);
+  const detailsAbortRef = useRef(null);
+  const detailsReqSeqRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      scheduleAbortRef.current?.abort();
+      detailsAbortRef.current?.abort();
+    };
+  }, []);
 
   const supportsPopover =
     typeof HTMLElement !== 'undefined' && Object.hasOwn(HTMLElement.prototype, 'popover');
@@ -100,6 +113,11 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
 
   const fetchSchedule = async (opts = {}) => {
     const forceRefresh = Boolean(opts && typeof opts === 'object' && opts.forceRefresh === true);
+    scheduleAbortRef.current?.abort();
+    const controller = new AbortController();
+    scheduleAbortRef.current = controller;
+    const reqSeq = ++scheduleReqSeqRef.current;
+
     setLoading(true);
     setError(null);
     setDegradedMode(false);
@@ -112,23 +130,33 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       limit_games: 250,
       ...(forceRefresh ? { refresh: true } : {}),
     };
+    const isCanceledErr = (err) =>
+      controller.signal.aborted ||
+      err?.code === 'ERR_CANCELED' ||
+      err?.name === 'CanceledError' ||
+      err?.name === 'AbortError';
 
     try {
       const [boardRes, topPicksRes, healthRes, matchupRes, mlbRes] = await Promise.all([
-        api.get('/api/board', { params: boardParams }),
+        api.get('/api/board', { params: boardParams, signal: controller.signal }),
         leagueFilter === 'NCAAM'
           ? api
-              .get('/api/ncaam/top-picks', { params: topPicksParams })
-              .catch((e) => ({ data: null, _error: e }))
+              .get('/api/ncaam/top-picks', { params: topPicksParams, signal: controller.signal })
+              .catch((e) => {
+                if (isCanceledErr(e)) throw e;
+                return { data: null, _error: e };
+              })
           : Promise.resolve({ data: null }),
-        api.get('/api/data-health').catch(() => ({ data: { items: [] } })),
+        api.get('/api/data-health', { signal: controller.signal }).catch(() => ({ data: { items: [] } })),
         leagueFilter === 'NCAAM'
-          ? api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate } }).catch(() => ({ data: { profiles: [] } }))
+          ? api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate }, signal: controller.signal }).catch(() => ({ data: { profiles: [] } }))
           : Promise.resolve({ data: { profiles: [] } }),
         leagueFilter === 'MLB'
-          ? api.get('/api/mlb/predictions', { params: { lookback_days: BOARD_DAYS_DEFAULT } }).catch(() => ({ data: { predictions: [] } }))
+          ? api.get('/api/mlb/predictions', { params: { lookback_days: BOARD_DAYS_DEFAULT }, signal: controller.signal }).catch(() => ({ data: { predictions: [] } }))
           : Promise.resolve({ data: { predictions: [] } }),
       ]);
+
+      if (controller.signal.aborted || scheduleReqSeqRef.current !== reqSeq) return;
 
       const dedupedBoard = dedupeBoardGames(Array.isArray(boardRes.data) ? boardRes.data : []);
       setEdges(dedupedBoard);
@@ -209,6 +237,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         });
       }
 
+      if (controller.signal.aborted || scheduleReqSeqRef.current !== reqSeq) return;
+
       setRowTopPicks(mapped);
       setRowTopPicksByKey(mappedByKey);
 
@@ -216,6 +246,9 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         setToast({ tone: 'warn', text: 'Board odds loaded, but top-picks cache returned a warning.' });
       }
     } catch (err) {
+      if (isCanceledErr(err) || scheduleReqSeqRef.current !== reqSeq) {
+        return;
+      }
       if (err?.response?.status === 403) {
         setAuthPromptOpen(true);
       }
@@ -251,7 +284,9 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         setError('Failed to load today’s slate.');
       }
     } finally {
-      setLoading(false);
+      if (scheduleReqSeqRef.current === reqSeq) {
+        setLoading(false);
+      }
     }
   };
 
@@ -503,19 +538,53 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
   };
 
   const handleOpenGameDetails = async (game) => {
+    detailsAbortRef.current?.abort();
+    const controller = new AbortController();
+    detailsAbortRef.current = controller;
+    const reqSeq = ++detailsReqSeqRef.current;
+
+    const cachedMeta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
+    const cachedAnalysis = buildCachedAnalysisResult(game, cachedMeta);
+
     setSelectedGame(game);
-    setIsAnalyzing(true);
-    setAnalysisResult(null);
     setCorrelationResult(null);
+    setAnalysisResult(cachedAnalysis);
+    if (cachedAnalysis) {
+      setIsAnalyzing(false);
+      setIsRefreshingDetails(true);
+    } else {
+      setIsAnalyzing(true);
+      setIsRefreshingDetails(false);
+    }
+
+    const isCanceledErr = (err) =>
+      controller.signal.aborted ||
+      err?.code === 'ERR_CANCELED' ||
+      err?.name === 'CanceledError' ||
+      err?.name === 'AbortError';
+
     try {
       const [analysisRes, corrRes] = await Promise.all([
-        api.post('/api/ncaam/analyze', { event_id: game.id }),
-        api.get('/api/ncaam/correlations/game', { params: { event_id: game.id } }).catch(() => ({ data: null })),
+        api.post(
+          '/api/ncaam/analyze',
+          { event_id: game.id },
+          { signal: controller.signal, timeout: 15000 }
+        ),
+        api
+          .get('/api/ncaam/correlations/game', {
+            params: { event_id: game.id },
+            signal: controller.signal,
+            timeout: 15000,
+          })
+          .catch(() => ({ data: null })),
       ]);
+
+      if (controller.signal.aborted || detailsReqSeqRef.current !== reqSeq) return;
+
       const apiData = analysisRes.data;
       const apiTop = (apiData?.recommendations || [])[0] || null;
-      const cachedMeta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
-      const cachedTop = cachedMeta?.rec || null;
+      const latestCachedMeta = lookupTopPickForGame(game, rowTopPicks, rowTopPicksByKey);
+      const cachedTop = latestCachedMeta?.rec || null;
       const merged =
         !apiTop && cachedTop
           ? {
@@ -550,12 +619,18 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         },
       }));
     } catch (err) {
-      setToast({
-        tone: 'err',
-        text: `Failed to analyze ${game.away_team} @ ${game.home_team}: ${err?.response?.data?.detail || err?.message || 'timeout'}`,
-      });
+      if (isCanceledErr(err) || detailsReqSeqRef.current !== reqSeq) return;
+      if (!cachedAnalysis) {
+        setToast({
+          tone: 'err',
+          text: `Failed to analyze ${game.away_team} @ ${game.home_team}: ${err?.response?.data?.detail || err?.message || 'timeout'}`,
+        });
+      }
     } finally {
-      setIsAnalyzing(false);
+      if (detailsReqSeqRef.current === reqSeq) {
+        setIsAnalyzing(false);
+        setIsRefreshingDetails(false);
+      }
     }
   };
 
@@ -1516,7 +1591,12 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         cachedMeta={activeSelectedGame ? lookupTopPickForGame(activeSelectedGame, rowTopPicks, rowTopPicksByKey) : null}
         bankroll={bankroll}
         isAnalyzing={isAnalyzing}
+        isRefreshingLive={isRefreshingDetails}
         onClose={() => {
+          detailsAbortRef.current?.abort();
+          detailsReqSeqRef.current += 1;
+          setIsAnalyzing(false);
+          setIsRefreshingDetails(false);
           setSelectedGame(null);
           setAnalysisResult(null);
           setCorrelationResult(null);

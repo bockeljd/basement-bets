@@ -38,6 +38,7 @@ const TodayMatchupModal = ({
   cachedMeta = null,
   bankroll = null,
   isAnalyzing,
+  isRefreshingLive = false,
   onClose,
   onAddBet,
   onAnalysisUpdated,
@@ -425,30 +426,38 @@ const TodayMatchupModal = ({
             ) : (
               <>
                 {/* Clean visual tab bar inside Details modal (replaces long scroll & dropdowns) */}
-                <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-800 pb-3" role="tablist" aria-label="Matchup details sections">
-                  {[
-                    { id: 'overview', label: 'Overview & Lines' },
-                    { id: 'stats', label: 'Stats & Four Factors' },
-                    { id: 'lineup', label: 'Lineup, Splits & Refs' },
-                  ].map((tab) => {
-                    const active = modalTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
-                        onClick={() => setModalTab(tab.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                          active
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-                        }`}
-                      >
-                        {tab.label}
-                      </button>
-                    );
-                  })}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Matchup details sections">
+                    {[
+                      { id: 'overview', label: 'Overview & Lines' },
+                      { id: 'stats', label: 'Stats & Four Factors' },
+                      { id: 'lineup', label: 'Lineup, Splits & Refs' },
+                    ].map((tab) => {
+                      const active = modalTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => setModalTab(tab.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {isRefreshingLive && analysisResult?._fromCache && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/15 border border-indigo-400/30 text-[11px] font-medium text-indigo-200">
+                      <Loader2 size={11} className="animate-spin" aria-hidden="true" />
+                      <span>Refreshing live stats…</span>
+                    </span>
+                  )}
                 </div>
 
                 {/* 1. Primary Recommendation / Pass Status (Overview) */}

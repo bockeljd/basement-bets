@@ -23,6 +23,9 @@ describe('modelPerformance helpers', () => {
 
     expect(formatMarketLabel('SPREAD_1H')).toBe('1H Spread');
     expect(formatMarketLabel('TOTAL_1H')).toBe('1H Over / Under');
+    expect(formatMarketLabel('NRFI')).toBe('NRFI');
+    expect(formatMarketLabel('nrfi')).toBe('NRFI');
+    expect(formatMarketLabel('yrfi')).toBe('YRFI');
 
     expect(
       formatLineAndOdds({

@@ -3329,30 +3329,18 @@ async def get_board(request: Request, league: str, date: Optional[str] = None, d
 
     start_date = datetime.strptime(date, "%Y-%m-%d").date()
     end_date = (start_date + timedelta(days=days - 1))
+    from src.utils.ncaam_slate import team_key_sql
     _ensure_events_venue_columns()
 
-    query = """
+    home_key_sql = team_key_sql("e.home_team")
+    away_key_sql = team_key_sql("e.away_team")
+
+    query = f"""
     WITH base_events AS (
       SELECT e.*,
         DATE(e.start_time AT TIME ZONE 'America/New_York') AS day_et,
-        LOWER(regexp_replace(
-          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.home_team,''),
-            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-            'St. Francis', 'Saint Francis'),
-          '[^a-z0-9]+', '', 'g'
-        )) AS home_key,
-        LOWER(regexp_replace(
-          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.away_team,''),
-            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-            'St. Francis', 'Saint Francis'),
-          '[^a-z0-9]+', '', 'g'
-        )) AS away_key,
+        {home_key_sql} AS home_key,
+        {away_key_sql} AS away_key,
         CASE
           WHEN e.id LIKE 'action:ncaam:%%' THEN 0
           WHEN e.id LIKE 'espn:ncaam:%%' THEN 1
@@ -3489,34 +3477,16 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
         return JSONResponse(content=payload, headers={'ETag': etag, 'Cache-Control': f"public, max-age={int(os.getenv('TOP_PICKS_TTL_SECONDS', '90'))}"})
 
     # Pull the same board window as /api/board, but NCAAM only.
+    from src.utils.ncaam_slate import team_key_sql
+
     start_date = datetime.strptime(date, "%Y-%m-%d").date()
     end_date = (start_date + timedelta(days=days - 1))
-
-    with get_db_connection() as conn:
-        rows = _exec(
-            conn,
-            """
+    top_picks_events_sql = f"""
             WITH base_events AS (
               SELECT e.*,
                 DATE(e.start_time AT TIME ZONE 'America/New_York') AS day_et,
-                LOWER(regexp_replace(
-                  replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.home_team,''),
-                    'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-                    'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-                    'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-                    'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-                    'St. Francis', 'Saint Francis'),
-                  '[^a-z0-9]+', '', 'g'
-                )) AS home_key,
-                LOWER(regexp_replace(
-                  replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.away_team,''),
-                    'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-                    'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-                    'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-                    'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-                    'St. Francis', 'Saint Francis'),
-                  '[^a-z0-9]+', '', 'g'
-                )) AS away_key,
+                {team_key_sql("e.home_team")} AS home_key,
+                {team_key_sql("e.away_team")} AS away_key,
                 CASE
                   WHEN e.id LIKE 'action:ncaam:%%' THEN 0
                   WHEN e.id LIKE 'espn:ncaam:%%' THEN 1
@@ -3530,7 +3500,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
               SELECT *
               FROM (
                 SELECT *,
-                  ROW_NUMBER() OVER (PARTITION BY league, day_et, home_key, away_key ORDER BY src_rank ASC, start_time ASC) AS rn
+                  ROW_NUMBER() OVER (PARTITION BY league, day_et, LEAST(home_key, away_key), GREATEST(home_key, away_key) ORDER BY src_rank ASC, start_time ASC) AS rn
                 FROM base_events
               ) t
               WHERE rn = 1
@@ -3539,7 +3509,12 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             FROM dedup_events
             ORDER BY start_time ASC
             LIMIT %(lim)s
-            """,
+            """
+
+    with get_db_connection() as conn:
+        rows = _exec(
+            conn,
+            top_picks_events_sql,
             {"start": str(start_date), "end": str(end_date), "lim": int(limit_games)},
         ).fetchall()
 
@@ -3549,51 +3524,7 @@ async def get_ncaam_top_picks(request: Request, date: Optional[str] = None, days
             with get_db_connection() as conn:
                 rows = _exec(
                     conn,
-                    """
-                    WITH base_events AS (
-                      SELECT e.*,
-                        DATE(e.start_time AT TIME ZONE 'America/New_York') AS day_et,
-                        LOWER(regexp_replace(
-                          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.home_team,''),
-                            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-                            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-                            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-                            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-                            'St. Francis', 'Saint Francis'),
-                          '[^a-z0-9]+', '', 'g'
-                        )) AS home_key,
-                        LOWER(regexp_replace(
-                          replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(COALESCE(e.away_team,''),
-                            'North Carolina State', 'NC State'), 'N.C. State', 'NC State'), 'N.C. St.', 'NC State'), 'NC St.', 'NC State'),
-                            'App State', 'Appalachian State'), 'Appalachian St.', 'Appalachian State'), 'Appalachian St', 'Appalachian State'),
-                            'South Carolina Upstate', 'USC Upstate'), 'U.S.C. Upstate', 'USC Upstate'),
-                            'Long Island University', 'LIU'), 'L.I.U.', 'LIU'),
-                            'St. Francis', 'Saint Francis'),
-                          '[^a-z0-9]+', '', 'g'
-                        )) AS away_key,
-                        CASE
-                          WHEN e.id LIKE 'action:ncaam:%%' THEN 0
-                          WHEN e.id LIKE 'espn:ncaam:%%' THEN 1
-                          ELSE 2
-                        END AS src_rank
-                      FROM events e
-                      WHERE e.league = 'NCAAM'
-                        AND DATE(e.start_time AT TIME ZONE 'America/New_York') BETWEEN %(start)s AND %(end)s
-                    ),
-                    dedup_events AS (
-                      SELECT *
-                      FROM (
-                        SELECT *,
-                          ROW_NUMBER() OVER (PARTITION BY league, day_et, home_key, away_key ORDER BY src_rank ASC, start_time ASC) AS rn
-                        FROM base_events
-                      ) t
-                      WHERE rn = 1
-                    )
-                    SELECT id, home_team, away_team, start_time, day_et, neutral_site, venue, venue_city, venue_state
-                    FROM dedup_events
-                    ORDER BY start_time ASC
-                    LIMIT %(lim)s
-                    """,
+                    top_picks_events_sql,
                     {"start": str(start_date), "end": str(end_date), "lim": int(limit_games)},
                 ).fetchall()
 

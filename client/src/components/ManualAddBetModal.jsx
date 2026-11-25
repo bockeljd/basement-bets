@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 
 // Extracted from TransactionView.jsx. Keep behavior identical.
 export default function ManualAddBetModal({
@@ -9,22 +9,51 @@ export default function ManualAddBetModal({
   onSave,
   onClose,
   embedded = false,
+  titleId = 'manual-add-bet-title',
 }) {
+  const dialogRef = useRef(null);
+  const pressedOutsideRef = useRef(false);
+
+  useEffect(() => {
+    if (embedded) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (show) {
+      if (!dialog.open && typeof dialog.showModal === 'function') {
+        dialog.showModal();
+      }
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [show, embedded]);
+
+  const isOutsideDialog = (event, dialog) => {
+    const r = dialog.getBoundingClientRect();
+    return event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom;
+  };
+
   if (!show) return null;
 
   const Card = (
     <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-white font-bold">Add Bet (Manual)</div>
-          <button type="button" className="text-gray-400 hover:text-white" onClick={() => onClose?.()}>
+          <h1 id={titleId} className="text-base text-white font-bold">Add Bet (Manual)</h1>
+          <button
+            type="button"
+            aria-label="Close add bet dialog"
+            className="text-gray-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+            onClick={() => onClose?.()}
+          >
             ✕
           </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-gray-400">Sportsbook</label>
+            <label htmlFor="manual-bet-sportsbook" className="text-xs text-gray-400">Sportsbook</label>
             <select
+              id="manual-bet-sportsbook"
+              autoFocus
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               value={manualBet.sportsbook}
               onChange={(e) => setManualBet({ ...manualBet, sportsbook: e.target.value })}
@@ -38,8 +67,9 @@ export default function ManualAddBetModal({
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-400">Account</label>
+            <label htmlFor="manual-bet-account" className="text-xs text-gray-400">Account</label>
             <select
+              id="manual-bet-account"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               value={manualBet.account_id || 'Main'}
               onChange={(e) => setManualBet({ ...manualBet, account_id: e.target.value })}
@@ -49,16 +79,18 @@ export default function ManualAddBetModal({
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-400">Date (YYYY-MM-DD)</label>
+            <label htmlFor="manual-bet-date" className="text-xs text-gray-400">Date (YYYY-MM-DD)</label>
             <input
+              id="manual-bet-date"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               value={manualBet.placed_at}
               onChange={(e) => setManualBet({ ...manualBet, placed_at: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-xs text-gray-400">Sport</label>
+            <label htmlFor="manual-bet-sport" className="text-xs text-gray-400">Sport</label>
             <input
+              id="manual-bet-sport"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               placeholder="NFL, NBA, NCAAM..."
               value={manualBet.sport}
@@ -66,8 +98,9 @@ export default function ManualAddBetModal({
             />
           </div>
           <div>
-            <label className="text-xs text-gray-400">Type</label>
+            <label htmlFor="manual-bet-type" className="text-xs text-gray-400">Type</label>
             <input
+              id="manual-bet-type"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               placeholder="Straight, SGP, Parlay..."
               value={manualBet.market_type}
@@ -75,8 +108,9 @@ export default function ManualAddBetModal({
             />
           </div>
           <div className="md:col-span-2">
-            <label className="text-xs text-gray-400">Event / Game</label>
+            <label htmlFor="manual-bet-event" className="text-xs text-gray-400">Event / Game</label>
             <input
+              id="manual-bet-event"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               placeholder="e.g., Patriots vs Broncos"
               value={manualBet.event_name}
@@ -84,8 +118,9 @@ export default function ManualAddBetModal({
             />
           </div>
           <div className="md:col-span-2">
-            <label className="text-xs text-gray-400">Selection</label>
+            <label htmlFor="manual-bet-selection" className="text-xs text-gray-400">Selection</label>
             <input
+              id="manual-bet-selection"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               placeholder="e.g., Under 28.5"
               value={manualBet.selection}
@@ -93,8 +128,9 @@ export default function ManualAddBetModal({
             />
           </div>
           <div>
-            <label className="text-xs text-gray-400">Odds (American)</label>
+            <label htmlFor="manual-bet-odds" className="text-xs text-gray-400">Odds (American)</label>
             <input
+              id="manual-bet-odds"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               placeholder="e.g., -110 or 254"
               value={manualBet.odds}
@@ -102,8 +138,9 @@ export default function ManualAddBetModal({
             />
           </div>
           <div>
-            <label className="text-xs text-gray-400">Wager ($)</label>
+            <label htmlFor="manual-bet-wager" className="text-xs text-gray-400">Wager ($)</label>
             <input
+              id="manual-bet-wager"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               placeholder="e.g., 10"
               value={manualBet.stake}
@@ -111,8 +148,9 @@ export default function ManualAddBetModal({
             />
           </div>
           <div>
-            <label className="text-xs text-gray-400">Status</label>
+            <label htmlFor="manual-bet-status" className="text-xs text-gray-400">Status</label>
             <select
+              id="manual-bet-status"
               className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-white"
               value={manualBet.status}
               onChange={(e) => setManualBet({ ...manualBet, status: e.target.value })}
@@ -126,14 +164,14 @@ export default function ManualAddBetModal({
           <div className="md:col-span-1 flex items-end justify-end gap-2">
             <button
               type="button"
-              className="px-3 py-2 rounded-lg border border-slate-700 text-gray-200 hover:bg-slate-800"
+              className="px-3 py-2 rounded-lg border border-slate-700 text-gray-200 hover:bg-slate-800 cursor-pointer"
               onClick={() => onClose?.()}
             >
               Cancel
             </button>
             <button
               type="button"
-              className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-bold"
+              className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white font-bold cursor-pointer disabled:opacity-50"
               onClick={() => onSave?.()}
               disabled={isUpdating}
             >
@@ -151,8 +189,28 @@ export default function ManualAddBetModal({
   if (embedded) return Card;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <dialog
+      ref={dialogRef}
+      closedby="any"
+      aria-labelledby={titleId}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose?.();
+      }}
+      onPointerDown={(e) => {
+        const d = dialogRef.current;
+        if (d) pressedOutsideRef.current = isOutsideDialog(e, d);
+      }}
+      onPointerUp={(e) => {
+        const d = dialogRef.current;
+        if (!('closedBy' in HTMLDialogElement.prototype) && pressedOutsideRef.current && d && isOutsideDialog(e, d)) {
+          onClose?.();
+        }
+        pressedOutsideRef.current = false;
+      }}
+      className="bg-transparent p-0 m-auto max-w-2xl w-[94dvw] backdrop:bg-black/75 backdrop:backdrop-blur-sm"
+    >
       {Card}
-    </div>
+    </dialog>
   );
 }

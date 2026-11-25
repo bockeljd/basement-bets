@@ -151,6 +151,20 @@ function App() {
     const [edgeBreakdown, setEdgeBreakdown] = useState([]);
     const [showAddBet, setShowAddBet] = useState(false);
     const [addBetMode, setAddBetMode] = useState('slip'); // slip | manual
+    const addBetDialogRef = useRef(null);
+    const addBetPressedOutsideRef = useRef(false);
+
+    useEffect(() => {
+        const dialog = addBetDialogRef.current;
+        if (!dialog) return;
+        if (showAddBet) {
+            if (!dialog.open && typeof dialog.showModal === 'function') {
+                dialog.showModal();
+            }
+        } else if (dialog.open) {
+            dialog.close();
+        }
+    }, [showAddBet]);
     const [manualBet, setManualBet] = useState({
         sportsbook: "DraftKings",
         account_id: "Main",
@@ -528,37 +542,6 @@ function App() {
 
     // Actuals sub-tab state moved above (before any conditional returns) to avoid hook-order issues.
 
-    if (!stats && page === 'actuals') {
-        if (loading) {
-            return <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white font-mono animate-pulse">Loading Basement Bets...</div>;
-        }
-        // If we're not loading and still have no stats, something went wrong (often auth).
-        return (
-            <div className="flex flex-col items-center justify-center min-h-screen text-red-500 bg-slate-950 p-6 text-center">
-                <AlertCircle size={48} className="mb-4" />
-                <h2 className="text-2xl font-bold mb-2">Unable to load dashboard</h2>
-                <p className="text-gray-400 mb-6">Most common cause: wrong Basement password saved in your browser.</p>
-                <div className="flex flex-wrap gap-4 justify-center">
-                    <button
-                        onClick={() => {
-                            try { localStorage.removeItem('basement_password'); } catch (e) { }
-                            window.location.reload();
-                        }}
-                        className="px-6 py-2 bg-slate-100 hover:bg-white text-slate-950 rounded-lg font-bold transition"
-                    >
-                        Clear Password & Retry
-                    </button>
-                    <button
-                        onClick={() => window.location.reload()}
-                        className="px-6 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
-                    >
-                        Retry
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <ErrorBoundary>
             <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans selection:bg-brand-blue/30">
@@ -663,7 +646,40 @@ function App() {
                         </div>
                     </header>
 
-                    {page === 'actuals' && (() => {
+                    {page === 'actuals' && !stats && (
+                        loading ? (
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 mb-6 flex items-center justify-center text-slate-300 font-mono text-sm animate-pulse">
+                                Loading Actuals &amp; Transactions...
+                            </div>
+                        ) : (
+                            <div className="rounded-2xl border border-rose-500/35 bg-rose-950/25 p-8 mb-6 flex flex-col items-center justify-center text-center">
+                                <AlertCircle size={36} className="mb-3 text-rose-400" />
+                                <h2 className="text-xl font-bold text-white mb-1">Unable to load actuals dashboard</h2>
+                                <p className="text-xs text-slate-400 mb-5">Most common cause: wrong Basement password saved in your browser.</p>
+                                <div className="flex flex-wrap gap-3 justify-center">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            try { localStorage.removeItem('basement_password'); } catch (e) { }
+                                            window.location.reload();
+                                        }}
+                                        className="px-4 py-2 bg-slate-100 hover:bg-white text-slate-950 rounded-lg text-xs font-bold transition cursor-pointer"
+                                    >
+                                        Clear Password &amp; Retry
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => window.location.reload()}
+                                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-white font-bold transition cursor-pointer"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            </div>
+                        )
+                    )}
+
+                    {page === 'actuals' && stats && (() => {
                         const allRows = Array.isArray(bets) ? bets : [];
                         const normSt = (raw) => {
                             const st = String(raw || '').trim().toUpperCase();
@@ -800,19 +816,49 @@ function App() {
 
 
                     {/* Content */}
-                    {showAddBet && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className="w-full max-w-2xl relative">
+                    <dialog
+                        ref={addBetDialogRef}
+                        closedby="any"
+                        aria-labelledby={addBetMode === 'manual' ? 'manual-add-bet-title' : undefined}
+                        aria-label={addBetMode === 'slip' ? 'Add Bet — Paste Slip' : undefined}
+                        onCancel={(e) => {
+                            e.preventDefault();
+                            setShowAddBet(false);
+                        }}
+                        onPointerDown={(e) => {
+                            const d = addBetDialogRef.current;
+                            if (d) {
+                                const r = d.getBoundingClientRect();
+                                addBetPressedOutsideRef.current =
+                                    e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+                            }
+                        }}
+                        onPointerUp={(e) => {
+                            const d = addBetDialogRef.current;
+                            if (!('closedBy' in HTMLDialogElement.prototype) && addBetPressedOutsideRef.current && d) {
+                                const r = d.getBoundingClientRect();
+                                const outside =
+                                    e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+                                if (outside) setShowAddBet(false);
+                            }
+                            addBetPressedOutsideRef.current = false;
+                        }}
+                        className="w-[94dvw] max-w-2xl bg-transparent p-0 m-auto backdrop:bg-black/80 backdrop:backdrop-blur-sm overflow-visible"
+                    >
+                        {showAddBet && (
+                            <div className="w-full relative max-h-[90dvh] overflow-y-auto p-1">
                                 <div className="mb-3 inline-flex gap-1 p-1 rounded-2xl bg-slate-900/60 border border-slate-700/50">
                                     <button
+                                        type="button"
                                         onClick={() => setAddBetMode('slip')}
-                                        className={`px-3 py-2 rounded-xl text-sm font-semibold transition ${addBetMode === 'slip' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                                        className={`px-3 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${addBetMode === 'slip' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
                                     >
                                         Paste Slip
                                     </button>
                                     <button
+                                        type="button"
                                         onClick={() => setAddBetMode('manual')}
-                                        className={`px-3 py-2 rounded-xl text-sm font-semibold transition ${addBetMode === 'manual' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
+                                        className={`px-3 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${addBetMode === 'manual' ? 'bg-slate-800/70 text-slate-100 shadow-sm ring-1 ring-white/10' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'}`}
                                     >
                                         Manual
                                     </button>
@@ -842,8 +888,8 @@ function App() {
                                 )}
                                 </Suspense>
                             </div>
-                        </div>
-                    )}
+                        )}
+                    </dialog>
 
                     {page === 'today' ? (
                         <Research
@@ -865,7 +911,7 @@ function App() {
                         <Suspense fallback={<div className="p-8 text-center text-sm text-slate-400">Loading MLB...</div>}>
                             <MLB />
                         </Suspense>
-                    ) : (
+                    ) : page === 'actuals' && !stats ? null : (
                         <Suspense fallback={<div className="p-8 text-center text-sm text-slate-400">Loading view...</div>}>
                             {actualsTab === 'sync' ? (
                                 <div className="rounded-2xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg">
@@ -1466,7 +1512,7 @@ function SummaryView({ stats, sportBreakdown, playerBreakdown, monthlyBreakdown,
                 {financials?.breakdown && (
                     <div className="bg-slate-900 border border-green-600/30 rounded-xl p-4 flex items-center justify-between min-w-[220px]">
                         <div>
-                            <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-0.5">Total In Play</div>
+                            <div className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-0.5">Cash Bankroll</div>
                             <div className="text-xl font-bold text-white">
                                 {formatCurrency(
                                     financials.breakdown
@@ -1918,7 +1964,7 @@ const FinancialHeader = ({ financials, mode = 'all' }) => {
 
             {mode !== 'performance' && (
                 <FinancialCard
-                    label="Total In Play"
+                    label="Cash Bankroll"
                     value={financials?.ledger_total_in_play ?? financials?.total_in_play}
                     icon={TrendingUp}
                     borderColor="border-green-500/30"

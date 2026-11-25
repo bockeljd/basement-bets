@@ -91,6 +91,52 @@ export const getAccountLastSync = (provName, accId, accRow, allBets = []) => {
     return best;
 };
 
+const UPPERCASE_SPORT_TOKENS = new Set([
+    'NBA', 'NFL', 'NHL', 'MLB', 'NCAAM', 'NCAAF', 'NCAAW', 'WNBA',
+    'UFC', 'MMA', 'PGA', 'MLS', 'ATP', 'WTA', 'EPL', 'F1', 'NASCAR', 'CBB', 'CFB',
+]);
+const UPPERCASE_TYPE_TOKENS = new Set(['SGP', 'ML', 'SGP+']);
+
+const toTitleCaseWords = (s) =>
+    String(s || '')
+        .trim()
+        .toLowerCase()
+        .replace(/(^|\s)([a-z])/g, (_, sep, ch) => `${sep}${ch.toUpperCase()}`);
+
+export const dedupeFilterOptions = (values, kind = 'generic') => {
+    const byLower = new Map();
+    for (const raw of values || []) {
+        const s = String(raw ?? '').trim();
+        if (!s || s.toLowerCase() === 'all') continue;
+        const low = s.toLowerCase();
+        if (!byLower.has(low)) byLower.set(low, []);
+        byLower.get(low).push(s);
+    }
+    const out = [];
+    for (const [low, variants] of byLower.entries()) {
+        const up = low.toUpperCase();
+        if (kind === 'sport') {
+            if (UPPERCASE_SPORT_TOKENS.has(up)) {
+                out.push(up);
+            } else {
+                out.push(toTitleCaseWords(low));
+            }
+        } else if (kind === 'type') {
+            if (UPPERCASE_TYPE_TOKENS.has(up)) {
+                out.push(up);
+            } else {
+                const title = toTitleCaseWords(low);
+                const mixed = variants.find((v) => v !== v.toLowerCase() && v !== v.toUpperCase());
+                out.push(variants.includes(title) ? title : (mixed || title));
+            }
+        } else {
+            const mixed = variants.find((v) => v !== v.toLowerCase() && v !== v.toUpperCase());
+            out.push(mixed || variants[0]);
+        }
+    }
+    return ['All', ...out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
+};
+
 // Extracted from App.jsx. Keep behavior identical; dependencies are passed as props when needed.
 
 export default function TransactionView({ bets, setBets, financials, reconciliation, loading, formatCurrency, formatDateMDY, showOpenBets = true, showFinancials = true }) {
@@ -156,8 +202,8 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
             localStorage.removeItem('txn_prefill');
             setFilters(f => ({
                 ...f,
-                sport: p?.sport ? String(p.sport).toUpperCase() : f.sport,
-                type: p?.type ? String(p.type) : f.type,
+                sport: p?.sport ? (dedupeFilterOptions([p.sport], 'sport')[1] || String(p.sport)) : f.sport,
+                type: p?.type ? (dedupeFilterOptions([p.type], 'type')[1] || String(p.type)) : f.type,
                 sportsbook: p?.sportsbook ? String(p.sportsbook) : f.sportsbook,
                 selection: p?.selection ? String(p.selection) : f.selection,
             }));
@@ -189,10 +235,10 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
         placed_at: new Date().toISOString().slice(0, 10)
     });
 
-    // Extract unique options for dropdowns - keep "All" at top
-    const sportsbooks = ["All", ...[...new Set(bets.map(b => b.provider).filter(Boolean))].sort()];
-    const sports = ["All", ...[...new Set(bets.map(b => b.sport).filter(Boolean))].sort()];
-    const types = ["All", ...[...new Set(bets.map(b => b.bet_type).filter(Boolean))].sort()];
+    // Extract unique options for dropdowns (case-deduplicated) - keep "All" at top
+    const sportsbooks = dedupeFilterOptions(bets.map(b => b.provider), 'generic');
+    const sports = dedupeFilterOptions(bets.map(b => b.sport), 'sport');
+    const types = dedupeFilterOptions(bets.map(b => b.bet_type), 'type');
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'descending' });
 
     const acctLabel = (b) => ((b?.account_id === 'User2' || String(b?.account_id || '').toLowerCase() === 'secondary') ? 'Secondary' : 'Primary');
@@ -438,11 +484,15 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
         // Filter out internal Wallet Transfers
         if ((b.description || "").toLowerCase().includes("wallet transfer")) return false;
 
+        const normEq = (rowVal, filterVal) => {
+            if (filterVal === "All") return true;
+            return String(rowVal || "").trim().toLowerCase() === String(filterVal || "").trim().toLowerCase();
+        };
         const matchDate = b.date.includes(filters.date);
-        const matchSportsbook = filters.sportsbook === "All" || b.provider === filters.sportsbook;
+        const matchSportsbook = normEq(b.provider, filters.sportsbook);
         const matchAccount = filters.account === "All" || acctLabel(b) === filters.account;
-        const matchSport = filters.sport === "All" || b.sport === filters.sport;
-        const matchType = filters.type === "All" || b.bet_type === filters.type;
+        const matchSport = normEq(b.sport, filters.sport);
+        const matchType = normEq(b.bet_type, filters.type);
         const matchSelection = (b.selection || b.description || "").toLowerCase().includes(filters.selection.toLowerCase());
         const matchStatus = filters.status === "All" || b.status === filters.status;
         return matchDate && matchSportsbook && matchAccount && matchSport && matchType && matchSelection && matchStatus;
@@ -710,9 +760,9 @@ export default function TransactionView({ bets, setBets, financials, reconciliat
                             .reduce((sum, p) => sum + Number((p.ledger_in_play ?? p.in_play) || 0), 0);
 
                         const totalTile = (
-                            <div className="bg-slate-900 border border-green-600/30 rounded-xl p-5" key="total-in-play">
+                            <div className="bg-slate-900 border border-green-600/30 rounded-xl p-5" key="cash-bankroll">
                                 <div className="flex items-center justify-between mb-3">
-                                    <span className="text-sm font-bold uppercase tracking-wider text-green-400">Total In Play</span>
+                                    <span className="text-sm font-bold uppercase tracking-wider text-green-400">Cash Bankroll</span>
                                     <Activity className="w-5 h-5 text-green-400" />
                                 </div>
                                 <div className="text-3xl font-bold text-white mb-1">

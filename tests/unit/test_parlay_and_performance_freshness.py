@@ -1077,3 +1077,157 @@ def test_compute_ncaam_parlays_today_recovers_concurrent_locked_parlay(monkeypat
     assert odp["locked_at"] == raced_locked_at
     assert odp["american_odds"] == 215
     assert odp["lock_reason"] == "bet_now"
+
+
+def test_parlay_shared_book_switch_syncs_leg_and_combo_bet_timing():
+    """When _price_multi_leg_combo locks a leg onto a different shared book (e.g. FanDuel -> DraftKings), timing text matches the parlay book."""
+    from datetime import datetime, timedelta, timezone
+    from src.services.ncaam_parlay_service import (
+        _attach_leg_timing,
+        _price_multi_leg_combo,
+        build_three_leg_high_payout_parlays,
+    )
+    from src.utils.bet_timing import combine_parlay_bet_timing
+
+    now = datetime(2026, 11, 25, 16, 0, tzinfo=timezone.utc)
+    tip_5h = (now + timedelta(hours=5)).isoformat()
+
+    # Leg A's standalone best book is FanDuel (-110 with sharp price edge),
+    # while DraftKings also qualifies (-115) and is the only shared book with Leg B/C.
+    leg_a = {
+        "event_id": "evt_sync_a",
+        "matchup": "Away A @ Home A",
+        "away_team": "Away A",
+        "home_team": "Home A",
+        "team_pick": "Home A -3.5",
+        "market_type": "SPREAD",
+        "side": "HOME",
+        "market_line": -3.5,
+        "price": -110,
+        "book": "FanDuel",
+        "win_prob": 0.62,
+        "ev": 0.1836,
+        "ev_per_unit": 0.1836,
+        "outcome": "PENDING",
+        "start_time": tip_5h,
+        "_dk_fd_prices": {"FanDuel": -110, "DraftKings": -115},
+        "_book_times": {"FanDuel": now.isoformat(), "DraftKings": now.isoformat()},
+        "_timing_payload": {
+            "movement_tags": ["sharp_price_edge"],
+            "sharp_edge_pts": 1.0,
+            "bet_timing": {
+                "action": "BET_NOW",
+                "label": "Bet Now",
+                "short_label": "Bet Now",
+                "tone": "emerald",
+                "reason": "FanDuel is offering a better number than sharp books — take it before it adjusts.",
+            },
+        },
+        "_timing_context": {},
+    }
+    leg_b = {
+        "event_id": "evt_sync_b",
+        "matchup": "Away B @ Home B",
+        "away_team": "Away B",
+        "home_team": "Home B",
+        "team_pick": "Home B ML",
+        "market_type": "MONEYLINE",
+        "side": "HOME",
+        "price": 135,
+        "book": "DraftKings",
+        "win_prob": 0.56,
+        "ev": 0.316,
+        "ev_per_unit": 0.316,
+        "outcome": "PENDING",
+        "start_time": tip_5h,
+        "_dk_fd_prices": {"DraftKings": 135},
+        "_book_times": {"DraftKings": now.isoformat()},
+        "_timing_payload": {"movement_tags": ["sharp_price_edge"], "sharp_edge_pts": 0.8},
+        "_timing_context": {},
+    }
+    leg_c = {
+        "event_id": "evt_sync_c",
+        "matchup": "Away C @ Home C",
+        "away_team": "Away C",
+        "home_team": "Home C",
+        "team_pick": "Home C ML",
+        "market_type": "MONEYLINE",
+        "side": "HOME",
+        "price": 120,
+        "book": "DraftKings",
+        "win_prob": 0.56,
+        "ev": 0.232,
+        "ev_per_unit": 0.232,
+        "outcome": "PENDING",
+        "start_time": tip_5h,
+        "_dk_fd_prices": {"DraftKings": 120},
+        "_book_times": {"DraftKings": now.isoformat()},
+        "_timing_payload": {},
+        "_timing_context": {},
+    }
+
+    dtp_by_eid = {
+        "evt_sync_a": {
+            "is_actionable": True,
+            "rec": {
+                "bet_type": "SPREAD",
+                "side": "HOME",
+                "book": "FanDuel",
+                "movement_tags": ["sharp_price_edge"],
+                "sharp_edge_pts": 1.0,
+                "bet_timing": leg_a["_timing_payload"]["bet_timing"],
+            },
+            "context": {},
+        }
+    }
+
+    for lg in (leg_a, leg_b, leg_c):
+        _attach_leg_timing(lg, dtp_by_eid.get(lg["event_id"]), now)
+
+    priced_2 = _price_multi_leg_combo((leg_a, leg_b), 0.0, dtp_by_eid=dtp_by_eid, now_utc=now)
+    assert priced_2 is not None
+    combo_legs, _dec, parlay_book, same_book = priced_2
+    assert same_book is True
+    assert parlay_book == "DraftKings"
+    for cl in combo_legs:
+        assert cl["book"] == "DraftKings"
+        reason = str((cl.get("bet_timing") or {}).get("reason") or "")
+        assert "FanDuel" not in reason
+    combo_bt = combine_parlay_bet_timing(combo_legs, now_utc=now)
+    assert combo_bt is not None
+    assert "FanDuel" not in str(combo_bt.get("reason") or "")
+
+    # Also test 3-leg high-payout parlays re-syncing book timing onto DraftKings
+    threes = build_three_leg_high_payout_parlays(
+        [leg_a, leg_b, leg_c],
+        min_ev=0.04,
+        odds_lo=100,
+        odds_hi=1500,
+        now_utc=now,
+        dtp_by_eid=dtp_by_eid,
+    )
+    assert len(threes) == 1
+    assert threes[0]["parlay_book"] == "DraftKings"
+    assert "FanDuel" not in str((threes[0].get("bet_timing") or {}).get("reason") or "")
+    for cl in threes[0]["legs"]:
+        assert "FanDuel" not in str((cl.get("bet_timing") or {}).get("reason") or "")
+
+
+def test_ncaam_slate_team_key_normalization_and_sql():
+    from src.utils.ncaam_slate import SLATE_CTE, normalize_ncaam_team_key, team_key_sql
+
+    assert normalize_ncaam_team_key("St. Peter's") == normalize_ncaam_team_key("Saint Peter's")
+    assert normalize_ncaam_team_key("SE Louisiana") == normalize_ncaam_team_key("Southeastern Louisiana")
+    assert normalize_ncaam_team_key("Grambling State") == normalize_ncaam_team_key("Grambling")
+    assert normalize_ncaam_team_key("Warner Southern") == normalize_ncaam_team_key("Warner Royals")
+    assert normalize_ncaam_team_key("Mt. St. Mary's") == normalize_ncaam_team_key("Mount St. Mary's")
+    # Do not corrupt trailing "St." into "Saint"
+    assert normalize_ncaam_team_key("Michigan St.") != normalize_ncaam_team_key("Michigan Saint")
+    assert normalize_ncaam_team_key("NC State") != normalize_ncaam_team_key("North Carolina")
+
+    sql_expr = team_key_sql("e.home_team")
+    # Must use Postgres POSIX regex syntax (never PCRE \b) and never bare '%'
+    assert "\\b" not in sql_expr
+    assert "%" not in sql_expr
+    assert "LEAST(home_key, away_key)" in SLATE_CTE
+

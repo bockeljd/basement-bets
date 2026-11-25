@@ -236,3 +236,13 @@ body {
   outline: 2px solid #38bdf8;
   outline-offset: 2px;
 }
+
+/* Native modal dialog scroll-containment (prevents scrolling backdrop/page underneath) */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}

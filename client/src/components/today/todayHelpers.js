@@ -79,15 +79,62 @@ export const safeReasonText = (rawReason) => {
   return text;
 };
 
-const normalizeBoardTeamKey = (s) =>
+export const normalizeBoardTeamKey = (s) =>
   String(s || '')
     .toLowerCase()
+    .trim()
     .replace(/\bnorth carolina state\b|\bn\.c\. state\b|\bn\.c\. st\.?\b|\bnc st\.?\b/g, 'nc state')
     .replace(/\bappalachian state\b|\bapp state\b|\bappalachian st\.?\b/g, 'appalachian state')
     .replace(/\bsouth carolina upstate\b|\bu\.s\.c\. upstate\b/g, 'usc upstate')
     .replace(/\blong island university\b|\bl\.i\.u\.?\b/g, 'liu')
+    .replace(/\bse louisiana\b|\bs\.e\. louisiana\b|\bsoutheastern la\.?\b/g, 'southeastern louisiana')
+    .replace(/\bse missouri st(?:ate)?\.?\b|\bsemo\b/g, 'southeast missouri state')
+    .replace(/\bgrambling st(?:ate)?\.?\b/g, 'grambling')
+    .replace(/\bwarner southern(?:\s+royals)?\b|\bwarner royals\b|\bwarner university\b/g, 'warner')
+    .replace(/\bnicholls st(?:ate)?\.?\b/g, 'nicholls')
+    .replace(/\bmcneese st(?:ate)?\.?\b/g, 'mcneese')
+    .replace(/\bsam houston st(?:ate)?\.?\b/g, 'sam houston')
+    .replace(/\bdelaware fightin(?:'|g)? blue hens\b/g, 'delaware blue hens')
+    .replace(/\btenn(?:essee)?[-\s]martin\b/g, 'ut martin')
+    .replace(/\bamerican university eagles\b/g, 'american eagles')
+    .replace(/\bgeorge washington revolutionaries\b/g, 'george washington colonials')
+    .replace(/\bsan jos[eé] state\b/g, 'san jose state')
+    .replace(/\bstephen f\.? austin\b|\bsf austin\b/g, 'stephen f austin')
     .replace(/\bst\.?\s*francis\b/g, 'saint francis')
+    .replace(/^st\.?\s+/g, 'saint ')
+    .replace(/(^|\s)(?:mt\.?|mount)\s+st\.?\s+/g, '$1mount saint ')
     .replace(/[^a-z0-9]/g, '');
+
+export const buildCachedAnalysisResult = (game, cachedMeta) => {
+  if (!game || !cachedMeta) return null;
+  const ctx = cachedMeta.context && typeof cachedMeta.context === 'object' ? cachedMeta.context : null;
+  const rec = cachedMeta.rec && typeof cachedMeta.rec === 'object' ? cachedMeta.rec : null;
+  const hasRec = Boolean(cachedMeta.isActionable && rec);
+  const blockReason = !hasRec ? (cachedMeta.reason || rec?.reason || ctx?.reason || null) : null;
+  return {
+    event_id: game.id,
+    recommendations: hasRec ? [rec] : [],
+    context: ctx || undefined,
+    outputs: ctx
+      ? {
+          mu_spread: ctx.fair_spread_home ?? ctx.mu_spread_power ?? null,
+          mu_total: ctx.fair_total ?? ctx.mu_total_power ?? null,
+        }
+      : undefined,
+    signals: rec?.signals || ctx?.signals || undefined,
+    no_bet_reason: blockReason,
+    block_reason: blockReason,
+    headline: cachedMeta.reason || rec?.reason || undefined,
+    analyzed_at: cachedMeta.analyzedAt || null,
+    model_version: cachedMeta.model_version || null,
+    neutral_site: game.neutral_site,
+    venue: game.venue,
+    venue_city: game.venue_city,
+    venue_state: game.venue_state,
+    _fromCache: true,
+    _cachedAt: cachedMeta.analyzedAt || null,
+  };
+};
 
 export const makeMatchupKey = (dayEt, away, home) => {
   if (!dayEt || !away || !home) return '';

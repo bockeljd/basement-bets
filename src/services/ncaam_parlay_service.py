@@ -242,7 +242,15 @@ def evaluate_value_underdog_ml_leg(
         return None
 
 
-_INTERNAL_LEG_KEYS = ("_min_leg_ev", "_book_times", "_dk_fd_prices", "_timing_context", "_timing_payload")
+_INTERNAL_LEG_KEYS = (
+    "_min_leg_ev",
+    "_book_times",
+    "_dk_fd_prices",
+    "_timing_context",
+    "_timing_payload",
+    "_book_changed",
+    "_price_worsened",
+)
 
 
 def _strip_internal_leg_keys(leg: dict) -> dict:
@@ -307,6 +315,12 @@ def _attach_leg_timing(leg: dict, dtp_entry: Optional[Dict[str, Any]], ref_now: 
     if timing_payload:
         timing_input.update(timing_payload)
 
+    rec_book = str((rec_obj or {}).get("book") or "").strip().lower()
+    leg_book = str(leg.get("book") or "").strip().lower()
+    book_changed = bool(leg.get("_book_changed")) or (
+        bool(leg_book) and bool(rec_book) and leg_book != rec_book
+    )
+
     # Preserve leg-level canonical price/book/ev after DK/FD best-price enrichment
     for k in (
         "event_id",
@@ -333,6 +347,19 @@ def _attach_leg_timing(leg: dict, dtp_entry: Optional[Dict[str, Any]], ref_now: 
         if leg.get(k) is not None:
             timing_input[k] = leg.get(k)
 
+    # When combo pricing switches a leg onto a worse-priced shared book,
+    # strip book-specific sharp-price tags that belonged to the other sportsbook.
+    if book_changed and leg.get("_price_worsened"):
+        raw_tags = timing_input.get("movement_tags")
+        if isinstance(raw_tags, str):
+            raw_tags = [t.strip() for t in raw_tags.split(",") if t and t.strip()]
+        if isinstance(raw_tags, (list, tuple, set)):
+            timing_input["movement_tags"] = [
+                t for t in raw_tags
+                if str(t).strip().lower() not in ("sharp_price_edge", "lagging_book_edge")
+            ]
+        timing_input.pop("sharp_edge_pts", None)
+
     # Ensure signals dictionary retains game-level injury/public split context when available
     if not isinstance(timing_input.get("signals"), dict):
         if isinstance(ctx_obj, dict) and isinstance(ctx_obj.get("signals"), dict):
@@ -349,6 +376,16 @@ def _attach_leg_timing(leg: dict, dtp_entry: Optional[Dict[str, Any]], ref_now: 
         or timing_input.get("sharp_edge_pts") is not None
     )
 
+    pre_reason_low = (
+        str(precomputed_bt.get("reason") or "").lower()
+        if isinstance(precomputed_bt, dict)
+        else ""
+    )
+    book_mismatch_in_pre = book_changed or any(
+        bk in pre_reason_low and bool(leg_book) and bk != leg_book
+        for bk in ("draftkings", "fanduel")
+    )
+
     tip_dt = _parse_leg_start_utc(leg.get("start_time"))
     mins_to_tip = ((tip_dt - ref_now).total_seconds() / 60.0) if tip_dt is not None else None
     pre_act = str(precomputed_bt.get("action") or "").upper() if isinstance(precomputed_bt, dict) else ""
@@ -358,6 +395,7 @@ def _attach_leg_timing(leg: dict, dtp_entry: Optional[Dict[str, Any]], ref_now: 
         and pre_act in VALID_TIMING_ACTIONS
         and precomputed_bt.get("label")
         and precomputed_bt.get("reason")
+        and not book_mismatch_in_pre
         and not has_rich_inputs
         and (mins_to_tip is None or (mins_to_tip > 0 and not (mins_to_tip <= 60.0 and pre_act != "BET_NOW")))
     ):
@@ -378,11 +416,18 @@ def _attach_leg_timing(leg: dict, dtp_entry: Optional[Dict[str, Any]], ref_now: 
         leg["bet_timing"] = t_res
 
 
-def _price_multi_leg_combo(legs, min_leg_ev):
+def _price_multi_leg_combo(
+    legs,
+    min_leg_ev,
+    *,
+    dtp_by_eid: Optional[Dict[str, Dict[str, Any]]] = None,
+    now_utc: Optional[datetime] = None,
+):
     """Select the highest payout whose individual legs qualify at the quoted prices."""
     shared = [book for book in ("DraftKings", "FanDuel")
               if all(book in leg.get("_dk_fd_prices", {}) for leg in legs)]
     best = None
+    ref_now = now_utc or datetime.now(timezone.utc)
     for book in shared or [None]:
         priced = []
         decimal = 1.0
@@ -398,10 +443,31 @@ def _price_multi_leg_combo(legs, min_leg_ev):
                 not 110 <= price <= 220 or probability - 1 / odds < 0.03 or ev < 0.035
             ):
                 break
-            item = _strip_internal_leg_keys(leg)
-            item.update(price=price, ev=ev, ev_per_unit=ev)
+            orig_book = str(leg.get("book") or "").strip().lower()
+            orig_price = leg.get("price")
+            new_book = str(book or leg.get("book") or "").strip().lower()
+            book_changed = bool(book and orig_book and new_book != orig_book)
+            try:
+                price_worsened = bool(
+                    orig_price is not None and odds < dec_from_american(int(orig_price))
+                )
+            except Exception:
+                price_worsened = False
+            work_leg = dict(leg)
+            work_leg.update(price=price, ev=ev, ev_per_unit=ev)
             if book:
-                item.update(book=book, quote_at=leg.get("_book_times", {}).get(book))
+                work_leg.update(book=book, quote_at=leg.get("_book_times", {}).get(book))
+            if str(work_leg.get("outcome") or "PENDING").upper() in ("PENDING", "") and (
+                book_changed or price != orig_price or not work_leg.get("bet_timing")
+            ):
+                work_leg["_book_changed"] = book_changed
+                work_leg["_price_worsened"] = price_worsened
+                _attach_leg_timing(
+                    work_leg,
+                    (dtp_by_eid or {}).get(str(work_leg.get("event_id") or "")),
+                    ref_now,
+                )
+            item = _strip_internal_leg_keys(work_leg)
             priced.append(item)
             decimal *= odds
         if len(priced) != len(legs) or (best and decimal <= best[1]):
@@ -421,6 +487,7 @@ def build_three_leg_high_payout_parlays(
     limit: int = 3,
     max_source_legs: int = 18,
     now_utc: Optional[datetime] = None,
+    dtp_by_eid: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[dict]:
     """Build independent 3-leg high-payout parlays (+300 to +1000) from the strongest +EV legs."""
     if not norm_legs or len(norm_legs) < 3:
@@ -458,7 +525,12 @@ def build_three_leg_high_payout_parlays(
                     continue
                 trio = (ranked_legs[i], ranked_legs[j], ranked_legs[k])
                 p = float(trio[0]["win_prob"]) * float(trio[1]["win_prob"]) * float(trio[2]["win_prob"])
-                priced = _price_multi_leg_combo(trio, 0.015)
+                priced = _price_multi_leg_combo(
+                    trio,
+                    0.015,
+                    dtp_by_eid=dtp_by_eid,
+                    now_utc=ref_now,
+                )
                 if priced is None:
                     continue
                 clean_legs, dec, parlay_book, same_book = priced
@@ -1188,7 +1260,12 @@ def compute_ncaam_parlays_today(
             parlay_outcome = _combine_two_leg_outcome(a.get("outcome"), b.get("outcome"))
             p = float(a["win_prob"]) * float(b["win_prob"])
 
-            priced = _price_multi_leg_combo((a, b), min_leg_ev_post)
+            priced = _price_multi_leg_combo(
+                (a, b),
+                min_leg_ev_post,
+                dtp_by_eid=dtp_by_eid,
+                now_utc=now_utc,
+            )
             if priced is None:
                 continue
             (leg_a, leg_b), dec, parlay_book, same_book = priced
@@ -1518,6 +1595,7 @@ def compute_ncaam_parlays_today(
             norm_legs,
             min_ev=max(0.04, float(min_ev_per_unit)),
             now_utc=now_utc,
+            dtp_by_eid=dtp_by_eid,
         )
         if _strategy != "home_fav"
         else []

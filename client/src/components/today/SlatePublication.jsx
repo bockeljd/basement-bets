@@ -45,6 +45,8 @@ export default function SlatePublication({ day }) {
     Number(slate?.evaluation?.actionable_games || 0) + Number(slate?.evaluation?.true_no_bet_games || 0);
   const unlinedGames = Number(slate?.evaluation?.unlined_games ?? slate?.evaluation?.stale_or_missing_odds_games ?? 0);
   const staleGames = Number(slate?.evaluation?.stale_odds_games || 0);
+  const actionableCount = Number(slate?.evaluation?.actionable_games || 0);
+  const betWord = actionableCount === 1 ? 'bet' : 'bets';
   return (
     <div
       className={`rounded-xl border p-3 text-sm text-slate-200 ${
@@ -56,8 +58,8 @@ export default function SlatePublication({ day }) {
       {slate?.evaluation && (
         <p className="mt-1 text-xs text-slate-400">
           {linedEvaluated > 0
-            ? `${linedEvaluated} model records evaluated (${slate.evaluation.actionable_games} bets · ${slate.evaluation.true_no_bet_games} passed)`
-            : `${slate.evaluation.cached_games} cached model records · ${slate.evaluation.actionable_games} bets`}
+            ? `${linedEvaluated} model records evaluated (${actionableCount} ${betWord} · ${slate.evaluation.true_no_bet_games} passed)`
+            : `${slate.evaluation.cached_games} cached model records · ${actionableCount} ${betWord}`}
           {unlinedGames > 0 && ` · ${unlinedGames} without sportsbook odds`}
           {staleGames > 0 && (
             <span className="text-amber-300 font-semibold">

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCachedAnalysisResult,
+  dedupeBoardGames,
   getBetTimingGuidance,
   getConfidenceMeta,
   getLiveGameStatus,
@@ -10,6 +12,7 @@ import {
   hasTop6RiskFlag,
   lookupTopPickForGame,
   makeMatchupKey,
+  normalizeBoardTeamKey,
   normalizeMovementTag,
 } from './todayHelpers';
 
@@ -447,5 +450,51 @@ describe('Today recommendations', () => {
         nowMs
       )
     ).toBeNull();
+  });
+
+  it('deduplicates Action Network vs ESPN NCAAM team variants and preserves richer priced rows', () => {
+    expect(normalizeBoardTeamKey("St. Peter's")).toBe(normalizeBoardTeamKey("Saint Peter's"));
+    expect(normalizeBoardTeamKey('SE Louisiana')).toBe(normalizeBoardTeamKey('Southeastern Louisiana'));
+    expect(normalizeBoardTeamKey('Grambling State')).toBe(normalizeBoardTeamKey('Grambling'));
+    expect(normalizeBoardTeamKey('Warner Southern')).toBe(normalizeBoardTeamKey('Warner Royals'));
+    expect(normalizeBoardTeamKey("Michigan St.")).not.toBe(normalizeBoardTeamKey("Michigan Saint"));
+
+    const deduped = dedupeBoardGames([
+      { id: 'espn:ncaam:1', sport: 'NCAAM', day_et: '2026-11-25', away_team: "Saint Peter's", home_team: 'SE Louisiana' },
+      { id: 'action:ncaam:1', sport: 'NCAAM', day_et: '2026-11-25', away_team: "St. Peter's", home_team: 'Southeastern Louisiana', home_spread: -4.5 },
+      { id: 'espn:ncaam:2', sport: 'NCAAM', day_et: '2026-11-25', away_team: 'Warner Southern', home_team: 'Grambling State' },
+      { id: 'action:ncaam:2', sport: 'NCAAM', day_et: '2026-11-25', away_team: 'Warner Royals', home_team: 'Grambling', total_line: 141.5 },
+    ]);
+    expect(deduped).toHaveLength(2);
+    expect(deduped.map((g) => g.id)).toEqual(['action:ncaam:1', 'action:ncaam:2']);
+  });
+
+  it('builds a cached Details snapshot immediately from daily_top_picks metadata', () => {
+    const game = {
+      id: 'action:ncaam:99',
+      home_team: 'Colorado',
+      away_team: 'Grand Canyon',
+      neutral_site: false,
+      venue: 'CU Events Center',
+    };
+    const actionSnap = buildCachedAnalysisResult(game, {
+      isActionable: true,
+      rec: { selection: 'Colorado -4.5', bet_type: 'SPREAD', price: -110 },
+      context: { fair_spread_home: -6.5, fair_total: 144.0 },
+      analyzedAt: '2026-11-25T15:00:00Z',
+    });
+    expect(actionSnap._fromCache).toBe(true);
+    expect(actionSnap.recommendations).toHaveLength(1);
+    expect(actionSnap.outputs.mu_spread).toBe(-6.5);
+    expect(actionSnap.venue).toBe('CU Events Center');
+
+    const passSnap = buildCachedAnalysisResult(game, {
+      isActionable: false,
+      reason: 'Line matches fair value',
+      context: { fair_spread_home: -4.5 },
+    });
+    expect(passSnap._fromCache).toBe(true);
+    expect(passSnap.recommendations).toEqual([]);
+    expect(passSnap.block_reason).toBe('Line matches fair value');
   });
 });
