@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 
 from src.database import _exec, get_db_connection, ensure_recommended_slates_tables
+from src.utils.ncaam_quotes import is_retail_book
 from src.utils.model_performance import rank_top6_items
 from psycopg2.extras import Json
 
@@ -84,7 +85,9 @@ def publish_slate(date_et=None):
             if not row or row["start_time"] - timedelta(minutes=30) != cutoff:
                 continue
             reason = None
-            if now >= row["start_time"]:
+            if not is_retail_book(item.get("book")):
+                reason = "No executable retail price at cutoff"
+            elif now >= row["start_time"]:
                 reason = "Missed pregame lock"
             elif cutoff - datetime.fromisoformat(item["computed_at"]) > timedelta(minutes=90):
                 reason = "Model forecast stale at cutoff"
@@ -124,6 +127,9 @@ def publish_slate(date_et=None):
             matchup_label = f"{row['away_team']} @ {row['home_team']}"
             if not row["id"]:
                 stale_holds[row["event_id"]] = f"{matchup_label} · Model prediction awaiting persistence"
+                continue
+            if not is_retail_book(row["book"]):
+                stale_holds[row["event_id"]] = f"{matchup_label} · Awaiting a retail sportsbook price"
                 continue
             if now - row["computed_at"] > timedelta(minutes=90):
                 stale_holds[row["event_id"]] = f"{matchup_label} · Model forecast stale (>90m old)"

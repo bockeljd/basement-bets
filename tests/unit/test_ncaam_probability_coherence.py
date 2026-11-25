@@ -69,3 +69,14 @@ def test_opposite_total_bounds_are_complementary_at_same_line(monkeypatch):
     bounds = [model._confidence_bounds_from_mu_uncertainty("TOTAL", 147, 13, 145, side)
               for side in ("over", "under")]
     assert bounds[0]["lb10"] + bounds[1]["ub90"] == pytest.approx(1)
+
+
+@pytest.mark.parametrize("book", ["LowVig", "Pinnacle", "BetOnlineAG", "Circa Sports"])
+def test_benchmark_prices_cannot_become_retail_recommendations(book):
+    from datetime import datetime, timezone
+    from src.utils.ncaam_quotes import executable_moneyline_quote, recent_retail_quote
+
+    now = datetime.now(timezone.utc)
+    quote = {"book": book, "price": -110, "captured_at": now}
+    assert not recent_retail_quote(quote, now)
+    assert not executable_moneyline_quote(quote, now)

@@ -740,7 +740,7 @@ def test_model_conviction_boost_and_context_fair_lines_and_job_tuple_unpack(monk
     ctx = res["context"]
     assert ctx["conviction_sources"] == 3
     assert ctx["efficiency_weight"] == pytest.approx(0.354, abs=0.002)
-    assert ctx["fair_spread_home"] < -5.8
+    assert ctx["fair_spread_home"] == pytest.approx(-5.6, abs=0.05)
     assert ctx["fair_total"] > 138.0
     assert ctx["closest_lean"] is not None
 
@@ -920,7 +920,7 @@ def test_blowout_spread_sigma_scaling_projected_score_and_rec_normalization(monk
 def test_calibrated_version_line_sync_and_adjustments_context(monkeypatch):
     from src.models.ncaam_market_first_model_v2 import NCAAMMarketFirstModelV2
 
-    assert NCAAMMarketFirstModelV2.VERSION == "2.4.2-calibrated"
+    assert NCAAMMarketFirstModelV2.VERSION == "2.4.3-november-spread"
     model = NCAAMMarketFirstModelV2()
     monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
     ev_ctx = {

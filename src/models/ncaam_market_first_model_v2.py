@@ -45,7 +45,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.4.2-calibrated"
+    VERSION = "2.4.3-november-spread"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -1908,6 +1908,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
             else:
                 mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.85)
 
+        if game_month == 11 and has_spread:
+            mu_spread_final += 0.25 * (mu_market_spread - mu_spread_final)
+
         # --- Feature: Live Injury Impact Toggle (applied after automated clamp) ---
         if self.manual_adjustments:
             h_inj = self.manual_adjustments.get('home_injury', 0.0)
@@ -2168,11 +2171,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         # If we produced no actionable recommendations, capture why (for UI).
         block_reason = None
         if not recs and isinstance(market_snapshot, dict):
-            from src.utils.ncaam_quotes import recent_retail_quote
+            from src.utils.ncaam_quotes import is_retail_book, recent_retail_quote
             as_of = market_snapshot.get('_quote_as_of') or datetime.now(timezone.utc)
             offered = [q for q in raw_snaps if q.get('price') is not None
-                       and str(q.get('book') or '').lower() not in ('', 'open', 'action_open', 'consensus', 'unknown')
-                       and not str(q.get('book')).lower().startswith('action_book_')]
+                       and is_retail_book(q.get('book'))]
             if closest_lean:
                 block_reason = f"{closest_lean['selection']} · {closest_lean['reason']}"
             elif offered and not any(recent_retail_quote(q, as_of) for q in offered):

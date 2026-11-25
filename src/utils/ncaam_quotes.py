@@ -1,10 +1,18 @@
 """Executable NCAAM prices used by the live model and historical replay."""
 from datetime import datetime, timedelta, timezone
 
+from src.services.odds_selection_service import OddsSelectionService
+
+
+def is_retail_book(name):
+    book = str(name or '').strip().lower()
+    if book in ('', 'open', 'action_open', 'consensus', 'unknown') or book.startswith('action_book_'):
+        return False
+    return not OddsSelectionService._is_sharp_benchmark(book)
+
 
 def recent_retail_quote(quote, as_of):
-    book = str(quote.get('book') or '').strip().lower()
-    if book in ('', 'open', 'action_open', 'consensus', 'unknown') or book.startswith('action_book_'):
+    if not is_retail_book(quote.get('book')):
         return False
     try:
         stamp = quote['captured_at']
