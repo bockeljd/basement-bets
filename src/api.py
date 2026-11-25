@@ -6001,7 +6001,7 @@ async def ncaam_parlay_performance_report(
                     conn,
                     """
                     SELECT DISTINCT ON (event_id)
-                      event_id, pick, selection, price, bet_price, outcome
+                      event_id, pick, selection, price, bet_price, outcome, win_prob, ev_per_unit
                     FROM model_predictions
                     WHERE event_id = ANY(%s)
                       AND UPPER(COALESCE(market_type, '')) IN ('MONEYLINE', 'ML', 'H2H')
@@ -6066,6 +6066,8 @@ async def ncaam_parlay_performance_report(
                     "market_line": lg.get("market_line"),
                     "price": lg.get("price"),
                     "book": lg.get("book"),
+                    "win_prob": lg.get("win_prob"),
+                    "ev": lg.get("ev") if lg.get("ev") is not None else lg.get("ev_per_unit"),
                     "outcome": leg_out,
                     "score": score_txt,
                 })
@@ -6104,6 +6106,8 @@ async def ncaam_parlay_performance_report(
                     "market_line": None,
                     "price": mp.get("bet_price") if mp.get("bet_price") is not None else mp.get("price"),
                     "book": None,
+                    "win_prob": mp.get("win_prob"),
+                    "ev": mp.get("ev_per_unit"),
                     "outcome": leg_out,
                     "score": score_txt,
                 })

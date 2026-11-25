@@ -204,6 +204,10 @@ export const computeParlayAnalytics = (
           losses: 0,
           pushes: 0,
           pending: 0,
+          expectedWinSum: 0,
+          expectedWinCount: 0,
+          impliedWinSum: 0,
+          impliedWinCount: 0,
         });
       }
       const mEntry = legMarketMap.get(mktKey);
@@ -211,6 +215,19 @@ export const computeParlayAnalytics = (
       else if (lgNorm === 'LOST') mEntry.losses += 1;
       else if (lgNorm === 'PUSH') mEntry.pushes += 1;
       else if (lgNorm !== 'VOID') mEntry.pending += 1;
+
+      if (lgNorm === 'WON' || lgNorm === 'LOST') {
+        const lgWp = Number(lg.win_prob);
+        if (Number.isFinite(lgWp) && lgWp > 0 && lgWp <= 1) {
+          mEntry.expectedWinSum += lgWp * 100;
+          mEntry.expectedWinCount += 1;
+        }
+        const lgImplied = impliedBreakEvenPctFromAmericanOdds(lg.price);
+        if (lgImplied !== null) {
+          mEntry.impliedWinSum += lgImplied;
+          mEntry.impliedWinCount += 1;
+        }
+      }
     }
   }
 
@@ -219,14 +236,110 @@ export const computeParlayAnalytics = (
   const legMarkets = Array.from(legMarketMap.values())
     .map((m) => {
       const decided = m.wins + m.losses;
+      const winRate = decided > 0 ? (m.wins / decided) * 100 : 0;
+      const avgExpectedWinPct =
+        m.expectedWinCount > 0 ? Number((m.expectedWinSum / m.expectedWinCount).toFixed(1)) : null;
+      const avgImpliedWinPct =
+        m.impliedWinCount > 0 ? Number((m.impliedWinSum / m.impliedWinCount).toFixed(1)) : null;
       return {
-        ...m,
+        marketKey: m.marketKey,
+        label: m.label,
+        wins: m.wins,
+        losses: m.losses,
+        pushes: m.pushes,
+        pending: m.pending,
         decided,
         recordText: `${m.wins}-${m.losses}${m.pushes > 0 ? `-${m.pushes}` : ''}`,
-        winRate: decided > 0 ? (m.wins / decided) * 100 : 0,
+        winRate,
+        avgExpectedWinPct,
+        avgImpliedWinPct,
+        calibrationGapPct:
+          decided > 0 && avgExpectedWinPct !== null
+            ? Number((winRate - avgExpectedWinPct).toFixed(1))
+            : null,
+        vsImpliedGapPct:
+          decided > 0 && avgImpliedWinPct !== null
+            ? Number((winRate - avgImpliedWinPct).toFixed(1))
+            : null,
       };
     })
     .sort((a, b) => (b.decided + b.pending) - (a.decided + a.pending) || b.winRate - a.winRate);
+
+  const summarizeAuditGroup = (groupMarkets) => {
+    let gWins = 0;
+    let gLosses = 0;
+    let expSum = 0;
+    let expCount = 0;
+    let impSum = 0;
+    let impCount = 0;
+    for (const gm of groupMarkets) {
+      const raw = legMarketMap.get(gm.marketKey);
+      gWins += gm.wins;
+      gLosses += gm.losses;
+      if (raw) {
+        expSum += raw.expectedWinSum;
+        expCount += raw.expectedWinCount;
+        impSum += raw.impliedWinSum;
+        impCount += raw.impliedWinCount;
+      }
+    }
+    const decided = gWins + gLosses;
+    const winRate = decided > 0 ? Number(((gWins / decided) * 100).toFixed(1)) : 0;
+    const avgExpectedWinPct = expCount > 0 ? Number((expSum / expCount).toFixed(1)) : null;
+    const avgImpliedWinPct = impCount > 0 ? Number((impSum / impCount).toFixed(1)) : null;
+    const calibrationGapPct =
+      decided > 0 && avgExpectedWinPct !== null
+        ? Number((winRate - avgExpectedWinPct).toFixed(1))
+        : null;
+    return {
+      decided,
+      wins: gWins,
+      losses: gLosses,
+      recordText: `${gWins}-${gLosses}`,
+      winRate,
+      avgExpectedWinPct,
+      avgImpliedWinPct,
+      calibrationGapPct,
+    };
+  };
+
+  const mlAudit = summarizeAuditGroup(legMarkets.filter((m) => m.marketKey === 'MONEYLINE'));
+  const stAudit = summarizeAuditGroup(
+    legMarkets.filter((m) => ['SPREAD', 'TOTAL', 'SPREAD_1H', 'TOTAL_1H'].includes(m.marketKey))
+  );
+  const overconfidentWarning =
+    mlAudit.decided >= 3 && mlAudit.calibrationGapPct !== null && mlAudit.calibrationGapPct <= -5.0;
+
+  let auditSummaryText = null;
+  if (mlAudit.decided > 0 || stAudit.decided > 0) {
+    const parts = [];
+    if (mlAudit.decided > 0) {
+      const mlCal =
+        mlAudit.avgExpectedWinPct !== null
+          ? ` vs ${mlAudit.avgExpectedWinPct.toFixed(1)}% model`
+          : mlAudit.avgImpliedWinPct !== null
+            ? ` vs ${mlAudit.avgImpliedWinPct.toFixed(1)}% implied`
+            : '';
+      parts.push(`ML ${mlAudit.recordText} (${mlAudit.winRate.toFixed(1)}%${mlCal})`);
+    }
+    if (stAudit.decided > 0) {
+      const stCal =
+        stAudit.avgExpectedWinPct !== null
+          ? ` vs ${stAudit.avgExpectedWinPct.toFixed(1)}% model`
+          : stAudit.avgImpliedWinPct !== null
+            ? ` vs ${stAudit.avgImpliedWinPct.toFixed(1)}% implied`
+            : '';
+      parts.push(`Spread/Total ${stAudit.recordText} (${stAudit.winRate.toFixed(1)}%${stCal})`);
+    }
+    auditSummaryText = parts.join(' · ');
+  }
+
+  const mlVsSpreadAudit = {
+    moneyline: mlAudit,
+    spreadTotal: stAudit,
+    overconfidentWarning,
+    summaryText: auditSummaryText,
+  };
 
   let runningUnits = 0;
   const equityCurve = Array.from(dayMap.values())
@@ -258,6 +371,7 @@ export const computeParlayAnalytics = (
     legRecordText: `${legWins}-${legLosses}${legPushes > 0 ? `-${legPushes}` : ''}`,
     legWinRate: legDecided > 0 ? (legWins / legDecided) * 100 : 0,
     legMarkets,
+    mlVsSpreadAudit,
     buckets: [
       finalizeParlayBucket(bucketMap.high_confidence),
       finalizeParlayBucket(bucketMap.payout_band),

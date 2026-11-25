@@ -73,11 +73,15 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className="text-2xl font-black text-white">{fmtOdds(c?.american_odds)}</span>
           <span className="text-xs font-bold text-slate-500">Parlay Odds</span>
-          {c?.parlay_book && (
+          {c?.parlay_book ? (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-300">
               {c.parlay_book}
             </span>
-          )}
+          ) : c?.same_book === false ? (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 text-slate-400">
+              Mixed Books
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {out && out !== 'PENDING' && (
@@ -171,6 +175,11 @@ function ComboCard({ c, color = 'amber', bankroll = null, onAddBet = null }) {
                 {legSurface.outcome && (
                   <span className={`px-1.5 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider ${legSurface.badgeCls}`}>
                     {legSurface.outcome}
+                  </span>
+                )}
+                {!c?.parlay_book && leg.book && String(leg.book).toLowerCase() !== 'consensus' && (
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    {leg.book}
                   </span>
                 )}
                 <span className="text-sm font-mono font-bold text-slate-400">{fmtOdds(leg.price)}</span>

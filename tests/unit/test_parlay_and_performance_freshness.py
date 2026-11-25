@@ -198,6 +198,8 @@ def test_parlay_performance_report_grades_away_ml_spread_total_and_partial_push(
                         "market_type": "MONEYLINE",
                         "side": "AWAY",
                         "price": 120,
+                        "win_prob": 0.48,
+                        "ev": 0.056,
                         "outcome": "PENDING",
                     },
                     {
@@ -327,6 +329,10 @@ def test_parlay_performance_report_grades_away_ml_spread_total_and_partial_push(
     by_id = {x["id"]: x for x in data["items"]}
     assert by_id["p_win"]["outcome"] == "WON"
     assert [lg["outcome"] for lg in by_id["p_win"]["legs"]] == ["WON", "WON"]
+    assert by_id["p_win"]["legs"][0]["win_prob"] == 0.48
+    assert by_id["p_win"]["legs"][0]["ev"] == 0.056
+    assert "win_prob" in by_id["p_win"]["legs"][1]
+    assert "ev" in by_id["p_win"]["legs"][1]
     assert by_id["p_lost"]["outcome"] == "LOST"
     assert [lg["outcome"] for lg in by_id["p_lost"]["legs"]] == ["LOST", "WON"]
     assert by_id["p_partial"]["outcome"] == "WON (partial)"
@@ -751,3 +757,165 @@ def test_compute_ncaam_parlays_today_excludes_started_games_contra_sharp_and_lea
     assert "evt_lean1" in all_leg_eids and "evt_lean2" in all_leg_eids
     assert res["official_daily_parlay"] is None
     assert len(inserts) == 0
+
+
+def test_ml_win_prob_from_spread_heavy_tail_and_early_season():
+    import math
+    from src.services.ncaam_parlay_service import ml_win_prob_from_spread
+
+    raw_gaussian = 0.5 * (1.0 - math.erf(-8.0 / (10.5 * math.sqrt(2.0))))
+    late_prob = ml_win_prob_from_spread(
+        -8.0,
+        10.5,
+        side="HOME",
+        start_time="2027-03-10T23:00:00Z",
+    )
+    early_prob = ml_win_prob_from_spread(
+        -8.0,
+        10.5,
+        side="HOME",
+        start_time="2026-11-24T23:00:00Z",
+    )
+    away_early = ml_win_prob_from_spread(
+        -8.0,
+        10.5,
+        side="AWAY",
+        start_time="2026-11-24T23:00:00Z",
+    )
+
+    assert early_prob < late_prob < raw_gaussian
+    assert abs((early_prob + away_early) - 1.0) < 1e-9
+
+    # Symmetry preserved with nonlinear 1-arg calibrate_fn
+    p_home_cal = ml_win_prob_from_spread(
+        -6.0,
+        10.5,
+        side="HOME",
+        start_time="2026-11-24T23:00:00Z",
+        calibrate_fn=lambda p: 0.9 * p + 0.05,
+    )
+    p_away_cal = ml_win_prob_from_spread(
+        -6.0,
+        10.5,
+        side="AWAY",
+        start_time="2026-11-24T23:00:00Z",
+        calibrate_fn=lambda p: 0.9 * p + 0.05,
+    )
+    assert abs((p_home_cal + p_away_cal) - 1.0) < 1e-9
+
+
+def test_secondary_parlay_ranking_relaxes_same_book_thrashing(monkeypatch):
+    from src.services.ncaam_parlay_service import compute_ncaam_parlays_today
+
+    now = datetime.now(timezone.utc)
+    today_et = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    tip_5h = (now + timedelta(minutes=300)).isoformat()
+
+    # Strong mixed-book pair: evt_m1 + evt_m2 (p_win=0.72*0.72=0.5184, mixed books DK + FD)
+    # Weak same-book pair: evt_s1 + evt_s2 (p_win=0.55*0.55=0.3025, both DraftKings)
+    ml_rows = [
+        {
+            "event_id": "evt_m1",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "MixA",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -145,
+            "win_prob": 0.72,
+            "ev_per_unit": 0.21,
+            "selection": "MixA",
+            "away_team": "Opp1",
+            "home_team": "MixA",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+        {
+            "event_id": "evt_m2",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "MixB",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -145,
+            "win_prob": 0.72,
+            "ev_per_unit": 0.21,
+            "selection": "MixB",
+            "away_team": "Opp2",
+            "home_team": "MixB",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+        {
+            "event_id": "evt_s1",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "SameA",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -110,
+            "win_prob": 0.55,
+            "ev_per_unit": 0.05,
+            "selection": "SameA",
+            "away_team": "Opp3",
+            "home_team": "SameA",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+        {
+            "event_id": "evt_s2",
+            "model_version": "v2",
+            "market_type": "MONEYLINE",
+            "pick": "SameB",
+            "outcome": "PENDING",
+            "bet_line": None,
+            "price": -110,
+            "win_prob": 0.55,
+            "ev_per_unit": 0.05,
+            "selection": "SameB",
+            "away_team": "Opp4",
+            "home_team": "SameB",
+            "start_time": tip_5h,
+            "day_et": today_et,
+        },
+    ]
+
+    import src.database as db
+
+    class _CommitFakeConn(_FakeConn):
+        def commit(self):
+            pass
+
+        def cursor(self):
+            return _FakeCursor([])
+
+    def fake_exec(_conn, sql, params=None):
+        s = " ".join(sql.split()).lower()
+        if "with latest_preds as" in s:
+            return _FakeCursor(ml_rows)
+        if "select (now() at time zone 'america/new_york'" in s:
+            return _FakeCursor([(today_et,)])
+        if "from odds_snapshots" in s and "canon_book" in s:
+            return _FakeCursor([
+                {"event_id": "evt_m1", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "DraftKings", "line_value": None, "price": -145},
+                {"event_id": "evt_m2", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "FanDuel", "line_value": None, "price": -145},
+                {"event_id": "evt_s1", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "DraftKings", "line_value": None, "price": -110},
+                {"event_id": "evt_s2", "market_type": "MONEYLINE", "side": "HOME", "canon_book": "DraftKings", "line_value": None, "price": -110},
+            ])
+        return _FakeCursor([])
+
+    monkeypatch.setattr(db, "get_db_connection", lambda: _CommitFakeConn())
+    monkeypatch.setattr(db, "get_admin_db_connection", lambda: _CommitFakeConn())
+    monkeypatch.setattr(db, "_exec", fake_exec)
+
+    res = compute_ncaam_parlays_today(date=today_et, persist=False)
+    hc = res["high_confidence"]
+    assert len(hc) >= 2
+    # Secondary high_confidence no longer puts weak same_book ahead of strong mixed-book pair
+    assert {lg["event_id"] for lg in hc[0]["legs"]} == {"evt_m1", "evt_m2"}
+    assert hc[0]["same_book"] is False
+    # Official daily parlay still prefers single-book executable combo when available
+    odp = res["official_daily_parlay"]
+    assert odp is not None
+    assert odp["same_book"] is True
+    assert {lg["event_id"] for lg in odp["legs"]} == {"evt_s1", "evt_s2"}

@@ -520,37 +520,72 @@ export default function ParlayPerformanceSection({
               </div>
             </div>
 
-            {/* Individual Leg Market Hit Rates */}
+            {/* Individual Leg Market Hit Rates & Calibration */}
             <div className="space-y-2">
               <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Leg Hit Rate by Market Type
+                Leg Hit Rate &amp; Calibration by Market
               </div>
               {stats.legMarkets.length === 0 ? (
                 <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 px-3 py-2 text-slate-500">
                   No parlay legs recorded in this filter yet.
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {stats.legMarkets.map((lm) => (
-                    <div
-                      key={lm.marketKey}
-                      className="rounded-lg border border-slate-800 bg-slate-950/65 px-2.5 py-1.5 flex items-center gap-2 text-[11px]"
-                    >
-                      <span className="font-semibold text-slate-200">{lm.label}</span>
-                      <span className="font-mono text-slate-300">{lm.recordText}</span>
-                      <span
-                        className={`font-mono font-bold ${
-                          lm.decided === 0
-                            ? 'text-sky-300'
-                            : lm.winRate >= 55
-                              ? 'text-emerald-400'
-                              : 'text-slate-200'
-                        }`}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {stats.legMarkets.map((lm) => (
+                      <div
+                        key={lm.marketKey}
+                        className="rounded-xl border border-slate-800 bg-slate-950/65 px-3 py-2 flex flex-col gap-1 text-[11px]"
                       >
-                        {lm.decided > 0 ? formatPct(lm.winRate) : `${lm.pending} open`}
-                      </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-200">{lm.label}</span>
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <span className="text-slate-300">{lm.recordText}</span>
+                            <span
+                              className={`font-bold ${
+                                lm.decided === 0
+                                  ? 'text-sky-300'
+                                  : lm.winRate >= 55
+                                    ? 'text-emerald-400'
+                                    : 'text-slate-200'
+                              }`}
+                            >
+                              {lm.decided > 0 ? formatPct(lm.winRate) : `${lm.pending} open`}
+                            </span>
+                          </div>
+                        </div>
+                        {(lm.avgExpectedWinPct !== null || lm.avgImpliedWinPct !== null) && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-slate-400">
+                            <span>
+                              {lm.avgExpectedWinPct !== null ? `Exp ${formatPct(lm.avgExpectedWinPct)}` : ''}
+                              {lm.avgExpectedWinPct !== null && lm.avgImpliedWinPct !== null ? ' · ' : ''}
+                              {lm.avgImpliedWinPct !== null ? `Imp ${formatPct(lm.avgImpliedWinPct)}` : ''}
+                            </span>
+                            {lm.calibrationGapPct !== null && (
+                              <span
+                                className={`font-bold ${
+                                  lm.calibrationGapPct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {formatSignedPct(lm.calibrationGapPct)} vs model
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {stats.mlVsSpreadAudit?.summaryText && (
+                    <div
+                      className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-mono ${
+                        stats.mlVsSpreadAudit.overconfidentWarning
+                          ? 'border-amber-500/35 bg-amber-950/20 text-amber-200'
+                          : 'border-slate-800/80 bg-slate-950/50 text-slate-300'
+                      }`}
+                    >
+                      {stats.mlVsSpreadAudit.summaryText}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>

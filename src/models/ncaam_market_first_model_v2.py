@@ -2901,8 +2901,19 @@ class NCAAMMarketFirstModelV2(BaseModel):
             if all(executable_moneyline_quote(q, quote_time) for q in (best_ml_home, best_ml_away)):
                 ml_price_home, ml_price_away = best_ml_home['price'], best_ml_away['price']
                 ml_book_home, ml_book_away = best_ml_home['book'], best_ml_away['book']
-                prob_home_raw = 1.0 - self._normal_cdf(0.0, -float(mu_spread_final), float(sigma_spread))
+                ml_sigma = float(sigma_spread) * 1.06
+                prob_home_raw = 1.0 - self._normal_cdf(0.0, -float(mu_spread_final), ml_sigma)
                 prob_home, prob_away = self._binary_probabilities(prob_home_raw, is_early_season)
+                if is_early_season:
+                    ip_h = implied_prob_american(int(ml_price_home))
+                    ip_a = implied_prob_american(int(ml_price_away))
+                    if ip_h is not None and ip_a is not None and (ip_h + ip_a) > 0:
+                        mkt_p_home = float(ip_h) / float(ip_h + ip_a)
+                        diff = float(prob_home) - mkt_p_home
+                        if abs(diff) > 0.08:
+                            capped_diff = (0.08 + 0.5 * (abs(diff) - 0.08)) * (1.0 if diff > 0 else -1.0)
+                            prob_home = max(0.02, min(0.98, mkt_p_home + capped_diff))
+                            prob_away = 1.0 - prob_home
 
                 ev_home = float(ev_per_unit(prob_home, int(ml_price_home)) or 0.0)
                 ev_away = float(ev_per_unit(prob_away, int(ml_price_away)) or 0.0)
@@ -2928,7 +2939,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 wp = prob_home if side == 'HOME' else prob_away
                 ev = ev_home if side == 'HOME' else ev_away
 
-                if side == 'HOME' and is_home_fav_parlay_leg and ev_home >= 0.005:
+                if side == 'HOME' and is_home_fav_parlay_leg and ev_home >= 0.015:
                     should_persist_ml = bool(team is not None and str(team).strip() != '')
                 else:
                     # Gate Moneyline persistence strictly to curb unprofitable longshots / marginal noise
@@ -3073,21 +3084,21 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
         if ev_home is not None:
             try:
-                if float(ev_home) < 0.005:
+                if float(ev_home) < 0.015:
                     return False
             except Exception:
                 return False
 
         if fair_spread_home is not None:
             try:
-                if float(fair_spread_home) > sp - 0.5:
+                if float(fair_spread_home) > sp - 1.0:
                     return False
             except Exception:
                 pass
 
         for t in movement_tags or []:
             low = str(t or "").strip().lower()
-            if low == "contra_sharp_money" or low.startswith("reverse_steam="):
+            if low in ("contra_sharp_money", "contra_sharp_line") or low.startswith("reverse_steam="):
                 return False
         return True
 

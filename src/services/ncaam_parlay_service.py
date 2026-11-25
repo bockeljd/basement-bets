@@ -115,6 +115,59 @@ def grade_parlay_leg_from_scores(lg: dict, gr: dict) -> Optional[str]:
     return "PUSH" if diff == 0 else ("WON" if diff > 0 else "LOST")
 
 
+def _parse_leg_start_utc(val: Any) -> Optional[datetime]:
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        return val if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
+    try:
+        txt = str(val).strip()
+        if not txt:
+            return None
+        dt = datetime.fromisoformat(txt.replace("Z", "+00:00"))
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def ml_win_prob_from_spread(
+    fair_spread_home: float,
+    sigma_spread: float,
+    *,
+    side: str = "HOME",
+    start_time: Any = None,
+    is_early_season: Optional[bool] = None,
+    calibrate_fn=None,
+) -> float:
+    """Convert fair home spread into a heavy-tail, PAVA-calibrated moneyline win probability."""
+    if is_early_season is not None:
+        early = bool(is_early_season)
+    else:
+        tip_dt = _parse_leg_start_utc(start_time)
+        early = bool(tip_dt is not None and tip_dt.month in (11, 12))
+
+    base_sig = max(8.5, float(sigma_spread or 10.8))
+    ml_sigma = base_sig * (1.12 if early else 1.06)
+    p_home_raw = 0.5 * (1.0 - math.erf(float(fair_spread_home) / (ml_sigma * math.sqrt(2.0))))
+    side_up = str(side or "HOME").strip().upper()
+    p_raw = p_home_raw if side_up == "HOME" else (1.0 - p_home_raw)
+
+    if callable(calibrate_fn):
+        def _call_cal(val: float) -> float:
+            try:
+                return float(calibrate_fn(val, is_early_season=early))
+            except TypeError:
+                return float(calibrate_fn(val))
+
+        yes = _call_cal(p_raw)
+        no = _call_cal(1.0 - p_raw)
+        wp = (yes / (yes + no)) if (yes + no) > 0 else p_raw
+    else:
+        wp = p_raw
+
+    return max(0.02, min(0.98, float(wp)))
+
+
 def evaluate_value_underdog_ml_leg(
     *,
     event_id: str,
@@ -136,11 +189,14 @@ def evaluate_value_underdog_ml_leg(
             return None
         if int(conviction_sources or 0) < 2:
             return None
-        sig = max(8.0, float(sigma_spread or 10.8))
-        p_home_raw = 0.5 * (1.0 - math.erf(float(fair_spread_home) / (sig * math.sqrt(2.0))))
         side_up = str(side or "").strip().upper()
-        p_raw = p_home_raw if side_up == "HOME" else (1.0 - p_home_raw)
-        wp = float(calibrate_fn(p_raw)) if callable(calibrate_fn) else float(p_raw)
+        wp = ml_win_prob_from_spread(
+            float(fair_spread_home),
+            float(sigma_spread or 10.8),
+            side=side_up,
+            start_time=start_time,
+            calibrate_fn=calibrate_fn,
+        )
         ip = implied_prob_american(pr)
         prob_edge = wp - ip
         ev_leg = wp * (dec_from_american(pr) - 1.0) - (1.0 - wp)
@@ -194,19 +250,8 @@ def _safe_json_dict(val: Any) -> Optional[dict]:
     return None
 
 
-def _parse_leg_start_utc(val: Any) -> Optional[datetime]:
-    if not val:
-        return None
-    if isinstance(val, datetime):
-        return val if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
-    try:
-        txt = str(val).strip()
-        if not txt:
-            return None
-        dt = datetime.fromisoformat(txt.replace("Z", "+00:00"))
-        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return None
+def _combo_pair_key(combo: dict) -> str:
+    return "|".join(sorted(str(lg.get("event_id") or "") for lg in (combo.get("legs") or [])))
 
 
 def _dtp_has_contra_risk(dtp_entry: Optional[Dict[str, Any]]) -> bool:
@@ -436,7 +481,12 @@ def build_three_leg_high_payout_parlays(
                 })
 
     candidates.sort(
-        key=lambda x: (1 if x.get("same_book") else 0, x["ev"], x["p_win"]),
+        key=lambda x: (
+            round(float(x["ev"]) + (0.015 if x.get("same_book") else 0.0), 3),
+            round(float(x["p_win"]), 3),
+            1 if x.get("same_book") else 0,
+            _combo_pair_key(x),
+        ),
         reverse=True,
     )
     accepted: List[dict] = []
@@ -723,9 +773,13 @@ def compute_ncaam_parlays_today(
                             sigma_raw = ctx_dict.get("sigma_spread")
                     else:
                         fair_sp_home = home_sp
-                sigma_val = max(8.0, float(sigma_raw or 10.8))
-                p_raw = 0.5 * (1.0 - math.erf(float(fair_sp_home) / (sigma_val * math.sqrt(2.0))))
-                wp_cal = float(cal_model._calibrate_win_prob(p_raw))
+                wp_cal = ml_win_prob_from_spread(
+                    float(fair_sp_home),
+                    float(sigma_raw or 10.8),
+                    side="HOME",
+                    start_time=hr.get("start_time"),
+                    calibrate_fn=cal_model._calibrate_win_prob,
+                )
                 ev_leg = wp_cal * (dec_from_american(ml_price) - 1.0) - (1.0 - wp_cal)
                 is_sweet = (
                     (-9.5 <= home_sp <= -4.5)
@@ -1214,19 +1268,39 @@ def compute_ncaam_parlays_today(
     if _strategy == "home_fav":
         sorted_by_win = sorted(
             combos_in_band,
-            key=lambda x: (1 if x.get("same_book") else 0, int(x.get("sweet_spot_legs") or 0), round(float(x["p_win"]), 3), x["ev"]),
+            key=lambda x: (
+                int(x.get("sweet_spot_legs") or 0),
+                round(float(x["p_win"]) + (0.015 if x.get("same_book") else 0.0), 3),
+                round(float(x["ev"]) + (0.01 if x.get("same_book") else 0.0), 3),
+                1 if x.get("same_book") else 0,
+                _combo_pair_key(x),
+            ),
             reverse=True,
         )
     else:
         sorted_by_win = sorted(
             combos_in_band,
-            key=lambda x: (1 if x.get("same_book") else 0, x["p_win"], x["ev"]),
+            key=lambda x: (
+                round(float(x["p_win"]) + (0.015 if x.get("same_book") else 0.0), 3),
+                round(float(x["ev"]) + (0.01 if x.get("same_book") else 0.0), 3),
+                1 if x.get("same_book") else 0,
+                _combo_pair_key(x),
+            ),
             reverse=True,
         )
     high_conf, used_eids = get_independent_combos(sorted_by_win, 5)
 
     plus_money = [c for c in combos_in_band if (c.get("american_odds") or 0) >= 100]
-    sorted_plus_money = sorted(plus_money, key=lambda x: (1 if x.get("same_book") else 0, x["ev"], x["p_win"]), reverse=True)
+    sorted_plus_money = sorted(
+        plus_money,
+        key=lambda x: (
+            round(float(x["ev"]) + (0.015 if x.get("same_book") else 0.0), 3),
+            round(float(x["p_win"]), 3),
+            1 if x.get("same_book") else 0,
+            _combo_pair_key(x),
+        ),
+        reverse=True,
+    )
     payout_band, payout_eids = get_independent_combos(sorted_plus_money, 5, avoid_eids=used_eids)
 
     if len(payout_band) < 5:
@@ -1303,7 +1377,8 @@ def compute_ncaam_parlays_today(
                 official_pool = [c for c in high_conf if _combo_eligible_for_official(c)] or [
                     c for c in payout_band if _combo_eligible_for_official(c)
                 ]
-                chosen = official_pool[0] if official_pool else None
+                same_book_official = [c for c in official_pool if c.get("same_book")]
+                chosen = (same_book_official[0] if same_book_official else (official_pool[0] if official_pool else None))
 
                 if chosen is not None:
                     earliest_tip = None

@@ -146,4 +146,60 @@ describe('parlayPerformance analytics helper', () => {
     expect(res.pending).toBe(1);
     expect(res.settled).toBe(0);
   });
+
+  it('audits Moneyline vs Spread/Total leg calibration and overconfidence gaps', () => {
+    const auditReport = {
+      items: [
+        {
+          id: 'a1',
+          date_et: '2026-11-20',
+          season: '2026-27',
+          american_odds: 150,
+          outcome: 'LOST',
+          roi_per_unit: -1.0,
+          legs: [
+            { event_id: 'e1', market_type: 'MONEYLINE', price: -200, win_prob: 0.72, outcome: 'LOST' },
+            { event_id: 'e2', market_type: 'SPREAD', price: -110, win_prob: 0.56, outcome: 'WON' },
+          ],
+        },
+        {
+          id: 'a2',
+          date_et: '2026-11-21',
+          season: '2026-27',
+          american_odds: 160,
+          outcome: 'LOST',
+          roi_per_unit: -1.0,
+          legs: [
+            { event_id: 'e3', market_type: 'MONEYLINE', price: -180, win_prob: 0.70, outcome: 'LOST' },
+            { event_id: 'e4', market_type: 'TOTAL', price: -110, win_prob: 0.56, outcome: 'WON' },
+          ],
+        },
+        {
+          id: 'a3',
+          date_et: '2026-11-22',
+          season: '2026-27',
+          american_odds: 155,
+          outcome: 'WON',
+          roi_per_unit: 1.55,
+          legs: [
+            { event_id: 'e5', market_type: 'MONEYLINE', price: -190, win_prob: 0.71, outcome: 'WON' },
+            { event_id: 'e6', market_type: 'SPREAD', price: -110, win_prob: 0.58, outcome: 'WON' },
+          ],
+        },
+      ],
+    };
+
+    const res = computeParlayAnalytics(auditReport, { selectedSeason: '2026-27', windowFilter: 'ALL' });
+    const mlMkt = res.legMarkets.find((m) => m.marketKey === 'MONEYLINE');
+    expect(mlMkt.winRate).toBeCloseTo(33.3, 1);
+    expect(mlMkt.avgExpectedWinPct).toBeCloseTo(71.0, 1);
+    expect(mlMkt.calibrationGapPct).toBeCloseTo(-37.7, 1);
+    expect(mlMkt.avgImpliedWinPct).toBeGreaterThan(64);
+
+    expect(res.mlVsSpreadAudit.moneyline.recordText).toBe('1-2');
+    expect(res.mlVsSpreadAudit.spreadTotal.recordText).toBe('3-0');
+    expect(res.mlVsSpreadAudit.overconfidentWarning).toBe(true);
+    expect(res.mlVsSpreadAudit.summaryText).toContain('ML 1-2');
+    expect(res.mlVsSpreadAudit.summaryText).toContain('Spread/Total 3-0');
+  });
 });
