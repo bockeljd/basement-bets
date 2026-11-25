@@ -258,12 +258,22 @@ function App() {
         } catch (e) { }
     }, []);
 
+    // Today uses the bankroll for stake sizing. The full Actuals dashboard can wait.
+    useEffect(() => {
+        if (showLogin || page !== 'today' || didLoad.current) return;
+        const controller = new AbortController();
+        api.get('/api/financials', { signal: controller.signal })
+            .then(({ data }) => { if (!controller.signal.aborted && data) setFinancials(data); })
+            .catch(() => {});
+        return () => controller.abort();
+    }, [showLogin, page]);
+
     // StrictMode guard - prevents double initial fetch in development
     const didLoad = useRef(false);
 
     useEffect(() => {
         // If user is not authenticated, don't fetch dashboard yet.
-        if (showLogin) return;
+        if (showLogin || page !== 'actuals') return;
         if (didLoad.current) return;
         didLoad.current = true;
 
@@ -371,7 +381,7 @@ function App() {
 
         // expose for child components (Transactions edit) without prop drilling
         window.__BB_RELOAD_DASHBOARD__ = reloadDashboard;
-    }, [showLogin]);
+    }, [showLogin, page]);
 
     const [sbImportBanner, setSbImportBanner] = useState(null);
 
@@ -441,7 +451,7 @@ function App() {
         );
     }
 
-    if (error) return (
+    if (error && page === 'actuals') return (
         <div className="flex flex-col items-center justify-center min-h-screen text-red-500 bg-slate-950 p-6 text-center">
             <AlertCircle size={48} className="mb-4" />
             <h2 className="text-2xl font-bold mb-2">Connection Error</h2>
@@ -484,7 +494,7 @@ function App() {
 
     // Actuals sub-tab state moved above (before any conditional returns) to avoid hook-order issues.
 
-    if (!stats && !(loading && page === 'today')) {
+    if (!stats && page === 'actuals') {
         if (loading) {
             return <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white font-mono animate-pulse">Loading Basement Bets...</div>;
         }

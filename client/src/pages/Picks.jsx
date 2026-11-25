@@ -105,6 +105,8 @@ export default function Picks() {
   const [gradeMessage, setGradeMessage] = useState(null);
   const [yesterdayReco, setYesterdayReco] = useState(null);
   const [liveCalibration, setLiveCalibration] = useState(null);
+  const [parlayError, setParlayError] = useState(false);
+  const parlayRequest = useRef(0);
   const [parlayReport, setParlayReport] = useState(null);
   const [modelLearning, setModelLearning] = useState(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
@@ -126,13 +128,27 @@ export default function Picks() {
   const focusTabRefs = useRef({});
   const [sortConfig, setSortConfig] = useState({ key: 'created_at', direction: 'desc' });
 
+  const loadParlays = async () => {
+    const request = ++parlayRequest.current;
+    setParlayError(false);
+    try {
+      const { data } = await api.get('/api/ncaam/parlays/performance-report', {
+        params: { days: 400, _t: Date.now() },
+      });
+      if (request === parlayRequest.current) setParlayReport(data);
+    } catch {
+      if (request === parlayRequest.current) setParlayError(true);
+    }
+  };
+
   const load = async () => {
     setLoading(true);
     setErr(null);
     const cacheHeaders = { 'Cache-Control': 'no-cache' };
+    void loadParlays();
     const ts = Date.now();
     try {
-      const [res, ysRes, liveCalRes, parlayRes, learningRes] = await Promise.all([
+      const [res, ysRes, liveCalRes, learningRes] = await Promise.all([
         api.get('/api/research/history', {
           params: { limit: 20000, lookback_days: 400, _t: ts },
           headers: cacheHeaders,
@@ -150,12 +166,6 @@ export default function Picks() {
           })
           .catch(() => ({ data: null })),
         api
-          .get('/api/ncaam/parlays/performance-report', {
-            params: { days: 400, _t: ts },
-            headers: cacheHeaders,
-          })
-          .catch(() => ({ data: null })),
-        api
           .get('/api/ncaam/model-learning', {
             params: { _t: ts },
             headers: cacheHeaders,
@@ -166,7 +176,6 @@ export default function Picks() {
       let rows = res.data || [];
       setYesterdayReco(ysRes?.data || null);
       setLiveCalibration(liveCalRes?.data || null);
-      setParlayReport(parlayRes?.data || null);
       setModelLearning(learningRes?.data || null);
 
       if (!(Array.isArray(rows) && rows.length > 0)) {
@@ -175,6 +184,8 @@ export default function Picks() {
           .catch(() => ({ data: [] }));
         rows = n.data || [];
       }
+
+      setHistory(rows);
 
       // Auto-grade once per 15-minute cooldown if yesterday or finished today (>3.5h since tip) still has open picks
       try {
@@ -201,7 +212,8 @@ export default function Picks() {
             params: { backfill_pending: true, backfill_days: 7, max_grade_rows: 1000 },
           });
           const ts2 = Date.now();
-          const [res2, ys2, liveCal2, parlay2] = await Promise.all([
+          void loadParlays();
+          const [res2, ys2, liveCal2] = await Promise.all([
             api.get('/api/research/history', {
               params: { limit: 20000, lookback_days: 400, _t: ts2 },
               headers: cacheHeaders,
@@ -218,17 +230,10 @@ export default function Picks() {
                 headers: cacheHeaders,
               })
               .catch(() => ({ data: liveCalRes?.data || null })),
-            api
-              .get('/api/ncaam/parlays/performance-report', {
-                params: { days: 400, _t: ts2 },
-                headers: cacheHeaders,
-              })
-              .catch(() => ({ data: parlayRes?.data || null })),
           ]);
           rows = res2.data || rows;
           if (ys2?.data) setYesterdayReco(ys2.data);
           if (liveCal2?.data) setLiveCalibration(liveCal2.data);
-          if (parlay2?.data) setParlayReport(parlay2.data);
         }
       } catch (e) {
         // non-blocking
@@ -2235,7 +2240,7 @@ export default function Picks() {
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs font-mono shrink-0">
                 <span className="px-2.5 py-1 rounded-full border border-slate-700 bg-slate-950/80 text-slate-200 font-bold">
-                  {parlayAnalytics.recordText}
+                  {parlayReport ? parlayAnalytics.recordText : '—'}
                 </span>
                 {parlayAnalytics.settled > 0 ? (
                   <span
@@ -2255,12 +2260,14 @@ export default function Picks() {
               </div>
             </div>
 
-            <ParlayPerformanceSection
+            {parlayError && <p role="alert">Couldn’t refresh parlay results. Use Refresh to retry.</p>}
+            {!parlayReport && !parlayError && <p role="status">Loading parlay results…</p>}
+            {parlayReport && <ParlayPerformanceSection
               parlayAnalytics={parlayAnalytics}
               selectedSport={selectedSport}
               onSwitchToNcaam={() => handleSportChange('NCAAM')}
               filterSummary={`${sportLabel} • ${seasonLabel} • ${windowLabel}`}
-            />
+            />}
           </section>
         )}
       </div>
