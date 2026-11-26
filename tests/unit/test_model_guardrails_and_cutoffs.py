@@ -216,3 +216,46 @@ def test_1h_early_season_requires_consensus_and_penalizes_heavy_juice(monkeypatc
         model_ctx={"game_month": 11, "min_rec_games": 4, "is_early_season": True, "agree_count": 2, "agree_count_total": 2},
     )
     assert not any(r["market"] == "TOTAL_1H" for r in recs_marginal_juice)
+
+
+def test_away_fav_tightening_and_extreme_unconfirmed_ev_guard(monkeypatch):
+    model = NCAAMMarketFirstModelV2()
+    model._get_archetype_stats = lambda k: {"n": 80, "mean": 0.03, "sd": 0.10}
+    monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
+
+    # Tightened Away Favorite gates: base 2.0% + 2.4% (< 5.5) = 4.4%, base 2.0% + 3.2% (>= 5.5) = 5.2%, or +1.2% with sharp
+    small_road_fav_low = {
+        "market": "SPREAD",
+        "side": "away",
+        "ev": 0.041,
+        "edge_points": 1.6,
+        "win_prob_lb10": 0.525,
+        "_agree_count": 2,
+    }
+    assert model._passes_publish_gates(small_road_fav_low, 3.5, True) is False
+    small_road_fav_ok = {**small_road_fav_low, "ev": 0.045}
+    assert model._passes_publish_gates(small_road_fav_ok, 3.5, True) is True
+
+    big_road_fav_low = {**small_road_fav_low, "ev": 0.049}
+    assert model._passes_publish_gates(big_road_fav_low, 7.5, True) is False
+    big_road_fav_sharp = {**small_road_fav_low, "ev": 0.035, "movement_tags": ["rlm_confirmed"]}
+    assert model._passes_publish_gates(big_road_fav_sharp, 7.5, True) is True
+
+    # Unconfirmed extreme EV (>12%) without sharp signal or 3-model consensus is blocked
+    extreme_trap = {
+        "market": "SPREAD",
+        "side": "home",
+        "ev": 0.14,
+        "edge_points": 2.4,
+        "win_prob_lb10": 0.55,
+        "_agree_count": 2,
+        "movement_tags": [],
+    }
+    assert model._passes_publish_gates(extreme_trap, -4.5, True) is False
+    assert "requires sharp-book or 3-model confirmation" in extreme_trap["_publish_pass_reason"]
+
+    # Confirmed by 3-model consensus or sharp backing -> allowed
+    extreme_3of3 = {**extreme_trap, "_agree_count": 3}
+    assert model._passes_publish_gates(extreme_3of3, -4.5, True) is True
+    extreme_sharp = {**extreme_trap, "movement_tags": ["rlm_confirmed"]}
+    assert model._passes_publish_gates(extreme_sharp, -4.5, True) is True

@@ -1455,7 +1455,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
         effective_cap_spread = self.CAP_SPREAD
         if (os.getenv('NCAAM_CAP_SPREAD') is None) and agree_count >= 2:
             if is_early_season:
-                effective_cap_spread = max(self.CAP_SPREAD, 2.2 if agree_count >= 3 else self.CAP_SPREAD)
+                effective_cap_spread = max(self.CAP_SPREAD, 2.5 if agree_count >= 3 else 2.35)
             else:
                 effective_cap_spread = max(self.CAP_SPREAD, 3.2)
         if (os.getenv('NCAAM_CAP_SPREAD') is None) and game_month == 11 and agree_count < 2:
@@ -1553,7 +1553,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         effective_cap_total = self.CAP_TOTAL
         if os.getenv('NCAAM_CAP_TOTAL') is None:
             if is_early_season and self.CAP_TOTAL <= self.DEFAULT_CAP_TOTAL:
-                effective_cap_total = min(self.CAP_TOTAL, 2.2 if game_month == 11 else 2.6)
+                if agree_count_total >= 2:
+                    effective_cap_total = 3.0 if agree_count_total >= 3 else 2.75
+                else:
+                    effective_cap_total = min(self.CAP_TOTAL, 2.2 if game_month == 11 else 2.6)
             elif agree_count_total >= 2 and not is_early_season:
                 effective_cap_total = max(self.CAP_TOTAL, 4.5 if agree_count_total >= 3 else 3.8)
 
@@ -1605,7 +1608,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * over_damp)
                 eff_cap_tot_use = min(
                     effective_cap_total,
-                    (2.5 if agree_count_total >= 3 else 2.25) if (game_month == 11 or low_sample_teams) else 3.0,
+                    (2.85 if agree_count_total >= 3 else 2.65) if (game_month == 11 or low_sample_teams) else 3.0,
                 )
             else:
                 eff_cap_tot_use = effective_cap_total
@@ -1903,10 +1906,10 @@ class NCAAMMarketFirstModelV2(BaseModel):
         ):
             mkt_sp_pos = float(mu_market_spread)
             if mkt_sp_pos >= 5.5 or is_early_season:
-                mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.65)
+                mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.60)
                 sigma_spread *= 1.035
             else:
-                mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.85)
+                mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.75)
 
         if game_month == 11 and has_spread:
             mu_spread_final += 0.25 * (float(raw_sp) - mu_spread_final)
@@ -3378,11 +3381,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 # Road favorite gate: laying points away demands stronger EV unless backed by sharp money
                 if side_lower == "away" and float(market_line_home) > 0.0 and os.getenv("NCAAM_DISABLE_AWAY_FAV_GATE") is None:
                     if has_sharp:
-                        min_ev += 0.008
+                        min_ev += 0.012
                     elif float(market_line_home) >= 5.5:
-                        min_ev += 0.022
+                        min_ev += 0.032
                     else:
-                        min_ev += 0.014
+                        min_ev += 0.024
             except Exception:
                 pass
         elif market == "TOTAL" and side_lower == "over" and os.getenv("NCAAM_DISABLE_OVER_DAMP") is None:
@@ -3403,6 +3406,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
         rec["gate_ev"] = ev
         if ev < min_ev:
             rec["_publish_pass_reason"] = f"EV {ev:+.1%} below required {min_ev:.1%}"
+            return False
+
+        max_unconfirmed_ev = float(os.getenv("PUBLISH_MAX_UNCONFIRMED_EV", "0.12"))
+        agree_for_mkt = agree_tot if market == "TOTAL" else agree_sp
+        if (
+            market in ("SPREAD", "TOTAL")
+            and ev > max_unconfirmed_ev
+            and not has_sharp
+            and (agree_for_mkt is None or int(agree_for_mkt) < 3)
+        ):
+            rec["_publish_pass_reason"] = f"Extreme EV {ev:+.1%} requires sharp-book or 3-model confirmation"
             return False
 
         lb10 = rec.get("win_prob_lb10")
