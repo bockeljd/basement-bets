@@ -1196,8 +1196,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
         </div>
       </div>
 
-      {/* Show a compact alert ONLY when NCAAM KenPom ratings need an update */}
-      {leagueFilter === 'NCAAM' && !healthSummary.kenpomOk && !loading && (
+      {/* Show a compact alert ONLY when NCAAM KenPom ratings actually loaded and need an update */}
+      {leagueFilter === 'NCAAM' && !error && dataHealth.length > 0 && !healthSummary.kenpomOk && !loading && (
         <div className="rounded-xl border border-amber-500/35 bg-amber-950/25 px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200">
           <span>KenPom ratings need a quick update for full model accuracy today.</span>
           <div className="flex items-center gap-2">

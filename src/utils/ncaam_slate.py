@@ -62,8 +62,8 @@ def team_key_sql(col: str) -> str:
         src_sql = src.replace("'", "''")
         dst_sql = dst.replace("'", "''")
         expr = f"replace({expr}, '{src_sql}', '{dst_sql}')"
-    expr = f"regexp_replace({expr}, '^st\\.?\\s+', 'saint ')"
-    expr = f"regexp_replace({expr}, '(^|\\s)(mt\\.?|mount)\\s+st\\.?\\s+', '\\1mount saint ', 'g')"
+    expr = f"regexp_replace({expr}, '^st\\.{{0,1}}\\s+', 'saint ')"
+    expr = f"regexp_replace({expr}, '(^|\\s)(mt\\.{{0,1}}|mount)\\s+st\\.{{0,1}}\\s+', '\\1mount saint ', 'g')"
     return f"regexp_replace({expr}, '[^a-z0-9]+', '', 'g')"
 
 

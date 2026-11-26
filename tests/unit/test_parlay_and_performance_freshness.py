@@ -1226,8 +1226,13 @@ def test_ncaam_slate_team_key_normalization_and_sql():
     assert normalize_ncaam_team_key("NC State") != normalize_ncaam_team_key("North Carolina")
 
     sql_expr = team_key_sql("e.home_team")
-    # Must use Postgres POSIX regex syntax (never PCRE \b) and never bare '%'
+    # Must use Postgres POSIX regex syntax (never PCRE \b) and never '?' (turns into %s in _exec) or bare '%'
     assert "\\b" not in sql_expr
+    assert "?" not in sql_expr
     assert "%" not in sql_expr
+    assert "?" not in SLATE_CTE
     assert "LEAST(home_key, away_key)" in SLATE_CTE
+    # Simulate _exec's '?' -> '%s' substitution and verify only the 2 BETWEEN date params remain
+    transformed = SLATE_CTE.replace("?", "%s").replace("%%", "")
+    assert transformed.count("%s") == 2
 
