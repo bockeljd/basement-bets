@@ -126,11 +126,13 @@ export default function Picks({ onAddBet }) {
   const [historyRowLimit, setHistoryRowLimit] = useState(100);
   const [showExplainer, setShowExplainer] = useState(false);
   const [activeSection, setActiveSection] = useState('core');
+  const [activeSubView, setActiveSubView] = useState('overview'); // overview | diagnostics | ledger
   const selectSection = (section) => {
     setActiveSection(section);
     if (section === 'parlays') setSelectedSport('NCAAM');
     if (section === 'smart') setHistoryScope('all');
     if (section === 'core') setHistoryScope('top6');
+    setActiveSubView('overview');
     setMarketFilter('ALL');
     setConfFilter('ALL');
     setOutcomeFilter('ALL');
@@ -411,13 +413,15 @@ export default function Picks({ onAddBet }) {
   // 1. Filter by Time Window across all sports first (keeps "By Sport" comparison aligned)
   const windowAllHistory = useMemo(() => {
     const cutoff =
-      windowFilter === '90'
-        ? etDaysAgoIso(90)
-        : windowFilter === '30'
-          ? etDaysAgoIso(30)
-          : windowFilter === '7'
-            ? etDaysAgoIso(7)
-            : null;
+      windowFilter === 'ERA'
+        ? '2026-11-16'
+        : windowFilter === '90'
+          ? etDaysAgoIso(90)
+          : windowFilter === '30'
+            ? etDaysAgoIso(30)
+            : windowFilter === '7'
+              ? etDaysAgoIso(7)
+              : null;
 
     if (!cutoff) return recommendedHistory;
     return recommendedHistory.filter((h) => {
@@ -574,9 +578,20 @@ export default function Picks({ onAddBet }) {
   }, [scopedHistory]);
 
   const parlayAnalytics = useMemo(
-    () => computeParlayAnalytics(parlayReport, { selectedSeason, windowFilter }),
+    () => computeParlayAnalytics(parlayReport, { selectedSeason, windowFilter: windowFilter === 'ERA' ? 'ALL' : windowFilter }),
     [parlayReport, selectedSeason, windowFilter]
   );
+
+  const sectionSummaries = useMemo(() => {
+    const top6Pool = selectTopPicksPerDay(sportSeasonWindowHistory, 6);
+    const coreRows = top6Pool.filter((h) => performanceGroup(h) === 'core');
+    const smartRows = sportSeasonWindowHistory.filter((h) => performanceGroup(h) === 'smart');
+    return {
+      core: computeRecordStats(coreRows),
+      smart: computeRecordStats(smartRows),
+      parlays: parlayAnalytics,
+    };
+  }, [sportSeasonWindowHistory, parlayAnalytics]);
 
   const executiveMetrics = useMemo(() => {
     const graded = (scopedHistory || [])
@@ -889,7 +904,11 @@ export default function Picks({ onAddBet }) {
   };
 
   const windowLabel =
-    windowFilter === 'ALL' ? 'All Time' : `Last ${windowFilter} Days`;
+    windowFilter === 'ALL'
+      ? 'All Time'
+      : windowFilter === 'ERA'
+        ? 'Nov 16+ Guarded Era'
+        : `Last ${windowFilter} Days`;
   const sportLabel = selectedSport === 'ALL' ? 'All Sports' : selectedSport;
   const seasonLabel = formatSeasonLabel(selectedSeason);
   const confLabelMap = {
@@ -1110,7 +1129,7 @@ export default function Picks({ onAddBet }) {
         </div>
       )}
 
-      {/* Section Focus Switcher + Unified Visual Filter Toolbar */}
+      {/* Section Focus Switcher with Live Portfolio Summary Pills */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
         <div
           role="tablist"
@@ -1118,11 +1137,16 @@ export default function Picks({ onAddBet }) {
           className="perf-tablist border-slate-800/90"
         >
           {[
-            { id: 'core', label: 'Core Picks' },
-            { id: 'smart', label: 'Smart Risk' },
-            { id: 'parlays', label: 'Official Parlays' },
+            { id: 'core', label: 'Core Picks', stats: sectionSummaries.core },
+            { id: 'smart', label: 'Smart Risk', stats: sectionSummaries.smart },
+            { id: 'parlays', label: 'Official Parlays', stats: sectionSummaries.parlays, isParlay: true },
           ].map((tab, idx, arr) => {
             const active = activeSection === tab.id;
+            const st = tab.stats;
+            const recStr = st
+              ? `${st.wins || 0}-${st.losses || 0}${(st.pushes || 0) > 0 ? `-${st.pushes}` : ''}`
+              : null;
+            const hasSettled = Boolean(st && st.settled > 0);
             const onKeyDown = (e) => {
               let nextIdx = null;
               if (e.key === 'ArrowRight') nextIdx = (idx + 1) % arr.length;
@@ -1133,7 +1157,9 @@ export default function Picks({ onAddBet }) {
                 e.preventDefault();
                 const targetTab = arr[nextIdx];
                 selectSection(targetTab.id);
-                focusTabRefs.current[targetTab.id]?.focus();
+                const el = focusTabRefs.current[targetTab.id];
+                el?.focus();
+                el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
               }
             };
             return (
@@ -1145,19 +1171,31 @@ export default function Picks({ onAddBet }) {
                 id={`perf-focus-tab-${tab.id}`}
                 role="tab"
                 type="button"
-                aria-controls="perf-focus-panel"
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
                 onKeyDown={onKeyDown}
-                onClick={() => selectSection(tab.id)}
+                onClick={(e) => {
+                  selectSection(tab.id);
+                  e.currentTarget.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+                }}
                 className="perf-tab text-xs sm:text-sm"
               >
                 <span>{tab.label}</span>
+                {hasSettled && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md border font-mono text-[10px] font-bold ${
+                      st.profitUnits >= 0
+                        ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300'
+                        : 'border-rose-500/35 bg-rose-500/15 text-rose-300'
+                    }`}
+                  >
+                    {recStr} · {formatUnits(st.profitUnits)}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
-
       </div>
 
       {/* Unified Visual Filter Toolbar (only 1 dropdown: Season) */}
@@ -1343,7 +1381,7 @@ export default function Picks({ onAddBet }) {
             <div className="grid grid-cols-4 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
               {[
                 { val: 'ALL', label: 'All' },
-                { val: '90', label: '90d' },
+                { val: 'ERA', label: 'Nov 16+' },
                 { val: '30', label: '30d' },
                 { val: '7', label: '7d' },
               ].map((opt) => {
@@ -1411,9 +1449,15 @@ export default function Picks({ onAddBet }) {
         {/* GROUP 1: CORE MODEL DATA & INSIGHTS */}
         {activeSection !== 'parlays' && (
           <section aria-labelledby="core-group-heading" className="space-y-6">
-            <div className="rounded-2xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/10 via-slate-900/70 to-indigo-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div
+              className={`rounded-2xl border px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                scopedStats.profitUnits >= 0
+                  ? 'border-emerald-500/25 bg-gradient-to-r from-emerald-500/10 via-slate-900/75 to-indigo-500/10'
+                  : 'border-slate-700/70 bg-gradient-to-r from-slate-900/90 via-slate-900/75 to-indigo-500/10'
+              }`}
+            >
               <div className="flex items-start gap-3">
-                <span className="mt-0.5 p-2 rounded-xl border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 shrink-0">
+                <span className="mt-0.5 p-2 rounded-xl border border-indigo-400/35 bg-indigo-500/15 text-indigo-300 shrink-0">
                   <Target className="w-4 h-4" aria-hidden="true" />
                 </span>
                 <div>
@@ -1421,7 +1465,7 @@ export default function Picks({ onAddBet }) {
                     {activeSection === 'smart' ? 'Smart Risk' : 'Core'} straight bets
                   </h2>
                   <p className="text-xs text-slate-300/90">
-                    Results assume one unit risked per pick.
+                    Flat 1u tracking • Use the view tabs below to inspect leak diagnostics or individual picks.
                   </p>
                 </div>
               </div>
@@ -1444,237 +1488,286 @@ export default function Picks({ onAddBet }) {
               </div>
             </div>
 
-            {/* Top KPI Summary Cards + Actionable Key Takeaways */}
-            <div className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {/* Card 1: Net Profit & ROI + Inline Equity Sparkline */}
-          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
-                  <span>Net Profit</span>
-                </div>
-                <div
-                  className={`perf-kpi-value font-extrabold font-mono ${
-                    scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                  }`}
+            {/* Clean Sub-View Navigation (Overview / Diagnostics & Leaks / Pick Ledger) */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div role="tablist" aria-label="Performance detail view" className="perf-tablist border-slate-800/90">
+                {[
+                  { id: 'overview', label: 'Overview & Leak Radar' },
+                  { id: 'diagnostics', label: 'Diagnostics & Guardrails' },
+                  { id: 'ledger', label: `Pick Ledger (${filteredAndSortedTableRows.length.toLocaleString()})` },
+                ].map((sv) => {
+                  const isSel = activeSubView === sv.id;
+                  return (
+                    <button
+                      key={sv.id}
+                      id={`perf-subview-tab-${sv.id}`}
+                      role="tab"
+                      type="button"
+                      aria-selected={isSel}
+                      onClick={(e) => {
+                        setActiveSubView(sv.id);
+                        e.currentTarget.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+                      }}
+                      className="perf-tab text-xs sm:text-sm"
+                    >
+                      {sv.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedSport === 'NCAAM' && windowFilter !== 'ERA' && sectionSummaries.core.settled > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setWindowFilter('ERA')}
+                  className="text-xs font-semibold text-indigo-300 hover:text-indigo-200 cursor-pointer"
                 >
-                  {formatUnits(scopedStats.profitUnits)}
+                  Filter Nov 16+ Guarded Era →
+                </button>
+              )}
+            </div>
+
+            {/* Top KPI Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              {/* Card 1: Net Profit & ROI + Inline Equity Sparkline */}
+              <article
+                className="perf-kpi-card p-5 flex flex-col justify-between gap-3"
+                data-tone={scopedStats.settled === 0 ? 'neutral' : scopedStats.profitUnits >= 0 ? 'pos' : 'neg'}
+              >
+                <div className="perf-kpi-top">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      <TrendingUp className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+                      <span>Net Profit</span>
+                    </div>
+                    <div
+                      className={`perf-kpi-value font-extrabold font-mono ${
+                        scopedStats.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {formatUnits(scopedStats.profitUnits)}
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      {scopedStats.settled > 0 ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className={`font-mono font-semibold ${
+                              scopedStats.roiPct >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                            }`}
+                          >
+                            {formatSignedPct(scopedStats.roiPct)} ROI
+                          </span>
+                          <span className="text-slate-600">·</span>
+                          <span>1u flat</span>
+                        </span>
+                      ) : (
+                        'Waiting on finished games'
+                      )}
+                    </div>
+                  </div>
+                  {renderEquitySparkline(executiveMetrics.sparkPoints, scopedStats.profitUnits >= 0)}
                 </div>
-                <div className="text-xs text-slate-400">
-                  {scopedStats.settled > 0 ? (
-                    <span className="inline-flex items-center gap-1.5">
+                {scopedStats.settled > 0 && (
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono pt-1">
+                    <div className={`rounded-lg border px-2.5 py-1 flex items-center justify-between ${scopedStats.profitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
+                      <span className="font-sans text-[10px] text-slate-300">1u Flat</span>
+                      <span className="font-bold">{formatUnits(scopedStats.profitUnits)}</span>
+                    </div>
+                    <div className={`rounded-lg border px-2.5 py-1 flex items-center justify-between ${weightedProfitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
+                      <span className="font-sans text-[10px] text-slate-300">Tier-Sized</span>
+                      <span className="font-bold">{formatUnits(weightedProfitUnits)}</span>
+                    </div>
+                  </div>
+                )}
+              </article>
+
+              {/* Card 2: Win Rate & Record */}
+              <article
+                className="perf-kpi-card p-5 flex flex-col justify-between gap-3"
+                data-tone={scopedStats.decided === 0 ? 'neutral' : scopedStats.winRate >= 52.38 ? 'pos' : 'neg'}
+              >
+                <div className="perf-kpi-top">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      <Target className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
+                      <span>Win Rate &amp; Record</span>
+                    </div>
+                    <div className="flex items-baseline gap-2.5">
                       <span
-                        className={`font-mono font-semibold ${
-                          scopedStats.roiPct >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                        className={`perf-kpi-value font-extrabold font-mono ${
+                          scopedStats.decided === 0
+                            ? 'text-slate-300'
+                            : scopedStats.winRate >= 52.38
+                              ? 'text-emerald-400'
+                              : 'text-rose-400'
                         }`}
                       >
-                        {formatSignedPct(scopedStats.roiPct)} ROI
+                        {scopedStats.decided > 0 ? `${scopedStats.winRate.toFixed(1)}%` : '—'}
                       </span>
-                      <span className="text-slate-600">·</span>
-                      <span>1u flat</span>
+                      <span className="text-sm font-mono font-bold text-slate-200">
+                        {scopedStats.wins}-{scopedStats.losses}
+                        {scopedStats.pushes > 0 ? `-${scopedStats.pushes}` : ''}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      {breakEvenDelta === null
+                        ? 'Break-even at -110 odds is 52.4%'
+                        : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% · ${scopedStats.settled.toLocaleString()} graded`}
+                    </div>
+                  </div>
+                  {scopedStats.pending > 0 && (
+                    <span className="px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-[10px] font-mono text-slate-300 shrink-0 self-start">
+                      {scopedStats.pending} open
                     </span>
-                  ) : (
-                    'Waiting on finished games'
                   )}
                 </div>
-              </div>
-              {renderEquitySparkline(executiveMetrics.sparkPoints, scopedStats.profitUnits >= 0)}
-            </div>
-            {scopedStats.settled > 0 && (
-              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono pt-1">
-                <div className={`rounded-lg border px-2.5 py-1 flex items-center justify-between ${scopedStats.profitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
-                  <span className="font-sans text-[10px] text-slate-300">1u Flat</span>
-                  <span className="font-bold">{formatUnits(scopedStats.profitUnits)}</span>
+                <div className="space-y-1">
+                  <div className="relative h-2.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        scopedStats.decided === 0
+                          ? 'bg-slate-600'
+                          : scopedStats.winRate >= 52.38
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                            : 'bg-gradient-to-r from-rose-500 to-amber-500'
+                      }`}
+                      style={{ width: `${scopedStats.decided > 0 ? Math.max(0, Math.min(100, scopedStats.winRate)) : 0}%` }}
+                    />
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-amber-300 shadow-[0_0_6px_rgba(251,191,36,0.9)]"
+                      style={{ left: '52.4%' }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                    <span>0%</span>
+                    <span className="text-amber-300/90">52.4% Break-Even</span>
+                    <span>100%</span>
+                  </div>
                 </div>
-                <div className={`rounded-lg border px-2.5 py-1 flex items-center justify-between ${weightedProfitUnits >= 0 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}>
-                  <span className="font-sans text-[10px] text-slate-300">Tier-Sized</span>
-                  <span className="font-bold">{formatUnits(weightedProfitUnits)}</span>
-                </div>
-              </div>
-            )}
-          </article>
+              </article>
 
-          {/* Card 2: Win Rate & Record */}
-          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="space-y-1">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <Target className="w-3.5 h-3.5 text-sky-400" aria-hidden="true" />
-                  <span>Win Rate &amp; Record</span>
+              {/* Card 3: Closing Line Value (CLV) */}
+              <article
+                className="perf-kpi-card p-5 flex flex-col justify-between gap-3"
+                data-tone={clvStats.avg === null ? 'neutral' : clvStats.avg > 0 ? 'pos' : 'neutral'}
+              >
+                <div className="perf-kpi-top">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
+                      <span>Closing Line Edge</span>
+                    </div>
+                    <div
+                      className={`perf-kpi-value font-extrabold font-mono ${
+                        clvStats.avg === null
+                          ? 'text-slate-300'
+                          : clvStats.avg > 0
+                            ? 'text-emerald-400'
+                            : clvStats.avg === 0
+                              ? 'text-slate-200'
+                              : 'text-amber-300'
+                      }`}
+                    >
+                      {clvStats.avg === null ? 'N/A' : `${clvStats.avg > 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      {clvStats.count > 0
+                        ? `Beat closing line ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% (${clvStats.count.toLocaleString()} picks)`
+                        : 'No closing-line checks saved yet'}
+                    </div>
+                  </div>
+                  {clvStats.avg !== null && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider shrink-0 self-start ${
+                        clvStats.avg >= 1.0
+                          ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                          : clvStats.avg > 0
+                            ? 'border-sky-500/40 bg-sky-500/15 text-sky-300'
+                            : 'border-amber-500/35 bg-amber-500/10 text-amber-200'
+                      }`}
+                    >
+                      {clvStats.avg >= 1.0 ? 'Elite' : clvStats.avg > 0 ? 'Sharp' : 'Neutral'}
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-baseline gap-2.5">
-                  <span
-                    className={`perf-kpi-value font-extrabold font-mono ${
-                      scopedStats.decided === 0
-                        ? 'text-slate-300'
-                        : scopedStats.winRate >= 52.38
-                          ? 'text-emerald-400'
-                          : 'text-rose-400'
-                    }`}
-                  >
-                    {scopedStats.decided > 0 ? `${scopedStats.winRate.toFixed(1)}%` : '—'}
-                  </span>
-                  <span className="text-sm font-mono font-bold text-slate-200">
-                    {scopedStats.wins}-{scopedStats.losses}
-                    {scopedStats.pushes > 0 ? `-${scopedStats.pushes}` : ''}
-                  </span>
+                <div className="space-y-1">
+                  <div className="h-2.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        clvStats.count === 0
+                          ? 'bg-slate-700'
+                          : (clvStats.beatCount / clvStats.count) >= 0.5
+                            ? 'bg-gradient-to-r from-indigo-500 to-emerald-400'
+                            : 'bg-amber-400'
+                      }`}
+                      style={{ width: `${clvStats.count > 0 ? Math.max(4, Math.min(100, (clvStats.beatCount / clvStats.count) * 100)) : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-500">
+                    <span>Market Sharpness</span>
+                    <span className="font-mono text-slate-300">
+                      {clvStats.count > 0 ? `${clvStats.beatCount}/${clvStats.count} beat close` : 'Pending close'}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-xs text-slate-400">
-                  {breakEvenDelta === null
-                    ? 'Break-even at -110 odds is 52.4%'
-                    : `${breakEvenDelta >= 0 ? '+' : ''}${breakEvenDelta.toFixed(1)}% vs 52.4% · ${scopedStats.settled.toLocaleString()} graded`}
-                </div>
-              </div>
-              {scopedStats.pending > 0 && (
-                <span className="px-2 py-0.5 rounded-full border border-slate-700 bg-slate-900 text-[10px] font-mono text-slate-300 shrink-0">
-                  {scopedStats.pending} open
-                </span>
-              )}
-            </div>
-            <div className="space-y-1">
-              <div className="relative h-2.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    scopedStats.decided === 0
-                      ? 'bg-slate-600'
-                      : scopedStats.winRate >= 52.38
-                        ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                        : 'bg-gradient-to-r from-rose-500 to-amber-500'
-                  }`}
-                  style={{ width: `${scopedStats.decided > 0 ? Math.max(0, Math.min(100, scopedStats.winRate)) : 0}%` }}
-                />
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-amber-300 shadow-[0_0_6px_rgba(251,191,36,0.9)]"
-                  style={{ left: '52.4%' }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-                <span>0%</span>
-                <span className="text-amber-300/90">52.4% Break-Even</span>
-                <span>100%</span>
-              </div>
-            </div>
-          </article>
+              </article>
 
-          {/* Card 3: Closing Line Value (CLV) */}
-          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="space-y-1">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" aria-hidden="true" />
-                  <span>Closing Line Edge</span>
+              {/* Card 4: Risk, Profit Factor & Drawdown */}
+              <article
+                className="perf-kpi-card p-5 flex flex-col justify-between gap-3"
+                data-tone={executiveMetrics.profitFactor === null ? 'neutral' : executiveMetrics.profitFactor >= 1.0 ? 'pos' : 'neg'}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <Activity className="w-3.5 h-3.5 text-purple-400" aria-hidden="true" />
+                    <span>Risk &amp; Consistency</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span
+                      className={`perf-kpi-value font-extrabold font-mono ${
+                        executiveMetrics.profitFactor === null
+                          ? 'text-slate-300'
+                          : executiveMetrics.profitFactor >= 1.15
+                            ? 'text-emerald-400'
+                            : executiveMetrics.profitFactor >= 1.0
+                              ? 'text-sky-300'
+                              : 'text-rose-400'
+                      }`}
+                    >
+                      {executiveMetrics.profitFactor === null
+                        ? '—'
+                        : executiveMetrics.profitFactor === Infinity
+                          ? '∞'
+                          : `${executiveMetrics.profitFactor.toFixed(2)}x`}
+                    </span>
+                    <span className="text-xs text-slate-400">Profit Factor</span>
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {executiveMetrics.activeDays > 0
+                      ? `${formatUnits(executiveMetrics.avgDailyUnits)} avg across ${executiveMetrics.activeDays} active days`
+                      : 'Waiting on finished game days'}
+                  </div>
                 </div>
-                <div
-                  className={`perf-kpi-value font-extrabold font-mono ${
-                    clvStats.avg === null
-                      ? 'text-slate-300'
-                      : clvStats.avg > 0
-                        ? 'text-emerald-400'
-                        : clvStats.avg === 0
-                          ? 'text-slate-200'
-                          : 'text-amber-300'
-                  }`}
-                >
-                  {clvStats.avg === null ? 'N/A' : `${clvStats.avg > 0 ? '+' : ''}${clvStats.avg.toFixed(2)} pts`}
+                <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono pt-1">
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/75 px-2.5 py-1 flex items-center justify-between">
+                    <span className="font-sans text-[10px] text-slate-400">Max Dip</span>
+                    <span className={`font-bold ${executiveMetrics.maxDrawdown > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                      {executiveMetrics.maxDrawdown > 0 ? `-${executiveMetrics.maxDrawdown.toFixed(2)}u` : '0.00u'}
+                    </span>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/75 px-2.5 py-1 flex items-center justify-between">
+                    <span className="font-sans text-[10px] text-slate-400">From Peak</span>
+                    <span className={`font-bold ${executiveMetrics.currentDrawdown > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                      {executiveMetrics.currentDrawdown > 0 ? `-${executiveMetrics.currentDrawdown.toFixed(2)}u` : 'At Peak'}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-xs text-slate-400">
-                  {clvStats.count > 0
-                    ? `Beat closing line ${((clvStats.beatCount / clvStats.count) * 100).toFixed(1)}% (${clvStats.count.toLocaleString()} picks)`
-                    : 'No closing-line checks saved yet'}
-                </div>
-              </div>
-              {clvStats.avg !== null && (
-                <span
-                  className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider shrink-0 ${
-                    clvStats.avg >= 1.0
-                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                      : clvStats.avg > 0
-                        ? 'border-sky-500/40 bg-sky-500/15 text-sky-300'
-                        : 'border-amber-500/35 bg-amber-500/10 text-amber-200'
-                  }`}
-                >
-                  {clvStats.avg >= 1.0 ? 'Elite' : clvStats.avg > 0 ? 'Sharp' : 'Neutral'}
-                </span>
-              )}
+              </article>
             </div>
-            <div className="space-y-1">
-              <div className="h-2.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    clvStats.count === 0
-                      ? 'bg-slate-700'
-                      : (clvStats.beatCount / clvStats.count) >= 0.5
-                        ? 'bg-gradient-to-r from-indigo-500 to-emerald-400'
-                        : 'bg-amber-400'
-                  }`}
-                  style={{ width: `${clvStats.count > 0 ? Math.max(4, Math.min(100, (clvStats.beatCount / clvStats.count) * 100)) : 0}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[10px] text-slate-500">
-                <span>Market Sharpness</span>
-                <span className="font-mono text-slate-300">
-                  {clvStats.count > 0 ? `${clvStats.beatCount}/${clvStats.count} beat close` : 'Pending close'}
-                </span>
-              </div>
-            </div>
-          </article>
 
-          {/* Card 4: Risk, Profit Factor & Drawdown */}
-          <article className="perf-kpi-card p-5 flex flex-col justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                <Activity className="w-3.5 h-3.5 text-purple-400" aria-hidden="true" />
-                <span>Risk &amp; Consistency</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span
-                  className={`perf-kpi-value font-extrabold font-mono ${
-                    executiveMetrics.profitFactor === null
-                      ? 'text-slate-300'
-                      : executiveMetrics.profitFactor >= 1.15
-                        ? 'text-emerald-400'
-                        : executiveMetrics.profitFactor >= 1.0
-                          ? 'text-sky-300'
-                          : 'text-rose-400'
-                  }`}
-                >
-                  {executiveMetrics.profitFactor === null
-                    ? '—'
-                    : executiveMetrics.profitFactor === Infinity
-                      ? '∞'
-                      : `${executiveMetrics.profitFactor.toFixed(2)}x`}
-                </span>
-                <span className="text-xs text-slate-400">Profit Factor</span>
-              </div>
-              <div className="text-xs text-slate-400">
-                {executiveMetrics.activeDays > 0
-                  ? `${formatUnits(executiveMetrics.avgDailyUnits)} avg across ${executiveMetrics.activeDays} active days`
-                  : 'Waiting on finished game days'}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono pt-1">
-              <div className="rounded-lg border border-slate-800 bg-slate-950/75 px-2.5 py-1 flex items-center justify-between">
-                <span className="font-sans text-[10px] text-slate-400">Max Dip</span>
-                <span className={`font-bold ${executiveMetrics.maxDrawdown > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
-                  {executiveMetrics.maxDrawdown > 0 ? `-${executiveMetrics.maxDrawdown.toFixed(2)}u` : '0.00u'}
-                </span>
-              </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-950/75 px-2.5 py-1 flex items-center justify-between">
-                <span className="font-sans text-[10px] text-slate-400">From Peak</span>
-                <span className={`font-bold ${executiveMetrics.currentDrawdown > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
-                  {executiveMetrics.currentDrawdown > 0 ? `-${executiveMetrics.currentDrawdown.toFixed(2)}u` : 'At Peak'}
-                </span>
-              </div>
-            </div>
-          </article>
-        </div>
-
-      </div>
-
-      {/* Main Recharts Visualizations & Breakdowns */}
+      {/* Main Recharts Visualizations & Breakdowns (Overview or Diagnostics) */}
+      {(activeSubView === 'overview' || activeSubView === 'diagnostics') && (
       <ModelPerformanceAnalytics
+        viewMode={activeSubView}
         history={scopedHistory}
         preConfHistory={scopePreConfHistory}
         preMarketHistory={scopePreMarketHistory}
@@ -1689,6 +1782,8 @@ export default function Picks({ onAddBet }) {
         filterSummary={filterSummaryText}
         liveCalibration={liveCalibration}
         modelLearning={modelLearning}
+        onSelectWindow={(nextWin) => setWindowFilter(nextWin)}
+        onOpenLedger={() => setActiveSubView('ledger')}
         slateAndRankSlot={(
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Yesterday / Most Recent Active Slate Recap */}
@@ -1867,8 +1962,10 @@ export default function Picks({ onAddBet }) {
           </div>
         )}
       />
+      )}
 
       {/* Bottom Pick History & Grading Explorer Table */}
+      {activeSubView === 'ledger' && (
       <article className="ui-card p-5 sm:p-6 space-y-4" aria-labelledby="pick-history-heading">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
@@ -1960,7 +2057,7 @@ export default function Picks({ onAddBet }) {
           tabIndex={0}
           className="perf-table-wrapper max-h-[560px] overflow-y-auto rounded-xl border border-slate-800/80"
         >
-          <table className="perf-sticky-table w-full text-left border-collapse text-sm">
+          <table className="perf-sticky-table perf-pick-table w-full text-left border-collapse text-sm">
             <caption className="sr-only">Pick History and Results ({filterSummaryText})</caption>
             <thead className="bg-slate-950/90 border-b border-slate-800">
               <tr>
@@ -2011,19 +2108,19 @@ export default function Picks({ onAddBet }) {
                         : 'text-slate-300 bg-slate-800/80 border-slate-700';
 
                   return (
-                    <tr key={h.id || h.prediction_id || `${h.event_id}-${idx}`} className={`${rowSurface.outcome ? rowSurface.rowCls : 'hover:bg-slate-900/55'} transition-colors`}>
-                      <td className={`py-2.5 px-2.5 font-mono text-xs text-slate-300 whitespace-nowrap ${rowSurface.stripeCls}`}>{day}</td>
-                      <td className="py-2.5 px-2.5 whitespace-nowrap">
+                    <tr key={h.id || h.prediction_id || `${h.event_id}-${idx}`} className="hover:bg-slate-900/55 transition-colors">
+                      <th scope="row" className={`py-2.5 px-2.5 font-mono text-xs text-slate-300 whitespace-nowrap ${rowSurface.stripeCls}`}>{day}</th>
+                      <td data-label="Sport" className="py-2.5 px-2.5 whitespace-nowrap">
                         <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 text-xs font-bold">
                           {sp}
                         </span>
                       </td>
-                      <td className="py-2.5 px-2.5 font-medium text-slate-100 max-w-[190px]">
+                      <td data-label="Matchup" className="py-2.5 px-2.5 font-medium text-slate-100 max-w-[190px]">
                         <div className="truncate" title={matchup}>
                           {matchup}
                         </div>
                       </td>
-                      <td className="py-2.5 px-2.5 max-w-[200px]">
+                      <td data-label="Pick & Odds" className="py-2.5 px-2.5 max-w-[200px]">
                         <div className="flex items-center gap-1.5">
                           {rankNum && rankNum <= 6 && (
                             <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-mono font-bold shrink-0">
@@ -2038,7 +2135,7 @@ export default function Picks({ onAddBet }) {
                           {lineOdds} • {market}
                         </div>
                       </td>
-                      <td className="py-2.5 px-2.5 text-right whitespace-nowrap">
+                      <td data-label="Edge" className="py-2.5 px-2.5 text-right whitespace-nowrap">
                         <div className="font-mono text-xs font-semibold text-slate-200">
                           {evPct != null ? `${evPct >= 0 ? '+' : ''}${evPct.toFixed(1)}% Edge` : '—'}
                         </div>
@@ -2046,7 +2143,7 @@ export default function Picks({ onAddBet }) {
                           {confTier}{confScore > 0 ? ` (${confScore})` : ''}
                         </span>
                       </td>
-                      <td className="py-2.5 px-2.5 whitespace-nowrap">
+                      <td data-label="Result" className="py-2.5 px-2.5 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           <span className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${badge.cls}`}>
                             {badge.label}
@@ -2057,6 +2154,7 @@ export default function Picks({ onAddBet }) {
                         </div>
                       </td>
                       <td
+                        data-label="Profit"
                         className={`py-2.5 px-2.5 text-right font-mono text-xs font-bold whitespace-nowrap ${
                           badge.key === 'WON'
                             ? 'text-emerald-400'
@@ -2095,6 +2193,7 @@ export default function Picks({ onAddBet }) {
           </div>
         )}
       </article>
+      )}
           </section>
         )}
 

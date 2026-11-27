@@ -45,7 +45,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.4.3-november-spread"
+    VERSION = "2.4.4-over-homefav-guard"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -1598,18 +1598,20 @@ class NCAAMMarketFirstModelV2(BaseModel):
             except Exception:
                 pass
 
-            # Gentle TOTAL OVER calibration: keep slight early-season conservatism without
-            # over-crushing OVER projections during high-scoring environments.
+            # Empirical TOTAL OVER calibration: live & 569-game history show strong Over inflation
+            # vs market (especially Nov/Dec small-sample rosters), so damp Over projections harder.
             if os.getenv('NCAAM_DISABLE_OVER_DAMP') is None and mu_total_final > mu_market_total:
                 if game_month == 11 or low_sample_teams:
-                    over_damp = 0.88 if agree_count_total >= 3 else 0.84
+                    over_damp = 0.78 if agree_count_total >= 3 else 0.72
+                    over_cap = 2.40 if agree_count_total >= 3 else (2.15 if agree_count_total == 2 else 1.80)
+                elif is_early_season:
+                    over_damp = 0.84
+                    over_cap = 2.70
                 else:
-                    over_damp = 0.90 if is_early_season else 0.94
+                    over_damp = 0.90
+                    over_cap = 3.0
                 mu_total_final = mu_market_total + ((mu_total_final - mu_market_total) * over_damp)
-                eff_cap_tot_use = min(
-                    effective_cap_total,
-                    (2.85 if agree_count_total >= 3 else 2.65) if (game_month == 11 or low_sample_teams) else 3.0,
-                )
+                eff_cap_tot_use = min(effective_cap_total, over_cap)
             else:
                 eff_cap_tot_use = effective_cap_total
             if abs(mu_total_final - mu_market_total) > eff_cap_tot_use:
@@ -1910,6 +1912,25 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 sigma_spread *= 1.035
             else:
                 mu_spread_final = mu_market_spread + ((mu_spread_final - mu_market_spread) * 0.75)
+
+        # Home favorite asymmetry: early-season home favorites win ATS far below market expectation
+        # Apply to non-injury edge so verified player-absence adjustments stay intact.
+        if (
+            os.getenv('NCAAM_DISABLE_HOME_FAV_GATE') is None
+            and not is_neutral
+            and is_early_season
+            and agree_count < 3
+            and mu_market_spread is not None
+            and float(mu_market_spread) < 0.0
+            and (float(mu_spread_final) - inj_spread_adj) < float(mu_market_spread)
+        ):
+            non_inj_sp = float(mu_spread_final) - inj_spread_adj
+            mu_spread_final = (
+                mu_market_spread
+                + ((non_inj_sp - mu_market_spread) * 0.80)
+                + inj_spread_adj
+            )
+            sigma_spread *= 1.02
 
         if game_month == 11 and has_spread:
             mu_spread_final += 0.25 * (float(raw_sp) - mu_spread_final)
@@ -3386,19 +3407,57 @@ class NCAAMMarketFirstModelV2(BaseModel):
                         min_ev += 0.032
                     else:
                         min_ev += 0.024
+                # Home favorite gate: early-season home chalk requires stronger EV while preserving home_dog value
+                if (
+                    side_lower == "home"
+                    and float(market_line_home) < 0.0
+                    and (is_early or low_sample)
+                    and os.getenv("NCAAM_DISABLE_HOME_FAV_GATE") is None
+                ):
+                    min_ev += 0.004 if has_sharp else 0.014
             except Exception:
                 pass
         elif market == "TOTAL" and side_lower == "over" and os.getenv("NCAAM_DISABLE_OVER_DAMP") is None:
             try:
-                if (is_early or low_sample) and not has_sharp and (agree_tot is not None and int(agree_tot) < 2):
-                    min_ev += 0.006
+                if not has_sharp and (is_early or low_sample):
+                    if agree_tot is None or int(agree_tot) < 2:
+                        min_ev += 0.018
+                    elif int(agree_tot) == 2:
+                        min_ev += 0.012
+                    else:
+                        min_ev += 0.006
+                tot_line_val = rec.get("line")
+                if not has_sharp and tot_line_val is not None and float(tot_line_val) >= 152.0:
+                    min_ev += 0.008
             except Exception:
                 pass
         try:
-            ms_bumps = ((self._load_adaptive_learning() or {}).get("learned_adjustments") or {}).get("market_side_ev_bump") or {}
-            ms_key = f"{market}:{side_lower}"
-            if ms_key in ms_bumps:
-                min_ev += float(ms_bumps[ms_key])
+            learned_adj = (self._load_adaptive_learning() or {}).get("learned_adjustments") or {}
+            ms_bumps = learned_adj.get("market_side_ev_bump") or {}
+            sr_bumps = learned_adj.get("spread_role_ev_bump") or {}
+            applied_role_bump = False
+            if market == "SPREAD" and market_line_home is not None and sr_bumps:
+                try:
+                    mkt_home_f = float(market_line_home)
+                    role_key = None
+                    if side_lower == "home" and mkt_home_f < 0.0:
+                        role_key = "home_fav"
+                    elif side_lower == "home" and mkt_home_f > 0.0:
+                        role_key = "home_dog"
+                    elif side_lower == "away" and mkt_home_f > 0.0:
+                        role_key = "away_fav"
+                    elif side_lower == "away" and mkt_home_f < 0.0:
+                        role_key = "away_dog"
+                    if role_key is not None:
+                        applied_role_bump = True
+                        if role_key in sr_bumps:
+                            min_ev += float(sr_bumps[role_key])
+                except Exception:
+                    applied_role_bump = False
+            if not applied_role_bump:
+                ms_key = f"{market}:{side_lower}"
+                if ms_key in ms_bumps:
+                    min_ev += float(ms_bumps[ms_key])
         except Exception:
             pass
 
@@ -3408,7 +3467,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
             rec["_publish_pass_reason"] = f"EV {ev:+.1%} below required {min_ev:.1%}"
             return False
 
-        max_unconfirmed_ev = float(os.getenv("PUBLISH_MAX_UNCONFIRMED_EV", "0.12"))
+        max_unconfirmed_ev = float(os.getenv("PUBLISH_MAX_UNCONFIRMED_EV", "0.105"))
         agree_for_mkt = agree_tot if market == "TOTAL" else agree_sp
         if (
             market in ("SPREAD", "TOTAL")
@@ -3448,10 +3507,17 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     or (has_sharp_steam and ev >= 0.038)
                 ):
                     min_lb10 = min(min_lb10, 0.506)
-                elif market == "TOTAL" and ev >= 0.040 and (
-                    (agree_tot is not None and int(agree_tot) >= 2) or (has_sharp_steam and ev >= 0.042)
-                ):
-                    min_lb10 = min(min_lb10, 0.506)
+                elif market == "TOTAL":
+                    if side_lower != "over" and ev >= 0.040 and (
+                        (agree_tot is not None and int(agree_tot) >= 2) or (has_sharp_steam and ev >= 0.042)
+                    ):
+                        min_lb10 = min(min_lb10, 0.506)
+                    elif side_lower == "over" and ev >= 0.045:
+                        if is_early or low_sample:
+                            if has_sharp_steam or has_sharp_price or (agree_tot is not None and int(agree_tot) >= 3):
+                                min_lb10 = min(min_lb10, 0.506)
+                        elif (agree_tot is not None and int(agree_tot) >= 2) or has_sharp_steam or has_sharp_price:
+                            min_lb10 = min(min_lb10, 0.506)
             lb10_val = float(lb10)
             if lb10_val < min_lb10:
                 rec["_publish_pass_reason"] = f"Lower win probability {lb10_val:.1%} below required {min_lb10:.1%}"
@@ -4628,6 +4694,9 @@ class NCAAMMarketFirstModelV2(BaseModel):
         ) -> bool:
             if not relax_gates and is_h1_early and int(agree_val or 0) < 2:
                 return False
+            if not relax_gates and market_key == 'TOTAL' and side_key == 'over' and is_h1_early:
+                if int(price_val) < -115 or int(agree_val or 0) < 3:
+                    return False
             if not relax_gates and lb10_val < min_1h_lb10:
                 return False
             min_ev_req = float(base_ev)

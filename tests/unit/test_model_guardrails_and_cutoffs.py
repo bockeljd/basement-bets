@@ -259,3 +259,104 @@ def test_away_fav_tightening_and_extreme_unconfirmed_ev_guard(monkeypatch):
     assert model._passes_publish_gates(extreme_3of3, -4.5, True) is True
     extreme_sharp = {**extreme_trap, "movement_tags": ["rlm_confirmed"]}
     assert model._passes_publish_gates(extreme_sharp, -4.5, True) is True
+
+
+def test_total_over_home_fav_leaks_guarded_and_spread_role_bumps(monkeypatch):
+    from src.services.archetype_learning_service import fit_adaptive_learning_from_rows
+
+    # 1. Verify archetype_learning_service emits role-specific spread_role_ev_bump
+    fake_rows = []
+    for i in range(15):
+        fake_rows.append(
+            {
+                "event_id": f"hf:{i}",
+                "market_type": "SPREAD",
+                "side": "home",
+                "bet_line": -5.5,
+                "bet_price": -110,
+                "outcome": "LOST" if i < 12 else "WON",
+                "ev_per_unit": 0.06,
+                "home_team": "Home",
+                "away_team": "Away",
+            }
+        )
+        fake_rows.append(
+            {
+                "event_id": f"hd:{i}",
+                "market_type": "SPREAD",
+                "side": "home",
+                "bet_line": 5.5,
+                "bet_price": -110,
+                "outcome": "WON" if i < 10 else "LOST",
+                "ev_per_unit": 0.06,
+                "home_team": "Home",
+                "away_team": "Away",
+            }
+        )
+    learned = fit_adaptive_learning_from_rows(fake_rows, baseline_bins={}, all_games_rows=[])
+    sr_bumps = (learned.get("learned_adjustments") or {}).get("spread_role_ev_bump") or {}
+    assert sr_bumps.get("home_fav", 0.0) > 0.0
+    assert sr_bumps.get("home_dog", 0.0) <= 0.0
+
+    # 2. Verify model applies spread_role_ev_bump to home_fav without punishing home_dog via SPREAD:home
+    model = NCAAMMarketFirstModelV2()
+    model._get_archetype_stats = lambda k: {"n": 80, "mean": 0.03, "sd": 0.10}
+    monkeypatch.setattr(
+        model,
+        "_load_adaptive_learning",
+        lambda: {
+            "learned_adjustments": {
+                "market_side_ev_bump": {"SPREAD:home": 0.015, "TOTAL:over": 0.015},
+                "spread_role_ev_bump": {"home_fav": 0.015},
+            }
+        },
+    )
+
+    home_dog = {
+        "market": "SPREAD",
+        "side": "home",
+        "ev": 0.030,
+        "edge_points": 1.6,
+        "win_prob_lb10": 0.530,
+        "_agree_count": 2,
+    }
+    assert model._passes_publish_gates(home_dog, 4.5, True) is True
+
+    early_home_fav_marginal = {
+        "market": "SPREAD",
+        "side": "home",
+        "ev": 0.042,
+        "edge_points": 1.8,
+        "win_prob_lb10": 0.530,
+        "_agree_count": 2,
+        "_is_early_season": True,
+    }
+    # 0.020 + 0.014 (early home_fav) + 0.015 (role bump) = 4.9% required > 4.2%
+    assert model._passes_publish_gates(early_home_fav_marginal, -5.5, True) is False
+
+    # 3. Early TOTAL:over blocks unconfirmed Smart Risk lb10 < 0.52 while TOTAL:under stays eligible
+    monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
+    early_over_smart = {
+        "market": "TOTAL",
+        "side": "over",
+        "line": 146.5,
+        "ev": 0.068,
+        "edge_points": 2.1,
+        "win_prob_lb10": 0.512,
+        "_agree_count_total": 2,
+        "_is_early_season": True,
+    }
+    assert model._passes_publish_gates(early_over_smart, None, True) is False
+
+    early_under_smart = {
+        "market": "TOTAL",
+        "side": "under",
+        "line": 154.5,
+        "ev": 0.055,
+        "edge_points": 2.0,
+        "win_prob_lb10": 0.512,
+        "_agree_count_total": 2,
+        "_is_early_season": True,
+    }
+    assert model._passes_publish_gates(early_under_smart, None, True) is True
+    assert early_under_smart["is_smart_risk"] is True

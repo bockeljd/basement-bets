@@ -27,6 +27,8 @@ import {
   formatMarketLabel,
   getNumericEdge,
   normalizeSport,
+  computePerformanceDiagnostics,
+  getSegmentStatusMeta,
 } from '../utils/modelPerformance';
 
 const TOOLTIP_STYLE = {
@@ -118,9 +120,15 @@ const ModelPerformanceAnalytics = ({
   liveCalibration = null,
   modelLearning = null,
   slateAndRankSlot = null,
+  viewMode = 'all', // 'all' | 'overview' | 'diagnostics'
+  onSelectWindow = null,
+  onOpenLedger = null,
 }) => {
   const [trendTab, setTrendTab] = useState('cumulative');
   const [edgeTab, setEdgeTab] = useState('chart');
+
+  const showOverview = viewMode === 'all' || viewMode === 'overview';
+  const showDiagnostics = viewMode === 'all' || viewMode === 'diagnostics';
 
   const analytics = useMemo(() => {
     const safeHistory = Array.isArray(history) ? history : [];
@@ -449,20 +457,25 @@ const ModelPerformanceAnalytics = ({
       else if (cTier === 'Medium') accumulateRowInto(convAcc.med_conf, h);
     }
 
-    const withMeta = (acc, badge, tone, benchmark) => ({
-      ...finalizeBucket(acc),
-      badge,
-      tone,
-      benchmark,
-    });
+    const withMeta = (acc, note) => {
+      const fin = finalizeBucket(acc);
+      const st = getSegmentStatusMeta(fin.settled, fin.roiPct);
+      return {
+        ...fin,
+        badge: st.label,
+        tone: st.tone,
+        benchmark: note,
+      };
+    };
 
     const adaptiveDesc = (section, key, fallbackText) => {
       const bucket = modelLearning?.[section]?.[key];
-      if (bucket && Number(bucket.n || 0) >= 3 && bucket.win_rate != null && bucket.roi != null) {
+      const rawRoi = bucket?.roi_per_unit ?? bucket?.roi;
+      if (bucket && Number(bucket.n || 0) >= 3 && bucket.win_rate != null && rawRoi != null) {
         const wr = (Number(bucket.win_rate) * 100).toFixed(1);
-        const roiNum = Number(bucket.roi) * 100;
+        const roiNum = Number(rawRoi) * 100;
         const roiStr = `${roiNum >= 0 ? '+' : ''}${roiNum.toFixed(1)}%`;
-        return `Season Adaptive: ${wr}% WR · ${roiStr} ROI (${bucket.n} graded)`;
+        return `Season Adaptive: ${wr}% WR · ${roiStr} ROI (${bucket.n} graded) · ${fallbackText}`;
       }
       return fallbackText;
     };
@@ -470,22 +483,22 @@ const ModelPerformanceAnalytics = ({
     const ncaamEdgeInsights = {
       sampleCount: ncaamGraded.length,
       spreadRoles: [
-        withMeta(roleAcc.away_dog, 'Sweet Spot', 'emerald', adaptiveDesc('by_spread_role', 'away_dog', 'Away Dog quality boost · Clamped early season')),
-        withMeta(roleAcc.home_dog, 'Strong Edge', 'emerald', adaptiveDesc('by_spread_role', 'home_dog', 'Home Dog quality boost · Lower upset juice')),
-        withMeta(roleAcc.home_fav, 'Solid', 'sky', adaptiveDesc('by_spread_role', 'home_fav', 'Home Favorite · Balanced consensus gate')),
-        withMeta(roleAcc.away_fav, 'Guarded', 'amber', adaptiveDesc('by_spread_role', 'away_fav', 'Road Favorite guard · Extra EV & quality damping')),
+        withMeta(roleAcc.away_dog, adaptiveDesc('by_spread_role', 'away_dog', 'Road underdogs protected by role-aware gate')),
+        withMeta(roleAcc.home_dog, adaptiveDesc('by_spread_role', 'home_dog', 'Home dogs shielded from Home Fav chalk bump')),
+        withMeta(roleAcc.home_fav, adaptiveDesc('by_spread_role', 'home_fav', 'Guarded in v2.4.4: 0.80x early chalk damp + EV hurdle')),
+        withMeta(roleAcc.away_fav, adaptiveDesc('by_spread_role', 'away_fav', 'Road fav gate: +2.4%/+3.2% EV hurdle & damping')),
       ],
       lineZones: [
-        withMeta(zoneAcc.tight_sp, 'Best Spread Zone', 'emerald', adaptiveDesc('by_spread_bucket', 'under_6', 'Tight Spread (<6) · +0.005 quality bonus')),
-        withMeta(zoneAcc.mid_tot, 'Best Total Zone', 'emerald', adaptiveDesc('by_total_zone', 'under_mid_140_152', 'Mid Totals (140–151.5) · Peak pacing zone')),
-        withMeta(zoneAcc.high_under, 'Pace Ceiling', 'sky', adaptiveDesc('by_total_zone', 'under_high_152+', 'High-Total Under · Curated pace regression')),
-        withMeta(zoneAcc.mid_sp, 'Mid Range', 'sky', adaptiveDesc('by_spread_bucket', 'mid_6_14', 'Mid Spread (6–13.5) · Quality boosted over 14+ blowouts')),
-        withMeta(zoneAcc.high_over, 'Capped / Guarded', 'amber', adaptiveDesc('by_total_zone', 'over_high_152+', 'High-Total Over · Tight edge cap vs inflated lines')),
+        withMeta(zoneAcc.tight_sp, adaptiveDesc('by_spread_bucket', 'under_6', 'Tight spread (<6 pts) · Extra early-season selectivity')),
+        withMeta(zoneAcc.mid_tot, adaptiveDesc('by_total_zone', 'under_mid_140_152', 'Mid totals (140–151.5) · Tight Over cap & Under focus')),
+        withMeta(zoneAcc.high_under, adaptiveDesc('by_total_zone', 'under_high_152+', 'High-total Under (152+) · Pace ceiling regression')),
+        withMeta(zoneAcc.mid_sp, adaptiveDesc('by_spread_bucket', 'mid_6_14', 'Mid spread (6–13.5) · Ranked over blowout garbage time')),
+        withMeta(zoneAcc.high_over, adaptiveDesc('by_total_zone', 'over_high_152+', 'High-total Over (152+) · Stricter Over cap & EV bar')),
       ],
       conviction: [
-        withMeta(convAcc.sharp, 'Top Multiplier', 'emerald', 'Sharp / RLM backed · 2+ sources required on Smart Risk'),
-        withMeta(convAcc.high_conf, 'Top Tier', 'sky', 'Filtered to highest lower-bound win probability'),
-        withMeta(convAcc.med_conf, 'Baseline', 'slate', 'Standard qualifying picks (50–79 score)'),
+        withMeta(convAcc.sharp, 'Sharp / RLM confirmed · Highest confirmation signal'),
+        withMeta(convAcc.high_conf, 'High score (80+) lower-bound probability'),
+        withMeta(convAcc.med_conf, 'Medium tier (50–79) qualifying baseline'),
       ],
     };
 
@@ -501,6 +514,18 @@ const ModelPerformanceAnalytics = ({
       };
     });
 
+    const cumVals = settledDays.map((d) => d.cumulativeUnits);
+    const minCum = cumVals.length > 0 ? Math.min(0, ...cumVals) : 0;
+    const maxCum = cumVals.length > 0 ? Math.max(0, ...cumVals) : 0;
+    const zeroSplitOffset =
+      maxCum > 0 && minCum < 0
+        ? Math.max(0.001, Math.min(0.999, maxCum / (maxCum - minCum)))
+        : maxCum > 0
+          ? 1
+          : 0;
+
+    const diagnostics = computePerformanceDiagnostics(safeHistory, modelLearning);
+
     return {
       gradedCount: graded.length,
       settledDays,
@@ -513,12 +538,273 @@ const ModelPerformanceAnalytics = ({
       sportBreakdown,
       ncaamEdgeInsights,
       timingBuckets,
+      diagnostics,
+      zeroSplitOffset,
       latestCumulativeUnits: settledDays.length > 0 ? settledDays[settledDays.length - 1].cumulativeUnits : 0,
     };
   }, [history, allHistory, preConfHistory, preMarketHistory, modelLearning]);
 
+  const diag = analytics.diagnostics;
+
   return (
     <section className="space-y-6" aria-label="Model Performance Charts and Breakdowns">
+      {/* Overview: Equity Curve + Leak Radar + Slate Recap */}
+      {showOverview && (
+        <>
+          {/* Edge Health & Leak Radar */}
+          {diag.settledCount > 0 && (
+            <article className="perf-chart-card p-5 sm:p-6 space-y-5" aria-labelledby="leak-radar-heading">
+              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 id="leak-radar-heading" className="text-lg font-bold text-slate-100">
+                      Edge Health &amp; Leak Radar
+                    </h3>
+                    {diag.eraComparison && (
+                      <span className="px-2.5 py-0.5 rounded-full border border-indigo-500/35 bg-indigo-500/15 text-indigo-200 text-[11px] font-semibold">
+                        Nov 16+ Guarded Era Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-300/90 max-w-3xl">
+                    {diag.headlineSummary}
+                  </p>
+                </div>
+                {onOpenLedger && (
+                  <button
+                    type="button"
+                    onClick={onOpenLedger}
+                    className="self-start px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-indigo-200 transition-colors cursor-pointer shrink-0"
+                  >
+                    Inspect All {history.length.toLocaleString()} Picks →
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+                {/* Left 7 cols: Top Winners vs Top Leaks + Era Shift */}
+                <div className="xl:col-span-7 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {/* Working Edges */}
+                    <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/15 p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+                          What&apos;s Winning
+                        </span>
+                        <span className="text-[10px] font-mono text-emerald-300/80">
+                          {diag.topWinners.length} positive segments
+                        </span>
+                      </div>
+                      {diag.topWinners.length === 0 ? (
+                        <p className="text-xs text-slate-400">
+                          No multi-pick profitable segment in the current filter.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {diag.topWinners.map((seg) => (
+                            <div
+                              key={seg.key}
+                              className="rounded-lg border border-emerald-500/20 bg-slate-950/70 px-3 py-2 space-y-1"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold text-slate-100">{seg.label}</span>
+                                <span className="font-mono text-xs font-bold text-emerald-400">
+                                  {formatUnits(seg.profitUnits)}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                                <span>{seg.recordText} · {formatPct(seg.winRate)} WR</span>
+                                <span className="text-emerald-300">{formatSignedPct(seg.roiPct)} ROI</span>
+                              </div>
+                              {seg.guardrailNote && (
+                                <div className="text-[10px] text-emerald-200/80">{seg.guardrailNote}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Top Leaks & Active Guardrails */}
+                    <div className="rounded-xl border border-rose-500/25 bg-rose-950/10 p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-rose-300">
+                          Biggest Drags &amp; Fixes
+                        </span>
+                        <span className="text-[10px] font-mono text-rose-300/80">
+                          {diag.topLeaks.length} leaking segments
+                        </span>
+                      </div>
+                      {diag.topLeaks.length === 0 ? (
+                        <p className="text-xs text-emerald-300/90">
+                          No multi-pick leaking segments detected in this slice.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {diag.topLeaks.map((seg) => (
+                            <div
+                              key={seg.key}
+                              className="rounded-lg border border-rose-500/20 bg-slate-950/70 px-3 py-2 space-y-1"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold text-slate-100">{seg.label}</span>
+                                <span className="font-mono text-xs font-bold text-rose-400">
+                                  {formatUnits(seg.profitUnits)}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                                <span>{seg.recordText} · {formatPct(seg.winRate)} WR</span>
+                                <span className="text-rose-300">{formatSignedPct(seg.roiPct)} ROI</span>
+                              </div>
+                              {seg.guardrailNote && (
+                                <div className="text-[10px] text-amber-200/90">{seg.guardrailNote}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Regime Comparison: Pre-Guardrail Firehose vs Nov 16+ Curated */}
+                  {diag.eraComparison && (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/65 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Volume vs. Selectivity Regime Shift
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-xs">
+                          <span className="text-slate-300">
+                            <strong className="text-slate-100">Nov 12–15 Firehose:</strong>{' '}
+                            <span className="font-mono">
+                              {diag.eraComparison.pre.wins}-{diag.eraComparison.pre.losses}
+                              {diag.eraComparison.pre.pushes > 0 ? `-${diag.eraComparison.pre.pushes}` : ''}
+                            </span>{' '}
+                            <span className={`font-mono font-semibold ${diag.eraComparison.pre.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              ({formatUnits(diag.eraComparison.pre.profitUnits)})
+                            </span>
+                          </span>
+                          <span className="text-slate-600">→</span>
+                          <span className="text-slate-300">
+                            <strong className="text-indigo-200">Nov 16+ Guarded:</strong>{' '}
+                            <span className="font-mono">
+                              {diag.eraComparison.current.wins}-{diag.eraComparison.current.losses}
+                              {diag.eraComparison.current.pushes > 0 ? `-${diag.eraComparison.current.pushes}` : ''}
+                            </span>{' '}
+                            <span className={`font-mono font-semibold ${diag.eraComparison.current.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              ({formatUnits(diag.eraComparison.current.profitUnits)})
+                            </span>
+                          </span>
+                        </div>
+                      </div>
+                      {onSelectWindow && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectWindow('ERA')}
+                          className="px-3 py-1.5 rounded-lg border border-indigo-400/40 bg-indigo-500/15 hover:bg-indigo-500/25 text-xs font-semibold text-indigo-200 cursor-pointer shrink-0"
+                        >
+                          Focus Nov 16+ Era
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Right 5 cols: Market Side Split + Feed Accuracy Benchmark */}
+                <div className="xl:col-span-5 space-y-4">
+                  {diag.marketSideSplit.length > 0 && (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Market Side Split
+                        </span>
+                        <span className="text-[10px] font-mono text-amber-300">52.4% Break-Even</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {diag.marketSideSplit.map((m) => (
+                          <div
+                            key={m.key}
+                            className="rounded-lg border border-slate-800/90 bg-slate-900/55 px-2.5 py-2 space-y-1"
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[11px] font-semibold text-slate-200 truncate">{m.label}</span>
+                              <span className={`text-[11px] font-mono font-bold ${m.profitUnits >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {formatUnits(m.profitUnits)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                              <span>{m.recordText}</span>
+                              <span className={m.winRate >= 52.4 ? 'text-emerald-300' : 'text-slate-300'}>
+                                {formatPct(m.winRate)}
+                              </span>
+                            </div>
+                            <div className="relative h-1.5 w-full rounded-full bg-slate-800 overflow-hidden" aria-hidden="true">
+                              <div
+                                className={`h-full rounded-full ${m.winRate >= 52.4 ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                                style={{ width: `${Math.max(4, Math.min(100, m.winRate))}%` }}
+                              />
+                              <div className="absolute top-0 bottom-0 w-0.5 bg-amber-300" style={{ left: '52.4%' }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {diag.feedBenchmark.length > 0 && (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Rating Error Benchmark (MAE)
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {diag.allGamesCount.toLocaleString()} NCAAM games
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {diag.feedBenchmark.map((f) => {
+                          const maxMae = Math.max(...diag.feedBenchmark.map((x) => x.mae), 11.5);
+                          const barPct = Math.max(20, Math.min(100, (f.mae / maxMae) * 100));
+                          const isBestNonMarket = f.key === 'blended_fair';
+                          const isWorst = f.key === 'haslametrics';
+                          return (
+                            <div key={f.key} className="space-y-0.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className={`font-medium ${isBestNonMarket ? 'text-indigo-200' : 'text-slate-300'}`}>
+                                  {f.label}
+                                </span>
+                                <span className="font-mono text-slate-300">
+                                  {f.mae.toFixed(2)} pts
+                                  {f.atsWinRate != null && (
+                                    <span className="text-slate-500"> · {f.atsWinRate.toFixed(1)}% ATS</span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full rounded-full bg-slate-800/90 overflow-hidden" aria-hidden="true">
+                                <div
+                                  className={`h-full rounded-full ${
+                                    f.key === 'market'
+                                      ? 'bg-sky-400'
+                                      : isBestNonMarket
+                                        ? 'bg-emerald-400'
+                                        : isWorst
+                                          ? 'bg-amber-400/85'
+                                          : 'bg-indigo-400'
+                                  }`}
+                                  style={{ width: `${barPct}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </article>
+          )}
+
       {/* Card 1: Performance Over Time */}
       <article className="perf-chart-card p-5 sm:p-6 space-y-4" aria-labelledby="perf-trend-heading">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
@@ -550,7 +836,10 @@ const ModelPerformanceAnalytics = ({
                   role="tab"
                   type="button"
                   aria-selected={active}
-                  onClick={() => setTrendTab(t.id)}
+                  onClick={(e) => {
+                    setTrendTab(t.id);
+                    e.currentTarget.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+                  }}
                   className="perf-tab"
                 >
                   {t.label}
@@ -560,7 +849,7 @@ const ModelPerformanceAnalytics = ({
           </div>
         </div>
 
-        {/* Cumulative Profit Curve */}
+        {/* Cumulative Profit Curve (Dual-Color Zero-Split Gradient) */}
         {trendTab === 'cumulative' && (
           <div
             id="trend-panel-cumulative"
@@ -577,13 +866,17 @@ const ModelPerformanceAnalytics = ({
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={analytics.settledDays} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="cumProfitFillPos" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.02} />
+                      <linearGradient id="cumProfitSplitStroke" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#10b981" />
+                        <stop offset={`${(analytics.zeroSplitOffset * 100).toFixed(2)}%`} stopColor="#10b981" />
+                        <stop offset={`${(analytics.zeroSplitOffset * 100).toFixed(2)}%`} stopColor="#f43f5e" />
+                        <stop offset="100%" stopColor="#f43f5e" />
                       </linearGradient>
-                      <linearGradient id="cumProfitFillNeg" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.32} />
-                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.02} />
+                      <linearGradient id="cumProfitSplitFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#10b981" stopOpacity={0.34} />
+                        <stop offset={`${(analytics.zeroSplitOffset * 100).toFixed(2)}%`} stopColor="#10b981" stopOpacity={0.04} />
+                        <stop offset={`${(analytics.zeroSplitOffset * 100).toFixed(2)}%`} stopColor="#f43f5e" stopOpacity={0.08} />
+                        <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.34} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
@@ -617,9 +910,9 @@ const ModelPerformanceAnalytics = ({
                     <Area
                       type="monotone"
                       dataKey="cumulativeUnits"
-                      stroke={analytics.latestCumulativeUnits >= 0 ? '#10b981' : '#f43f5e'}
+                      stroke="url(#cumProfitSplitStroke)"
                       strokeWidth={2.5}
-                      fill={analytics.latestCumulativeUnits >= 0 ? 'url(#cumProfitFillPos)' : 'url(#cumProfitFillNeg)'}
+                      fill="url(#cumProfitSplitFill)"
                       dot={analytics.settledDays.length <= 15 ? { r: 3 } : false}
                       activeDot={{ r: 5 }}
                     />
@@ -628,7 +921,7 @@ const ModelPerformanceAnalytics = ({
               </div>
             )}
             <p className="text-[11px] text-slate-400">
-              Assumes the same 1-unit bet on every graded pick. Above 0u means ahead overall; hover a date to see that day&apos;s record.
+              Assumes a flat 1-unit stake on every graded pick. Green shades profit above 0u; rose shades drawdown below 0u.
             </p>
           </div>
         )}
@@ -846,7 +1139,11 @@ const ModelPerformanceAnalytics = ({
       </article>
 
       {slateAndRankSlot}
+        </>
+      )}
 
+      {showDiagnostics && (
+        <>
       {/* Row 2: Bet Type Performance & Edge Calibration */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card 2: Bet Type Performance */}
@@ -1243,6 +1540,7 @@ const ModelPerformanceAnalytics = ({
           emerald: 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300',
           sky: 'bg-sky-500/15 border-sky-500/35 text-sky-300',
           amber: 'bg-amber-500/15 border-amber-500/35 text-amber-300',
+          rose: 'bg-rose-500/15 border-rose-500/35 text-rose-300',
           slate: 'bg-slate-800 border-slate-700 text-slate-300',
         };
         const renderInsightCol = (title, subtitle, items) => (
@@ -1613,6 +1911,8 @@ const ModelPerformanceAnalytics = ({
           </article>
         );
       })()}
+        </>
+      )}
     </section>
   );
 };

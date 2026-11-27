@@ -646,3 +646,240 @@ export const computeRankBreakdown = (rows, maxRank = 6, rowFilter = null) => {
     };
   });
 };
+
+export const getSegmentStatusMeta = (settled, roiPct) => {
+  const n = Number(settled || 0);
+  const roi = Number(roiPct || 0);
+  if (n < 3) {
+    return { key: 'small_sample', label: 'Small Sample', tone: 'slate' };
+  }
+  if (roi >= 12) {
+    return { key: 'outperforming', label: 'Outperforming', tone: 'emerald' };
+  }
+  if (roi >= 2) {
+    return { key: 'profitable', label: 'Profitable', tone: 'emerald' };
+  }
+  if (roi >= -3) {
+    return { key: 'break_even', label: 'Break-Even', tone: 'sky' };
+  }
+  if (roi >= -12) {
+    return { key: 'watch', label: 'Soft / Watch', tone: 'amber' };
+  }
+  return { key: 'leaking', label: 'Leaking · Guarded', tone: 'rose' };
+};
+
+const inferSpreadSideIsAway = (row) => {
+  const sideHint = String(row?.side || '').trim().toLowerCase();
+  if (sideHint === 'away' || sideHint === 'home') return sideHint === 'away';
+  const selLow = String(row?.selection || row?.pick || '').trim().toLowerCase();
+  let awayTeam = String(row?.away_team || '').trim().toLowerCase();
+  let homeTeam = String(row?.home_team || '').trim().toLowerCase();
+  if (!awayTeam && !homeTeam) {
+    const mTxt = String(row?.matchup || '').trim().toLowerCase();
+    if (mTxt.includes(' @ ')) [awayTeam, homeTeam] = mTxt.split(' @ ').map((s) => s.trim());
+    else if (mTxt.includes(' vs ')) [awayTeam, homeTeam] = mTxt.split(' vs ').map((s) => s.trim());
+  }
+  if (awayTeam && selLow.startsWith(awayTeam)) return true;
+  if (homeTeam && selLow.startsWith(homeTeam)) return false;
+  return null;
+};
+
+const GUARDRAIL_NOTES_BY_KEY = {
+  total_over: 'Guarded in v2.4.4: stricter Over damping, 2–3 model consensus & +1.8% early EV gate',
+  total_under: 'Strength zone: high totals & pace ceiling Unders remain favored',
+  spread_dogs: 'Underdog points edge protected from favorite chalk penalties',
+  spread_favs: 'Early-season favorites face higher EV hurdles to curb upset chalk losses',
+  role_home_fav: 'Guarded in v2.4.4: 0.80x early-season chalk damp + role-specific EV gate',
+  role_away_fav: 'Road favorite gate (+2.4%/+3.2% EV hurdle & 0.60x/0.75x damping)',
+  role_away_dog: 'Profitable underdog role protected by role-aware adaptive learning',
+  role_home_dog: 'Protected from Spread:Home chalk penalty via role-aware learning',
+  edge_10plus: 'Guarded: unconfirmed >10.5% EV outliers require sharp-book or 3/3 consensus',
+};
+
+const finalizeDiagnosticSegment = (acc, key, group) => {
+  const decided = acc.wins + acc.losses;
+  const settled = decided + acc.pushes;
+  const winRate = decided > 0 ? (acc.wins / decided) * 100 : 0;
+  const roiPct = settled > 0 ? (acc.profitUnits / settled) * 100 : 0;
+  return {
+    key,
+    group,
+    label: acc.label,
+    settled,
+    decided,
+    wins: acc.wins,
+    losses: acc.losses,
+    pushes: acc.pushes,
+    recordText: `${acc.wins}-${acc.losses}${acc.pushes > 0 ? `-${acc.pushes}` : ''}`,
+    winRate,
+    profitUnits: Number(acc.profitUnits.toFixed(2)),
+    roiPct: Number(roiPct.toFixed(1)),
+    status: getSegmentStatusMeta(settled, roiPct),
+    guardrailNote: GUARDRAIL_NOTES_BY_KEY[key] || null,
+  };
+};
+
+/**
+ * Computes actionable Leak Radar, Market-Side Split, Regime Era Comparison, and
+ * 666-game Feed Accuracy Benchmark for Model Performance.
+ */
+export const computePerformanceDiagnostics = (rows = [], modelLearning = null) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const graded = safeRows.filter((h) => {
+    const n = normalizeOutcome(getRawOutcome(h));
+    return n === 'WON' || n === 'LOST' || n === 'PUSH';
+  });
+
+  const segAcc = {
+    total_under: { label: 'Totals Under', group: 'Market × Side', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    total_over: { label: 'Totals Over', group: 'Market × Side', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    spread_dogs: { label: 'Spread Underdogs (+)', group: 'Market × Side', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    spread_favs: { label: 'Spread Favorites (-)', group: 'Market × Side', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    first_half: { label: '1H Markets', group: 'Market × Side', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    moneyline: { label: 'Moneylines', group: 'Market × Side', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    role_away_dog: { label: 'Away Underdog (+)', group: 'Spread Role', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    role_home_dog: { label: 'Home Underdog (+)', group: 'Spread Role', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    role_home_fav: { label: 'Home Favorite (-)', group: 'Spread Role', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    role_away_fav: { label: 'Away Favorite (-)', group: 'Spread Role', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    edge_2to5: { label: 'Edge 2% – 5%', group: 'Edge Band', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    edge_5to10: { label: 'Edge 5% – 10%', group: 'Edge Band', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+    edge_10plus: { label: 'Edge 10%+', group: 'Edge Band', wins: 0, losses: 0, pushes: 0, profitUnits: 0 },
+  };
+
+  const addSeg = (key, norm, pl) => {
+    const a = segAcc[key];
+    if (!a) return;
+    if (norm === 'WON') a.wins += 1;
+    else if (norm === 'LOST') a.losses += 1;
+    else if (norm === 'PUSH') a.pushes += 1;
+    a.profitUnits += pl;
+  };
+
+  const preEraRows = [];
+  const currEraRows = [];
+
+  for (const h of graded) {
+    const out = getRawOutcome(h);
+    const norm = normalizeOutcome(out);
+    const pl = roiPerUnit(out, getEffectivePrice(h));
+    const day = getPerformanceDay(h);
+    if (day) {
+      if (day < '2026-11-16') preEraRows.push(h);
+      else currEraRows.push(h);
+    }
+
+    const mkt = normalizeMarketType(h);
+    const sideText = `${h?.side || ''} ${h?.selection || ''} ${h?.pick || ''}`.toUpperCase();
+    const rawLine = h?.bet_line ?? h?.market_line ?? h?.line;
+    const numLine = rawLine !== null && rawLine !== undefined && rawLine !== '' ? Number(rawLine) : NaN;
+
+    if (mkt === 'TOTAL') {
+      if (sideText.includes('UNDER')) addSeg('total_under', norm, pl);
+      else if (sideText.includes('OVER')) addSeg('total_over', norm, pl);
+    } else if (mkt === 'SPREAD' && Number.isFinite(numLine)) {
+      if (numLine > 0) addSeg('spread_dogs', norm, pl);
+      else if (numLine < 0) addSeg('spread_favs', norm, pl);
+
+      const isAway = inferSpreadSideIsAway(h);
+      if (numLine > 0 && isAway === true) addSeg('role_away_dog', norm, pl);
+      else if (numLine > 0 && isAway === false) addSeg('role_home_dog', norm, pl);
+      else if (numLine < 0 && isAway === false) addSeg('role_home_fav', norm, pl);
+      else if (numLine < 0 && isAway === true) addSeg('role_away_fav', norm, pl);
+    } else if (mkt === 'TOTAL_1H' || mkt === 'SPREAD_1H') {
+      addSeg('first_half', norm, pl);
+    } else if (mkt === 'MONEYLINE') {
+      addSeg('moneyline', norm, pl);
+    }
+
+    const evDec = getNumericEdge(h);
+    if (evDec !== null) {
+      const evPct = evDec * 100;
+      if (evPct < 5) addSeg('edge_2to5', norm, pl);
+      else if (evPct < 10) addSeg('edge_5to10', norm, pl);
+      else addSeg('edge_10plus', norm, pl);
+    }
+  }
+
+  const segments = Object.entries(segAcc)
+    .map(([key, acc]) => finalizeDiagnosticSegment(acc, key, acc.group))
+    .filter((s) => s.settled > 0);
+
+  const marketSideKeys = ['total_under', 'total_over', 'spread_dogs', 'spread_favs'];
+  const marketSideSplit = marketSideKeys
+    .map((k) => segments.find((s) => s.key === k))
+    .filter(Boolean);
+
+  const primaryPool = segments.filter(
+    (s) => (s.group === 'Market × Side' || s.group === 'Spread Role') && s.settled >= 2
+  );
+  const poolForRanking = primaryPool.length > 0 ? primaryPool : segments.filter((s) => s.settled >= 2);
+
+  const topWinners = poolForRanking
+    .filter((s) => s.profitUnits > 0.05)
+    .slice()
+    .sort((a, b) => b.profitUnits - a.profitUnits || b.roiPct - a.roiPct)
+    .slice(0, 3);
+
+  const topLeaks = poolForRanking
+    .filter((s) => s.profitUnits < -0.05)
+    .slice()
+    .sort((a, b) => a.profitUnits - b.profitUnits || a.roiPct - b.roiPct)
+    .slice(0, 3);
+
+  const totalNet = graded.reduce((acc, h) => acc + roiPerUnit(getRawOutcome(h), getEffectivePrice(h)), 0);
+  const topLeak = topLeaks[0] || null;
+  const topWin = topWinners[0] || null;
+
+  let headlineSummary = 'Not enough settled picks in the active filter to isolate drivers.';
+  if (graded.length > 0) {
+    if (topLeak && totalNet < 0) {
+      const lossShare = Math.min(100, Math.round((Math.abs(topLeak.profitUnits) / Math.max(0.1, Math.abs(totalNet))) * 100));
+      headlineSummary = `${topLeak.label} (${topLeak.recordText}, ${topLeak.profitUnits.toFixed(2)}u) drove ${lossShare}% of the net drawdown${topWin ? `, while ${topWin.label} led winners at +${topWin.profitUnits.toFixed(2)}u (${topWin.winRate.toFixed(1)}% WR)` : ''}.`;
+    } else if (topWin) {
+      headlineSummary = `${topWin.label} leads profitability at ${topWin.recordText} (+${topWin.profitUnits.toFixed(2)}u, ${topWin.roiPct >= 0 ? '+' : ''}${topWin.roiPct.toFixed(1)}% ROI)${topLeak ? `; biggest drag is ${topLeak.label} (${topLeak.profitUnits.toFixed(2)}u)` : ''}.`;
+    }
+  }
+
+  const FEED_LABELS = {
+    market: 'Sportsbook Consensus',
+    blended_fair: 'Blended Model Fair',
+    kenpom: 'KenPom Ratings',
+    torvik: 'BartTorvik Ratings',
+    haslametrics: 'Haslametrics',
+  };
+  const rawFeedAcc = modelLearning?.all_games_summary?.feed_accuracy || null;
+  const marketMae = rawFeedAcc?.market?.mae != null ? Number(rawFeedAcc.market.mae) : null;
+  const feedBenchmark = rawFeedAcc
+    ? Object.entries(rawFeedAcc)
+        .filter(([, v]) => v && v.mae != null && Number(v.n || 0) > 0)
+        .map(([key, v]) => ({
+          key,
+          label: FEED_LABELS[key] || key,
+          mae: Number(v.mae),
+          n: Number(v.n),
+          atsWinRate: v.ats_win_rate != null ? Number(v.ats_win_rate) * 100 : null,
+          deltaVsMarket: marketMae != null && key !== 'market' ? Number((Number(v.mae) - marketMae).toFixed(3)) : null,
+        }))
+        .sort((a, b) => a.mae - b.mae)
+    : [];
+
+  const eraComparison =
+    preEraRows.length > 0 && currEraRows.length > 0
+      ? {
+          pre: computeRecordStats(preEraRows),
+          current: computeRecordStats(currEraRows),
+        }
+      : null;
+
+  return {
+    settledCount: graded.length,
+    segments,
+    marketSideSplit,
+    topWinners,
+    topLeaks,
+    headlineSummary,
+    feedBenchmark,
+    eraComparison,
+    allGamesCount: Number(modelLearning?.all_games_summary?.n_games || 0),
+  };
+};

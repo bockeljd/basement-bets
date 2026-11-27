@@ -513,6 +513,12 @@ def fit_adaptive_learning_from_rows(
         if bump != 0.0:
             market_side_ev_bump[ms_key] = bump
 
+    spread_role_ev_bump: Dict[str, float] = {}
+    for sr_key, st in sr_summary.items():
+        bump = _compute_ev_bump_from_roi(st["n"], st["roi_per_unit"], min_n=12)
+        if bump != 0.0:
+            spread_role_ev_bump[sr_key] = bump
+
     total_n = sum(v["n"] for v in ms_summary.values())
     sig_cal = all_games_summary.get("sigma_calibration") or {}
     return {
@@ -536,6 +542,7 @@ def fit_adaptive_learning_from_rows(
             "total_sigma_scale": float(sig_cal.get("total_sigma_scale") or 1.0),
             "spread_bucket_ev_bump": spread_bucket_ev_bump,
             "market_side_ev_bump": market_side_ev_bump,
+            "spread_role_ev_bump": spread_role_ev_bump,
         },
         "bins": merged_bins,
     }
