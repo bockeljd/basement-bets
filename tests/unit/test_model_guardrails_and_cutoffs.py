@@ -360,3 +360,116 @@ def test_total_over_home_fav_leaks_guarded_and_spread_role_bumps(monkeypatch):
     }
     assert model._passes_publish_gates(early_under_smart, None, True) is True
     assert early_under_smart["is_smart_risk"] is True
+
+
+def test_1h_blocks_outlier_book_adverse_selection_and_caps_sizing(monkeypatch):
+    model = NCAAMMarketFirstModelV2()
+    monkeypatch.setattr(model, "_load_adaptive_learning", lambda: {})
+    now_dt = datetime.now(timezone.utc)
+    ev = {"id": "action:ncaam:299462", "home_team": "St. Thomas Tommies", "away_team": "Liberty Flames"}
+
+    # 1. Exact Liberty @ St. Thomas adverse-selection trap:
+    # Full-game edge is weak (+1.1 pts), slow books sit at 69.0, sharp-moved bet365 is at 67.5 -> MUST BLOCK
+    trap_snap = {
+        "spread_home": -1.25,
+        "spread_price_home": -110,
+        "total": 146.5,
+        "_quote_as_of": now_dt,
+        "_raw_snaps": [
+            {"market_type": "TOTAL_1H", "side": "OVER", "line_value": 69.0, "price": -110, "book": "DraftKings", "captured_at": now_dt},
+            {"market_type": "TOTAL_1H", "side": "OVER", "line_value": 69.0, "price": -110, "book": "FanDuel", "captured_at": now_dt},
+            {"market_type": "TOTAL_1H", "side": "OVER", "line_value": 67.5, "price": -110, "book": "bet365", "captured_at": now_dt},
+        ],
+    }
+    trap_recs = model._generate_recommendations(
+        mu_s=-1.4,
+        sig_s=10.5,
+        mu_t=147.6,
+        sig_t=14.0,
+        snap=trap_snap,
+        event=ev,
+        torvik_view={"lean": "Home"},
+        relax_gates=False,
+        model_ctx={"game_month": 11, "min_rec_games": 5, "is_early_season": True, "agree_count": 0, "agree_count_total": 3},
+    )
+    assert not any(r["market"] == "TOTAL_1H" for r in trap_recs)
+
+    # 2. Legitimate aligned 1H Under (all books near 68.5 AND strong full-game Under edge -6.5 pts -> -3.12 in 1H) passes
+    aligned_snap = {
+        "spread_home": -1.25,
+        "spread_price_home": -110,
+        "total": 146.5,
+        "_quote_as_of": now_dt,
+        "_raw_snaps": [
+            {"market_type": "TOTAL_1H", "side": "UNDER", "line_value": 68.5, "price": -110, "book": "DraftKings", "captured_at": now_dt},
+            {"market_type": "TOTAL_1H", "side": "UNDER", "line_value": 68.5, "price": -110, "book": "bet365", "captured_at": now_dt},
+        ],
+    }
+    aligned_recs = model._generate_recommendations(
+        mu_s=-1.4,
+        sig_s=10.5,
+        mu_t=140.0,
+        sig_t=14.0,
+        snap=aligned_snap,
+        event=ev,
+        torvik_view={"lean": "Home"},
+        relax_gates=False,
+        model_ctx={"game_month": 11, "min_rec_games": 5, "is_early_season": True, "agree_count": 0, "agree_count_total": 3},
+    )
+    h1_under = [r for r in aligned_recs if r["market"] == "TOTAL_1H" and r["side"] == "under"]
+    assert len(h1_under) == 1
+
+    # 3. Verify 1H sizing cap & TOTAL_1H -> TOTAL split mapping in _apply_split_and_injury_signals
+    contra_out = model._apply_split_and_injury_signals(
+        h1_under,
+        action_splits={
+            "TOTAL": {
+                "UNDER": {"bet_pct": 25.0, "handle_pct": 20.0},
+                "OVER": {"bet_pct": 25.0, "handle_pct": 80.0},
+            }
+        },
+        relax_gates=True,
+    )
+    assert "contra_sharp_money" in contra_out[0]["movement_tags"]
+
+    # 4. Verify analyze() caps 1H sizing at 0.5u ('Half-Unit 1H Derivative') instead of 1.5u
+    jan_dt = datetime(2027, 1, 15, 23, 0, tzinfo=timezone.utc)
+    jan_aligned_snap = {
+        "spread_home": -1.25,
+        "spread_price_home": -110,
+        "total": 146.5,
+        "_quote_as_of": jan_dt,
+        "_best_total_under": {"line_value": 146.5, "price": -110, "captured_at": jan_dt, "book": "DraftKings"},
+        "_best_total_over": {"line_value": 146.5, "price": -110, "captured_at": jan_dt, "book": "DraftKings"},
+        "_raw_snaps": [
+            {"market_type": "TOTAL_1H", "side": "UNDER", "line_value": 68.5, "price": -110, "book": "DraftKings", "captured_at": jan_dt},
+            {"market_type": "TOTAL_1H", "side": "UNDER", "line_value": 68.5, "price": -110, "book": "bet365", "captured_at": jan_dt},
+        ],
+    }
+    monkeypatch.setattr(model, "_get_council_verdict", lambda eid: None)
+    monkeypatch.setattr(model.torvik_service, "get_projection", lambda h, a, date=None, neutral_site=False: {"margin": 1.0, "total": 140.6, "lean": "Home"})
+    monkeypatch.setattr(model.torvik_service, "get_matchup_team_stats", lambda h, a, date=None: {"home": {"continuity": 0.72, "luck": 0.0, "record": "15-3"}, "away": {"continuity": 0.72, "luck": 0.0, "record": "15-3"}, "game_tempo": 67.0})
+    monkeypatch.setattr(model.kenpom_client, "calculate_kenpom_adjustment", lambda h, a, neutral_site=False: {"spread_adj": 1.0, "fair_margin": 1.0, "fair_total": 140.6, "total_adj": 0.0})
+    monkeypatch.setattr(model.kenpom_client, "get_player_stats_for_team", lambda t, limit=50: [])
+    monkeypatch.setattr(model.kenpom_client, "get_team_player_agg", lambda t: None)
+    monkeypatch.setattr(model.kenpom_client, "get_team_rating", lambda t: None)
+    monkeypatch.setattr(model.kenpom_client, "get_home_court", lambda t: None)
+    monkeypatch.setattr(model.haslametrics_client, "calculate_projection", lambda h, a, neutral_site=False, asof_date=None: {"available": True, "margin": 1.0, "total": 140.6})
+    monkeypatch.setattr(model.geo_service, "get_altitude_adjustment", lambda h, neutral_site=False: 0.0)
+    monkeypatch.setattr(model.geo_service, "calculate_distance", lambda h, a: 100.0)
+    monkeypatch.setattr(model, "_calculate_shooting_regression", lambda t, as_of_date=None: 0.0)
+    monkeypatch.setattr(model, "_calculate_situational_spots", lambda t, ev_arg: 0.0)
+    monkeypatch.setattr(model, "_calculate_fatigue_penalty", lambda t, eid, gd: 0.0)
+    monkeypatch.setattr(model, "_apply_referee_signal", lambda eid, tot, avg_ftr=None: tot)
+    monkeypatch.setattr(model, "_get_archetype_stats", lambda key: {"n": 80, "mean": 0.04, "sd": 0.10})
+    res_full = model.analyze(
+        "action:ncaam:299462",
+        event_context={**ev, "start_time": jan_dt, "neutral_site": True},
+        market_snapshot=jan_aligned_snap,
+        relax_gates=True,
+        persist=False,
+    )
+    h1_ui = [r for r in res_full["recommendations"] if r["bet_type"] == "TOTAL_1H"]
+    assert h1_ui
+    assert h1_ui[0]["suggested_units"] <= 0.5
+    assert h1_ui[0]["sizing_tier"] == "Half-Unit 1H Derivative"

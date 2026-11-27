@@ -45,7 +45,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
     - Structured narratives.
     """
     
-    VERSION = "2.4.4-over-homefav-guard"
+    VERSION = "2.4.5-1h-steam-guard"
     
     # Optimized Model Weights (2026-02-01 Sniper Plan)
     # Target: 75% Market / 25% Torvik+KenPom
@@ -2353,13 +2353,14 @@ class NCAAMMarketFirstModelV2(BaseModel):
                 ev=r.get('ev'),
                 kelly_q=r.get('kelly'),
             )
-            if is_smart_risk:
+            is_h1_mkt = r['market'] in ('SPREAD_1H', 'TOTAL_1H')
+            if is_smart_risk or is_h1_mkt:
                 capped_u = min(float(sizing.get('units') or 0.5), 0.5)
                 sizing = {
                     **sizing,
                     'units': round(capped_u, 2),
                     'bankroll_pct': round(min(float(sizing.get('bankroll_pct') or capped_u), capped_u), 2),
-                    'sizing_tier': 'Half-Unit Smart Risk Play',
+                    'sizing_tier': 'Half-Unit Smart Risk Play' if is_smart_risk else 'Half-Unit 1H Derivative',
                 }
             r['suggested_units'] = sizing['units']
             r['recommended_units'] = sizing['units']
@@ -3813,14 +3814,15 @@ class NCAAMMarketFirstModelV2(BaseModel):
         for r in recs:
             rec = dict(r)
             mkt = str(rec.get("market") or "").upper()
+            base_mkt = "SPREAD" if mkt == "SPREAD_1H" else ("TOTAL" if mkt == "TOTAL_1H" else mkt)
             side = str(rec.get("side") or "").upper().strip()
             tags = list(rec.get("movement_tags") or [])
 
-            mkt_splits = splits.get(mkt) if isinstance(splits, dict) else None
+            mkt_splits = splits.get(base_mkt) if isinstance(splits, dict) else None
             if isinstance(mkt_splits, dict) and side in mkt_splits:
                 opp_side = (
                     ("AWAY" if side == "HOME" else "HOME")
-                    if mkt in ("SPREAD", "ML")
+                    if base_mkt in ("SPREAD", "ML")
                     else ("UNDER" if side == "OVER" else "OVER")
                 )
                 pick_s = mkt_splits.get(side) or {}
@@ -3843,11 +3845,11 @@ class NCAAMMarketFirstModelV2(BaseModel):
 
                     # Check line direction relative to pick without chasing heavy steam (>1.5 pts)
                     line_aligned = False
-                    if mkt == "SPREAD" and mc.get("open_spread_home") is not None and mc.get("current_spread_home") is not None:
+                    if base_mkt == "SPREAD" and mc.get("open_spread_home") is not None and mc.get("current_spread_home") is not None:
                         move_home = float(mc["current_spread_home"]) - float(mc["open_spread_home"])
                         move_toward_pick = (-move_home) if side == "HOME" else move_home
                         line_aligned = 0.0 <= move_toward_pick <= 1.5
-                    elif mkt == "TOTAL" and mc.get("open_total") is not None and mc.get("current_total") is not None:
+                    elif base_mkt == "TOTAL" and mc.get("open_total") is not None and mc.get("current_total") is not None:
                         move_t = float(mc["current_total"]) - float(mc["open_total"])
                         line_aligned = (0.0 <= move_t <= 1.5) if side == "OVER" else (-1.5 <= move_t <= 0.0)
 
@@ -3925,7 +3927,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                             rec["kelly"] = 0.0
                             if "kelly_pct" in rec:
                                 rec["kelly_pct"] = 0.0
-                    mkt_name = str(rec.get("market") or rec.get("market_type") or "").upper()
+                    mkt_name = "SPREAD" if mkt == "SPREAD_1H" else ("TOTAL" if mkt == "TOTAL_1H" else str(rec.get("market") or rec.get("market_type") or "").upper())
                     if mkt_name == "TOTAL":
                         min_gate_ev = (
                             float(getattr(self, "PUBLISH_MIN_EV_TOTAL_OVER", 0.041))
@@ -4728,7 +4730,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     if sp1h_home:
                         bh = max(sp1h_home, key=lambda x: (float(x['line_value']), int(x.get('price') or -110)))
                         lh = float(bh['line_value'])
-                        if abs(lh - mkt_1h_home) <= 1.5:
+                        if abs(lh - mkt_1h_home) <= 0.5 and (-0.52 * fg_edge_home) >= 1.0:
                             ph = _clean_main_price(bh.get('price'), default=-110)
                             raw_h1 = _spread_cover_prob_home(mu_1h_s, sig_1h_s, lh)
                             prob_h1 = self._calibrate_win_prob(raw_h1, is_early_season=g_is_early)
@@ -4763,7 +4765,7 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     if sp1h_away:
                         ba = max(sp1h_away, key=lambda x: (float(x['line_value']), int(x.get('price') or -110)))
                         la = float(ba['line_value'])
-                        if abs(la - (-mkt_1h_home)) <= 1.5:
+                        if abs(la - (-mkt_1h_home)) <= 0.5 and (0.52 * fg_edge_home) >= 1.0:
                             pa = _clean_main_price(ba.get('price'), default=-110)
                             raw_a1 = 1.0 - _spread_cover_prob_home(mu_1h_s, sig_1h_s, -la)
                             prob_a1 = self._calibrate_win_prob(raw_a1, is_early_season=g_is_early)
@@ -4808,81 +4810,82 @@ class NCAAMMarketFirstModelV2(BaseModel):
                     h1_tot_vals = [float(s['line_value']) for s in (tot1h_over + tot1h_under)]
                     mkt_1h_tot = _stats.median(h1_tot_vals)
                     fg_edge_tot = float(mu_t) - float(line_t)
-                    mu_1h_t = mkt_1h_tot + (0.48 * fg_edge_tot)
-                    sig_1h_t = max(7.5, float(sig_t) * 0.70)
-                    best_1h_tot = []
-                    if tot1h_under:
-                        bu = max(tot1h_under, key=lambda x: (float(x['line_value']), int(x.get('price') or -110)))
-                        lu = float(bu['line_value'])
-                        if abs(lu - mkt_1h_tot) <= 2.0:
-                            pu = _clean_main_price(bu.get('price'), default=-110)
-                            raw_u1 = self._normal_cdf(lu, mu_1h_t, sig_1h_t)
-                            prob_u1 = self._binary_probabilities(raw_u1, g_is_early)[0]
-                            ev_u1 = self._calculate_ev(prob_u1, pu, push_prob=self._push_probability(lu))
-                            edge_u1 = lu - mu_1h_t
-                            b1u = self._confidence_bounds_from_mu_uncertainty(
-                                market='TOTAL',
-                                mu=float(mu_1h_t),
-                                sigma=float(sig_1h_t),
-                                line=float(lu),
-                                side='under',
-                                game_month=g_month,
-                                min_rec_games=g_min_games,
-                                mean_gap=g_gap_tot,
-                                agree_count=g_agree_tot,
-                            )
-                            lb10_u1 = float(b1u['lb10']) if b1u.get('lb10') is not None else max(0.50, prob_u1 - 0.02)
-                            ub90_u1 = float(b1u['ub90']) if b1u.get('ub90') is not None else min(0.95, prob_u1 + 0.02)
-                            if _h1_side_passes(0.038, 'TOTAL', 'under', pu, ev_u1, prob_u1, 0.545, edge_u1, 1.5, lb10_u1, g_agree_tot):
-                                best_1h_tot.append({
-                                    "market": "TOTAL_1H", "side": "under", "team": "1H UNDER",
-                                    "raw_win_prob": raw_u1, "line": lu, "price": pu, "prob": round(prob_u1, 3), "win_prob": round(prob_u1, 3),
-                                    "fair_line_1h_total": round(mu_1h_t, 1),
-                                    "win_prob_lb10": round(lb10_u1, 3),
-                                    "win_prob_ub90": round(ub90_u1, 3),
-                                    "ev": float(round(ev_u1, 4)), "kelly": float(round(self._calculate_kelly(prob_u1, pu), 4)),
-                                    "quote_captured_at": str(bu.get("captured_at") or "") or None,
-                                    "book": bu.get('book') or 'Consensus', "edge_points": float(round(edge_u1, 2)),
-                                    "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
-                                    "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,
-                                })
-                    if tot1h_over:
-                        bo = min(tot1h_over, key=lambda x: (float(x['line_value']), -int(x.get('price') or -110)))
-                        lo = float(bo['line_value'])
-                        if abs(lo - mkt_1h_tot) <= 2.0:
-                            po = _clean_main_price(bo.get('price'), default=-110)
-                            raw_o1 = 1.0 - self._normal_cdf(lo, mu_1h_t, sig_1h_t)
-                            prob_o1 = self._binary_probabilities(raw_o1, g_is_early)[0]
-                            ev_o1 = self._calculate_ev(prob_o1, po, push_prob=self._push_probability(lo))
-                            edge_o1 = mu_1h_t - lo
-                            b1o = self._confidence_bounds_from_mu_uncertainty(
-                                market='TOTAL',
-                                mu=float(mu_1h_t),
-                                sigma=float(sig_1h_t),
-                                line=float(lo),
-                                side='over',
-                                game_month=g_month,
-                                min_rec_games=g_min_games,
-                                mean_gap=g_gap_tot,
-                                agree_count=g_agree_tot,
-                            )
-                            lb10_o1 = float(b1o['lb10']) if b1o.get('lb10') is not None else max(0.50, prob_o1 - 0.02)
-                            ub90_o1 = float(b1o['ub90']) if b1o.get('ub90') is not None else min(0.95, prob_o1 + 0.02)
-                            if _h1_side_passes(0.045, 'TOTAL', 'over', po, ev_o1, prob_o1, 0.55, edge_o1, 1.8, lb10_o1, g_agree_tot):
-                                best_1h_tot.append({
-                                    "market": "TOTAL_1H", "side": "over", "team": "1H OVER",
-                                    "raw_win_prob": raw_o1, "line": lo, "price": po, "prob": round(prob_o1, 3), "win_prob": round(prob_o1, 3),
-                                    "fair_line_1h_total": round(mu_1h_t, 1),
-                                    "win_prob_lb10": round(lb10_o1, 3),
-                                    "win_prob_ub90": round(ub90_o1, 3),
-                                    "ev": float(round(ev_o1, 4)), "kelly": float(round(self._calculate_kelly(prob_o1, po), 4)),
-                                    "quote_captured_at": str(bo.get("captured_at") or "") or None,
-                                    "book": bo.get('book') or 'Consensus', "edge_points": float(round(edge_o1, 2)),
-                                    "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
-                                    "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,
-                                })
-                    if best_1h_tot:
-                        recs.append(max(best_1h_tot, key=lambda c: c['ev']))
+                    if abs(mkt_1h_tot - (0.472 * float(line_t))) <= 3.5:
+                        mu_1h_t = mkt_1h_tot + (0.48 * fg_edge_tot)
+                        sig_1h_t = max(7.5, float(sig_t) * 0.70)
+                        best_1h_tot = []
+                        if tot1h_under:
+                            bu = max(tot1h_under, key=lambda x: (float(x['line_value']), int(x.get('price') or -110)))
+                            lu = float(bu['line_value'])
+                            if abs(lu - mkt_1h_tot) <= 0.5 and (-0.48 * fg_edge_tot) >= 1.1:
+                                pu = _clean_main_price(bu.get('price'), default=-110)
+                                raw_u1 = self._normal_cdf(lu, mu_1h_t, sig_1h_t)
+                                prob_u1 = self._binary_probabilities(raw_u1, g_is_early)[0]
+                                ev_u1 = self._calculate_ev(prob_u1, pu, push_prob=self._push_probability(lu))
+                                edge_u1 = lu - mu_1h_t
+                                b1u = self._confidence_bounds_from_mu_uncertainty(
+                                    market='TOTAL',
+                                    mu=float(mu_1h_t),
+                                    sigma=float(sig_1h_t),
+                                    line=float(lu),
+                                    side='under',
+                                    game_month=g_month,
+                                    min_rec_games=g_min_games,
+                                    mean_gap=g_gap_tot,
+                                    agree_count=g_agree_tot,
+                                )
+                                lb10_u1 = float(b1u['lb10']) if b1u.get('lb10') is not None else max(0.50, prob_u1 - 0.02)
+                                ub90_u1 = float(b1u['ub90']) if b1u.get('ub90') is not None else min(0.95, prob_u1 + 0.02)
+                                if _h1_side_passes(0.038, 'TOTAL', 'under', pu, ev_u1, prob_u1, 0.545, edge_u1, 1.5, lb10_u1, g_agree_tot):
+                                    best_1h_tot.append({
+                                        "market": "TOTAL_1H", "side": "under", "team": "1H UNDER",
+                                        "raw_win_prob": raw_u1, "line": lu, "price": pu, "prob": round(prob_u1, 3), "win_prob": round(prob_u1, 3),
+                                        "fair_line_1h_total": round(mu_1h_t, 1),
+                                        "win_prob_lb10": round(lb10_u1, 3),
+                                        "win_prob_ub90": round(ub90_u1, 3),
+                                        "ev": float(round(ev_u1, 4)), "kelly": float(round(self._calculate_kelly(prob_u1, pu), 4)),
+                                        "quote_captured_at": str(bu.get("captured_at") or "") or None,
+                                        "book": bu.get('book') or 'Consensus', "edge_points": float(round(edge_u1, 2)),
+                                        "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
+                                        "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,
+                                    })
+                        if tot1h_over:
+                            bo = min(tot1h_over, key=lambda x: (float(x['line_value']), -int(x.get('price') or -110)))
+                            lo = float(bo['line_value'])
+                            if abs(lo - mkt_1h_tot) <= 0.5 and (0.48 * fg_edge_tot) >= 1.1:
+                                po = _clean_main_price(bo.get('price'), default=-110)
+                                raw_o1 = 1.0 - self._normal_cdf(lo, mu_1h_t, sig_1h_t)
+                                prob_o1 = self._binary_probabilities(raw_o1, g_is_early)[0]
+                                ev_o1 = self._calculate_ev(prob_o1, po, push_prob=self._push_probability(lo))
+                                edge_o1 = mu_1h_t - lo
+                                b1o = self._confidence_bounds_from_mu_uncertainty(
+                                    market='TOTAL',
+                                    mu=float(mu_1h_t),
+                                    sigma=float(sig_1h_t),
+                                    line=float(lo),
+                                    side='over',
+                                    game_month=g_month,
+                                    min_rec_games=g_min_games,
+                                    mean_gap=g_gap_tot,
+                                    agree_count=g_agree_tot,
+                                )
+                                lb10_o1 = float(b1o['lb10']) if b1o.get('lb10') is not None else max(0.50, prob_o1 - 0.02)
+                                ub90_o1 = float(b1o['ub90']) if b1o.get('ub90') is not None else min(0.95, prob_o1 + 0.02)
+                                if _h1_side_passes(0.045, 'TOTAL', 'over', po, ev_o1, prob_o1, 0.55, edge_o1, 1.8, lb10_o1, g_agree_tot):
+                                    best_1h_tot.append({
+                                        "market": "TOTAL_1H", "side": "over", "team": "1H OVER",
+                                        "raw_win_prob": raw_o1, "line": lo, "price": po, "prob": round(prob_o1, 3), "win_prob": round(prob_o1, 3),
+                                        "fair_line_1h_total": round(mu_1h_t, 1),
+                                        "win_prob_lb10": round(lb10_o1, 3),
+                                        "win_prob_ub90": round(ub90_o1, 3),
+                                        "ev": float(round(ev_o1, 4)), "kelly": float(round(self._calculate_kelly(prob_o1, po), 4)),
+                                        "quote_captured_at": str(bo.get("captured_at") or "") or None,
+                                        "book": bo.get('book') or 'Consensus', "edge_points": float(round(edge_o1, 2)),
+                                        "movement_tags": ["first_half_market"], "_is_early_season": g_is_early,
+                                        "_agree_count": g_agree_sp, "_agree_count_total": g_agree_tot,
+                                    })
+                        if best_1h_tot:
+                            recs.append(max(best_1h_tot, key=lambda c: c['ev']))
             except Exception:
                 pass
 
