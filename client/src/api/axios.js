@@ -46,10 +46,13 @@ api.interceptors.response.use(
         try {
             const method = (response?.config?.method || 'get').toLowerCase();
             const url = response?.config?.url;
-            if (method === 'get' && url && CACHEABLE_GETS.has(url)) {
-                const etag = response?.headers?.etag;
-                if (etag) {
-                    saveCache(url, response?.config?.params, response.data, etag);
+            if (method === 'get' && url && CACHEABLE_GETS.has(url) && response?.status === 200 && response?.data != null) {
+                const etag = response?.headers?.etag || null;
+                const params = response?.config?.params;
+                saveCache(url, params, response.data, etag);
+                if (url === '/api/ncaam/top-picks' && params && Object.prototype.hasOwnProperty.call(params, 'refresh')) {
+                    const { refresh: _omitRefresh, ...baseParams } = params;
+                    saveCache(url, baseParams, response.data, etag);
                 }
             }
         } catch {

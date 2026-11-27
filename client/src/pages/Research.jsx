@@ -42,6 +42,8 @@ import {
   dedupeBoardGames,
   getOutcomeOutlineClasses,
   buildCachedAnalysisResult,
+  fetchWithRetry,
+  mapTopPicksPayload,
 } from '../components/today/todayHelpers';
 import '../styles/todayDashboard.css';
 
@@ -124,12 +126,12 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
     setDegradedAsOf(null);
 
     const boardParams = { league: leagueFilter, date: selectedDate, days: BOARD_DAYS_DEFAULT };
-    const topPicksParams = {
+    const baseTopPicksParams = {
       date: selectedDate,
       days: BOARD_DAYS_DEFAULT,
       limit_games: 250,
-      ...(forceRefresh ? { refresh: true } : {}),
     };
+    const topPicksParams = forceRefresh ? { ...baseTopPicksParams, refresh: true } : baseTopPicksParams;
     const isCanceledErr = (err) =>
       controller.signal.aborted ||
       err?.code === 'ERR_CANCELED' ||
@@ -138,16 +140,28 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
 
     try {
       const [boardRes, topPicksRes, healthRes, matchupRes, mlbRes] = await Promise.all([
-        api.get('/api/board', { params: boardParams, signal: controller.signal }),
+        fetchWithRetry(() => api.get('/api/board', { params: boardParams, signal: controller.signal }), {
+          retries: 1,
+          delayMs: 600,
+          signal: controller.signal,
+        }),
         leagueFilter === 'NCAAM'
-          ? api
-              .get('/api/ncaam/top-picks', { params: topPicksParams, signal: controller.signal })
-              .catch((e) => {
-                if (isCanceledErr(e)) throw e;
-                return { data: null, _error: e };
-              })
+          ? fetchWithRetry(
+              () => api.get('/api/ncaam/top-picks', { params: topPicksParams, signal: controller.signal }),
+              { retries: 1, delayMs: 600, signal: controller.signal }
+            ).catch((e) => {
+              if (isCanceledErr(e)) throw e;
+              return { data: null, _error: e };
+            })
           : Promise.resolve({ data: null }),
-        api.get('/api/data-health', { signal: controller.signal }).catch(() => ({ data: { items: [] } })),
+        fetchWithRetry(() => api.get('/api/data-health', { signal: controller.signal }), {
+          retries: 1,
+          delayMs: 600,
+          signal: controller.signal,
+        }).catch((e) => {
+          if (isCanceledErr(e)) throw e;
+          return { data: null, _error: e };
+        }),
         leagueFilter === 'NCAAM'
           ? api.get('/api/ncaam/matchup-profiles', { params: { date: selectedDate }, signal: controller.signal }).catch(() => ({ data: { profiles: [] } }))
           : Promise.resolve({ data: { profiles: [] } }),
@@ -160,7 +174,9 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
 
       const dedupedBoard = dedupeBoardGames(Array.isArray(boardRes.data) ? boardRes.data : []);
       setEdges(dedupedBoard);
-      setDataHealth(healthRes?.data?.items || []);
+      if (!healthRes?._error && Array.isArray(healthRes?.data?.items)) {
+        setDataHealth(healthRes.data.items);
+      }
 
       const mProfiles = {};
       (matchupRes?.data?.profiles || []).forEach((p) => {
@@ -168,28 +184,27 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       });
       setMatchupProfiles(mProfiles);
 
-      const mapped = {};
-      const mappedByKey = {};
+      let mapped = {};
+      let mappedByKey = {};
+      let topPicksNotice = null;
 
-      if (leagueFilter === 'NCAAM' && topPicksRes?.data?.picks && typeof topPicksRes.data.picks === 'object') {
-        const tp = topPicksRes.data.picks;
-        Object.keys(tp).forEach((eid) => {
-          const item = tp[eid];
-          const recObj = {
-            rec: item?.rec,
-            analyzedAt: item?.analyzed_at,
-            isActionable: item?.is_actionable,
-            reason: item?.reason,
-            source: item?.source,
-            event: item?.event,
-            context: item?.context || null,
-            model_version: item?.model_version || null,
-          };
-          mapped[eid] = recObj;
-          const ev = item?.event || {};
-          const k = makeMatchupKey(String(ev.day_et || '').slice(0, 10), ev.away_team, ev.home_team);
-          if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
-        });
+      if (leagueFilter === 'NCAAM') {
+        if (topPicksRes?.data?.picks && typeof topPicksRes.data.picks === 'object') {
+          ({ mapped, mappedByKey } = mapTopPicksPayload(topPicksRes.data.picks));
+          setToast((prev) =>
+            prev?.tone === 'warn' && /top-picks|picks cache|saved picks/i.test(prev.text || '') ? null : prev
+          );
+        } else if (topPicksRes?._error) {
+          const cachedTop =
+            loadCache('/api/ncaam/top-picks', baseTopPicksParams) ||
+            loadCache('/api/ncaam/top-picks', topPicksParams);
+          if (cachedTop?.payload?.picks && typeof cachedTop.payload.picks === 'object') {
+            ({ mapped, mappedByKey } = mapTopPicksPayload(cachedTop.payload.picks));
+            topPicksNotice = { tone: 'warn', text: 'Showing saved picks while live cache reconnects.' };
+          } else {
+            topPicksNotice = { tone: 'warn', text: 'Board odds loaded, but picks cache is temporarily busy. Click Refresh to retry.' };
+          }
+        }
       } else if (leagueFilter === 'MLB' && dedupedBoard.length > 0 && Array.isArray(mlbRes?.data?.predictions)) {
         const latestPreds = new Map();
         mlbRes.data.predictions
@@ -242,8 +257,8 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       setRowTopPicks(mapped);
       setRowTopPicksByKey(mappedByKey);
 
-      if (topPicksRes?._error) {
-        setToast({ tone: 'warn', text: 'Board odds loaded, but top-picks cache returned a warning.' });
+      if (topPicksNotice) {
+        setToast(topPicksNotice);
       }
     } catch (err) {
       if (isCanceledErr(err) || scheduleReqSeqRef.current !== reqSeq) {
@@ -254,28 +269,20 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
       }
       try {
         const cachedBoard = loadCache('/api/board', boardParams);
-        const cachedTop = leagueFilter === 'NCAAM' ? loadCache('/api/ncaam/top-picks', topPicksParams) : null;
+        const cachedTop =
+          leagueFilter === 'NCAAM'
+            ? loadCache('/api/ncaam/top-picks', baseTopPicksParams) ||
+              loadCache('/api/ncaam/top-picks', topPicksParams)
+            : null;
         if (cachedBoard?.payload) {
           setEdges(dedupeBoardGames(cachedBoard.payload || []));
           setDegradedMode(true);
           setDegradedAsOf(cachedBoard?.at || null);
         }
         if (cachedTop?.payload?.picks) {
-          const tp = cachedTop.payload.picks;
-          const mapped = {};
-          Object.keys(tp).forEach((eid) => {
-            mapped[eid] = {
-              rec: tp[eid]?.rec,
-              analyzedAt: tp[eid]?.analyzed_at,
-              isActionable: tp[eid]?.is_actionable,
-              reason: tp[eid]?.reason,
-              source: tp[eid]?.source,
-              event: tp[eid]?.event,
-              context: tp[eid]?.context || null,
-              model_version: tp[eid]?.model_version || null,
-            };
-          });
+          const { mapped, mappedByKey } = mapTopPicksPayload(cachedTop.payload.picks);
           setRowTopPicks(mapped);
+          setRowTopPicksByKey(mappedByKey);
         }
         if (!cachedBoard?.payload && !cachedTop?.payload) {
           setError('Failed to load today’s slate. Please try refreshing.');
@@ -818,6 +825,10 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
     () => summarizeDataHealth(dataHealth, edges, leagueFilter),
     [dataHealth, edges, leagueFilter]
   );
+  const showDataHealthAlert =
+    !loading &&
+    dataHealth.length > 0 &&
+    (!healthSummary.feedsHealthy || (leagueFilter === 'NCAAM' && !healthSummary.kenpomOk));
 
   const tabs = useMemo(() => {
     const base = [
@@ -1086,14 +1097,14 @@ const Research = ({ onAddBet, bankroll = null, showModelPerformanceTab = true })
               {...(supportsPopover ? { popovertarget: 'today-tools-popover' } : {})}
               onClick={!supportsPopover ? () => setToolsFallbackOpen((v) => !v) : undefined}
               className={`min-h-[36px] inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition ${
-                !healthSummary.feedsHealthy || (leagueFilter === 'NCAAM' && !healthSummary.kenpomOk)
+                showDataHealthAlert
                   ? 'border-amber-500/45 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200'
                   : 'border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200'
               }`}
             >
               <span
                 className={`w-2 h-2 rounded-full ${
-                  !healthSummary.feedsHealthy || (leagueFilter === 'NCAAM' && !healthSummary.kenpomOk)
+                  showDataHealthAlert
                     ? 'bg-amber-400'
                     : 'bg-emerald-400'
                 }`}

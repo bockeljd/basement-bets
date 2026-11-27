@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCachedAnalysisResult,
   dedupeBoardGames,
+  fetchWithRetry,
   getBetTimingGuidance,
   getConfidenceMeta,
   getLiveGameStatus,
@@ -12,6 +13,7 @@ import {
   hasTop6RiskFlag,
   lookupTopPickForGame,
   makeMatchupKey,
+  mapTopPicksPayload,
   normalizeBoardTeamKey,
   normalizeMovementTag,
 } from './todayHelpers';
@@ -496,5 +498,95 @@ describe('Today recommendations', () => {
     expect(passSnap._fromCache).toBe(true);
     expect(passSnap.recommendations).toEqual([]);
     expect(passSnap.block_reason).toBe('Line matches fair value');
+  });
+
+  it('retries transient 504/network failures once and does not retry 403 or aborted requests', async () => {
+    let calls = 0;
+    const recovered = await fetchWithRetry(
+      async () => {
+        calls += 1;
+        if (calls === 1) {
+          const err = new Error('Gateway Timeout');
+          err.response = { status: 504 };
+          throw err;
+        }
+        return { data: { ok: true } };
+      },
+      { retries: 1, delayMs: 0 }
+    );
+    expect(calls).toBe(2);
+    expect(recovered.data.ok).toBe(true);
+
+    let netCalls = 0;
+    const recoveredNet = await fetchWithRetry(
+      async () => {
+        netCalls += 1;
+        if (netCalls === 1) {
+          throw new Error('Network Error');
+        }
+        return 'ok';
+      },
+      { retries: 1, delayMs: 0 }
+    );
+    expect(netCalls).toBe(2);
+    expect(recoveredNet).toBe('ok');
+
+    let forbiddenCalls = 0;
+    await expect(
+      fetchWithRetry(
+        async () => {
+          forbiddenCalls += 1;
+          const err = new Error('Forbidden');
+          err.response = { status: 403 };
+          throw err;
+        },
+        { retries: 1, delayMs: 0 }
+      )
+    ).rejects.toThrow('Forbidden');
+    expect(forbiddenCalls).toBe(1);
+
+    let abortCalls = 0;
+    await expect(
+      fetchWithRetry(
+        async () => {
+          abortCalls += 1;
+          const err = new Error('Canceled');
+          err.name = 'CanceledError';
+          err.code = 'ERR_CANCELED';
+          throw err;
+        },
+        { retries: 1, delayMs: 0 }
+      )
+    ).rejects.toThrow('Canceled');
+    expect(abortCalls).toBe(1);
+  });
+
+  it('maps top-picks payloads by event_id and neutral/reversed matchup key', () => {
+    const { mapped, mappedByKey } = mapTopPicksPayload({
+      'action:ncaam:123': {
+        is_actionable: false,
+        reason: 'Line matches fair value',
+        analyzed_at: '2026-11-26T16:44:00Z',
+        model_version: '2.4.3-november-spread',
+        event: {
+          day_et: '2026-11-26',
+          home_team: 'Texas Longhorns',
+          away_team: 'Georgetown Hoyas',
+        },
+        context: {
+          closest_lean: { selection: 'OVER 154.5', ev: 0.012, edge_points: 1.1 },
+        },
+      },
+    });
+    expect(mapped['action:ncaam:123'].context.closest_lean.selection).toBe('OVER 154.5');
+    const directKey = makeMatchupKey('2026-11-26', 'Georgetown Hoyas', 'Texas Longhorns');
+    expect(mappedByKey[directKey]).toBe(mapped['action:ncaam:123']);
+    const swappedBoardRow = {
+      id: 'espn:ncaam:999',
+      day_et: '2026-11-26',
+      home_team: 'Georgetown Hoyas',
+      away_team: 'Texas Longhorns',
+    };
+    expect(lookupTopPickForGame(swappedBoardRow, mapped, mappedByKey)).toBe(mapped['action:ncaam:123']);
   });
 });

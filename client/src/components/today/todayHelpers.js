@@ -2536,3 +2536,99 @@ export const getOutcomeOutlineClasses = (rawVerdict, variant = 'bet') => {
     badgeCls: entry.badgeCls,
   };
 };
+
+/**
+ * Determine whether an Axios/fetch error is transient and safe to retry once.
+ */
+export const isRetryableRequestError = (err, signal = null) => {
+  if (
+    signal?.aborted ||
+    err?.code === 'ERR_CANCELED' ||
+    err?.name === 'CanceledError' ||
+    err?.name === 'AbortError'
+  ) {
+    return false;
+  }
+  const status = err?.response?.status;
+  if (typeof status === 'number') {
+    return status === 408 || status === 429 || status >= 500;
+  }
+  return true;
+};
+
+const sleepWithAbort = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      const abortErr = new Error('Request aborted');
+      abortErr.name = 'AbortError';
+      abortErr.code = 'ERR_CANCELED';
+      reject(abortErr);
+      return;
+    }
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const abortErr = new Error('Request aborted');
+      abortErr.name = 'AbortError';
+      abortErr.code = 'ERR_CANCELED';
+      reject(abortErr);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener?.('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
+
+/**
+ * Execute an async request with bounded retry on transient network/5xx/timeout errors.
+ */
+export async function fetchWithRetry(requestFn, { retries = 1, delayMs = 600, signal = null } = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await requestFn();
+    } catch (err) {
+      if (attempt >= retries || !isRetryableRequestError(err, signal)) {
+        throw err;
+      }
+      attempt += 1;
+      if (delayMs > 0) {
+        await sleepWithAbort(delayMs, signal);
+      }
+    }
+  }
+}
+
+/**
+ * Normalize a /api/ncaam/top-picks payload map into event-ID and matchup-key lookups.
+ */
+export function mapTopPicksPayload(picksObj) {
+  const mapped = {};
+  const mappedByKey = {};
+  if (!picksObj || typeof picksObj !== 'object') {
+    return { mapped, mappedByKey };
+  }
+  Object.keys(picksObj).forEach((eid) => {
+    const item = picksObj[eid];
+    const recObj = {
+      rec: item?.rec,
+      analyzedAt: item?.analyzed_at,
+      isActionable: item?.is_actionable,
+      reason: item?.reason,
+      source: item?.source,
+      event: item?.event,
+      context: item?.context || null,
+      model_version: item?.model_version || null,
+    };
+    mapped[eid] = recObj;
+    const ev = item?.event || {};
+    const k = makeMatchupKey(String(ev.day_et || '').slice(0, 10), ev.away_team, ev.home_team);
+    if (k && !mappedByKey[k]) mappedByKey[k] = recObj;
+  });
+  return { mapped, mappedByKey };
+}

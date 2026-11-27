@@ -82,6 +82,7 @@ async def check_access_key(request: Request, call_next):
         public_paths = {
             "/api/version",
             "/api/health",
+            "/api/data-health",
             "/api/board",
             "/api/ncaam/top-picks",
             "/api/ncaam/bracket/current",
